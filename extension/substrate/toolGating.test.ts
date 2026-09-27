@@ -395,13 +395,13 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "env | grep PERK",
     "timeout 30 rg foo src",
     "find . -exec grep -l foo {} \\;",
-    "find . -exec env X=1 grep -l foo {} \\;",
+    "find . -exec env LC_ALL=C grep -l foo {} \\;",
     'cd "$(cat .perk/root)" && rg foo', // the structural stand-in for `cd $(git rev-parse …) && …`
     "cd /repo\ngit ls-files docs | head -5; echo ---; sed -n '1,5p' README.md",
     'f=$(ls dist/*.js); grep -n "x" "$f"',
     'f="/a b/c"; sed -n \'1p\' "$f"',
     "LC_ALL=C sort file",
-    "X=1 Y=2 grep foo f",
+    "LC_ALL=C GIT_OPTIONAL_LOCKS=0 grep foo f",
     "cat <<'EOF' | wc -c\nline one\nline two\nEOF",
     "cat <<EOF\n$(echo hi)\nEOF",
     'echo "$(pwd)"',
@@ -424,12 +424,12 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "command rg foo",
     "xargs -0 -n1 grep -l foo",
     "find . -name '*.py' | xargs -I{} wc -l {}",
-    "env -i X=1 grep foo f",
+    "env -i LC_ALL=C grep foo f",
     "timeout -k 5 30s rg foo",
     "fd -e py -x wc -l",
     "cat a |& grep b",
     "echo ok & ls",
-    "env -i FOO=bar", // a wrapper chain with no command word is its own command
+    "env -i LC_ALL=C", // a wrapper chain with no command word is its own command
     // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
     "echo ${x/;/,}; ls", // ${…} is one unit: its `;` is not an operator
   ]) {
@@ -1050,6 +1050,7 @@ test("isReadOnlyBashCommand: argument-level writers and non-list forms are block
     // npm audit fix, sort -o, tree -o, xxd's output operand
     "npm audit fix",
     "npm audit fix --force",
+    "npm \\\naudit fix", // a continued separator still names the destructive audit action
     "sort -o out f",
     "sort -o./out.txt f",
     "sort -ro out f",
@@ -1179,6 +1180,361 @@ test("isReadOnlyBashCommand: exec flags of admitted git subcommands and flag wor
   }
 });
 
+// Exec-bearing input: an environment entry, a program word or an option that makes an otherwise
+// admitted read launch another program. The payloads are strings under test — never run.
+test("isReadOnlyBashCommand: exec-bearing environment is refused in every sink", () => {
+  for (const cmd of [
+    // a shell prefix: only the literal safe pairs
+    "GIT_EXTERNAL_DIFF=python git diff",
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0=python git log",
+    "GIT_SSH_COMMAND=python git ls-remote origin",
+    "GIT_PROXY_COMMAND=python git ls-remote git://example.com/r",
+    "GIT_PAGER=python git log",
+    "PAGER=python git log",
+    "GH_PAGER=python gh pr view 1",
+    "LESSOPEN='|python %s' less f",
+    "LESSCLOSE=python less f",
+    "BAT_PAGER=python bat f",
+    "LD_PRELOAD=/tmp/x.so ls",
+    "DYLD_INSERT_LIBRARIES=/tmp/x.dylib ls",
+    "PERL5OPT=-Mx shasum f",
+    "PERL5LIB=/tmp shasum f",
+    "PYTHONPATH=/tmp perk --version",
+    "NODE_OPTIONS='--require /tmp/x.js' pi --version",
+    "RIPGREP_CONFIG_PATH=/tmp/rc rg foo",
+    "XDG_CONFIG_HOME=/tmp git log",
+    "HOME=/tmp git log",
+    "PATH=/tmp:$PATH git log",
+    "EDITOR=python git log",
+    "SSH_ASKPASS=python git ls-remote origin",
+    "AWKPATH=/tmp awk -f x f",
+    "PS4='$(python -c 1)' ls",
+    "X=1 grep foo f", // no generic prefix either
+    "LC_ALL=C X=1 sort f",
+    "LC_ALL=POSIX sort f",
+    "LC_ALL='C' sort f",
+    // an env entry: the same safe pairs, under a wrapper and at exec positions too
+    "env GIT_EXTERNAL_DIFF=python git diff",
+    "env -i PAGER=python git log",
+    "env PERL5OPT=-Mx shasum f",
+    "env LD_PRELOAD=/tmp/x.so ls",
+    "env X=1 grep foo f",
+    "timeout 5 env GIT_PAGER=python git log",
+    "find . -exec env PAGER=python git log \\;",
+    "fd -x env PS4=x git log",
+    // a standalone assignment then a read: `set -a` exports it, `set -x` expands PS4
+    "PS4='$(python -c 1)'; set -x; ls",
+    "set -x; PS4='$(python -c 1)'; ls",
+    "set -a; GIT_EXTERNAL_DIFF=python; git diff",
+    "set -a; PERL5OPT=-Mx; shasum f",
+    "set -a; PERL5LIB=/tmp; shasum f",
+    "set -a; GIT_CONFIG_COUNT=1; GIT_CONFIG_KEY_0=core.pager; GIT_CONFIG_VALUE_0=python; git log",
+    "set -a; GIT_SSH_COMMAND=python; git ls-remote origin",
+    "set -a; LESSOPEN='|python %s'; less f",
+    "set -a; LD_PRELOAD=/tmp/x.so; ls",
+    "set -a\nPAGER=python\ngit log",
+    "PATH=/tmp; ls",
+    "GIT_OPTIONAL_LOCKS=1; git status",
+    // a for variable is assigned like a standalone one, whatever the loop's words
+    "for PATH in /tmp; do git log; done",
+    "set -a; for GIT_EXTERNAL_DIFF in python; do git diff; done",
+    "for GIT_OPTIONAL_LOCKS in 0; do git status; done",
+    "for PS4 in x; do set -x; ls; done",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+  for (const cmd of [
+    "LC_ALL=C sort f",
+    "GIT_OPTIONAL_LOCKS=0 git status",
+    "LC_ALL=C GIT_OPTIONAL_LOCKS=0 git log --oneline -1",
+    "env LC_ALL=C sort f",
+    "env -i GIT_OPTIONAL_LOCKS=0 git status",
+    "env -i git status",
+    "env | grep PATH",
+    "timeout 5 env LC_ALL=C sort f",
+    "find . -exec env LC_ALL=C grep -l foo {} \\;",
+    "GIT_OPTIONAL_LOCKS=0; git status",
+    "set -a; EVID=x; git log",
+    "set -x; ls",
+    'for f in a b; do git log -1 "$f"; done',
+    'x=$(git rev-parse HEAD); git show "$x"',
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
+  }
+});
+
+test("isReadOnlyBashCommand: a NAME=value or suffixed word is never the admitted command", () => {
+  for (const cmd of [
+    // a program's literal argv: an assignment-shaped word is the program's name
+    "timeout 5 rg=payload foo",
+    "nice LC_ALL=C sort f",
+    "env rg=payload",
+    "find . -exec rg=payload {} \\;",
+    "fd -x rg=payload",
+    "rg=payload foo",
+    // a command-keyed row covers the complete command word
+    "rg-extra foo",
+    "rg.foo foo",
+    "ast-grep-x run",
+    "npx agent-browser-x snapshot",
+    "sort.x f",
+    "env-x",
+    "cat=x f",
+    // …and the complete subcommand word
+    "git show-x",
+    "git show=payload",
+    "git show.payload",
+    "git diff-x HEAD",
+    "git-show-x",
+    "git show-branch", // never admitted — only a prefix accident matched it
+    "git show\\\n-x", // a continuation joins `show-x`
+    'git show"-x"',
+    "git diff2>/dev/null",
+    "git stash list-x",
+    "git stash show.x",
+    "git stash\\\nshow", // a continuation alone joins `stashshow`
+    "git worktree\\\nlist",
+    "git config\\\nget user.name",
+    "git reflog show-x",
+    "git remote show-x origin",
+    "git worktree list-x",
+    "git config get-x a.b",
+    "gh pr view-x 1",
+    "gh pr view=1",
+    "gh pr\\\nview 1", // a continuation alone joins `prview`
+    "npm\\\nls", // joins the executable word
+    "gh auth status-x",
+    "gh search prs-x q",
+    "npm ls-x",
+    "npm lsx",
+    "yarn why-x x",
+    "perk objective show-x 7",
+    "perk objective node-engagement-x 7",
+    "perk --version-x",
+    "perk learn docs-check-x",
+    "pi --version-x",
+    "node --version-x",
+    "wget -O -foo https://example.com",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+  for (const cmd of [
+    "git show --stat",
+    "git -C repo show HEAD",
+    "git diff>/dev/null",
+    "git diff 2>/dev/null",
+    "git status&>/dev/null",
+    "git show\\\n  --stat",
+    "git stash \\\nshow",
+    "git worktree \\\nlist",
+    "git config \\\nget user.name",
+    "rg \\\n--glob '*.ts' foo",
+    "gh \\\npr \\\nview 1",
+    "npm \\\nls",
+    "perk \\\nobjective \\\nshow 7",
+    "perk \\\n--version",
+    "timeout 5 rg foo",
+    "env rg foo",
+    "gh pr view 1",
+    "npm ls",
+    "perk objective show 7",
+    "perk --version",
+    "pi --version",
+    "git stash list",
+    "git stash show -p",
+    "git reflog show",
+    "git remote show origin",
+    "git worktree list",
+    "git config get user.name",
+    "wget -O - https://example.com",
+    "wget -O- https://example.com",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
+  }
+});
+
+test("isReadOnlyBashCommand: shell keywords and `time` follow bash's reading of the position", () => {
+  for (const cmd of [
+    // a reserved word after a wrapper or at an exec position is a program name
+    "timeout 5 if true; then ls; fi",
+    "nice { ls; }",
+    "nohup ! ls",
+    "find . -exec ! \\;",
+    "fd -x done",
+    // only the keyword `time` (a pipeline's start, before any prefix) takes a prefix after it
+    "env time LC_ALL=C sort f",
+    "echo x | time LC_ALL=C sort f",
+    "time </dev/null if ls",
+    "time 2>/dev/null ! ls",
+    "time </dev/null -p ls",
+    "time </dev/null time LC_ALL=C sort f",
+    "LC_ALL=C time LC_ALL=C sort f",
+    "! time LC_ALL=C sort f",
+    "if time LC_ALL=C sort f; then ls; fi",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+  for (const cmd of [
+    "time LC_ALL=C sort f",
+    "time -p LC_ALL=C sort f",
+    "time </dev/null LC_ALL=C sort f",
+    "time -p </dev/null LC_ALL=C sort f",
+    "time rg foo",
+    "echo x | time rg foo",
+    "env time -p rg foo",
+    "if grep -q x f; then time LC_ALL=C sort f; fi",
+    "timeout 5 env LC_ALL=C sort f",
+    "! grep -q x f",
+    'time for f in a b; do wc -l "$f"; done',
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
+  }
+});
+
+test("isReadOnlyBashCommand: a direct program selector is vetoed beside its allowed neighbor", () => {
+  for (const cmd of [
+    "rg --pre python foo",
+    "rg --pre=python foo",
+    "rg '--pre=python' foo",
+    "rg -n --hostname-bin=python foo",
+    "rg --hostname-bin python foo",
+    "rg</dev/null --pre=python foo",
+    "rg 3<host.txt --hostname-bin python foo",
+    "timeout 5 rg --pre python foo",
+    "find . -exec rg --pre python foo {} \\;",
+    "sort --compress-program=python f",
+    "sort --compress-program python f",
+    "sort --comp=python f",
+    "sort</dev/null --compress-program=python f",
+    'sort -k1 "--compress-program=python" f',
+    "bat --pager=python f",
+    "bat --pager python f",
+    "bat '--pager=python' f",
+    "bat</dev/null --pager=python f",
+    "less +!python f",
+    "less '+!python' f",
+    "less '+#python' f",
+    "less '+|python' f",
+    "less +v f",
+    "less +sout f",
+    "less ++!python f",
+    "less '++|python' f",
+    "less ++v f",
+    "less --cmd=x f",
+    "less -k keys f",
+    "less -kkeys f",
+    "less --lesskey-file=x f",
+    "less --lesskey-src=x f",
+    "less --lesskey-context=x f",
+    "more -p python f",
+    "more -ppython f",
+    "more -sp python f",
+    "more</dev/null -p python f",
+    "more '+!python' f",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+  for (const cmd of [
+    "rg --pre-glob '*.gz' foo",
+    "rg --pre-glob=x foo",
+    "rg --no-pre foo",
+    "sort -k1,1 f",
+    "sort -r f",
+    "sort --co python f", // only the planned `--comp…` abbreviation family is vetoed
+    "bat --paging=never f",
+    "bat -p f",
+    "less +G f",
+    "less +G!python f", // only the planned dangerous leading startup command is scoped
+    "less +50 f",
+    "less +/pattern f",
+    "less +/save f", // a search pattern's text is inert
+    "less -p pattern f",
+    "less -N f",
+    "more f",
+    "more +G f",
+    "more +/x f",
+    // the option walk stays inside its own command
+    "rg foo f; echo --pre x",
+    "sort f\necho --compress-program",
+    "bat f && echo --pager",
+    "more f | wc -c; echo -p",
+    "less f; echo +!x",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
+  }
+});
+
+test("isReadOnlyBashCommand: explicit git helper switches are vetoed on every read that takes them", () => {
+  for (const cmd of [
+    "git diff --ext-diff",
+    "git diff --textconv",
+    "git diff</dev/null --ext-diff",
+    "git diff 3<input --textconv",
+    "git log -p --ext-diff",
+    "git log --textconv -p",
+    "git show --ext-diff HEAD",
+    "git show --textconv HEAD:f",
+    "git range-diff --ext-diff a b",
+    "git reflog --ext-diff",
+    "git reflog show --textconv",
+    "git reflog -3 --ext-diff",
+    "git stash show --ext-diff",
+    "git stash list -p --textconv",
+    "git shortlog --ext-diff",
+    "git -C repo diff --ext-diff",
+    'git -C "$(pwd)" diff --ext-diff',
+    "git --no-pager log --textconv",
+    "git diff '--ext-diff'",
+    "git diff \\--textconv",
+    "git diff $(echo a) --ext-diff",
+    "rg $(echo foo) --pre python",
+    "sort $(echo f) --comp=python",
+    "git diff \\\n  --ext-diff",
+    "git diff --ext-diff\\\n HEAD",
+    "git grep --textconv foo",
+    "git cat-file --textconv HEAD:f",
+    "git cat-file --filters HEAD:f",
+    "git cat-file</dev/null --filters HEAD:f",
+    "git hash-object --path=f f",
+    "git hash-object --path f --stdin",
+    "git hash-object --filters f",
+    "git hash-object --stdin-paths",
+    "git hash-object</dev/null --path=f f",
+    "rg --pre=python\\\n foo",
+    "bat --pager=python\\\n f",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+  for (const cmd of [
+    "git diff --no-ext-diff",
+    "git diff --no-textconv",
+    "git log --no-ext-diff -p",
+    "git show --no-textconv HEAD",
+    "git diff -Oorder.txt",
+    "git grep -o foo",
+    "git grep --text foo",
+    "git hash-object --no-filters f",
+    "git hash-object --stdin",
+    // abbreviations are outside this scoped closure (the full helper option words above are closed)
+    "git grep --textc foo",
+    "git cat-file --textc HEAD:f",
+    "git hash-object --pa=f f",
+    "git hash-object --stdin-p",
+    "git cat-file -p HEAD",
+    "git reflog show -3",
+    "git reflog",
+    "git stash show -p",
+    "git stash list",
+    "git range-diff a b",
+    "git shortlog -sn",
+    "git -C repo log -1",
+    "git diff; echo --ext-diff",
+    "git log\necho --textconv",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
+  }
+});
+
 test("isReadOnlyBashCommand: heredoc code is still code", () => {
   for (const cmd of [
     "cat <<EOF > out\nx\nEOF",
@@ -1213,6 +1569,9 @@ test("isReadOnlyBashCommand: recorded leniencies stay as recorded", () => {
     "find . -type f -print0 | xargs -0 git branch --list", // run-time appended arguments
     "sed -f - f <<'EOF'\nw out\nEOF", // a program read from a literal heredoc
     "sed -'i' 's/a/b/' f", // a quote INSIDE the flag word
+    // names assigned at run time are not the submitted text's assignments
+    "read -r PATH < f; git log",
+    "printf -v PAGER %s cat; git log",
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed (recorded leniency): ${cmd}`);
   }
@@ -1256,6 +1615,19 @@ test("readOnlyBashVerdict: a refusal names its reason", () => {
   assert.equal(reason("$CMD"), REFUSAL_REASONS["dynamic-command-word"]);
   assert.equal(reason("env -Q ls"), REFUSAL_REASONS["wrapper-usage"]);
   assert.equal(reason("(ls)"), REFUSAL_REASONS["unmodeled-syntax"]);
+  assert.equal(reason("timeout 5 if true; then ls; fi"), REFUSAL_REASONS["unmodeled-syntax"]);
+  // exec-bearing environment: one stable refusal for every sink
+  for (const cmd of [
+    "X=1 git log",
+    "env PAGER=python git log",
+    "timeout 5 rg=payload",
+    "PATH=/tmp; ls",
+    "for PATH in /tmp; do ls; done",
+  ])
+    assert.equal(reason(cmd), REFUSAL_REASONS["unsafe-environment-assignment"], cmd);
+  // the destructive veto still reads first, walker refusal or not
+  assert.ok(reason("X=1 rm -rf x").startsWith("matches the destructive veto /\\brm\\b/i"));
+  assert.ok(reason("PATH=/tmp; git diff --ext-diff").startsWith("matches the destructive veto /"));
   // only the first line of the offending command, cut to 100 characters
   assert.equal(
     reason(`ls; python -c '${"x".repeat(200)}'\nmore`),
@@ -1306,6 +1678,16 @@ test("live round-trip: gate enforces read-only, then releases on mode=read-write
 
     const safeBash = await h.emitToolCall("bash", { command: "git status" });
     assert.equal(safeBash?.block, undefined, "safe bash allowed while read-only");
+
+    // an injection-shaped read (an exec-bearing prefix) is blocked; the safe pair still reads
+    const injected = await h.emitToolCall("bash", {
+      command: "GIT_EXTERNAL_DIFF=python git diff",
+    });
+    assert.equal(injected?.block, true, "exec-bearing environment blocked while read-only");
+    const pinned = await h.emitToolCall("bash", {
+      command: "GIT_OPTIONAL_LOCKS=0 git status",
+    });
+    assert.equal(pinned?.block, undefined, "a literal safe pair still reads");
 
     // Navigate back to the read-write entry -> gate turns OFF; writes allowed again.
     await h.navigateTo(readWriteId);

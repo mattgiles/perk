@@ -193,29 +193,53 @@ own narrower refinement allowlist (read/research/question, `plan_review`, and
 `objective_refinement_draft` — no node claim, no other draft or save tool, no delegation) and
 whose hidden guidance is the `[READ-ONLY REFINEMENT MODE]` flavor naming that writer. Every excluded tool is denied, including `edit`, `write`, save/delivery
 tools and unknown or late-registered foreign mutators—even if toolset synchronization failed.
-Allowlisted `bash` also retains its command-position sub-allowlist: every command word must be
-allowlisted — after sequencing operators and newlines, inside `$(…)`/backticks/process
-substitutions, after assignment prefixes and leading redirections, after shell keywords and the
-wrappers `env`/`timeout`/`xargs`/`nice`/`time`/`command`/`nohup`, and at `find -exec`/`fd -x`.
-`$VAR` as a command, unterminated quotes and unmodeled shell syntax are refused; `for` loops,
-`VAR=$(…)` assignments and heredocs pass when every command word does, and a refusal names its
-reason beneath the echoed command. The allowlist admits the read-only `git` plumbing (`rev-parse`,
-`blame`, `grep`, `worktree list`, list-form `branch`/`tag`, `stash list|show`,
-`remote -v|show|get-url`, `config --get|--list`, …) and everyday text utilities (`nl`, `cut`, `tr`,
-`shasum`, `sed` without `-i`, …) — `SAFE_PATTERNS` in `extension/substrate/toolGating.ts` is the
-inventory. Argument-level writers are vetoed (`find -delete`, `sed -i`, `git branch -D`/`-m`/`<name>`,
-`git remote add`, `git worktree add`, `git tag -a`/`-d`/`<name>`, `git stash push|pop|…`,
-`git … --output`, `sort -o`, `tree -o`, `npm audit fix`), as are the exec flags `git grep -O` and
-`git ls-remote --upload-pack`; interpreters (`python`, `node`, `uv run`, `sh -c`) stay blocked; and
-heredoc data is data (a `>` or `git add` inside `<<'EOF' … EOF` is not a write) while a `$(…)`
-inside an unquoted heredoc is judged like any other command. It is a structural check with
-recorded limits, not a sandbox: program text inside allowlisted commands (`awk`/`sed`), trailing
-arguments `xargs`/`find -exec`/`fd -x` supply at run time, and exec flags in unusual spellings
-(`fd -Hx`, `find . $'-exec' …`) are accepted leniencies.
-Other listed tools pass this gate
-but still undergo their ordinary authority checks. The sanctioned artifact writers and
-review/exploration companions, research and delegation retain their existing carve-outs; this is
-not an OS sandbox or an argument-level certificate for delegation, browser automation or web tools.
+Allowlisted `bash` retains a textual command-position sub-allowlist. It first applies the
+whole-command destructive veto, then walks every command position — after sequencing operators and
+newlines, inside substitutions, after shell keywords/redirections/wrappers, and at `find -exec`/
+`fd -x` — then matches every emitted command against `SAFE_PATTERNS` in
+`extension/substrate/toolGating.ts` (the inventory). A refusal names its reason beneath the echoed
+command. Heredoc data remains data while substitutions in an expanding heredoc are commands.
+
+The walker distinguishes three kinds of position. A shell position may parse assignment prefixes
+and keywords; `env` parses environment entries; `timeout`/`nice`/`nohup`/`xargs`/`command`, an
+external `time`, and `find`/`fd` exec forms take a literal program word. A submitted shell prefix or
+`env` entry may be only plain, byte-exact `LC_ALL=C` or `GIT_OPTIONAL_LOCKS=0`. Generic prefixes
+such as `X=1 grep`, quoted/expanded variants, and `env X=1 grep` are refused. At an external
+position even `LC_ALL=C` is a program name and is refused; a later `env` can intentionally switch
+back (`timeout 5 env LC_ALL=C sort`).
+
+Standalone scratch assignments and ordinary loops still work, but cannot assign exec-bearing
+names. This reserves `GIT_*` (apart from exact `GIT_OPTIONAL_LOCKS=0`), `LD_*`, `DYLD_*`,
+`LESS*`, `BAT_*`, `PYTHON*`, `PERL*`, `XDG_*`, and known path/pager/editor/shell-startup names
+including `PATH`, `HOME`, `PAGER`, `NODE_OPTIONS`, `RIPGREP_CONFIG_PATH`, `BASH_ENV`, `PS4`,
+`SSH_ASKPASS`, `AWKPATH` and `AWKLIBPATH`. The same check applies to a `for` iterator: `for f …`
+is allowed; `for PATH …` is not. Names assigned dynamically through `read` and inherited
+environment are outside this submitted-text check.
+
+At the first shell position of a pipeline, before any assignment/redirection, `time [-p]` is Bash's
+keyword and may precede a safe shell prefix (`time LC_ALL=C sort`). After an earlier assignment,
+`env`/another wrapper, `!`, or a pipe, `time` is the external program, so `env time LC_ALL=C sort`
+and `echo x | time LC_ALL=C sort` are refused. Unknown distinctions fail closed. Command and
+subcommand rows also require a complete token: `git show --stat`, `git diff>/dev/null` and an `rg`
+continued onto a `--glob` word pass; `git show-x`, `show-branch`, `rg=payload`, `rg-extra` and `gh
+pr view-x` do not.
+
+Argument-level writers remain vetoed. Exec-bearing selector options are also refused within their
+command: `rg --pre|--hostname-bin`, `sort --compress-program` (`--comp…` abbreviations), `bat
+--pager`, dangerous leading less/more `+cmd`/`++cmd` commands, less `--cmd`/`-k`/`--lesskey-*`,
+and `more -p`. Git helper switches are refused on the admitted reads that accept them:
+`--ext-diff`/`--textconv` for diff/log/show/range-diff/reflog/stash/shortlog, `git grep
+--textconv`, `git cat-file --textconv|--filters`, and `git hash-object
+--path|--filters|--stdin-paths`. Neighboring read flags (`rg --pre-glob`, `less +G`, `less -p`,
+`--no-ext-diff`, `--no-textconv`, `--no-filters`) remain available.
+
+This is a structural text check, not a shell, environment, repository-config, interactive-input or
+process sandbox. It does not prove inherited variables safe, see names assigned dynamically,
+suppress Git helpers selected implicitly by existing config/attributes, or inspect argv appended at
+run time by `xargs`/`find`/`fd`. Program text inside admitted tools, unusual/expanded exec-flag
+spellings, internal flag quoting and unhandled option abbreviations remain limits. Other listed
+tools still undergo their ordinary authority checks; artifact/review/research/delegation carve-outs
+do not become OS-sandboxed or argument-level certified.
 
 **Guidance lifetime versus the structural gate.** While the gate is on, perk also injects a hidden
 `[READ-ONLY MODE]` guidance message once per session-tree branch: the whole branch history decides,

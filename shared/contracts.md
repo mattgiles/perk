@@ -733,68 +733,90 @@ falls back to the full configured `pi.getAllTools()` set — never a hardcoded l
 **every** tool outside that same `READ_ONLY_TOOLS` set at `tool_call`, including `plan_save`, delivery
 and unknown/late foreign mutators, even when toolset narrowing failed. This backstop applies to all
 effective read-only sessions, parents too. `edit`/`write` keep their file-modification denial wording;
-other excluded tools receive a read-only not-allowlisted denial. Listed non-bash tools pass this gate
-but retain downstream authority checks. Listed `bash` additionally requires its argument
-check: the whole-string destructive veto over the walker's **veto view** (`commandPositions.ts`'s
-`vetoText`: every substitution, `${…}` and heredoc body collapsed out of the text that holds it,
-each substitution's own text appended on a line of its own — an argument walk crosses a nested
-operator, a heredoc body is data to the command that reads it, and what bash executes inside a
-substitution is judged exactly like top-level text), then the bash sub-allowlist applied at
-**every command position** (`extension/substrate/commandPositions.ts`) — the start of input and
-the word after an unquoted `;` `|` `|&` `&&` `||`, a lone `&` or an unquoted newline; after
-`$(`/backtick (also inside double quotes) and `<(`/`>(`; after any `NAME=value` prefix and any
-leading redirection (its operand is never the command); after the keywords `for…in`/`do`/`done`/
-`while`/`until`/`if`/`then`/`elif`/`else`/`fi`/`{`/`}`/`!`; after the wrappers `env`/`timeout N`/
-`xargs`/`nice`/`time`/`command`/`nohup` (enumerated flags; the same dispatch applies inside exec
-positions); and at `find -exec/-execdir/-ok/-okdir` and `fd -x/--exec/-X/--exec-batch`. Heredoc
-bodies are data (an unquoted-delimiter body is joined at `\`-newline and scanned for
-substitutions; a quoted-delimiter body is literal); `#` comments follow bash's rule; `${…}` is one
-unit. A bare wrapper chain is its own command (`env`, `env -i X=1`), and `xargs`'s own once it is
-in the chain (its input supplies the command); the words a wrapper consumes (flags, their
-arguments, `env` assignments) must be static. A dynamic command word (`$VAR`, quoted, escaped,
-substituted), an unterminated quote/substitution/heredoc, an unmodeled or non-static wrapper word,
-or unmodeled syntax (bare `(…)`, `$((…))`, arrays, function definitions, `case`/`select`/`[[`,
-nested-backtick escapes, a heredoc delimiter whose quote-removed value is not static) is refused,
-as is a command with nothing to run. Accepted limits (recorded in `commandPositions.ts` and
-`toolGating.ts`, not enforced): in-program writers inside allowlisted commands' program text
-(`awk`/`sed`), a command fd supplies at run time (`fd -x env`), run-time supplied arguments
-(`xargs`, `find -exec`, `fd -x`, and words an expansion supplies), a quote or escape inside a flag
-word and abbreviated long options in the veto rows, exec flags other than the exact pre-expansion
-words of the simple command's own `find`/`fd` (`fd -Hx`, `find . $'-exec' …`), a glob or brace
-expansion read as one word, and `\\` inside backticks. The block message keeps its two-line head (`perk read-only mode: command blocked
-(not allowlisted).` / `Command: <command>`) and appends `Reason: <veto row | walker refusal |
-first non-allowlisted command | no command>`. Tool inventories are unchanged; there is no OS-sandbox claim for allowlisted delegation,
-web/browser or artifact carve-outs. The bash sub-allowlist (`SAFE_PATTERNS` is the inventory)
-covers read-only inspection commands (`jq`, `curl`, …): the read-only `git` plumbing (`rev-parse`,
-`blame`, `worktree list`, …) including the **list forms** of argument-sensitive subcommands
-(`branch`/`tag`/`config` with only enumerated options plus positionals and a list-implying option
-or getter among them — a negation such as `--no-list`, or a list flag consumed as another option's
-value, never reads as list mode — or `branch`/`tag` bare with display modifiers and no positional;
-`stash list|show`; `remote [-v]|show|get-url`; `config` subcommand getters/a single dotted key;
-`reflog` show forms; `symbolic-ref <ref>`) behind an admitted `-C <dir>`/`--no-pager` prefix
-(never `-c`), everyday text utilities (`nl`, `cut`, `tr`, `shasum`, …), `sed` in every form but
-`-i`, `command -v`, and `perk --version`/`--help`/`learn docs-check`. **Argument-level writers**
-are vetoed — `find -delete`, `sed -i`, the `git` writer forms (`branch -D`, `remote add`,
-`worktree add`, `tag -a`, `stash push`, `config --add`, `hash-object -w`, `--output`, `notes`,
-`update-ref`, `reflog expire|delete|drop`) and exec flags (`grep -O`, `ls-remote
---upload-pack`), `sort -o`, `tree -o`, `npm audit fix` — reading through a leading quote or
-escape on the flag word; the sub-allowlist further covers read-only `gh` **query**
-subcommands (view/list/diff/status/checks/search + `gh auth status`; `gh api` and every mutating
-subcommand stay blocked), the read-only `perk objective` queries (`show`/`next` + aliases and
-`node-engagement`; the mutating subcommands stay blocked), and exactly the whitespace-separated
-`perk pr review-context --expected-pr N --json` (the plan-bound form), `perk pr review-context
---pr N --json` and `perk pr review-context --pr N --stack --json` (the human-triage doors'
-adversarial children; N matches `[1-9][0-9]*` on every form, `--json` last), the PINNED stack
-form `perk pr review-context --pr N --stack --pin-base <sha> --pin-head <pr>=<sha> … --json`
-(the stack-review flow's lanes and its routing step — exactly `pinnedReviewContextCommand`'s
-rendering: full 40-hex lowercase shas, `--pin-base` then at least two bottom→top `--pin-head`
-pairs; the CLI re-validates grammar and topology) and `perk pr feedback --json` forms with
-optional surrounding whitespace. Anchored
-query exceptions keep the command-position check and the destructive veto: `cd … && query` passes
-because every command position is checked, but
-the flagless context form, other argument orders, extra arguments (`--local` included), lookalike
-verbs, `review-post`, `gh api`, real-file redirects, and chained mutations do not. The sub-allowlist also retains command-keyed `ast-grep` /
-`agent-browser` (+ `npx agent-browser`) entries (an accepted arg-blind leniency, like `curl`);
+other excluded tools receive a read-only not-allowlisted denial. Listed non-bash tools pass this gate but retain downstream authority checks. Listed `bash`
+additionally requires its argument check, in this order: (a) the whole-string destructive veto over
+the walker's **veto view** (`commandPositions.ts`'s `vetoText`: every substitution, `${…}` and
+heredoc body collapsed out of the text that holds it, each substitution's own text appended on a
+line of its own); (b) the command-position walker; then (c) `SAFE_PATTERNS` against every command
+the walker emitted. Destructive-veto-first is invariant even when the walker would refuse the same
+input. The block message keeps its two-line head (`perk read-only mode: command blocked (not
+allowlisted).` / `Command: <command>`) and appends `Reason: <veto row | walker refusal | first
+non-allowlisted command | no command>`.
+
+The walker checks **every command position** (`extension/substrate/commandPositions.ts`): the
+start of input and the word after an unquoted `;` `|` `|&` `&&` `||`, a lone `&` or an unquoted
+newline; inside `$(`/backticks (also in double quotes) and `<(`/`>(`; after shell keywords,
+leading redirections and admitted wrappers; and at `find -exec/-execdir/-ok/-okdir` and `fd
+-x/--exec/-X/--exec-batch`. Heredoc bodies are data (an unquoted-delimiter body is joined at
+`\`-newline and scanned for substitutions; a quoted-delimiter body is literal); `#` comments
+follow bash's rule; `${…}` is one unit. Dynamic command words, unterminated lexical constructs,
+unmodeled/non-static wrapper words and unmodeled syntax remain refusals; input with no command to
+run remains a no-command refusal.
+
+Each open position records how bash reads its next word. A **shell** position recognizes grammar and
+assignment prefixes; an **env** position follows `env`'s assignment parsing; an **external**
+position after `timeout`/`nice`/`nohup`/`xargs`/`command`/external `time`, or at a `find`/`fd` exec
+form, reads literal program argv. Only shell and env positions consume assignments. A submitted
+shell prefix or env entry may be only the byte-exact, plain pair `LC_ALL=C` or
+`GIT_OPTIONAL_LOCKS=0`: no quote, expansion, `+=`, alternate value or case folding. The check is
+applied when the executable opens, including a builtin; `env` with no assignment, with or without
+`-i`, remains admitted. A `NAME=value` word at an external position is a program name and is
+refused, safe-pair spelling included. Reserved words after an external wrapper/exec form or after a
+shell assignment/redirection are program names too and are refused rather than skipped as grammar.
+
+A simple command that closes without an executable may keep ordinary scratch assignments, but not
+an assignment to an exec-bearing name. Reserved names are `GIT_*` (except the exact standalone
+`GIT_OPTIONAL_LOCKS=0` pair), `LD_*`, `DYLD_*`, `LESS*`, `BAT_*`, `PYTHON*`, `PERL*`, `XDG_*`,
+and `PATH`, `HOME`, `PAGER`, `GH_PAGER`, `MANPAGER`, `NODE_OPTIONS`, `RIPGREP_CONFIG_PATH`,
+`ENV`, `BASH_ENV`, `PS4`, `SHELL`, `EDITOR`, `VISUAL`, `SSH_ASKPASS`, `AWKPATH` and
+`AWKLIBPATH`. The same name check applies to a plain valid `for` iterator; malformed/unsupported
+iterator names are refused. Thus `EVID=$(cat x); echo "$EVID"` and `for f …` remain available,
+while `set -a; GIT_EXTERNAL_DIFF=…; git diff`, `PS4=…; set -x`, `PERL5OPT=…; shasum` and `for
+PATH …` do not. Names populated dynamically by `read` (or another admitted command) and inherited
+environment are outside this textual check.
+
+Bash's `time` is grammar only at a shell pipeline's beginning, before any shell assignment or
+redirection. There (with its optional exact `-p`) the timed command is shell grammar again, so
+`time LC_ALL=C sort` passes. After an env/external wrapper, a prior shell prefix, `!`, or a pipe it
+is the external `time` wrapper and its next word is literal program argv; `env time LC_ALL=C sort`
+and `echo x | time LC_ALL=C sort` refuse. Chaining may deliberately switch semantics again, as in
+`timeout 5 env LC_ALL=C sort`. Version-ambiguous keyword placements use the conservative external
+reading; an unmodeled distinction refuses rather than guessing grammar.
+
+Every command/subcommand-keyed `SAFE_PATTERNS` row covers its complete literal word. The shared
+shell-token-end assertion accepts a blank (including a continued line between words), an adjacent
+redirection or the end of the simple command — never `=`, `-`, `.` or another intra-word suffix.
+Accordingly `git show --stat`, `git -C repo show`, `git diff>/dev/null` and an `rg` command
+continued onto a `--glob` word pass,
+while `git show-x`, `show-branch`, `rg=payload`, `rg-extra`, `gh pr view-x` and analogous npm/yarn/
+perk/version lookalikes do not. Quoted, escaped or expanded executable words remain walker
+refusals. `SAFE_PATTERNS` remains the command inventory: read-only Git plumbing/list forms,
+everyday text utilities, read-only `gh`/`perk` queries, the exact review-context/feedback forms and
+the existing command-keyed browser/search entries; this change adds no command.
+
+Argument-level writers remain vetoed (`find -delete`, `sed -i`, Git writer forms, `sort -o`,
+`tree -o`, `npm audit fix`, and the existing Git exec flags). **Exec-bearing selector options** are
+also scoped vetoes within their own command: `rg --pre|--hostname-bin`, `sort
+--compress-program` and its `--comp…` abbreviation, `bat --pager`, dangerous leading less/more
+`+cmd`/`++cmd` commands (`!`, `#`, `|`, `v`, `s`), less `--cmd`, `-k` and the three
+`--lesskey-*` sources, and every `more -p` form. Neighboring nonselectors such as `rg --pre-glob`,
+`rg --no-pre`, `bat --paging=never`, `less +G`, `less -p pattern` and ordinary `more` remain.
+Explicit Git helper switches are vetoed where admitted reads take them: `--ext-diff`/
+`--textconv` on diff/log/show/range-diff/reflog/stash show-or-list/shortlog, `git grep
+--textconv`, `git cat-file --textconv|--filters`, and `git hash-object
+--path|--filters|--stdin-paths`. Their positive option words are exact; `--no-ext-diff`,
+`--no-textconv`, `--no-filters`, `git grep -o`, `git hash-object --stdin` and `git diff
+-Oorder.txt` remain.
+
+This is a textual gate, not a shell, environment, repository-config, interactive-input or process
+sandbox. It does not prove pre-existing exported variables safe, chase names assigned dynamically,
+or suppress helpers selected implicitly by existing Git attributes/config (`core.fsmonitor`,
+implicit diff/textconv/clean filters). Runtime-appended argv from `xargs`/`find`/`fd`, interactive
+less/more/top input, fixed ripgrep decompressors selected through inherited `PATH`, in-program
+writers in awk/sed/jq, unusual/expanded exec-flag spellings, internal flag quoting and unhandled
+getopt abbreviations remain recorded limits. Tool inventories are unchanged; there is no OS-sandbox
+claim for allowlisted delegation, web/browser or artifact carve-outs.
+
 (3) injects a hidden `[READ-ONLY MODE]` context at `before_agent_start` — **once-only per
 selected branch**: the injection is FULL-branch-scan dedup'd on the marker (`branchCarries` over
 `branchOf(ctx)` — selected-branch history across compaction, not live model context and not a

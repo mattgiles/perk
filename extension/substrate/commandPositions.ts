@@ -19,6 +19,20 @@
 // destructive veto reads each command's words without a nested operator in the way, reads what
 // bash executes inside a substitution exactly like top-level text, and never reads heredoc data.
 //
+// Every command position carries a provenance, because bash reads the same word differently there.
+// A *shell* position is grammar: `NAME=value` words are assignment prefixes, reserved words are
+// keywords, and `time` at a pipeline's start is bash's timing keyword. An *env* position (after
+// `env` and its flags) takes every word holding `=` as an environment entry. An *external* position
+// (after `timeout`/`nice`/`nohup`/`xargs`/`command`, the external `time`, and at `find -exec`/`fd
+// -x`) is a program's literal argv, so a `NAME=value` word there is a program name and a reserved
+// word is no keyword. An environment entry reaches whatever program runs next and can make an
+// admitted read launch another (`GIT_EXTERNAL_DIFF`, `PAGER`, `LD_PRELOAD`, `PERL5OPT`, `PS4`
+// under `set -x`), so prefixes and env entries are held to two literal safe pairs, and a standalone
+// assignment — a shell variable that `set -a` or a later read may carry — or a `for` variable may
+// not name an exec-bearing variable. A distinction this walker cannot make is refused, never
+// guessed to be grammar. Inherited environment and names assigned at run time (`read`, `printf -v`)
+// are outside this text-level check.
+//
 // Not a shell parser: it refuses what it does not model — fail-closed on the unknown, never on the
 // modeled — and validates no compound-command structure. Accepted leniencies, recorded rather than
 // chased (shapes a model would not reach by accident): in-program writers inside allowlisted
@@ -39,6 +53,7 @@ export type CommandRefusal =
   | "unbalanced-close"
   | "dynamic-command-word"
   | "wrapper-usage"
+  | "unsafe-environment-assignment"
   | "unmodeled-syntax";
 
 /** One human-readable line per refusal — the gate's `Reason:` text. */
@@ -52,8 +67,10 @@ export const REFUSAL_REASONS: Readonly<Record<CommandRefusal, string>> = {
     "a command word must be a plain word ($VAR, quoted, escaped or substituted command words are refused)",
   "wrapper-usage":
     "unsupported wrapper usage (unknown flag, missing flag argument, or missing/invalid timeout duration)",
+  "unsafe-environment-assignment":
+    "unsafe environment assignment (only a plain LC_ALL=C or GIT_OPTIONAL_LOCKS=0 may prefix a command or follow env; a NAME=value word after another wrapper or at find -exec/fd -x is a program name; PATH, GIT_*, LD_*, PS4 and other exec-bearing names may not be assigned or used as a for variable)",
   "unmodeled-syntax":
-    "unsupported shell syntax (subshell, function, array, arithmetic, case/select/[[, redirection without operand, nested backtick escape, trailing backslash, or quoting this gate cannot resolve)",
+    "unsupported shell syntax (subshell, function, array, arithmetic, case/select/[[, a keyword where bash runs a program, redirection without operand, nested backtick escape, trailing backslash, or quoting this gate cannot resolve)",
 };
 
 export type CommandPositions =
@@ -487,6 +504,13 @@ function segmentsOf(frame: Frame): string[] {
 
 // --- dispatch: command-position rules over the tree ---------------------------------------------
 
+/**
+ * How bash reads the word at a command position: `shell` grammar (assignment prefixes, keywords),
+ * `env`'s own argument list (every word holding `=` before the command is an environment entry),
+ * or a program's literal argv (`external` — `NAME=value` is a program name, a keyword is none).
+ */
+type Origin = "shell" | "env" | "external";
+
 type WrapperSpec = {
   /** flag → whether it takes an argument */
   flags: ReadonlyMap<string, boolean>;
@@ -500,6 +524,10 @@ type WrapperSpec = {
   dashEnds?: true;
   /** `xargs`: its input becomes its command's trailing arguments, so a bare chain after it is xargs's own. */
   appends?: true;
+  /** How the wrapped command's position reads; a program's literal argv unless stated. */
+  next?: Origin;
+  /** Bash's `time` keyword: one optional exact `-p` (bash 3.2 runs a `--` after it as the command). */
+  keyword?: true;
 };
 
 /** A getopt-style spec: `x` (short, no argument), `x:` (short, with argument), `--long` / `--long:` likewise. */
@@ -510,9 +538,12 @@ function wrapper(flags: string, traits: Omit<WrapperSpec, "flags"> = {}): Wrappe
   return { flags: table, ...traits };
 }
 
-/** Enumerated flags only: an unmodeled one (`env -S`, `time -o`, `xargs -a`, …) is refused. */
+/**
+ * Enumerated flags only: an unmodeled one (`env -S`, `time -o`, `xargs -a`, …) is refused. `time`
+ * here is the external program — the keyword form is `TIME_KEYWORD`.
+ */
 const WRAPPERS: ReadonlyMap<string, WrapperSpec> = new Map([
-  ["env", wrapper("i u: --ignore-environment --unset:", { dashEnds: true })],
+  ["env", wrapper("i u: --ignore-environment --unset:", { dashEnds: true, next: "env" })],
   [
     "timeout",
     wrapper("v s: k: --foreground --preserve-status --verbose --signal: --kill-after:", {
@@ -533,15 +564,54 @@ const WRAPPERS: ReadonlyMap<string, WrapperSpec> = new Map([
   ["command", wrapper("p v V", { query: true })],
 ]);
 
+/** `time` at a pipeline's start: bash's keyword, timing a pipeline whose first words are grammar again. */
+const TIME_KEYWORD = wrapper("p", { keyword: true, next: "shell" });
+
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
+const NAME = /^[A-Za-z_][A-Za-z0-9_]*/;
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const DURATION = /^\d+(\.\d+)?[smhd]?$/;
 const OPENERS = new Set(["while", "until", "if", "then", "elif", "else", "do", "{", "!"]);
+/**
+ * The openers after which every bash this gate meets still reads `time` as its keyword: bash 3.2
+ * (macOS `/bin/bash`, Pi's default shell there) runs the external `time` after `if`, `elif`,
+ * `while`, `until` and `!`.
+ */
+const TIME_OPENERS = new Set(["then", "else", "do", "{"]);
 const CLOSERS = new Set(["fi", "done", "}"]);
 const REFUSED = new Set(["case", "esac", "select", "function", "coproc", "[[", "]]", "in"]);
+/** Every reserved word the walker reads as grammar at a shell position — a program name elsewhere. */
+const KEYWORDS: ReadonlySet<string> = new Set([...OPENERS, ...CLOSERS, ...REFUSED, "for"]);
 const EXEC_FLAGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ["find", new Set(["-exec", "-execdir", "-ok", "-okdir"])],
   ["fd", new Set(["-x", "--exec", "-X", "--exec-batch"])],
 ]);
+
+/**
+ * The only environment entries a command may carry — a shell prefix or an `env` entry — byte-exact
+ * and plain (no quoting, expansion, `+=` or other value): locale-stable output, and no
+ * opportunistic Git index writes.
+ */
+const SAFE_PAIRS: ReadonlySet<string> = new Set(["LC_ALL=C", "GIT_OPTIONAL_LOCKS=0"]);
+
+/**
+ * Variable names that make a later admitted read launch another program or load code: Git's
+ * config/diff/pager/SSH hooks, the dynamic loader's preloads, pager/editor/lesskey settings,
+ * interpreter startup (`shasum` is a Perl script), the `set -x` trace prompt `PS4`, the command
+ * search path and the files a shell sources. A standalone assignment or a `for` variable may not
+ * name one, whatever its value: `set -a` exports it to every later command.
+ */
+const RESERVED_NAME =
+  /^(?:(?:GIT|LD|DYLD|XDG|BAT)_\w*|LESS\w*|PYTHON\w*|PERL\w*|PATH|HOME|PAGER|GH_PAGER|MANPAGER|NODE_OPTIONS|RIPGREP_CONFIG_PATH|ENV|BASH_ENV|PS4|SHELL|EDITOR|VISUAL|SSH_ASKPASS|AWKPATH|AWKLIBPATH)$/;
+
+function isSafePair(word: Word): boolean {
+  return word.plain && SAFE_PAIRS.has(word.text);
+}
+
+/** A standalone shell assignment to an exec-bearing name (the safe pairs stay allowed). */
+function isReservedAssignment(word: Word): boolean {
+  return !isSafePair(word) && RESERVED_NAME.test(NAME.exec(word.prefix)?.[0] ?? "");
+}
 
 type WrapperScan = {
   spec: WrapperSpec;
@@ -564,6 +634,19 @@ type SimpleCommand = {
    * command, so the chain is only as allowed as xargs itself).
    */
   fallback: { start: number; xargs: boolean } | null;
+  /** How the next word at the command position reads. */
+  origin: Origin;
+  /** Shell assignment words awaiting the command they prefix — standalone if none follows. */
+  assignments: Word[];
+  /**
+   * An assignment or redirection precedes the command word: bash then reads no reserved word
+   * (`X=1 if`, `>f time` run programs named `if` and `time`).
+   */
+  prefixed: boolean;
+  /** At a pipeline's start, where bash reads `time` as its keyword. */
+  pipelineStart: boolean;
+  /** Any word or redirection seen. */
+  touched: boolean;
 };
 
 class Dispatcher {
@@ -576,17 +659,27 @@ class Dispatcher {
 
   frame(frame: Frame): void {
     this.refuse(frame.refusal);
-    let cmd = fresh();
+    let cmd = fresh(true);
     for (const token of frame.tokens) {
       if (token.kind === "op") {
         this.close(cmd, frame, token.start, token.op);
-        cmd = fresh();
+        cmd = fresh(startsPipeline(cmd, token.op));
       } else if (token.kind === "redirect") {
-        // An operand is never the command: the state is left as it was.
+        // An operand is never the command. A redirect after keyword `time` starts the timed simple
+        // command, ending the keyword's option scan; Bash then reads a following keyword/`-p` as
+        // the literal program word, not more timing grammar.
+        cmd.touched = true;
+        if (cmd.state === "wrapper" && cmd.wrapper?.spec.keyword === true) {
+          cmd.state = "command";
+          cmd.origin = "shell";
+          cmd.wrapper = null;
+          cmd.prefixed = true;
+        } else if (cmd.state === "command" && cmd.origin === "shell") cmd.prefixed = true;
         if (token.operand === null) this.refuse("unmodeled-syntax");
         else this.nested(token.operand);
       } else if (token.kind === "body") this.nested(token.content);
       else {
+        cmd.touched = true;
         this.nested(token.word);
         this.word(cmd, token.word);
       }
@@ -603,6 +696,8 @@ class Dispatcher {
     // A `for` header ends only at `;` or a newline, and only after its name.
     if (cmd.state.startsWith("for-") && (cmd.state === "for-name" || (op !== ";" && op !== "\n")))
       this.refuse("unmodeled-syntax");
+    // Assignments no command followed are shell variables: scratch, unless exec-bearing.
+    if (cmd.assignments.some(isReservedAssignment)) this.refuse("unsafe-environment-assignment");
     const scan = cmd.wrapper;
     if (scan !== null && (scan.pendingArgument || scan.needsDuration)) this.refuse("wrapper-usage");
     else if (cmd.fallback !== null) this.open(cmd, cmd.fallback.start, null); // a bare chain is its own command
@@ -623,12 +718,26 @@ class Dispatcher {
     if (state === "command") this.command(cmd, word);
     else if (state === "wrapper") this.wrapped(cmd, cmd.wrapper as WrapperScan, word);
     else if (state === "args") {
-      // An exec flag of the simple command's own find/fd opens a command position in it.
-      if (word.value !== null && EXEC_FLAGS.get(cmd.word ?? "")?.has(word.value))
+      // An exec flag of the simple command's own find/fd opens a command position in it — the
+      // exec'd program's literal argv, never shell grammar.
+      if (word.value !== null && EXEC_FLAGS.get(cmd.word ?? "")?.has(word.value)) {
         cmd.state = "command";
+        cmd.origin = "external";
+        cmd.pipelineStart = false;
+      }
     } else if (state === "for-name") {
-      if (word.plain) cmd.state = "for-in";
-      else this.refuse("unmodeled-syntax");
+      // Bash assigns the loop variable on every iteration, as a standalone assignment would.
+      if (
+        !word.plain ||
+        !IDENTIFIER.test(word.text) ||
+        KEYWORDS.has(word.text) ||
+        word.text === "time"
+      )
+        this.refuse("unmodeled-syntax");
+      else {
+        if (RESERVED_NAME.test(word.text)) this.refuse("unsafe-environment-assignment");
+        cmd.state = "for-in";
+      }
     } else if (state === "for-in") {
       if (word.plain && word.text === "in") cmd.state = "for-words";
       else this.refuse("unmodeled-syntax");
@@ -638,22 +747,40 @@ class Dispatcher {
 
   /** A word at a command position. */
   private command(cmd: SimpleCommand, word: Word): void {
-    const text = word.text;
-    if (ASSIGNMENT.test(word.prefix)) {
-      // Any number of prefixes; the position stays. After a wrapper it is an argv word, which an
-      // expansion could split into the command itself.
-      if (cmd.fallback !== null && word.value === null) this.refuse("wrapper-usage");
+    if (cmd.origin === "shell" && ASSIGNMENT.test(word.prefix)) {
+      // Any number of prefixes; the position stays.
+      cmd.assignments.push(word);
+      cmd.prefixed = true;
       return;
     }
+    if (cmd.origin === "env" && (word.value ?? word.prefix).includes("=")) {
+      // An env entry must be static — an expansion's word count is unknown here, so it could
+      // supply the command itself — and a safe pair.
+      if (word.value === null) this.refuse("wrapper-usage");
+      else if (!isSafePair(word)) this.refuse("unsafe-environment-assignment");
+      return;
+    }
+    // The command word: the pending shell prefixes reach whatever runs here, a builtin included.
+    if (!cmd.assignments.every(isSafePair)) this.refuse("unsafe-environment-assignment");
+    cmd.assignments = [];
+    const grammar = cmd.origin === "shell" && !cmd.prefixed;
+    const text = word.text;
     if (!word.plain) this.refuse("dynamic-command-word");
+    else if (text.includes("=")) this.refuse("unsafe-environment-assignment");
+    else if (KEYWORDS.has(text) && !grammar) this.refuse("unmodeled-syntax");
     else if (REFUSED.has(text)) this.refuse("unmodeled-syntax");
-    else if (text === "for") cmd.state = "for-name";
-    else if (CLOSERS.has(text)) cmd.state = "args";
-    else if (!OPENERS.has(text)) {
-      const spec = WRAPPERS.get(text);
+    else if (text === "for") {
+      cmd.state = "for-name";
+      cmd.fallback = null; // `time for …` times the loop: the keyword is no command of its own
+    } else if (CLOSERS.has(text)) cmd.state = "args";
+    else if (OPENERS.has(text)) cmd.pipelineStart = TIME_OPENERS.has(text);
+    else {
+      const keyword = text === "time" && grammar && cmd.pipelineStart;
+      const spec = keyword ? TIME_KEYWORD : WRAPPERS.get(text);
       if (spec === undefined) this.open(cmd, word.start, text);
       else {
         cmd.state = "wrapper";
+        cmd.pipelineStart = false;
         cmd.wrapper = {
           spec,
           start: word.start,
@@ -674,6 +801,11 @@ class Dispatcher {
    */
   private wrapped(cmd: SimpleCommand, scan: WrapperScan, word: Word): void {
     const text = word.text;
+    if (scan.spec.keyword === true && text.startsWith("-")) {
+      if (text !== "-p" || scan.flagsDone) this.refuse("wrapper-usage");
+      scan.flagsDone = true;
+      return;
+    }
     const flag = !scan.flagsDone && text.startsWith("-") && text !== "-" && text !== "--";
     if ((scan.pendingArgument || flag) && word.value === null) this.refuse("wrapper-usage");
     if (scan.pendingArgument) scan.pendingArgument = false;
@@ -686,6 +818,7 @@ class Dispatcher {
       scan.flagsDone = true;
     } else {
       cmd.state = "command";
+      cmd.origin = scan.spec.next ?? "external";
       cmd.wrapper = null;
       this.command(cmd, word);
     }
@@ -721,6 +854,26 @@ class Dispatcher {
   }
 }
 
-function fresh(): SimpleCommand {
-  return { state: "command", entries: [], word: null, wrapper: null, fallback: null };
+/**
+ * Whether the command after `op` starts a pipeline: never after `|`/`|&`, and a newline after an
+ * empty command (`a |⏎ time …`) continues whatever preceded it.
+ */
+function startsPipeline(before: SimpleCommand, op: string): boolean {
+  if (op === "|" || op === "|&") return false;
+  return op === "\n" && !before.touched ? before.pipelineStart : true;
+}
+
+function fresh(pipelineStart: boolean): SimpleCommand {
+  return {
+    state: "command",
+    entries: [],
+    word: null,
+    wrapper: null,
+    fallback: null,
+    origin: "shell",
+    assignments: [],
+    prefixed: false,
+    pipelineStart,
+    touched: false,
+  };
 }

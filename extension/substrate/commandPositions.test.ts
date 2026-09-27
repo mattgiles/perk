@@ -50,28 +50,43 @@ const COMMANDS: [string, string[]][] = [
   ["echo $'a\\'b'; ls", ["echo $'a\\'b'", "ls"]],
   ["echo $'\\''; python -c pass # '", ["echo $'\\''", "python -c pass # '"]],
   ["echo \"$'a'\"; ls", ["echo \"$'a'\"", "ls"]],
-  // assignment prefixes
+  // standalone assignments (scratch variables) and the literal safe prefix pairs
   ['EVID=$(cat x); echo "$EVID"', ["cat x", 'echo "$EVID"']],
   ['f="/a b/c"; sed -n \'1p\' "$f"', ["sed -n '1p' \"$f\""]],
   ["F=~/x; wc -l $F", ["wc -l $F"]],
-  ["X=1 Y=2 grep foo f", ["grep foo f"]],
+  ["LC_ALL=C GIT_OPTIONAL_LOCKS=0 grep foo f", ["grep foo f"]],
+  ["LC_ALL=C sort f", ["sort f"]],
+  ["GIT_OPTIONAL_LOCKS=0 git status", ["git status"]],
+  ["LC_ALL=C 2>/dev/null sort f", ["sort f"]],
   ["A=1", []],
-  ["A+=b ls", ["ls"]],
+  ["A+=b; ls", ["ls"]],
+  ["X=1 Y=2", []],
+  ["LC_ALL=C", []],
+  ["GIT_OPTIONAL_LOCKS=0", []],
+  // a safe prefix reaches a builtin or a wrapper too
+  ["LC_ALL=C cd x", ["cd x"]],
+  ["LC_ALL=C env rg", ["rg"]],
+  ["LC_ALL=C time rg", ["rg"]],
   // keywords
   ['for f in agents/*.md; do wc -l "$f"; done', ['wc -l "$f"']],
   ['for f in $(ls); do cat "$f"; done', ["ls", 'cat "$f"']],
   ["for n in 1 2\ndo\necho $n\ndone", ["echo $n"]],
   ["for f; do ls; done", ["ls"]],
+  ["for LC_ALL in C; do sort f; done", ["sort f"]],
+  ["for _x1 in a; do ls; done", ["ls"]],
   ["while grep -q x f; do cat f; done", ["grep -q x f", "cat f"]],
   [
     "if grep -q x f; then cat f; elif ls; then pwd; else id; fi",
     ["grep -q x f", "cat f", "ls", "pwd", "id"],
   ],
   ["! grep -q x f", ["grep -q x f"]],
+  ["! LC_ALL=C grep -q x f", ["grep -q x f"]],
   ["{ cat a; cat b; }", ["cat a", "cat b"]],
+  ["ls | { cat; }", ["ls", "cat"]],
   ["while read l; do echo; done < f", ["read l", "echo"]],
   // wrappers: the entry starts at the wrapped word; a bare wrapper is its own entry
-  ["env X=1 rg foo", ["rg foo"]],
+  ["env LC_ALL=C rg foo", ["rg foo"]],
+  ["env -i LC_ALL=C GIT_OPTIONAL_LOCKS=0 grep foo", ["grep foo"]],
   ["env", ["env"]],
   ["env -i", ["env -i"]],
   ["env -u X -- rg", ["rg"]],
@@ -89,20 +104,49 @@ const COMMANDS: [string, string[]][] = [
   ["nice --adjustment=5 rg", ["rg"]],
   ["time rg", ["rg"]],
   ["time -p rg", ["rg"]],
+  // bash's `time` keyword at a pipeline's start times a pipeline whose first words are grammar:
+  // a safe prefix, a keyword, a nested `time`
+  ["time LC_ALL=C sort f", ["sort f"]],
+  ["time -p LC_ALL=C sort f", ["sort f"]],
+  ["time -p GIT_OPTIONAL_LOCKS=0 git status", ["git status"]],
+  ["time </dev/null LC_ALL=C sort f", ["sort f"]],
+  ["time -p </dev/null LC_ALL=C sort f", ["sort f"]],
+  // a redirect starts the timed simple command: a later `-p` is its literal executable word
+  ["time </dev/null -p ls", ["-p ls"]],
+  ["ls; time LC_ALL=C sort f", ["ls", "sort f"]],
+  ["ls && time LC_ALL=C sort f", ["ls", "sort f"]],
+  ["ls &&\ntime LC_ALL=C sort f", ["ls", "sort f"]],
+  ["echo $(time LC_ALL=C sort f)", ["echo $(time LC_ALL=C sort f)", "sort f"]],
+  ["{ time LC_ALL=C sort f; }", ["sort f"]],
+  ["if ls; then time LC_ALL=C sort f; fi", ["ls", "sort f"]],
+  ["for f in a; do time LC_ALL=C sort f; done", ["sort f"]],
+  ["time for f in a; do ls; done", ["ls"]],
+  ["time ! grep x f", ["grep x f"]],
+  ["time time rg", ["rg"]],
+  // the external `time` (after an earlier word, `|`, `!`, `if`) still wraps a real read
+  ["echo x | time rg", ["echo x", "rg"]],
+  ["! time rg", ["rg"]],
+  ["if time rg; then ls; fi", ["rg", "ls"]],
+  ["env time -p rg", ["rg"]],
+  ["nice time rg", ["rg"]],
   ["nohup rg", ["rg"]],
   ["command rg foo", ["rg foo"]],
   ["command -p rg foo", ["rg foo"]],
   ["command -v python", ["command -v python"]],
   ["command -pV x", ["command -pV x"]],
-  ["env X=1 timeout 5 rg", ["rg"]],
+  ["env LC_ALL=C timeout 5 rg", ["rg"]],
+  // a chained env switches back to env's own entries
+  ["timeout 5 env LC_ALL=C sort f", ["sort f"]],
+  ["nohup env -i GIT_OPTIONAL_LOCKS=0 git log", ["git log"]],
+  ["command env LC_ALL=C sort", ["sort"]],
   ["env - rg", ["rg"]],
   ["env timeout 5 nice -n 1 time -p nohup command rg foo", ["rg foo"]],
   // a wrapper chain that reaches no command word is its own command, also past assignments…
-  ["env -i FOO=bar", ["env -i FOO=bar"]],
-  ["env X=1 timeout 5", ["timeout 5"]],
+  ["env -i LC_ALL=C", ["env -i LC_ALL=C"]],
+  ["env LC_ALL=C timeout 5", ["timeout 5"]],
   // …and once xargs is in the chain it is xargs's own: its input supplies the command
   ["ls | xargs env", ["ls", "xargs env"]],
-  ["ls | xargs env X=1", ["ls", "xargs env X=1"]],
+  ["ls | xargs env LC_ALL=C", ["ls", "xargs env LC_ALL=C"]],
   ["env xargs env", ["xargs env"]],
   // exec forms: the exec'd text runs to the enclosing command's end
   ["find . -exec grep -l foo {} \\;", ["find . -exec grep -l foo {} \\;", "grep -l foo {} \\;"]],
@@ -125,9 +169,10 @@ const COMMANDS: [string, string[]][] = [
     ["find . -exec env python -c pass {} \\;", "python -c pass {} \\;"],
   ],
   [
-    "find . -exec env X=1 grep -l foo {} \\;",
-    ["find . -exec env X=1 grep -l foo {} \\;", "grep -l foo {} \\;"],
+    "find . -exec env LC_ALL=C grep -l foo {} \\;",
+    ["find . -exec env LC_ALL=C grep -l foo {} \\;", "grep -l foo {} \\;"],
   ],
+  ["fd -x env GIT_OPTIONAL_LOCKS=0 git log", ["fd -x env GIT_OPTIONAL_LOCKS=0 git log", "git log"]],
   [
     "find . -exec timeout 5 python {} \\;",
     ["find . -exec timeout 5 python {} \\;", "python {} \\;"],
@@ -177,7 +222,7 @@ const COMMANDS: [string, string[]][] = [
   // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
   ["echo ${x/;/,}; ls", ["echo ${x/;/,}", "ls"]],
   // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
-  ["V=${x:-a $(pwd)} ls", ["pwd", "ls"]],
+  ["V=${x:-a $(pwd)}; ls", ["pwd", "ls"]],
   ["echo $(#c\nls)", ["echo $(#c\nls)", "ls"]],
   ['echo "a\\"" ; ls', ['echo "a\\""', "ls"]],
   ["echo a\\;b", ["echo a\\;b"]],
@@ -243,6 +288,88 @@ const REFUSALS: [string, CommandRefusal][] = [
   ["env -u$X ls", "wrapper-usage"],
   ['nice -n "$N" rg', "wrapper-usage"],
   ["env FOO=$(cat x) rg", "wrapper-usage"],
+  // keyword `time` takes one exact `-p` (bash 3.2 runs a `--` after it as the command)
+  ["time -- rg", "wrapper-usage"],
+  ["time -pp rg", "wrapper-usage"],
+  ["time -p -p rg", "wrapper-usage"],
+  ["time -p -- rg", "wrapper-usage"],
+  // a redirection after keyword time starts the timed command: reserved words are program names
+  ["time </dev/null if ls", "unmodeled-syntax"],
+  ["time 2>/dev/null ! ls", "unmodeled-syntax"],
+  ["time -p </dev/null for f in a; do ls; done", "unmodeled-syntax"],
+  ["time </dev/null time LC_ALL=C sort", "unsafe-environment-assignment"],
+  // a shell prefix or an env entry is a literal safe pair: nothing else, no quoting or expansion
+  ["X=1 grep foo f", "unsafe-environment-assignment"],
+  ["X=1 Y=2 grep foo f", "unsafe-environment-assignment"],
+  ["LC_ALL=C X=1 grep foo f", "unsafe-environment-assignment"],
+  ["A+=b ls", "unsafe-environment-assignment"],
+  ["LC_ALL=POSIX sort f", "unsafe-environment-assignment"],
+  ["LC_ALL+=C sort f", "unsafe-environment-assignment"],
+  ["lc_all=c sort f", "unsafe-environment-assignment"],
+  ["LC_ALL='C' sort f", "unsafe-environment-assignment"],
+  ["LC_ALL=\\C sort f", "unsafe-environment-assignment"],
+  ["LC_ALL=$C sort f", "unsafe-environment-assignment"],
+  ["GIT_OPTIONAL_LOCKS=1 git status", "unsafe-environment-assignment"],
+  ["GIT_PAGER=cat git log", "unsafe-environment-assignment"],
+  ["X=1 cd x", "unsafe-environment-assignment"],
+  ["X=1 set -x", "unsafe-environment-assignment"],
+  ["X=1 env rg", "unsafe-environment-assignment"],
+  ["X=1 time rg", "unsafe-environment-assignment"],
+  ["X=1 2>/dev/null ls", "unsafe-environment-assignment"],
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+  ["V=${x:-a} ls", "unsafe-environment-assignment"],
+  ["while X=1 read l; do ls; done", "unsafe-environment-assignment"],
+  ["env X=1 grep foo f", "unsafe-environment-assignment"],
+  ["env -i X=1 grep foo f", "unsafe-environment-assignment"],
+  ["env -i FOO=bar", "unsafe-environment-assignment"],
+  ["env -- X=1 rg", "unsafe-environment-assignment"],
+  ["env LC_ALL=C X=1 rg", "unsafe-environment-assignment"],
+  ["env 'LC_ALL=C' rg", "unsafe-environment-assignment"],
+  ["env rg=payload", "unsafe-environment-assignment"],
+  ["env a-b=c rg", "unsafe-environment-assignment"],
+  ["find . -exec env X=1 grep -l foo {} \\;", "unsafe-environment-assignment"],
+  ["fd -x env X=1 grep", "unsafe-environment-assignment"],
+  ["ls | xargs env X=1", "unsafe-environment-assignment"],
+  // at a program's literal argv a NAME=value word is the program name, safe pair or not
+  ["timeout 5 rg=payload", "unsafe-environment-assignment"],
+  ["timeout 5 LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["nice LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["nohup LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["xargs LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["command LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["env timeout 5 LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["find . -exec rg=payload {} \\;", "unsafe-environment-assignment"],
+  ["find . -exec LC_ALL=C grep x {} \\;", "unsafe-environment-assignment"],
+  ["fd -x rg=payload", "unsafe-environment-assignment"],
+  ["rg-extra=1 foo", "unsafe-environment-assignment"],
+  ["=x", "unsafe-environment-assignment"],
+  // only the keyword `time` (at a pipeline's start, before any prefix) reads a prefix after it
+  ["env time LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["echo x | time LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["echo x |& time LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["echo x |\ntime LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["LC_ALL=C time LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["2>/dev/null time LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["! time LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["if time LC_ALL=C sort; then ls; fi", "unsafe-environment-assignment"],
+  ["while time LC_ALL=C sort; do ls; done", "unsafe-environment-assignment"],
+  ["time time LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["nice time LC_ALL=C sort", "unsafe-environment-assignment"],
+  ["find . -exec time LC_ALL=C sort \\;", "unsafe-environment-assignment"],
+  // a standalone assignment or a for variable never names an exec-bearing variable
+  ["PATH=/tmp/x", "unsafe-environment-assignment"],
+  ["PATH+=:/tmp/x; git log", "unsafe-environment-assignment"],
+  ["PS4='$(x)'; set -x; ls", "unsafe-environment-assignment"],
+  ["GIT_EXTERNAL_DIFF=x; git diff", "unsafe-environment-assignment"],
+  ["GIT_OPTIONAL_LOCKS=1", "unsafe-environment-assignment"],
+  ["GIT_OPTIONAL_LOCKS='0'", "unsafe-environment-assignment"],
+  ["A=1 LD_PRELOAD=x", "unsafe-environment-assignment"],
+  ["PERL5OPT=-Mx; shasum f", "unsafe-environment-assignment"],
+  ["LESSOPEN='|x %s'", "unsafe-environment-assignment"],
+  ["for PATH in /tmp; do ls; done", "unsafe-environment-assignment"],
+  ["for GIT_EXTERNAL_DIFF in x; do git diff; done", "unsafe-environment-assignment"],
+  ["for GIT_OPTIONAL_LOCKS in 0; do git status; done", "unsafe-environment-assignment"],
+  ["for PS4; do ls; done", "unsafe-environment-assignment"],
   ["(cd x && ls)", "unmodeled-syntax"],
   ["foo() { ls; }", "unmodeled-syntax"],
   ["A=(1 2)", "unmodeled-syntax"],
@@ -252,6 +379,30 @@ const REFUSALS: [string, CommandRefusal][] = [
   ["[[ -f x ]] && cat x", "unmodeled-syntax"],
   ["for in x; do ls; done", "unmodeled-syntax"],
   ["for f x; do ls; done", "unmodeled-syntax"],
+  // a for variable is a plain identifier
+  ["for f-x in a; do ls; done", "unmodeled-syntax"],
+  ["for 'f' in a; do ls; done", "unmodeled-syntax"],
+  ["for 1x in a; do ls; done", "unmodeled-syntax"],
+  ["for f=1 in a; do ls; done", "unmodeled-syntax"],
+  ["for do; do ls; done", "unmodeled-syntax"],
+  ["for time in a; do ls; done", "unmodeled-syntax"],
+  // a reserved word where bash runs a program: after a prefix or a leading redirection, after a
+  // wrapper, at an exec position
+  ["LC_ALL=C if true; then ls; fi", "unmodeled-syntax"],
+  ["LC_ALL=C for f in a; do ls; done", "unmodeled-syntax"],
+  ["LC_ALL=C { ls; }", "unmodeled-syntax"],
+  ["2>/dev/null ! grep x f", "unmodeled-syntax"],
+  ["timeout 5 if true; then ls; fi", "unmodeled-syntax"],
+  ["timeout 5 !", "unmodeled-syntax"],
+  ["nice { ls; }", "unmodeled-syntax"],
+  ["nohup for f in a; do ls; done", "unmodeled-syntax"],
+  ["env done", "unmodeled-syntax"],
+  ["env then ls", "unmodeled-syntax"],
+  ["command while", "unmodeled-syntax"],
+  ["xargs fi", "unmodeled-syntax"],
+  ["time -p nice do", "unmodeled-syntax"],
+  ["find . -exec ! \\;", "unmodeled-syntax"],
+  ["fd -x until", "unmodeled-syntax"],
   // a `for` header ends only at `;` or a newline — also when it sits at an exec position
   ["for", "unmodeled-syntax"],
   ["find . -exec for x in \\; -exec python {} \\;", "unmodeled-syntax"],
@@ -286,6 +437,7 @@ test("REFUSAL_REASONS: one non-empty line per refusal", () => {
     "unbalanced-close",
     "dynamic-command-word",
     "wrapper-usage",
+    "unsafe-environment-assignment",
     "unmodeled-syntax",
   ];
   assert.deepEqual(Object.keys(REFUSAL_REASONS).sort(), [...all].sort());
@@ -385,6 +537,33 @@ test("vetoText: present on the refusal arm", () => {
   const refused = commandPositions("env -Q x <<EOF\nb $(ls)\nEOF");
   assert.equal(refused.ok ? "ok" : refused.refusal, "wrapper-usage");
   assert.equal(refused.vetoText, "env -Q x <<EOF\nEOF\n$(ls)");
+});
+
+test("an environment refusal leaves segments and the veto view as lexed; the admitted arm starts at the command word", () => {
+  const prefixed = "X=1 git log; GIT_OPTIONAL_LOCKS=0 git status";
+  const refused = commandPositions(prefixed);
+  assert.equal(refused.ok ? "ok" : refused.refusal, "unsafe-environment-assignment");
+  assert.deepEqual(refused.segments, ["X=1 git log", "GIT_OPTIONAL_LOCKS=0 git status"]);
+  assert.equal(refused.vetoText, prefixed);
+  const standalone = "PATH=$(pwd); echo `ls`";
+  const reserved = commandPositions(standalone);
+  assert.equal(reserved.ok ? "ok" : reserved.refusal, "unsafe-environment-assignment");
+  assert.deepEqual(reserved.segments, ["PATH=$(pwd)", "echo `ls`"]);
+  assert.deepEqual(splitTopLevelSegments(standalone), reserved.segments);
+  assert.equal(reserved.vetoText, "PATH=_; echo _\n$(pwd)\n`ls`");
+  const safe = "LC_ALL=C sort f; time -p GIT_OPTIONAL_LOCKS=0 git log | env -i LC_ALL=C wc -l";
+  const admitted = commandPositions(safe);
+  assert.deepEqual(admitted.ok ? admitted.commands : admitted.refusal, [
+    "sort f",
+    "git log",
+    "wc -l",
+  ]);
+  assert.deepEqual(admitted.segments, [
+    "LC_ALL=C sort f",
+    "time -p GIT_OPTIONAL_LOCKS=0 git log",
+    "env -i LC_ALL=C wc -l",
+  ]);
+  assert.equal(admitted.vetoText, safe);
 });
 
 test("segments: a later scan survives an earlier unmodeled construct", () => {
