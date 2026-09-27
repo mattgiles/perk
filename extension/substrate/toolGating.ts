@@ -1012,6 +1012,14 @@ const SAFE_PATTERNS = [
   // its own scratch files.
   /^\s*perk\s+pr\s+review-context\s+(?:--expected-pr\s+[1-9][0-9]*|--pr\s+[1-9][0-9]*(?:\s+--stack(?:\s+--pin-base\s+[0-9a-f]{40}(?:\s+--pin-head\s+[1-9][0-9]*=[0-9a-f]{40}){2,})?)?)\s+--json\s*$/,
   /^\s*perk\s+pr\s+feedback\s+--json\s*$/,
+  // The perk library workers' deterministic `--json` forms (contracts.md §8.75(f)). The CLI mutates
+  // only the gitignored `docs/library/` cache and refuses unless its representative ignore probes
+  // pass and nothing under the library is tracked (the probes run before its lock, except
+  // `remove`'s entry probe): the `perk pr review-context` leniency, made operational by the CLI's
+  // cache-only preflight. `--json` last, any whitespace-separated arguments before it; the
+  // destructive veto still blocks real-file redirects and chained mutations. Later verbs
+  // (`add source`/`check`/`refresh`) are admitted when they land.
+  /^\s*perk\s+librarian\s+(?:list|record|remove)\b(?:\s+\S+)*\s+--json\s*$/,
   // Read-only `gh` queries — the guidance in the managed AGENTS block ("GitHub access goes
   // through gh") must be followable in read-only sessions. Query-shaped subcommands only;
   // `gh api` stays blocked (it can POST/PATCH), as do all mutating subcommands (create/edit/

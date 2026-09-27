@@ -75,6 +75,9 @@ category directory.
 | `objective-stack-land.schema.json` | `ObjectiveStackLandOut` | `serialization` | Atomic train readiness or landing result. |
 | `objective-doctor.schema.json` | `ObjectiveDoctorOut` | `serialization` | Objective manifest, cancellation, and train diagnosis. |
 | `objective-node-engagement.schema.json` | `ObjectiveNodeEngagementOut` | `serialization` | Node pre-planning engagement plus the refinement pointer and advisory warnings. |
+| `librarian-list.schema.json` | `LibrarianListOut` | `serialization` | Library report: catalogued entries with derived status, uncatalogued and staging directories. |
+| `librarian-record.schema.json` | `LibrarianRecordOut` | `serialization` | Published or adopted library entry plus best-effort warnings. |
+| `librarian-remove.schema.json` | `LibrarianRemoveOut` | `serialization` | Removed library entry and whether its content was deleted. |
 <!-- perk:reference-facts:schemas-outputs:end -->
 
 The `validation` mode records what a parser accepts. The `serialization` mode records what a JSON

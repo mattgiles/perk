@@ -13,13 +13,15 @@ from perk.convergence.managed_state import ArtifactHealth
 Status = Literal["ok", "warn", "info", "fail"]
 
 # Render groups for the managed convergences: settings + the required-perk-version pin under
-# "package", the workflow-dir/cache layout under "state", the rest under "repository".
+# "package", the workflow-dir/cache layout under "state", the library README under "library", the
+# rest under "repository".
 _MANAGED_GROUP: dict[str, str] = {
     "settings-wiring": "package",
     "workflow-dir": "state",
     "skills-manifest": "skills",
     "runner-workflow": "repository",
     "required-perk-version": "package",
+    "library-readme": "library",
 }
 
 

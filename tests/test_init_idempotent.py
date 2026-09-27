@@ -142,6 +142,10 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "/.perk/workflow/" in gitignore
     # The borrowed pi-subagents engine's project-scoped run-artifact root is transient.
     assert "/.pi-subagents/" in gitignore
+    # The perk library is a gitignored cache whose README alone is committed.
+    assert "/docs/library/**\n!/docs/library/README.md" in gitignore
+    # ...and init never creates the library (or its README) when docs/library/ is absent.
+    assert not (tmp_path / "docs" / "library").exists()
     agents_md = (tmp_path / "AGENTS.md").read_text()
     assert "perk conventions" in agents_md
     # The managed block carries the ambient gh guidance.

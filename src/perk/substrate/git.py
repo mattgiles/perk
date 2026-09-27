@@ -225,6 +225,29 @@ def is_ignored(repo: Path, path: Path | str) -> bool:
     raise GitError(f"git check-ignore failed for {path}: {proc.stderr.strip() or proc.returncode}")
 
 
+def ignored_subset(repo: Path, paths: list[str]) -> frozenset[str]:
+    """The subset of ``paths`` (relative to ``repo``, POSIX) the ignore patterns match.
+
+    One ``git check-ignore --no-index`` probe (the batch sibling of ``is_ignored``). The paths
+    need not exist — a nonexistent nested path is evaluated against the patterns like any other.
+    ``--no-index`` also evaluates tracked paths against the patterns, so a tracked file an ignore
+    rule covers IS in the result (``is_ignored``, index-aware, would report it unignored): a
+    caller that must also exclude tracked content checks ``tracked_paths`` separately. Output is
+    newline-separated (``-z`` needs ``--stdin``) with ``core.quotePath=false``; a path git still
+    C-quotes (``"``, ``\\``, control characters) comes back quoted and so reads as unignored —
+    the probe fails closed. Exit 0 (some ignored) and 1 (none) are ordinary; any other exit raises
+    ``GitError`` (never read a broken probe as "ignored").
+    """
+    if not paths:
+        return frozenset()
+    proc = _run_capture(
+        ["-c", "core.quotePath=false", "check-ignore", "--no-index", "--", *paths], cwd=repo
+    )
+    if proc.returncode not in (0, 1):
+        raise GitError(f"git check-ignore failed: {proc.stderr.strip() or proc.returncode}")
+    return frozenset(line for line in proc.stdout.splitlines() if line)
+
+
 def tracked_paths(repo: Path, pathspecs: list[str]) -> list[str]:
     """The tracked paths under ``pathspecs`` (relative to ``repo``); ``[]`` when clean.
 

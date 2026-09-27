@@ -45,6 +45,7 @@ from perk.convergence.doctor.checks import (
     _git_identity_check,
     _issues_check,
     _legacy_workflow_check,
+    _library_check,
     _managed_checks,
     _models_check,
     _pi_agent_dir_check,
@@ -121,6 +122,7 @@ __all__ = [
     "_github_checks",
     "_issues_check",
     "_legacy_workflow_check",
+    "_library_check",
     "_linear_checks",
     "_linear_selected",
     "_managed_checks",
@@ -247,6 +249,8 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     checks.append(_cache_check(root))
     checks.append(_gc_check(root))
     checks.append(_legacy_workflow_check(root))
+    # Offline and report-only (warn at worst), so NOT verify-gated: the perk library's health.
+    checks.append(_library_check(root))
     return checks
 
 

@@ -28,6 +28,7 @@ def _register_root_commands(root: click.Group) -> None:
     from perk.cli.commands.implement_cmd import implement
     from perk.cli.commands.init_cmd import init_perk
     from perk.cli.commands.learn import learn_group
+    from perk.cli.commands.librarian import librarian_group
     from perk.cli.commands.objective import objective_group
     from perk.cli.commands.plan import plan_group
     from perk.cli.commands.pr import (
@@ -83,6 +84,7 @@ def _register_root_commands(root: click.Group) -> None:
     # register_stage_commands skips both gist stages (DEDICATED_STAGES).
     register_with_aliases(root, workflow_group)
     register_with_aliases(root, skills_group)
+    register_with_aliases(root, librarian_group)
     root.add_command(release_notes_cmd)
     # `release-notes` is an informational command; it renders under the Other help bucket.
     root.add_command(resume_session)

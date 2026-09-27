@@ -401,7 +401,9 @@ def managed_artifacts() -> tuple[ArtifactDescriptor, ...]:
     (``perk-repo-skills.yaml`` — network-derived and user-content-derived, not
     offline-computable); ``.perk/config.toml`` (seeded once, user-owned after);
     ``.agents/skills/`` symlinks + the ``.pi/npm`` extension install (gitignored,
-    skills-CLI/npm-managed).
+    skills-CLI/npm-managed); ``docs/library/README.md`` (converged only when ``docs/library/``
+    exists, and the artifact-health lens has no "not applicable" state — a consumer without the
+    directory would read ``not-installed``; add the descriptor when the lens grows one).
     """
     return (
         ArtifactDescriptor(

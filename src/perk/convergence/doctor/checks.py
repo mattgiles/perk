@@ -15,6 +15,8 @@ from perk.convergence.doctor import legacy_agent_defs
 from perk.convergence.doctor.data import _MANAGED_GROUP, Check, Status
 from perk.convergence.init.settings import PONYTAIL_NPM_NAME
 from perk.convergence.managed_state import ArtifactHealth, HealthStatus
+from perk.library import LibraryError, LibraryLayout, ListReport, list_library, translating_io
+from perk.library.guard import require_no_tracked_content
 from perk.state import cache, gc
 from perk.substrate import bindings, git, paths, providers, registry
 from perk.substrate.config import (
@@ -1644,3 +1646,118 @@ def _legacy_workflow_check(root: Path) -> Check:
             "perk doctor --fix",
         )
     return Check("legacy-workflow", "state", "ok", "no legacy .pi/workflow/ cache")
+
+
+# Part severity for the report-only library check (it never fails).
+_LIBRARY_SEVERITY: dict[Status, int] = {"ok": 0, "info": 1, "warn": 2}
+
+
+@dataclass(frozen=True)
+class _LibraryPart:
+    status: Status
+    message: str
+    detail: str
+    remediation: str
+
+
+def _library_check(root: Path) -> Check:
+    """Report-only, offline health of the perk library (group ``library``; warn at worst).
+
+    Resolves the MAIN checkout's ``docs/library/``. Warns on an unreadable catalog, an
+    uncommitted README, or tracked content under the library (the workers refuse until it is
+    untracked); reports uncatalogued and leftover staging directories as info. A missing or
+    drifted README is the managed ``library-readme`` check's, not this one's.
+    """
+    layout = LibraryLayout.for_repo(root)
+    if not layout.root.is_dir():
+        return Check("library", "library", "ok", "library absent (no docs/library/)")
+    readme_rel = layout.relative_to_main(layout.readme_path)
+    parts: list[_LibraryPart] = []
+    report: ListReport | None = None
+    try:
+        report = list_library(root)
+    except LibraryError as exc:
+        if exc.error_type == "catalog_malformed":
+            parts.append(
+                _LibraryPart(
+                    "warn",
+                    f"{paths.LIBRARY_REL}/catalog.json unreadable",
+                    f"catalog: {exc}",
+                    f"repair or remove {paths.LIBRARY_REL}/catalog.json by hand — perk librarian "
+                    "never rewrites a malformed catalog",
+                )
+            )
+        else:
+            parts.append(
+                _LibraryPart(
+                    "warn",
+                    f"{paths.LIBRARY_REL}/ unreadable",
+                    f"library: {exc}",
+                    f"check the permissions under {layout.root}",
+                )
+            )
+    if layout.readme_path.is_file() and not git.is_tracked(layout.main_root, readme_rel):
+        parts.append(
+            _LibraryPart(
+                "warn",
+                f"{readme_rel} is not committed",
+                f"readme: {readme_rel} is untracked",
+                f"git add {readme_rel} and commit it — linked worktrees reach the library "
+                "through it",
+            )
+        )
+    try:
+        with translating_io("tracked-content sweep"):
+            require_no_tracked_content(layout)
+    except LibraryError as exc:
+        tracked = exc.error_type == "library_tracked_content"
+        parts.append(
+            _LibraryPart(
+                "warn",
+                f"{paths.LIBRARY_REL}/ carries committed content"
+                if tracked
+                else f"{paths.LIBRARY_REL}/ tracked-content sweep failed",
+                f"tracked: {exc}",
+                "git rm --cached the listed paths — the perk librarian workers refuse until "
+                "they are untracked"
+                if tracked
+                else "rerun perk doctor once git is healthy",
+            )
+        )
+    if report is not None:
+        if report.uncatalogued:
+            names = ", ".join(path.name for path in report.uncatalogued)
+            parts.append(
+                _LibraryPart(
+                    "info",
+                    f"{len(report.uncatalogued)} uncatalogued library director"
+                    + ("y" if len(report.uncatalogued) == 1 else "ies"),
+                    f"uncatalogued: {names}",
+                    "perk librarian record --adopt <dir> --kind docs --source <url> (see "
+                    "perk librarian list for each copyable hint)",
+                )
+            )
+        if report.staging:
+            names = ", ".join(path.name for path in report.staging)
+            parts.append(
+                _LibraryPart(
+                    "info",
+                    f"{len(report.staging)} leftover staging director"
+                    + ("y" if len(report.staging) == 1 else "ies"),
+                    f"staging: {names}",
+                    "publish with `perk librarian record --publish <dir> --slug <slug> --source "
+                    "<url>` or delete",
+                )
+            )
+    if not parts:
+        count = len(report.entries) if report is not None else 0
+        return Check("library", "library", "ok", f"library catalogued ({count} entries)")
+    top = max(parts, key=lambda part: _LIBRARY_SEVERITY[part.status])
+    return Check(
+        "library",
+        "library",
+        top.status,
+        top.message,
+        "; ".join(part.detail for part in parts),
+        top.remediation,
+    )

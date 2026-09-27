@@ -36,6 +36,7 @@ FAMILY_MAP: dict[str, frozenset[str]] = {
     "cli/objective.md": frozenset({"objective"}),
     "cli/pr.md": frozenset({"pr"}),
     "cli/learn-and-gist.md": frozenset({"learn", "gist"}),
+    "cli/librarian.md": frozenset({"librarian"}),
     "cli/remote-and-utility.md": frozenset(
         {"worktree", "state", "registry", "skills", "workflow", "release-notes", "resume"}
     ),

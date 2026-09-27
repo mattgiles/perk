@@ -10,7 +10,8 @@ wiring from the first turn (the init-spine principle).
 symbol behind a sorted ``__all__``, preserving the ``init.X`` attribute-access import path.
 The orchestrators reference the moved helpers as
 facade globals, so the existing ``init_mod.sync_skills`` monkeypatch keeps working. Submodules:
-``templates``, ``report``, ``blocks``, ``settings``, ``skills``,
+``templates``, ``report``, ``blocks``, ``settings``, ``skills``, ``library`` (the committed
+``docs/library/README.md``),
 ``onboarding`` (the interactive gestures — guided tool installs, gh login, git identity, the
 Linear key prompt).
 """
@@ -49,6 +50,7 @@ from perk.convergence.init.extension_install import (
     materialize_extension_install,
     shipped_agent_defs_dir,
 )
+from perk.convergence.init.library import LIBRARY_README, converge_library_readme
 from perk.convergence.init.onboarding import (
     PI_NPM_SPEC,
     SKILLS_GO_SPEC,
@@ -145,6 +147,7 @@ __all__ = [
     "GITIGNORE_END",
     "GIT_PACKAGE",
     "HUNK_INSTALL_HINT",
+    "LIBRARY_README",
     "LINEAR_PACKAGE",
     "MANAGED_SKILL_NAMES",
     "NPM_PACKAGE",
@@ -202,6 +205,7 @@ __all__ = [
     "consumer_npm_install_root",
     "consumer_perk_package_dir",
     "converge_config",
+    "converge_library_readme",
     "converge_repo_skills_manifest",
     "converge_version_pin",
     "ensure_extension_install_present",
@@ -341,6 +345,11 @@ def managed_convergences(root: Path, self_repo: bool) -> list[ManagedConvergence
                 header_if_new="# AGENTS\n",
                 apply=apply,
             ),
+        ),
+        ManagedConvergence(
+            "library-readme",
+            ("library-readme",),
+            lambda apply: converge_library_readme(root, apply=apply),
         ),
     ]
 

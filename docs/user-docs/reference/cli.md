@@ -1,6 +1,6 @@
 ---
 title: "CLI commands"
-description: "The command-map hub for the perk CLI — the stage-launcher spine, shared conventions, and the map to six exact-detail family references."
+description: "The command-map hub for the perk CLI — the stage-launcher spine, shared conventions, and the map to seven exact-detail family references."
 sidebar:
   order: 3010
 ---
@@ -26,7 +26,7 @@ command map below.
 ## Orientation
 
 The `perk` surface is organized as **noun-groups** — `plan`, `objective`, `pr`, `learn`,
-`worktree`, `state`, `registry`, `skills`, `workflow` — each holding both **warm stage launchers** (a launch
+`librarian`, `worktree`, `state`, `registry`, `skills`, `workflow` — each holding both **warm stage launchers** (a launch
 opens a primed `pi` session for one workflow stage) and **cold deterministic workers** (`--json`
 machine surfaces the warm in-session doors shell out to), separated by help sections. A few things
 escape a group:
@@ -53,10 +53,11 @@ escape a group:
   [Remote and utility commands](./cli/remote-and-utility.md#perk-resume-target)).
 
 This hub keeps the [stage-launcher spine](#stage-launchers-the-earned-flat-names) and the
-[command map](#command-groups); exact per-command detail lives on six family references:
+[command map](#command-groups); exact per-command detail lives on seven family references:
 [Setup and health](./cli/setup-and-health.md) (`init`, `doctor`),
 [Plan commands](./cli/plan.md), [Objective commands](./cli/objective.md),
-[PR commands](./cli/pr.md), [Learn and gist commands](./cli/learn-and-gist.md), and
+[PR commands](./cli/pr.md), [Learn and gist commands](./cli/learn-and-gist.md),
+[Librarian commands](./cli/librarian.md) (`librarian`), and
 [Remote and utility commands](./cli/remote-and-utility.md) (`worktree`, `state`, `registry`,
 `skills`, `workflow`, `resume`, `release-notes`).
 
@@ -227,6 +228,7 @@ above are the spine; every other command's detail lives on its family reference 
 | `perk state` (alias `st`) | Inspect the local workflow cache and mint run ids. | [Remote and utility commands](./cli/remote-and-utility.md#run-state) |
 | `perk registry` (alias `reg`) | Inspect and validate the shared stage registry. | [Remote and utility commands](./cli/remote-and-utility.md#registry) |
 | `perk skills` (alias `sk`) | Manage this repo's skills (sugar over the upstream skills CLI). | [Remote and utility commands](./cli/remote-and-utility.md#skills) |
+| `perk librarian` | Tend the perk library — the catalogued, gitignored offline reference under `docs/library/`. | [Librarian commands](./cli/librarian.md) |
 | `perk workflow` (alias `wf`) | Supervise dispatched CI runs. | [Remote and utility commands](./cli/remote-and-utility.md#dispatched-runs) |
 | `perk resume` | Open Pi's session picker in a checkout (bare, `--worktree`, or a plan's worktree), or reopen a run's recorded conversation by run id. | [Remote and utility commands](./cli/remote-and-utility.md#perk-resume-target) |
 | `perk release-notes` | Show perk's bundled release notes. | [Remote and utility commands](./cli/remote-and-utility.md#perk-release-notes) |

@@ -1,5 +1,4 @@
 .DS_Store
-docs/library/**
 
 # dev / build artifacts
 .venv/
@@ -20,6 +19,8 @@ node_modules/
 /.worktrees/
 /.perk/workflow/
 /.pi-subagents/
+/docs/library/**
+!/docs/library/README.md
 # END perk managed
 
 .pi/subagents

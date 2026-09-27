@@ -604,3 +604,101 @@ def test_golden_objective_node_engagement_unavailable() -> None:
             _objective_node_engagement_unavailable_context()
         ).model_dump(mode="json"),
     )
+
+
+# --- librarian ----------------------------------------------------------------------------
+
+
+def _librarian_views():
+    from pathlib import Path
+
+    from perk.library import DocsUpstream, Entry, EntryView, PageMarker, SourceUpstream
+
+    root = Path("/repo/docs/library")
+    docs = Entry(
+        kind="docs",
+        slug="pi",
+        source="https://pi.dev/docs",
+        path="documentation/pi",
+        added_at="2026-09-01T00:00:00Z",
+        stale_after=1_209_600,
+        upstream=DocsUpstream(pages=(PageMarker(url="https://pi.dev/docs/intro"),)),
+        checked_at="2026-09-20T00:00:00Z",
+        evidence="strong",
+    )
+    source = Entry(
+        kind="source",
+        slug="click",
+        source="https://github.com/pallets/click",
+        path="source-code/github.com/pallets/click",
+        added_at="2026-09-02T00:00:00Z",
+        stale_after=86_400,
+        upstream=SourceUpstream(branch="main", head_sha="0123abcd"),
+        ref="8.1.7",
+    )
+    return root, (
+        EntryView(
+            entry=source,
+            absolute_path=root / source.path,
+            present=True,
+            status="pinned",
+            checked_age_seconds=None,
+        ),
+        EntryView(
+            entry=docs,
+            absolute_path=root / docs.path,
+            present=False,
+            status="fresh",
+            checked_age_seconds=604_800,
+        ),
+    )
+
+
+def test_golden_librarian_list() -> None:
+    from perk.cli.commands.librarian.list_cmd import LibrarianListOut
+    from perk.library import ListReport
+
+    root, views = _librarian_views()
+    report = ListReport(
+        root=root,
+        catalog_present=True,
+        entries=views,
+        uncatalogued=(root / "hunk",),
+        staging=(root / ".staging" / "pi-01ARZ",),
+    )
+    assert_golden("librarian_list", LibrarianListOut.from_domain(report).model_dump(mode="json"))
+
+
+def test_golden_librarian_record() -> None:
+    from perk.cli.commands.librarian.record_cmd import LibrarianRecordOut
+    from perk.library import RecordOutcome
+
+    _root, views = _librarian_views()
+    outcome = RecordOutcome(
+        action="publish",
+        view=views[1],
+        replaced_previous=True,
+        warnings=(
+            "prior revision left at /repo/docs/library/documentation/.pi.previous-1a2b3c4d5e6f",
+        ),
+    )
+    assert_golden(
+        "librarian_record", LibrarianRecordOut.from_domain(outcome).model_dump(mode="json")
+    )
+
+
+def test_golden_librarian_remove() -> None:
+    from pathlib import Path
+
+    from perk.cli.commands.librarian.remove_cmd import LibrarianRemoveOut
+    from perk.library import RemoveOutcome
+
+    outcome = RemoveOutcome(
+        slug="pi",
+        kind="docs",
+        absolute_path=Path("/repo/docs/library/documentation/pi"),
+        content_removed=True,
+    )
+    assert_golden(
+        "librarian_remove", LibrarianRemoveOut.from_domain(outcome).model_dump(mode="json")
+    )

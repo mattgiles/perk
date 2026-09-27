@@ -66,6 +66,12 @@ CAPABILITIES: tuple[Capability, ...] = (
         required=True,
         scope="both",
     ),
+    Capability(
+        "library-readme",
+        "the committed docs/library/README.md (converged only when docs/library/ exists)",
+        required=True,
+        scope="both",
+    ),
 )
 
 

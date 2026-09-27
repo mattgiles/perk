@@ -33,6 +33,10 @@ set; the same opt-out also silences the post-upgrade notice (see
 Init also records `.perk/managed-state.toml` — a machine-written version+hash record of every
 managed artifact, written as a convergence side effect (commit it; a converged repo re-runs
 without touching it).
+The managed `.gitignore` block also carries the perk library rules `/docs/library/**` and
+`!/docs/library/README.md`, and when `docs/library/` already exists init converges its committed
+`docs/library/README.md` (it never creates the directory — see
+[Librarian commands](./librarian.md)).
 
 Run **interactively**, `perk init` is also a guided onboarding flow. It offers to install the
 missing *supported* required tools — `gh` via `brew install gh` (when brew is on PATH), `pi` via
@@ -169,6 +173,12 @@ diagnostic only (`ok`/`info`/`warn`, never `fail`) — the managed dry-run check
 authoritative for pass/fail — and the per-artifact rows appear in the `--json` report's
 `artifact_health` array. `--fix` reconverges the drifted artifacts and then re-records the state
 file.
+The `library` group covers the perk library (see [Librarian commands](./librarian.md)): the
+managed `library-readme` check fails when `docs/library/` exists but its `README.md` is missing
+or drifted (`--fix` restores it), and the report-only, offline `library` check (never `fail`, no
+`--fix`) warns on an unreadable `catalog.json`, an uncommitted README, or tracked content under
+`docs/library/` (the librarian workers refuse until it is untracked), and reports uncatalogued
+and leftover staging directories as info.
 The
 `environment` group reports required tools as `fail` when missing and optional tools
 (e.g. `ast-grep`) as `warn`. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.

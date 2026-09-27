@@ -539,6 +539,31 @@ test("plan-bound review queries allow only the exact argument forms", () => {
     assert.equal(isReadOnlyBashCommand(command), false, command);
 });
 
+test("perk librarian workers are admitted only in their --json-last forms", () => {
+  // The CLI's cache-only preflight backs the admission (it refuses before touching a
+  // non-ignored or tracked path); the gate only pins the verb set and `--json` last.
+  for (const command of [
+    "perk librarian list --json",
+    "cd repo && perk librarian list --json",
+    "perk librarian record --publish docs/library/.staging/pi-01ARZ --slug pi --source https://pi.dev/docs --json",
+    "perk librarian record --adopt docs/library/pi --kind docs --source https://pi.dev/docs --json",
+    "perk librarian record --publish docs/library/.staging/pi-01ARZ --slug pi --source https://pi.dev/docs --replace --accept-failures --json",
+    "perk librarian remove pi --json",
+  ])
+    assert.equal(isReadOnlyBashCommand(command), true, command);
+  for (const command of [
+    "perk librarian list",
+    "perk librarian list --json --verbose",
+    "perk librarian record --adopt docs/library/pi --kind docs --source https://x --json > out.txt",
+    "perk librarian remove pi --json && git add .",
+    "perk librarian add source foo/bar --json",
+    "perk librarian check --json",
+    "perk librarian refresh pi --json",
+    "perk librarianx list --json",
+  ])
+    assert.equal(isReadOnlyBashCommand(command), false, command);
+});
+
 test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () => {
   for (const cmd of [
     "rm -rf /tmp/x",

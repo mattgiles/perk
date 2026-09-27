@@ -13,7 +13,9 @@ GITIGNORE_END = "# END perk managed"
 # borrowed `pi-subagents` engine's project-scoped artifact root (debug artifacts + chain runs
 # in the session cwd) — transient, never tracked. The conventional project agent dir's
 # contents are ignored except models.json: exclude contents, not the directory itself, so
-# negations work. Users can opt more files in with later rules after the managed block.
+# negations work. The perk library (`docs/library/`) is a gitignored cache whose README alone is
+# committed — the same contents-not-directory shape lets the README negation work. Users can opt
+# more files in with later rules after the managed block.
 GITIGNORE_BODY = "\n".join(
     [
         "/.pi/npm/",
@@ -24,6 +26,8 @@ GITIGNORE_BODY = "\n".join(
         "/.worktrees/",
         "/.perk/workflow/",
         "/.pi-subagents/",
+        "/docs/library/**",
+        "!/docs/library/README.md",
     ]
 )
 

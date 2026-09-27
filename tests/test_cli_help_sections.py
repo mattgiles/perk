@@ -46,6 +46,7 @@ def test_command_groups_section_lists_groups():
     for entry in (
         "worktree (wt)",
         "gist",
+        "librarian",
         "objective (obj)",
         "pr",
         "registry (reg)",

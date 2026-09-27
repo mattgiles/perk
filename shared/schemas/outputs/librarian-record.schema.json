@@ -1,0 +1,186 @@
+{
+  "$defs": {
+    "EntryOut": {
+      "additionalProperties": false,
+      "description": "One catalogued entry in a ``--json`` envelope (order load-bearing; ``path`` absolute).",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/Kind"
+        },
+        "slug": {
+          "title": "Slug",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "present": {
+          "title": "Present",
+          "type": "boolean"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ref"
+        },
+        "added_at": {
+          "title": "Added At",
+          "type": "string"
+        },
+        "checked_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Checked At"
+        },
+        "checked_age_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Checked Age Seconds"
+        },
+        "stale_after": {
+          "title": "Stale After",
+          "type": "integer"
+        },
+        "evidence": {
+          "$ref": "#/$defs/Evidence"
+        },
+        "drifted": {
+          "title": "Drifted",
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/Status"
+        }
+      },
+      "required": [
+        "kind",
+        "slug",
+        "source",
+        "path",
+        "present",
+        "ref",
+        "added_at",
+        "checked_at",
+        "checked_age_seconds",
+        "stale_after",
+        "evidence",
+        "drifted",
+        "status"
+      ],
+      "title": "EntryOut",
+      "type": "object"
+    },
+    "Evidence": {
+      "enum": [
+        "strong",
+        "weak",
+        "none"
+      ],
+      "type": "string"
+    },
+    "Kind": {
+      "enum": [
+        "docs",
+        "source"
+      ],
+      "type": "string"
+    },
+    "Status": {
+      "enum": [
+        "fresh",
+        "stale",
+        "drifted",
+        "unverifiable",
+        "pinned",
+        "unknown"
+      ],
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``--json`` envelope of ``perk librarian record`` (order load-bearing).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "action": {
+      "enum": [
+        "publish",
+        "adopt"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "entry": {
+      "$ref": "#/$defs/EntryOut"
+    },
+    "replaced_previous": {
+      "title": "Replaced Previous",
+      "type": "boolean"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "action",
+    "entry",
+    "replaced_previous",
+    "warnings"
+  ],
+  "title": "LibrarianRecordOut",
+  "type": "object"
+}
