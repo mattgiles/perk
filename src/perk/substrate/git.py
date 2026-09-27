@@ -11,7 +11,7 @@ import re
 import shutil
 import subprocess
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -21,6 +21,17 @@ from perk.substrate.proc import ProcFailure, run_captured, run_captured_bytes, r
 
 # GIT_TERMINAL_PROMPT=0: credential prompts fail fast instead of hanging to the timeout.
 _GIT_ENV = {"GIT_TERMINAL_PROMPT": "0"}
+
+# The library's config-pinned execution policy (contracts.md §8.75(i)): the executing git
+# operations over a library checkout (clone, fetch, checkout, fast-forward) ignore the user's
+# global and system config, so no configured hooks path, filter driver, credential helper,
+# `insteadOf` rewrite or config-file proxy applies — nothing a cloned tree selects can execute.
+# Paired with a `-c core.hooksPath=<empty dir>` pin (the `pinned=` keyword below). Env config
+# (`GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`) and env proxies still apply.
+LIBRARY_GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
+
+# A blobless partial clone of a whole repository can be slow on a large upstream.
+CLONE_TIMEOUT = 600
 
 
 @dataclass(frozen=True)
@@ -145,9 +156,16 @@ _DELETED_REMOTE_RE = re.compile(r"\[deleted\]\s+(\S+)")
 _MERGE_CONFLICT_INFO_RE = re.compile(r"^[0-7]{6} [0-9a-f]+ [123]\t(.+)$")
 
 
-def _run(args: list[str], *, cwd: Path | None = None, timeout: int = 30) -> str:
+def _run(
+    args: list[str],
+    *,
+    cwd: Path | None = None,
+    timeout: int = 30,
+    env_overlay: Mapping[str, str] | None = None,
+) -> str:
+    env = {**_GIT_ENV, **(env_overlay or {})}
     try:
-        return run_checked(["git", *args], cwd=cwd, timeout=timeout, env_overlay=_GIT_ENV)
+        return run_checked(["git", *args], cwd=cwd, timeout=timeout, env_overlay=env)
     except ProcFailure as exc:
         raise GitError(str(exc)) from exc
 
@@ -170,7 +188,11 @@ def _run_bytes(
 
 
 def _run_capture(
-    args: list[str], *, cwd: Path | None = None, timeout: int = 30
+    args: list[str],
+    *,
+    cwd: Path | None = None,
+    timeout: int = 30,
+    env_overlay: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run ``git <args>`` best-effort: returns the completed process **without raising** on a
     non-zero exit so callers can parse stdout/stderr on partial failure.
@@ -179,10 +201,22 @@ def _run_capture(
     ``delete_remote_branches``); ``_run`` (which raises ``GitError``) remains the default for
     single ops. A ``TimeoutExpired`` is still exceptional and raises ``GitError``.
     """
+    env = {**_GIT_ENV, **(env_overlay or {})}
     try:
-        return run_captured(["git", *args], cwd=cwd, timeout=timeout, env_overlay=_GIT_ENV)
+        return run_captured(["git", *args], cwd=cwd, timeout=timeout, env_overlay=env)
     except ProcFailure as exc:
         raise GitError(str(exc)) from exc
+
+
+def _pinned_prefix(pinned: Path | None) -> list[str]:
+    """The ``-c core.hooksPath=<pinned>`` argv prefix of a config-pinned library op (``[]``
+    when unpinned). ``pinned`` is an empty directory the caller owns, so no hook can run."""
+    return [] if pinned is None else ["-c", f"core.hooksPath={pinned}"]
+
+
+def _pinned_env(pinned: Path | None) -> Mapping[str, str] | None:
+    """The env overlay of a config-pinned library op (``None`` when unpinned)."""
+    return None if pinned is None else LIBRARY_GIT_ENV
 
 
 def repo_root(cwd: Path) -> Path | None:
@@ -453,13 +487,38 @@ def is_dirty(cwd: Path) -> bool:
     return bool(_run(["status", "--porcelain"], cwd=cwd).strip())
 
 
-def fetch(repo: Path, *, remote: str = "origin") -> None:
+def fetch(repo: Path, *, remote: str = "origin", pinned: Path | None = None) -> None:
     """Fetch ``remote`` into ``repo`` (a **network** op; ``GitError`` on failure).
 
     Callers that need offline tolerance should treat the failure as best-effort. A longer
-    ``timeout`` than the default is used because the network can be slow.
+    ``timeout`` than the default is used because the network can be slow. ``pinned`` (an empty
+    hooks directory) runs the fetch config-pinned (:data:`LIBRARY_GIT_ENV`).
     """
-    _run(["fetch", remote], cwd=repo, timeout=120)
+    _run(
+        [*_pinned_prefix(pinned), "fetch", remote],
+        cwd=repo,
+        timeout=120,
+        env_overlay=_pinned_env(pinned),
+    )
+
+
+def clone_partial(
+    url: str, dest: Path, *, pinned: Path | None = None, timeout: int = CLONE_TIMEOUT
+) -> None:
+    """Blobless partial clone of ``url`` into ``dest`` (a **network** op; ``GitError`` on
+    failure).
+
+    ``git clone --quiet --filter=blob:none``: history and trees arrive up front, file contents
+    on demand. ``dest`` may already exist as an EMPTY directory (git clones into it) — callers
+    claim it atomically first. The caller owns cleanup of a failed clone. ``pinned`` (an empty
+    hooks directory) runs the clone config-pinned (:data:`LIBRARY_GIT_ENV`).
+    """
+    _run(
+        [*_pinned_prefix(pinned), "clone", "--quiet", "--filter=blob:none", url, str(dest)],
+        cwd=dest.parent,
+        timeout=timeout,
+        env_overlay=_pinned_env(pinned),
+    )
 
 
 def fetch_refspecs(
@@ -515,16 +574,23 @@ def upstream_ref(repo: Path) -> str | None:
     return ref or None
 
 
-def merge_ff_only(repo: Path, ref: str) -> bool:
+def merge_ff_only(repo: Path, ref: str, *, pinned: Path | None = None) -> bool:
     """Fast-forward the current branch to ``ref`` (``git merge --ff-only <ref>``); best-effort.
 
     Returns ``True`` on a clean fast-forward (exit 0), ``False`` otherwise (a non-fast-forward /
     diverged history exits non-zero). Never raises on a non-FF result — runs through
     ``_run_capture`` (mirroring ``delete_branches``). A ``TimeoutExpired`` still raises
     ``GitError`` (inherited from ``_run_capture``). Mutates the working tree on success, so callers
-    must guard on a clean tree + a real upstream first.
+    must guard on a clean tree + a real upstream first. Exit 0 also covers git's "Already up to
+    date" (``ref`` an ancestor of HEAD), so callers that must tell the two apart classify by
+    ancestry first. ``pinned`` (an empty hooks directory) runs it config-pinned.
     """
-    return _run_capture(["merge", "--ff-only", ref], cwd=repo).returncode == 0
+    proc = _run_capture(
+        [*_pinned_prefix(pinned), "merge", "--ff-only", ref],
+        cwd=repo,
+        env_overlay=_pinned_env(pinned),
+    )
+    return proc.returncode == 0
 
 
 def detect_trunk_branch(repo: Path, *, remote: str = "origin") -> str:
@@ -551,15 +617,23 @@ def detect_trunk_branch(repo: Path, *, remote: str = "origin") -> str:
     return "main"
 
 
-def remote_branch_head(repo: Path, branch: str, *, remote: str = "origin") -> str | None:
+def remote_branch_head(
+    repo: Path, branch: str, *, remote: str = "origin", pinned: Path | None = None
+) -> str | None:
     """The SHA at ``refs/heads/<branch>`` on ``remote`` (a **network** op via ``ls-remote``).
 
     ``None`` when the remote has no such branch (an absent remote ref is an ordinary
     observation, never an error); ``GitError`` on a network/infra failure. Works from a fresh
     clone — unlike :func:`remote_ref_exists` it asks the remote itself, not local
-    remote-tracking refs. Uses the generous network ``timeout`` like :func:`fetch`.
+    remote-tracking refs. Uses the generous network ``timeout`` like :func:`fetch`. ``pinned``
+    (an empty hooks directory) runs it config-pinned (:data:`LIBRARY_GIT_ENV`).
     """
-    out = _run(["ls-remote", remote, f"refs/heads/{branch}"], cwd=repo, timeout=120)
+    out = _run(
+        [*_pinned_prefix(pinned), "ls-remote", remote, f"refs/heads/{branch}"],
+        cwd=repo,
+        timeout=120,
+        env_overlay=_pinned_env(pinned),
+    )
     for line in out.splitlines():
         sha, _, ref = line.partition("\t")
         if ref.strip() == f"refs/heads/{branch}" and sha:
@@ -1015,13 +1089,18 @@ def list_refs(repo: Path, prefix: str) -> list[str]:
     return [line for line in out.splitlines() if line]
 
 
-def checkout_detached(repo: Path, sha: str) -> None:
+def checkout_detached(repo: Path, sha: str, *, pinned: Path | None = None) -> None:
     """Detach HEAD at ``sha`` (``git checkout --detach <sha>``); ``GitError`` on failure.
 
     Repositions an existing (typically isolated) worktree between operations — distinct from
-    :func:`worktree_add_detached`, which only creates the worktree.
+    :func:`worktree_add_detached`, which only creates the worktree. ``pinned`` (an empty hooks
+    directory) runs it config-pinned (:data:`LIBRARY_GIT_ENV`).
     """
-    _run(["checkout", "--detach", sha], cwd=repo)
+    _run(
+        [*_pinned_prefix(pinned), "checkout", "--detach", sha],
+        cwd=repo,
+        env_overlay=_pinned_env(pinned),
+    )
 
 
 def rebase_in_progress(worktree: Path) -> bool:

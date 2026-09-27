@@ -110,7 +110,8 @@ def list_library(repo_root: Path, *, now: Clock | None = None) -> ListReport:
         catalog = load_catalog(layout)
         moment = (now or utc_now)()
         entries = tuple(
-            _view(layout, entry, moment) for entry in sorted(catalog.entries, key=lambda e: e.slug)
+            entry_view(layout, entry, moment)
+            for entry in sorted(catalog.entries, key=lambda e: e.slug)
         )
         return ListReport(
             root=layout.root,
@@ -144,7 +145,8 @@ def _uncatalogued(layout: LibraryLayout, catalog: Catalog) -> tuple[Path, ...]:
     return (*top, *orphans)
 
 
-def _view(layout: LibraryLayout, entry: Entry, now: datetime) -> EntryView:
+def entry_view(layout: LibraryLayout, entry: Entry, now: datetime) -> EntryView:
+    """``entry`` as the workers report it at ``now`` (absolute path, presence, status)."""
     absolute = layout.root / entry.path
     age = None
     if entry.checked_at is not None:
@@ -201,7 +203,7 @@ def publish(
             previous = _commit_publish(layout, staged, target, slug, catalog.with_entry(entry))
             warnings = [inventory_warning] if inventory_warning is not None else []
             warnings.extend(_post_publish(target, previous))
-            view = _view(layout, entry, moment)
+            view = entry_view(layout, entry, moment)
         return RecordOutcome(
             action="publish",
             view=view,
@@ -459,7 +461,7 @@ def adopt(
                 upstream=DocsUpstream(pages=markers),
             )
             _commit_adopt(layout, original, target, catalog.with_entry(entry))
-            view = _view(layout, entry, moment)
+            view = entry_view(layout, entry, moment)
         warnings = (inventory_warning,) if inventory_warning is not None else ()
         return RecordOutcome(action="adopt", view=view, replaced_previous=False, warnings=warnings)
 

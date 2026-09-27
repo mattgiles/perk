@@ -33,7 +33,7 @@ SLUG_GRAMMAR = (
     "characters, no '..'"
 )
 # One segment of a source-code entry path (`<host>`, `<org>`, `<repo>`).
-_SOURCE_SEGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+SOURCE_SEGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def library_root(repo_root: Path) -> Path:
@@ -80,6 +80,9 @@ class LibraryLayout:
     def docs_entry_dir(self, slug: str) -> Path:
         return self.documentation / slug
 
+    def source_entry_dir(self, host: str, org: str, repo: str) -> Path:
+        return self.root / source_entry_path(host, org, repo)
+
     def relative(self, path: Path) -> str:
         """``path`` relative to the library root, POSIX — the catalog ``path`` form.
 
@@ -90,6 +93,11 @@ class LibraryLayout:
     def relative_to_main(self, path: Path) -> str:
         """``path`` relative to the main checkout, POSIX — the git pathspec form (lexical)."""
         return path.relative_to(self.main_root).as_posix()
+
+
+def source_entry_path(host: str, org: str, repo: str) -> str:
+    """The catalog ``path`` of a source checkout: ``source-code/<host>/<org>/<repo>``."""
+    return f"{SOURCE_CODE_DIRNAME}/{host}/{org}/{repo}"
 
 
 def validate_slug(slug: str) -> str:
@@ -122,5 +130,5 @@ def entry_path_shape(kind: Kind, path: str) -> bool:
     return (
         len(parts) == 4
         and parts[0] == SOURCE_CODE_DIRNAME
-        and all(_SOURCE_SEGMENT_RE.fullmatch(part) is not None for part in parts[1:])
+        and all(SOURCE_SEGMENT_RE.fullmatch(part) is not None for part in parts[1:])
     )
