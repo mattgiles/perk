@@ -282,9 +282,12 @@ old issue is closed. See
 
 `--from <guidance>` accepts a local file path (relative or absolute; an existing file wins) or a
 backend source id (a gist, an issue, or a Linear project id); its text is materialized beside the
-old objective as untrusted guidance that steers the re-author. It is guidance only: the source is
-not adopted, modified, or closed, and the successor is still a fresh superseding objective. It may
-not name the objective being replanned or that replan's own scratch file (`invalid_input`).
+old objective as untrusted guidance that steers the re-author. It is guidance only: reading it
+never adopts, modifies, or closes the source, and the successor is still a fresh superseding
+objective. The save's normal effects still apply to whatever the replan itself touches — for
+example, a plan issue passed as guidance that a stacked successor also carries is re-owned by the
+transfer, like any carried plan. It may not name the objective being replanned (under any
+spelling the backend resolves to it) or that replan's own scratch file (`invalid_input`).
 Errors: `seed_file_error` (unreadable or empty file), `guidance_not_found`, `guidance_empty`
 (a source with no body text), `invalid_input` (blank or aliasing). `--dry-run --json` adds `from`
 and `from_kind` (`file` | `source`).

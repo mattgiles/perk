@@ -6270,11 +6270,15 @@ untrusted human DATA. Detection is file-first (`seed_file.detect_seed_file` → 
 `objective author --from` cleans it (`strip().lstrip("#").strip()`) and read via
 `ObjectiveStore.read_objective_source` (`guidance_not_found` on a miss, `guidance_empty` on a
 bodiless source; deliberately **no** OPEN/kind refusals — those are adoption concerns); a blank
-id is `invalid_input`. **Alias policy:** the replan mutates exactly two resources — the subject
+id is `invalid_input`. **Alias policy:** every replan mutates two resources — the subject
 objective (closed on save) and its scratch file (rewritten at launch, dry-run included) — and
-`--from` refuses to alias either (`invalid_input`: a cleaned source id equal to the objective id;
-a resolved file path equal to the replan scratch path), checked locally before the banner, any
-network read, or the scratch write; any other readable source (another perk objective included)
+`--from` refuses to alias either (`invalid_input`). The scratch check compares resolved paths
+locally, before the banner, any network read, or the scratch write. The subject check runs
+twice: an instant local comparison of cleaned ids at that same pre-banner point, then a
+backend-canonical comparison — the guidance source's store-returned id against Prepare's
+`objective_id` — right after the read-only Prepare snapshot and still before the engagement
+reads, the scratch write, and launch (the backend is the identity authority: GitHub resolves
+`042`/`+42` to issue 42). Any other readable source (another perk objective or a plan included)
 is accepted as DATA. The guidance rides the replan scratch as an `<untrusted_replan_guidance>`
 block (after `<untrusted_objective_unfinished_nodes>`, before `<stacked_delivery_facts>`; the
 `from:` label sits inside the container — a source's title/url are untrusted too); the seed
@@ -6285,7 +6289,9 @@ source-arm read is narrated as its own `io_step` before the objective lookup (so
 objective argument stays the subject, the `supersedes` handoff is unchanged, there is no
 `adopt_from`, the guidance source is never adopted/modified/closed by the guidance handling (a
 consumed gist stays open — the human closes it), and absent `--from` every artifact (scratch,
-seed, stderr, `--json` payload) is byte-identical.
+seed, stderr, `--json` payload) is byte-identical. The save's own effects are unchanged and apply
+to their targets whether or not one also served as guidance: a §8.53 transfer re-owns every
+carried plan, including a plan issue that doubled as `--from` guidance.
 
 **The lineage fields.** `ObjectiveHeader` includes `supersedes` and `superseded_by` (both
 `str | None`, rendered by `objective.render_header_block`): `supersedes=<OLD>` on the NEW header,
