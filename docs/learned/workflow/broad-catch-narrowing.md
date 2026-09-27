@@ -109,6 +109,13 @@ typed subclass of the substrate base error (`StackTopologyError(GitError)`, foll
 `PushRejectedError` precedent in `perk/substrate/git.py`) is caught BEFORE `GitError` at every
 boundary, raised `from exc` with the probe text appended; unknown callers still fail closed.
 
+**Stdlib parsers used as validators need their own arm.** A catch set enumerated from a command's
+I/O operations (`OSError`/`GitError`) misses the parser a validator calls inside the same envelope
+boundary: `urllib.parse.urlsplit` raises its own `ValueError` (`https://[::1` — an unmatched IPv6
+bracket), which escaped the library's `--json` boundary as a traceback until the URL validator
+(`src/perk/cli/commands/librarian/shared.py::validate_source_url`) grew the parser arm. Add the
+parser arm, and a parser-raising case to the refusal matrix.
+
 ## Declared fail-open ("never raises") contracts need adversarial-fixture sweeps
 
 A declared "never raises" contract is verified boundary-by-boundary with adversarial fixtures —
@@ -218,7 +225,8 @@ issued for a non-JSON failure. The cause must be named because it reaches a huma
 `(OSError, json.JSONDecodeError)` net lets invalid bytes crash `perk doctor`. One arm stays coarse:
 the `is_file()` gate sends a path that exists but is not a regular file (a directory) to the absent
 `[]` arm, so this probe never reports that shape — a convergence acting on the result needs the
-`exists()`/`is_file()` split above.
+`exists()`/`is_file()` split above. (This paragraph documents `_settings_packages`' current behavior;
+update it when the routed non-regular-file arm lands — #2580.)
 
 ## Cross-references
 

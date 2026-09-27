@@ -7,7 +7,7 @@
 # validates the registry + every doc's declaration.
 clusters:
   - id: pi-extension
-    rollup: "Pi SDK/extension substrate craft — API facts, context injection/loading, seams, TUI surfaces, tool-param decode, headless session driving."
+    rollup: "Pi SDK/extension substrate craft — API facts, context injection/loading, the read-only bash gate, seams, TUI surfaces, tool-param decode, headless sessions."
   - id: subagent-orchestration
     rollup: "Spawning and orchestrating subagents — pi-subagents mechanics, agent defs, report waves, lane semantics, streaming."
   - id: toolchain-gotchas

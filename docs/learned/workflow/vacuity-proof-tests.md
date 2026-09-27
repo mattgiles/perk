@@ -21,22 +21,22 @@ condition that would make an incorrect implementation fail, then assert the full
 - Dedup/uniqueness claims need manufactured collisions under the exact contract key —
   "Manufacture collisions for uniqueness and dedup claims".
 - Assert positive membership and full payloads; ordered effects flow through ONE recorder with a
-  discriminating order — "Assert payloads" / "Order pins need one recorder".
+  discriminating order; render between the producing and consuming events — "Assert payloads" /
+  "Order pins need one recorder" / "Snapshot before the event that consumes correlation state".
 - Write failure matrices from the boundary contract; a fixture for check N must be valid for
   checks 1..N−1 — "Enumerate failure matrices from the contract".
-- Cover the whole declared surface: per-field corruption, every enum arm, precedence per
-  adjacent pair, throwing cases for fail-open reads — "Parametrize the whole declared surface".
-- Capture the exact request each parity fake receives (full argv, staged stdin) — "Capture exact
-  requests from parity fakes".
+- Cover the whole declared surface: per-field corruption, every enum arm, precedence per adjacent
+  pair, throwing cases for fail-open reads — "Parametrize the whole declared surface"; capture the
+  exact request each parity fake receives — "Capture exact requests from parity fakes".
 - Discriminating inputs live inside the measured scope — a race pin swaps the world inside the
-  counted read window (`measureArtifactReadCalls`) — "Put discriminating inputs inside the
-  measured scope".
+  counted read window, samples until the writers finish and asserts monotonic change — "Put
+  discriminating inputs inside the measured scope" / "Race pins sample until the writers are done".
 - Negative-space checks prove a live selector and fail under an injected offender; a
   regression pin names the mutation it catches; widen the TEST seed to `unknown`, never the
   production type — "Negative-space checks" / "Structural source pins".
-- Folds and extractions mint branches: pin each arm — "Fold and extraction test craft".
-- Never-execute seams need a live control that first FIRES unhardened (two-stage: git's external
-  diff skips textconv) plus an argv pin — "Live controls for never-execute seams".
+- Folds and extractions mint branches: pin each arm — "Fold and extraction test craft"; never-execute
+  seams need a live control that first FIRES unhardened (two-stage: git's external diff skips
+  textconv) plus an argv pin — "Live controls for never-execute seams".
 - Keep one real default path through the deepest seam; pin composition via the CAPTURED
   registration, never a hand rebuild — "Keep one real default path and verify delegates".
 - Assert where values leave the subsystem, reading back through the production reconstruction
@@ -149,6 +149,19 @@ Four sharper payload rules:
   and interleave degraded cases between dispatchable ones, so an order bug and a skip bug are
   separately visible (#2176).
 
+## Snapshot before the event that consumes correlation state
+
+When a display path could mutate state a later event reads, render **between** the producing and the
+consuming events, not after both. The first `/btw` tool-row test rendered only after both
+`tool_execution_end` events — a renderer that folded the stored tool names in place would still
+pass, because the end-event matching had already happened.
+
+Recipe (`extension/vendor/btw/btw.test.ts`, the tool-row fold test): wrap
+`AgentSession.prototype.subscribe` with `t.mock.method` and render the overlay just before
+forwarding each end event to the listener; assert the row is still running and already folded at
+that point, that the end events carry the raw names, and that both rows then finish. A mutation
+proof — temporarily folding the pending tool calls in place — must fail it.
+
 ## Enumerate failure matrices from the contract
 
 A fixture generator usually expresses only valid shapes. Deriving negative cases from it therefore
@@ -250,6 +263,19 @@ that fixture design generalizes to every conversion proof.
   directly — going through the dispatcher adds its own read and shifts the swap point. Before
   accepting "untestable" for a race, look for an existing counting seam.
 
+## Race pins sample until the writers are done, then assert monotonic change
+
+A torn-read test whose reader loop stops after a fixed iteration count (~1 s) is vacuous when the
+subprocess writers (`python -m perk …`) take longer than that just to start: every observation is
+the empty state and every assertion passes. Recipe (realized in
+`tests/test_library_concurrency.py::test_concurrent_publishers_lose_no_update_and_readers_see_no_torn_catalog`):
+
+- sample until a `writers_done` event under a bounded deadline, with a `try/finally` that kills
+  stragglers and joins the reader thread;
+- assert the first observation was the empty state;
+- assert at least one change was observed;
+- assert the observed counts never decrease.
+
 ## Live controls for never-execute seams
 
 A "this must never run" seam (a diff that must not execute the user's `diff.external`/textconv
@@ -277,7 +303,10 @@ fixture is enough. Without that arm, a renamed directory, stale regex, or broad 
 repository invariant into an empty scan.
 
 `tests/test_explanation_boundary.py` demonstrates paired scanner directions, while
-`workflow/source-scan-guards.md` collects guard-specific non-vacuity techniques.
+`workflow/source-scan-guards.md` collects guard-specific non-vacuity techniques. A static sanction
+literal standing in for a tier CI cannot enumerate (`tests/test_skill_declarations.py::PACKAGE_SKILLS`
+for the gitignored `.pi/npm` skills) makes a guard pass trivially for that tier — see
+`workflow/borrowed-packages.md` § "Partial retirement — an upstream drops a bundled skill".
 
 Mutation-proof ordering pins by temporarily reversing the implementation and watching the pin
 fail — but never restore with `git checkout <file>` while carrying uncommitted work (a HEAD

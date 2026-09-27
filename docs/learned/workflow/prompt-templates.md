@@ -426,8 +426,8 @@ Most arm templates use `{{ var }}` only and keep branching in code. When branchi
 - Fresh-worktree TS toolchain and formatter cautions live in their topical docs:
   `toolchain/worktree-node-modules.md` (`npm ci` before TS checks) and `toolchain/biome.md`
   (`run_ci` green ≠ committed-format-green).
-- The `edit`-fails-across-an-em-dash trap → a Python `str.replace` heredoc escape hatch for
-  Unicode-safe exact edits.
+- The `edit`-fails-across-an-em-dash trap → `workflow/doc-reconciliation.md` § "Pi's edit tool on
+  em-dash-heavy prose".
 - Keep `contracts.md §8.31` references intact through comment-hygiene sweeps.
 
 ## Cross-references

@@ -78,6 +78,17 @@ reference) see less than their names suggest (#2508, #2514):
 4. **`prompts/` is outside `_SOURCE_ROOTS`**, so prompt-file references are unguarded.
 5. **An illustrative `.md` path in prose registers as a doc reference** — placeholder it
    (`<section>/<page>.md`; the token charset exempts `<`).
+6. **A pointer to a module later split into a package still resolves.** `_resolve_source_pointer`
+   probes literal → `src/` form → `src/perk/…/X/__init__.py` (deliberate, so split history stays
+   valid), so a bare cite of the old `mod.py` keeps resolving to the facade even when the described
+   content moved to a submodule — the realized case was `toolchain/ty.md`'s
+   `perk/convergence/init.py` cite, whose content lives in `init/settings.py` (repointed by #2539;
+   `workflow/provider-seam.md` still narrates the old path). The symbol arm is a plain substring
+   test and split facades re-export every submodule name, so `old.py::symbol` passes too — the
+   missing-symbol arm proves a name *appears*, not that it is *defined* there. After a module→package
+   split only an analyst/audit finds these: include "old-module pointers into split packages" in
+   dream/audit sweeps, and cite the defining submodule (`pkg/sub.py::symbol`) when a pointer is
+   load-bearing.
 
 The judgment side is `doc-reconciliation.md` § "Deliberate nonzero stale-pointer advisories".
 

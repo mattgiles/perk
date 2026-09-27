@@ -257,5 +257,5 @@ for the canonical fail-open pattern.
 - `docs/learned/workflow/cold-door-launch.md` — the launch seam the pipeline's tail composes
 - `docs/learned/workflow/source-scan-guards.md` — the guard pattern enforcing the shared primitives
 - `docs/learned/workflow/plan-ref-lifecycle.md` — fail-open on-land bookkeeping pattern
-- `docs/learned/pi/context-system.md` — the bash allowlist (incl. the read-only `gh` query subcommands)
+- `docs/learned/pi/read-only-bash-gate.md` — the bash allowlist (incl. the read-only `gh` query subcommands)
 - `docs/learned/workflow/human-engagement-reads.md` — the concrete cold-injects/warm-instructs instance

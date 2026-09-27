@@ -130,7 +130,7 @@ declares `"pi-subagents": {"agents": ["./agents"]}`, and pi-subagents discovers 
 `source: "package"`. There is no second copy and no reconverge — edit `agents/<name>.md` and ship
 a release. The listing (`adversarial-reviewer`, `conflict-resolver`, `draft-reviewer`,
 `dream-analyst`, `dream-reducer`, `harvest-analyst`, `learn-analyst`, `objective-explorer`,
-`pr-reviewer`, `review-classifier`, `scout`) is the shipped `agents/*.md` census — never restate a
+`pr-reviewer`, `review-classifier`, `scout`, `simplifier`) is the shipped `agents/*.md` census — never restate a
 count (`workflow/doc-reconciliation.md`).
 
 ### How pi-subagents discovers agents
@@ -163,10 +163,36 @@ The census is `agents/*.md` ↔ `SUBAGENT_KEYS` (`extension/substrate/config.ts`
 `extension/substrate/config.test.ts`) ↔ the `SubagentsTable` aliases minus `session-auditor`
 (`perk/substrate/config.py`, pinned by `tests/test_subagent_agents.py` and
 `tests/test_packaging.py::test_packed_package_declares_discoverable_agent_census`). Adding an agent
-touches, in lockstep: `agents/<name>.md` + the commented `[models.subagents]` sample +
-`SubagentsTable` + `SUBAGENT_KEYS` + their pins + **this doc's listing** (the census is
-self-referencing — that keeps the listing current). A **rename** walks the same census plus a
-`git mv` of the source. The test seam for the packed artifact is `workflow/distribution.md`'s
+touches, in lockstep (the realized set when `simplifier` landed):
+
+- **The def** — `agents/<name>.md`.
+- **Python config** — the `SubagentsTable` field AND the `ConfigFileModel.to_domain` `subagents`
+  enumeration row (`perk/substrate/config.py`; the exact-dict pin
+  `tests/test_config.py::test_subagents_selection_parsed` catches a missed row).
+- **TypeScript config** — `SUBAGENT_KEYS` only: `PerkConfig.subagents` is
+  `Partial<Record<SubagentKey, string>>`, so the tuple is the single TS source of truth (the former
+  hand-written per-key map was a lockstep site strict TS would have failed at
+  `subagentModel`/`parseSubagentsSelection`).
+- **Samples/config** — the commented row in `perk/convergence/init/templates.py` + this repo's
+  `.perk/config.toml` row.
+- **Pins** — `tests/test_subagent_agents.py::_PROFILES` (+ its count and comment); for
+  Ponytail-bound defs the `skillPath` exception set and the expected map in
+  `test_ponytail_defs_source_bind_only_the_exact_skill_paths`, and the Ponytail tuple in
+  `tests/test_packaging.py::test_packed_package_declares_discoverable_agent_census`; the
+  parse-all-keys test in `extension/substrate/config.test.ts`; `REPORT_ROLES` in
+  `extension/waves/reportWave.test.ts` (report roles only).
+- **Prose** — `shared/contracts.md` §8.3's shipped-report paragraph with its **three spelled-out
+  counts** (hand-maintained — every added def bumps all three plus the lists);
+  `skills/perk-expert/references/configuration.md` + `customization-recipes.md`;
+  `docs/user-docs/reference/configuration/models-and-compaction.md`.
+- **Opt-in, outside `just ci`** — the `docs/design/prose-prompt-map.yaml` match row + the
+  regenerated map.
+- **This doc's listing** — the census is self-referencing, but a def-adding PR cannot edit
+  `docs/learned/`; the `/learn` pass is where the listing update lands.
+
+**When a census carries a hand-written type mirroring an `as const` tuple, derive the type from the
+tuple** — that deletes a lockstep site instead of growing it. A **rename** walks the same census plus
+a `git mv` of the source. The test seam for the packed artifact is `workflow/distribution.md`'s
 (§ "init/doctor/launch own the `@mgiles/perk` npm install").
 
 The prose layer the census does not guard: audit every cohort-wide design-doc universal for
@@ -505,6 +531,9 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   still spawn `context: "fresh"` for isolation. By owner decision the guidance baseline stays
   0.70.1, so `subagent-compat` warns by design; the full re-verify, browser-door live leg
   included, is owed.
+- **2026-09 — `simplifier`** — the def landed dormant (#2557) and flipped live (#2561); the census
+  site list grew to the realized set above. Size watch: this doc is ~46 KB — a split is due at the
+  next dream pass.
 - **Agent-def delivery (#2455)** — agent defs moved from the wheel + `perk init` `.pi/agents/perk/`
   delivery to pi-subagents package discovery; the legacy dir is a doctor migration.
 - **Two-boolean landing** — deleted: the `<active_agent>` prefix parser + `childIdentity.ts`,

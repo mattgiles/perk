@@ -29,8 +29,10 @@ pi API facts, and test recipes those turns established.
   severity-filtered notify asserts, the full suite via `just test-js` — "Harness recipes".
 - Vendoring a pi-tui-touching extension hits the dual-copy nominal-class clash + friends —
   "Vendoring a TS extension that touches pi-tui".
-- Display renderers sanitize the display projection (strip CSI/OSC/APC + unsafe controls),
-  never the persisted payloads — "Transcript rendering is an untrusted-output boundary".
+- ONE stripper (`stripTerminalControls`/`sanitizeOneLine`), applied by row shape — one-row sinks
+  fold, row-splitting sinks strip only; sanitize the display projection, never persisted payloads
+  or correlation ids — "The display-sanitizer law"; an editable Input's paste is cleaned before
+  insertion — "Sanitize an editable Input's paste BEFORE insertion".
 - Pi-dist facts carry no inline version stamps — "Sources" names the pin SSOT, the last full
   re-verification, and the re-verify-at-each-pin-bump rule; body version numbers are event stamps.
 
@@ -176,13 +178,33 @@ asserting (a) rank-monotonicity — if drop-rank r survives, every higher rank s
 (b) never-exceed-width at every step; then assert the sweep actually exercised all ranks. This
 shape is robust to padding-math tweaks where width snapshots churn.
 
-## Transcript rendering is an untrusted-output boundary (#1761)
+## The display-sanitizer law — one stripper, applied by row shape
 
-ANSI-aware styling/width-truncation does not make persisted text terminal-safe. Display-only
-renderers validate the entry shape and strip CSI/OSC/APC + unsafe control bytes from the
-*display projection* while preserving persisted entries and tool-result payloads exactly.
-Hostile-control fixtures belong in the renderer test baseline — the threat model a PR review
-caught, not the happy path.
+ANSI-aware styling/width-truncation does not make persisted text terminal-safe (#1761). The
+normative statement is `docs/design/tui-charter.md` §6, its "display-sanitizer law" paragraph — this
+is the operational summary:
+
+- **One stripper.** `surfaces.ts` exports ONE control stripper, `stripTerminalControls` (LF and tab
+  survive; pi-tui renders a tab as three spaces), and `sanitizeOneLine` (the stripper, then a
+  reimplementation of Pi's `sanitizeStatusText` whitespace fold). Never add a second stripper.
+- **The sink rule is by row shape.** A one-row renderer folds — an embedded LF breaks row accounting
+  and `truncateToWidth` keeps LF. A row-splitting renderer strips only, so indentation survives.
+- **Sanitize whole persisted strings *before* splitting them into rows**, so a control string
+  spanning a newline ends where a terminal would end it.
+- **`JSON.stringify` escapes C0 but passes C1 (0x80–0x9f) raw** — strip JSON rows, never fold them.
+- **Only the display projection changes.** Persisted entries, in-memory state and correlation
+  identifiers stay byte-exact: btw matches `tool_execution_end` on the raw `toolName`, and
+  pi-agent-core emits `tool_execution_start` with the model's raw tool name *before* registry
+  validation, so tool names are untrusted. Render a display copy, never fold in place.
+- **Accepted limit:** an unterminated OSC/DCS/APC drops everything through end of input — a
+  streaming `/btw` partial hides the answer tail until the terminator arrives; the stored text is
+  unchanged.
+- **Fixture gotchas:** a C1 CSI opener (0x9b) consumes bytes up to its final byte, so a "bare C1
+  byte" fixture uses a non-opener such as U+0085; `ESC` + digit is an nF escape that consumes the
+  digit. Hostile-control fixtures belong in every renderer's test baseline.
+- **Residual (routed, #2577):** `report()`'s headline reaches Pi's `showExtensionNotify` sinks
+  (`showError`/`showWarning`/`showStatus` render raw) unsanitized — the one perk-composed display
+  path the law does not yet cover.
 
 ## Plan-fidelity micro-lesson
 
@@ -213,6 +235,26 @@ must instantiate/extend, import it as a VALUE from top-level pi-tui, but take th
 matching the `ui.custom` factory param (`import type`, as `extension/vendor/btw/btw.ts` does);
 returning an overlay where a structural `Component` is expected type-checks structurally.
 **Version skew is the trap** — "confirmed exported" is true but silently assumes a single copy.
+
+### Sanitize an editable Input's paste BEFORE insertion, not after
+
+pi-tui `Input.handlePaste` inserts the pasted text raw (only CR/LF removal + tab expansion) and
+advances the cursor by the raw length; `setValue` only clamps the cursor, and `cursor`/`handlePaste`
+are TS-private. So a post-hoc scrub of the value displaces the cursor: in `ab|cd`, pasting a
+control-bearing `X` then typing `Y` gave `abXcdY` instead of `abXYcd`.
+
+**Fix shape:** clean the bracketed paste chunk before the Input sees it
+(`extension/vendor/btw/btw.ts::scrubBracketedPaste`). Pi's terminal re-wraps a paste as ONE
+`ESC[200~…ESC[201~` chunk; mirror `Input.handleInput`'s framing (remove the first start marker; the
+paste is everything before the first end marker). **Never sanitize the whole `data` chunk** — the
+paste markers and arrow keys are themselves CSI sequences. Keep the post-hoc value scrub as a
+backstop only: a split-chunk paste, or a kitty CSI-u keystroke whose codepoint lands in C1
+(`decodeKittyPrintable` rejects only codepoints below 32), leaves the draft clean but the cursor
+merely clamped.
+
+**Test recipe:** build the draft through the real overlay's `handleInput` (typed keys + `ESC[D`),
+paste mid-draft, type, and assert the whole draft — an end-of-draft paste cannot detect
+displacement. Unicode bidi/format controls are not stripped (recorded).
 
 ### Bringing a new `ctx.ui.*` method under governance (the `setWorkingMessage` seam)
 
@@ -282,6 +324,8 @@ the first production console-swap; prior swaps were all test-local):
 - `extension/index.ts` — perk-status handle creation, `session_shutdown` → `clearActivity`, per-`session_start` footer install
 - `extension/testing/harness.ts` — factory-widget/placement capture, `invokeCommand`
 - `shared/contracts.md` §8.3 (progress tracking) — the composed slot's RPC dual-publish contract
-- `docs/design/tui-charter.md` — the charter the surfaces converge to
+- `docs/design/tui-charter.md` — the charter the surfaces converge to; §6's "display-sanitizer law"
+  paragraph is the normative sanitizer statement
+- `extension/vendor/btw/btw.ts::scrubBracketedPaste` — the pre-insertion paste clean
 - `docs/learned/pi/extension-seams.md` — `report()` and the consolidation-seam recipe
 - `docs/learned/workflow/borrowed-packages.md` — the setFooter-clobber vetting/retirement recipe

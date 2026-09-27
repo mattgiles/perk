@@ -30,6 +30,8 @@ a capability is a borrow at all.
   repo non-mutation is the read-only bar — "Vetting" and "The read-only bar".
 - When upstream surfaces disagree, runtime tool description + code + changelog outrank packaged
   skill/doc prose — "When upstream's own surfaces disagree".
+- On a bump, read the CHANGELOG "Removed" entries for skills too and sweep every place a
+  package-skill name lives — "Partial retirement — an upstream drops a bundled skill".
 - Lazy install/restart, filter security limits, and attempted-vs-covered bookkeeping remain explicit
   residuals — "Residuals".
 - A parser needed by the bare-clone extension would be vendored as a byte-pinned module *closure*,
@@ -175,6 +177,33 @@ Fixture subtlety: "borrowed package preserved across provider select/deselect" f
 *still-borrowed* package; if a test needs strict "user extra survives" semantics, anchor on
 `npm:@me/custom`, not a borrowed entry (init would re-add a borrowed one regardless).
 
+## Partial retirement — an upstream drops a bundled skill
+
+pi-web-access removed its bundled `librarian` skill in 0.14.0, and perk kept a `[skills.stages]`
+row, the `PACKAGE_SKILLS` sanction literal, config fixtures and five prose sites through the
+installed 0.31.0 (cleared by #2556). The drift was silent for three reasons: unknown skill names do
+nothing by design (§8.39); CI cannot enumerate the gitignored `.pi/npm` tier, hence a hand-maintained
+literal; and `test_config_stage_rows_reference_known_skills_and_stages` checks only that stage rows
+name a *listed* skill, taking the literal on trust (`workflow/vacuity-proof-tests.md` § "Negative-space
+checks need floors and mutation proofs").
+
+**On a borrowed-package bump, read the CHANGELOG "Removed" entries for skills and resources, not just
+tools**, then sweep every place a package-skill name can live: `.perk/config.toml` `[skills.stages]`,
+`PACKAGE_SKILLS` (`tests/test_skill_declarations.py`), config-parse fixtures (`tests/test_config.py`,
+`extension/substrate/config.test.ts`), `shared/providers.yaml` comments, the user docs + the
+`skills/perk-expert/references/` mirror, and design docs.
+
+- **Don't close a name-clearing sweep with a negative pin** ("`librarian` must not appear") when the
+  name is being reclaimed — it goes false the moment the first-party owner ships. The honest
+  completion check is a scoped grep listing the deliberately untouched hits. Clear every foreign
+  ownership claim in its own node before the node that ships the new owner.
+- **Replacement example names** in fixtures/samples should be a real row in perk's own committed
+  config (`agent-browser`) that doesn't collide with another placeholder on the same page
+  (`house-style` is the `[[bindings]]` example).
+
+The reverse-direction guard (`PACKAGE_SKILLS ⊆` the skills `skill_exposure._enumerate_package_skills`
+enumerates when `.pi/npm` is installed) is routed (#2580).
+
 ## Foreign tool names are inert when absent
 
 Allowlisting a borrowed package's tool names in `READ_ONLY_TOOLS` needs **no presence detection**:
@@ -307,7 +336,9 @@ recipe:
 - `src/perk/convergence/init/settings.py` — `BORROWED_PACKAGES`
 - `src/perk/convergence/capabilities.py` — the `borrowed-packages` capability summary
 - `docs/learned/workflow/provider-seam.md` — the seam this recipe is *not*; also `package_filter`
-- `docs/learned/pi/context-system.md` — the read-only mode whose allowlist this touches
+- `docs/learned/pi/read-only-bash-gate.md` — the read-only mode whose allowlist this touches
+- `docs/learned/workflow/vacuity-proof-tests.md` — why a static sanction literal makes a guard pass
+  trivially for the tier it stands in for
 - `docs/learned/workflow/warm-door-commands.md` — the drive-coverage guard over the stage-scoped
   universe
 - `docs/learned/pi/tui-surfaces.md` — the perk-owned footer the setFooter rule protects

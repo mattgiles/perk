@@ -9,7 +9,8 @@ cluster: pi-extension
 perk injects context into sessions (the authoring-stage guidance contexts, the plan-adapter bridge
 contexts, skill bindings) and later strips it from the model window when it goes stale. The
 lifecycle has sharp edges because of how Pi's `context` event works (see `pi/extension-api.md`: it
-runs on **every** provider call over the full message list).
+runs on **every** provider call over the non-system messages — since Pi 0.87 system messages are
+withheld from the `context` event (`emitContext`'s role filter); the strip logic here is unaffected).
 
 ## Distillation
 

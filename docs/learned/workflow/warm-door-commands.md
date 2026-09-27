@@ -48,12 +48,18 @@ flips, delete the dead helper and correct the surfaces that describe it in the s
 `shared/contracts.md`, the in-session context constant (`OBJECTIVE_AUTHORING_CONTEXT`,
 `extension/authoring/objective/prose.ts`), the owning `SKILL.md`.
 
-**Gate on the effective mode floor.** Warm-minted sessions leave `perk:workflow-state.mode`
-undefined (the mint arm of `establishSessionIdentity`, `extension/session/lifecycle.ts`, appends
-identity fields only) and `isReadOnlyMode` treats anything but the literal `"read-only"` as
-writable. Deny only that explicit floor; never require a positive `"read-write"` token the warm
-path never writes (`docs/learned/workflow/mergeability-and-conflict-resolution.md` § "Two
-authorization gaps only review caught").
+**Gate on the mode floor of the controller you are copying.** Warm-minted sessions leave
+`perk:workflow-state.mode` undefined (the mint arm of `establishSessionIdentity`,
+`extension/session/lifecycle.ts`, appends identity fields only) and `isReadOnlyMode` treats anything
+but the literal `"read-only"` as writable. The two write controllers answer that differently: the
+retained `/objective-sync` resolver denies only the literal `"read-only"` floor (a warm session
+passes), while the `/submit` conflict controller (`extension/pi/v1/delivery/submitConflict.ts`, its
+`valid` predicate) requires a positive `mode === "read-write"` — so a warm-minted session can neither
+prime nor consume `resolve_submit_conflicts`. Match the controller you are copying; the two differ
+today, and whether the submit controller's positive gate is intended is an open code question
+(routed, #2581). The per-controller detail lives in
+`docs/learned/workflow/mergeability-and-conflict-resolution.md` § "Two authorization gaps only
+review caught".
 
 **Enter is distributed, exit rides the save.** A door seeding a read-only turn enters with
 `if (!gating.isActive()) gating.enter(ctx)` — after input resolution, before `sendUserMessage` — so
@@ -198,8 +204,9 @@ the yield); cross-door **ordering** rides the fake-router `argvFile` capture
 - `/plan-save` rendered only the `linked === true` branch of the objective-node sub-result, so a
   failed `planning → in_progress` advance read as "nothing to do" (#124/#126).
 - The `/objective-sync` retained resolver required an explicit `"read-write"` token and refused every
-  warm session. Two dogfood runs of the retired `/review` door, whose hunk launch line lived only in
-  guidance, set the gesture rule.
+  warm session; it now denies only the `"read-only"` floor (the `/submit` conflict controller still
+  requires the positive token — see Law 1's mode-floor paragraph). Two dogfood runs of the retired
+  `/review` door, whose hunk launch line lived only in guidance, set the gesture rule.
 - Adding `plan_review` to the objective-save stage (forced by the guard) made a plan-arm fallthrough
   reachable from an objective session (#2028); `/stack-review-browser` set the warm/cold parity
   template — cold `--stack` checkout via `runColdDoor`, one parameterless opener, entry-neutral

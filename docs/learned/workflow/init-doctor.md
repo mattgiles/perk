@@ -34,7 +34,8 @@ cluster: config-and-convergence
   `--fix` models the retired writer's flat output and shares one classification with its check —
   "Legacy-cleanup migrations model the retired writer's shape"; whole-directory
   safety checks probe representative artifacts and use `:(literal)` pathspecs — "Whole-directory
-  safety checks need representative probes and literal pathspecs".
+  safety checks need representative probes and literal pathspecs"; every write site behind an
+  ignore-probe fence opens link-blind — "Every write site behind an ignore-probe fence…".
 
 ## The split
 
@@ -521,6 +522,44 @@ grammar — brackets, wildcards, and magic-like names redirect or hide a tracked
 create real tracked files under metacharacter names and prove both detection and the exclusion of
 unrelated glob matches.
 
+## Every write site behind an ignore-probe fence refuses redirects without following links
+
+The "classify every entry link-blind" bullet of § "Legacy-cleanup migrations model the retired
+writer's shape" applies to **every converged file and every lock file**, not only cleanup. An ignore
+probe checks a path *name* (`workflow/git-substrate.md` § "Ignore probes are name-only…"), so a
+symlinked leaf or ancestor passes the fence while the write lands elsewhere. PR review found two
+instances in the library foundation: `converge_library_readme`
+(`src/perk/convergence/init/library.py`) checked only whether the library directory was a symlink —
+a symlinked `README.md` or `docs/` ancestor let `init`/`doctor --fix` overwrite the repo-root README
+— and the library lock followed a pre-existing symlink out of the cache.
+
+**The rule:** check the leaf and each owned ancestor link-blind, confirm the root `resolve()`s where
+expected, open with `O_NOFOLLOW` after an `lstat` check, then `fstat` for a regular file (with
+`O_NONBLOCK`, so a swapped-in FIFO cannot hang the open) — realized in `src/perk/library/lock.py`.
+`src/perk/delivery/oplock.py` still follows symlinks (routed, #2584).
+
+### "Refused before the lock, zero writes" has a structural limit
+
+When a guard's inputs come from lock-protected state — the library `remove`'s entry path comes from
+the catalog, which is read under the lock — the entry probe runs under the lock, and a refusal there
+can leave the (ignored) lock file behind. Write the weaker guarantee into the contract and the user
+docs (review caught the stronger promise), and probe the lock file's own path before creating it.
+
+### An atomic catalog write does not make a multi-step publish atomic
+
+Recovery prose lists the on-disk state after **each** rename step, not only "before" and "after".
+The library publish is displace → swap-in → catalog write: a kill between the first two leaves the
+catalog pointing at a missing target with the displaced `.<slug>.previous-*` as the only copy of the
+prior revision, and a kill between the last two leaves a different state again. This extends
+"all-or-nothing is a property of the PREFLIGHT" above.
+
+### Remediation text must not send the user to a destructive verb
+
+A `directory_catalogued`/`kind_mismatch` refusal points to a content-preserving next step (keep the
+entry, or `record --publish … --replace`) and names a deleting verb only as the deletion it is — the
+first draft told the user to run `perk librarian remove`, which deletes the directory they were
+trying to keep.
+
 ## Managed template reconvergence
 
 When you edit managed full-file templates in the codebase (for example, `PERK_RUN_WORKFLOW` in
@@ -600,6 +639,10 @@ the `again.fixed == []` idempotency tests.
 - `src/perk/cli/commands/doctor/render.py` — `GROUP_ORDER` (the human-render group allow-list)
 - `src/perk/convergence/capabilities.py` — `Capability`, `applicable()`
 - `src/perk/substrate/git.py` — `is_tracked`, `rm_cached`, `tracked_paths` (the `:(literal)` pathspec boundary)
+- `src/perk/library/guard.py` — `require_unlinked_components`; `src/perk/library/lock.py` — the
+  `lstat` + `O_NOFOLLOW` + `fstat` lock open
+- `docs/learned/workflow/git-substrate.md` — the ignore-probe mechanics (name-only, beyond-a-symlink
+  fatal)
 - `src/perk/substrate/config.py` — `launch_pi_agent_dir` (the one agent-dir precedence); `src/perk/convergence/doctor/checks.py` — `_subagent_host_tools_check` (the version-range-gated report-only precedent), `_subagent_compat_check`
 - `docs/learned/workflow/cold-door-launch.md` — the launch side of the agent-dir precedence; `docs/learned/workflow/broad-catch-narrowing.md` — classifying every read outcome of a file perk does not own
 - `tests/test_doctor.py` — `test_every_required_capability_has_a_doctor_check`

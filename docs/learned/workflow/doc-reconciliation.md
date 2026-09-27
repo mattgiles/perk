@@ -20,8 +20,8 @@ after all edits and stamped with the measured HEAD SHA) — is
   never re-verifies a paragraph — "The doc-accuracy gate".
 - Sweep retired conventions by whole-corpus grep, escaped form included; full CI is the exit
   gate — "A retired-convention sweep needs a symbol grep".
-- Per-fact source ledgers; audit findings are leads; gates verify at execution — "The
-  truth-sweep recipe".
+- Per-fact source ledgers; audit findings are leads; gates verify at execution; fact-check a plan's
+  After-text claims too — "The truth-sweep recipe".
 - Frozen counts/censuses/version stamps delegate to a source-owned guard, derivation or event
   stamp, never a refreshed number — "De-freeze taxonomy".
 - Mirror drift is an omission: pin the fact ledger first; truthfulness beats scope — "Mirror and
@@ -33,6 +33,8 @@ after all edits and stamped with the measured HEAD SHA) — is
 - Stale-pointer advisories may end deliberately nonzero: pin the scanner's token shapes,
   rephrase-first — "Deliberate nonzero stale-pointer advisories".
 - Sweep steps may no-op; neighbor Status prose stales — "Sweep-step craft".
+- Pi's `edit` fuzzy fallback rewrites touched lines to ASCII dashes/quotes; after a glyph failure
+  use an asserting Python script — "Pi's edit tool on em-dash-heavy prose".
 - Post-submit choreography fails on every observed instance: front-load; artifact-anchored
   forward references only; evidence on a pre-`/submit` carrier — "Validation-record
   reconciliation".
@@ -64,7 +66,8 @@ Dated instances live inline as `(#NNNN)` issue anchors.
 - **An existence grep passes 7 of 8 diet-found defects (#2523).** The decisive checks are
   **role-read** — for every "X does/owns/gates Y" claim, read X's body or docstring;
   misattributions cluster where a role was split across two symbols after the doc was written
-  (decide/drive, reader/checker, seam/guard) — and **population enumeration**: treat every
+  (decide/drive, reader/checker, seam/guard; and a protocol's second implementation — see
+  "Universals generalized from N observed cases" below) — and **population enumeration**: treat every
   every/each/all/only/never as a frozen census, list the population at the checkout, and state it
   by reference or scope the claim to the mechanism.
 - **A dream lane's "no factual defect" verdict is scoped to its `Evidence checked` list (#2514)** —
@@ -109,6 +112,17 @@ construction (the `fail()`/`EXIT_FOR_TYPE` consolidation missed a third file's r
   the drift class it exists to fix; re-verify against current source first.
 - **The executor re-resolves every path at edit time, and a gate verifies state at execution** —
   neither trusts a same-plan "verified" note; the plan→implement window is enough for drift.
+- **Plan After-text contains claims, not just a patch** — the executor fact-checks the replacement
+  text itself, especially "X isn't possible/testable" claims. The realized case (#2541): the planner
+  audited the named fake (`headfulUIContext`'s recording methods) but not `invokeTool`'s option bag,
+  so its own After-text would have written a new false sentence.
+- **A limitation stated against a named fake goes stale when the capability arrives through a
+  different surface.** To check an "X is untestable" claim, search for tests that already exercise
+  the capability (e.g. an `rg` for `invokeTool(` calls carrying a `ui` option in
+  `extension/**/*.test.ts`), not for the fake's API — "no dialogs on `headfulUIContext` ⇒
+  untestable" survived in three docs after the overlay landed. This is a recurrence of § "Sweep-step
+  craft"'s "A retired limitation … greps `docs/learned/` the same turn" (the capability's PR didn't
+  run it).
 - **Bounded negative greps gate retired spellings**: scoped to the node's owned docs in a
   partitioned objective, cross-node hits recorded as count + attribution.
 - **Pin procedures + classifications, not numbers**: on a moved base re-derive every measured
@@ -164,7 +178,15 @@ construction (the `fail()`/`EXIT_FOR_TYPE` consolidation missed a third file's r
   them as routed leads on a carrier that outlives the plan issue (a learn issue, an objective
   node, a contracts-amendment plan) before `/submit`.
 - **Universals generalized from N observed cases go false at N+1 (#2523)** — enumerate, don't
-  hedge.
+  hedge. A doc that records a **second implementation of a protocol** must attribute each rule to
+  the implementation that has it (both, or only one); a trailing "the realized second instance: X"
+  line must not inherit the whole list (#2537). Of the two leases only the resolver lease has the
+  three-way `io_error` classification, the post-rename re-check and the quarantine-verify release,
+  and only the hunk lease has inode fencing; of the two conflict controllers only the submit one
+  requires a positive `read-write` mode. Sibling rule: when deleting a "latent same-class residual"
+  bullet as false, check the named symbol's siblings for the same defect first —
+  `find_comment_id_by_marker` is exhaustive, but its sibling `_find_plan_body_comment_id` is the
+  unpaginated one (routed, #2581).
 
 ## Mirror and fact-drift reconciliation
 
@@ -297,6 +319,27 @@ Scanner-aware citation craft (#2158, #2157, #2167):
   (#2029); a numbered step sequence is scoped to one mode with an up-front callout carrying the
   other mode's complete path (#2024).
 
+## Pi's edit tool on em-dash-heavy prose — fuzzy fallback rewrites the lines it touches
+
+This is the ONE home for both "edit fails across an em dash" and "edit silently normalizes". When
+the exact match fails, Pi's `edit` falls back to `fuzzyFindText`
+(`dist/core/tools/edit-diff.js`), matching in normalized space (NFKC, per-line trailing-whitespace
+trim, Unicode dashes → `-`, smart quotes → ASCII, special spaces → space), and
+`applyReplacementsPreservingUnchangedLines` writes every touched line back from the normalized text
+— so a "successful" edit may have turned `—`/smart quotes into ASCII on the lines it touched (#2541:
+an `oldText` with a stray trailing space+tab matched after the trim and rewrote that line's em dash).
+
+**Literal vs decoded escapes.** A correctly JSON-encoded `\u2014` in the tool argument is decoded to
+the em dash by pi-ai's JSON parse before `edit` sees it, and matches normally. The observed failures
+(#2541, #2543, #2561) were one slip: it fails outright on a *double-escaped* literal backslash-u
+sequence left in `oldText` — never because a correctly encoded escape fails.
+
+- Never use `edit` as a probe or with placeholder text — a mid-edit `PLACEHOLDER_*` token left in a
+  doc becomes junk on a crash.
+- After one glyph-related failure, switch to a small Python script applying each Before→After with
+  `assert text.count(before) == 1` (the same exact-and-unique check the edit tool gives).
+- Check `git diff` for unintended `—`→`-` changes before committing.
+
 ## Validation-record reconciliation — sequencing, forward references, evidence classification
 
 **Reconciling an existing record:** obsolete-mark steps in place (*obsolete since PR #N — skip*),
@@ -331,6 +374,23 @@ instance, "ALWAYS" labels included; prose awareness does not enforce itself:
   `objective-store.md` § "Node↔plan unification is one `ObjectiveRef | None` capability". For a
   docs-only node the natural evidence homes are the implementation commit message and the node's
   reconciled description — never "the PR description" (#2504, #2506).
+- **Recurrence tally: prose is not stopping it.** Plans put evidence in the PR body a FOURTH time
+  (#2549, #2541, #2543, after #2504/#2506) even with this section in the planner's scope; the lint
+  lead is routed (#2578).
+- **A dogfood gate that needs an interactive session is a human-owned step between `/submit` and
+  `/ready`/`/land`.** The implement session cannot run live model + subagent sessions; plans say so
+  explicitly, and the reviewer/lander confirms the Dogfood record exists before merge (#2561 merged
+  with none).
+
+**Re-verify passes sweep the CHANGELOG against the claims, not only the claims against source.**
+Checking each doc claim against source misses a source change no claim mentions — the 0.70.1
+pi-subagents re-verify missed the `acceptanceRole`-only inference change its own archive record
+quoted (#2543). Sweep every CHANGELOG entry since the last re-read against the doc's claims; treat
+earlier archive records as leads, never authority; and distinguish "the installed CHANGELOG contains
+entry X" from "release N introduced X" (the reviewer-prompt acceptance suppression entry is 0.63.0's).
+**In-place truth revisions grow docs** — the 12 docs one dream cycle revised grew +8.6 KB, 56 % of it
+from two re-verify nodes — so dream predictions for a truth-revision cycle should expect growth, not
+reduction.
 
 **Forward references and stacked trains:** author only **artifact-anchored** forward references
 (an issue, a successor plan — self-resolving), never **commit-anchored** ones (a promised

@@ -36,10 +36,10 @@ non-obvious behavioral facts and traps.
   "Process patterns".
 - Search tuning starts with index membership and token presence, then follows a bounded ladder;
   pagination is an edge-by-edge opt-in — "Pagefind" and "Pagination".
-- `.md`→`.mdx` keeps route identity stable but fans out across every source/inventory mirror;
-  candidate jsdom pins must respect the effective dev floor — "Rename and pin fan-out".
-- Duplicated SVG variants need post-build content-parity and SVG-local accessibility checks —
-  "Hand-authored SVG variant discipline".
+- `.md`→`.mdx` keeps route identity stable but fans out across every source/inventory mirror; a new
+  routed how-to fans out to the sidebar + blueprint; candidate jsdom pins respect the dev floor —
+  "Rename and pin fan-out"; duplicated SVG variants need post-build content-parity and SVG-local
+  accessibility checks — "Hand-authored SVG variant discipline".
 - Fragment validation follows browser semantics, including decoded ids, empty fragments, and
   pathless query links — "URL-fragment validation needs browser semantics".
 - A scope-scoped CI row must run every relevant GitHub gate, including lint/typecheck for files
@@ -246,6 +246,14 @@ in multiple inventories. Sweep source-relative links, the exact-count comments i
 `docs/site/src/remark-rewrite-corpus-links.mjs` and `docs/site/README.md`, and the built-site
 `mdxPages` href-integrity list. Routes are the stable identity; source suffixes are implementation
 facts that every mirror must reconcile.
+
+**A new routed how-to's propagation path.** Beyond the page and its `docs/user-docs/how-to/index.md` row, a new
+page needs a `docs/site/src/sidebar.mjs` entry (the sidebar guard pins corpus ≡ sidebar) and a dated
+amendment to `docs/design/docs-site-blueprint.md` with rows in §2 (route table), §3 (sidebar map) and
+§4 (inventory), with the corpus/routed/sidebar totals re-derived. Two gotchas: `git stash` without
+`-u` leaves the untracked new page in place, so the "baseline" sidebar test fails for the same reason
+and looks pre-existing; and the `## Related` section is capped at 1–3 links
+(`docs/user-docs/_authoring.md`) — when a reference page is already at 3, link the new how-to inline.
 
 ## Hand-authored SVG variant discipline
 

@@ -22,7 +22,8 @@ and the authoring loop both carry non-obvious design decisions worth preserving.
   roadmap before a plan-baked node-add — "Roadmap edit hygiene".
 - Out-of-order sibling landings can push a node past the objective's boundary line — handle it
   explicitly — "A node can outgrow the objective's boundary line".
-- Objective authoring mirrors the plan→save shape (draft → review → canonical save) — "The
+- Objective authoring mirrors the plan→save shape (draft → review → canonical save); rendered drafts
+  lose the omitted-vs-`[]` `depends_on` distinction, so rewrite flows carry it in code — "The
   objective authoring loop mirrors plan → save".
 - `perk objective run` is the node-by-node supervisor loop (selection, launch, settle) — "The
   `perk objective run` supervisor loop".
@@ -253,6 +254,17 @@ artifact, `plan_review` renders + reviews it, and an APPROVED verdict auto-saves
   That keeps `planReview → objectiveDraft` cycle-free: the draft module never imports review
   modules. `schema_version` is the consumer branch point — consumers must validate/branch on it
   rather than assuming the shape.
+- **`renderObjectiveDraft` is lossy for `depends_on`.** The roadmap table renders an omitted
+  `depends_on` and an explicit `[]` identically (`-`), but `src/perk/objective/graph.py::build_graph`
+  treats them differently: when every node omits it → sequential inference from phase order; when
+  ANY node carries an explicit list, `[]` included → explicit mode, where omitted means no deps. So a
+  render → model-rewrite → whole-value `objective_draft` flow can silently change scheduling. The
+  simplify doors carry `depends_on` in a code-composed preserved-fields block whenever a node has the
+  array (`extension/authoring/objective/draft.ts::preservedObjectiveFields`, consumed by
+  `extension/pi/v1/simplify.ts`), and the fold-in guidance keeps it verbatim unless a merge/removal
+  forces a change. Design rule: when a "fields to carry through" block can come from two sources
+  (the live draft at completion vs a launch-time snapshot), the guidance defers to the block's
+  **label** — never assert the block is always current.
 - **Draft module = leaf.** When a save module needs to value-import the draft reader, move the
   shared param vocabulary INTO the draft module rather than extracting a third module — mirrors
   planDraft←planSave; the import direction is draft→save only, never the reverse. (An exported
