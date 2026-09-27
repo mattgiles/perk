@@ -1,4 +1,4 @@
-"""``perk librarian remove`` — drop a library entry (contracts.md §8.74(e)).
+"""``perk librarian remove`` — drop a library entry (contracts.md §8.75(e)).
 
 Removes the entry from the catalog first, then deletes exactly its leaf entry directory (after a
 symlink-component check). A failed deletion leaves an adoptable orphan ``list`` reports.

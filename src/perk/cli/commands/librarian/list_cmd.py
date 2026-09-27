@@ -1,4 +1,4 @@
-"""``perk librarian list`` — the library report (offline, lock-free, contracts.md §8.74).
+"""``perk librarian list`` — the library report (offline, lock-free, contracts.md §8.75).
 
 Resolves the MAIN checkout's library from any worktree and prints absolute paths: every
 catalogued entry with its derived status, every uncatalogued directory with a copyable adopt

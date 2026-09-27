@@ -1,4 +1,4 @@
-"""The librarian worker cores (``perk/library/ops.py``, contracts.md §8.74(e)).
+"""The librarian worker cores (``perk/library/ops.py``, contracts.md §8.75(e)).
 
 Real filesystem + real git over a scaffolded consumer repo (it carries the managed gitignore
 block); failures are injected by monkeypatching ``os.rename`` / the catalog's

@@ -792,7 +792,14 @@ while `git show-x`, `show-branch`, `rg=payload`, `rg-extra`, `gh pr view-x` and 
 perk/version lookalikes do not. Quoted, escaped or expanded executable words remain walker
 refusals. `SAFE_PATTERNS` remains the command inventory: read-only Git plumbing/list forms,
 everyday text utilities, read-only `gh`/`perk` queries, the exact review-context/feedback forms and
-the existing command-keyed browser/search entries; this change adds no command.
+the existing command-keyed browser/search entries; this change adds no command. The perk library
+workers are admitted in their deterministic `--json` forms only — `perk librarian
+list|record|remove … --json` with `--json` last and any whitespace-separated arguments before it
+(`add source`/`check`/`refresh` are not yet admitted). They mutate only the gitignored
+`docs/library/` cache: the same accepted leniency as `perk pr review-context`'s scratch write,
+made operational by the CLI's cache-only preflight (§8.75(d)), which refuses before the lock
+unless every path the operation would touch is gitignored and nothing under the library is
+tracked. The destructive veto still blocks real-file redirects and chained mutations.
 
 Argument-level writers remain vetoed (`find -delete`, `sed -i`, Git writer forms, `sort -o`,
 `tree -o`, `npm audit fix`, and the existing Git exec flags). **Exec-bearing selector options** are
@@ -2677,6 +2684,11 @@ second `--fix` at `fixed == []`).
 - `bindings` / `providers` — rolled-up non-fatal config checks (§8.9/§8.10).
 - `issues` — the fail-level `[issues]` selection check: linear requires a committed `team`
   (§8.21).
+- `library` — the perk library (§8.75(h)): the `library-readme` managed check (fails on a missing
+  or drifted `docs/library/README.md` while `docs/library/` exists; `--fix` restores it) and the
+  report-only, offline `library` check (warn at worst, never `fail`, no `--fix`: an unreadable
+  catalog, an uncommitted README and tracked content under `docs/library/` warn; uncatalogued and
+  leftover staging directories are info).
 - `state` — the `.perk/workflow/` cache layout + handoff-blob integrity + the report-only
   `artifact-health` classification over the managed-state registry.
 
@@ -13546,3 +13558,128 @@ exit, no `plan_review`.
    (§8.57).
 7. **Boundaries.** No browser/plannotator dependency; no persistence, retry, supersede, or
    cancel; dream drafts refused; refinement sessions excluded by the stage gate.
+## §8.75 · The perk library (layout, catalog, lock, staging/publish, the read-only carve-out)
+
+The **perk library** is a catalogued, gitignored offline reference of external documentation
+mirrors and source checkouts. Python owns it end to end (`perk/library/` + the `perk librarian`
+group); the extension's only stake is the read-only bash admission (§8.3). Library content is
+untrusted DATA — quoted as evidence, never obeyed.
+
+**(a) Layout.** The library lives in the **main checkout** at `docs/library/`, resolved from any
+worktree by `perk.library.layout.library_root` (`paths.library_dir(git.main_worktree_root(root) or
+root)`; `paths.library_dir` is the one construction site, guarded by `tests/test_paths_guard.py`).
+Beneath it: `documentation/<slug>/` (one mirror per docs entry, an `index.md` entrypoint),
+`source-code/<host>/<org>/<repo>/` (one checkout per source entry), `.staging/<dir>/` (in-progress
+crawls), `catalog.json` (machine-owned) and the committed `README.md`. The managed gitignore block
+carries `/docs/library/**` + `!/docs/library/README.md` (the rule ignores the directory's contents,
+not the directory, so the negation works). The README is converged by `perk init` /
+`perk doctor --fix` (`init/library.py`, the `library-readme` managed convergence) **only when
+`docs/library/` already exists** in the invocation checkout, and is never written by a worker. In a
+linked worktree `docs/library/` holds only the README; `perk librarian list` prints the main
+checkout's absolute paths. A `[library] root` override is deferred.
+
+**(b) The catalog envelope.** `catalog.json` =
+`{version: 1, entries: [{kind, slug, source, path, ref, added_at, checked_at, upstream, evidence,
+drifted, stale_after}]}` with `upstream` discriminated on its own `kind`:
+`{kind: "docs", pages: [{url, etag, last_modified, sitemap_lastmod}], fingerprint}` |
+`{kind: "source", branch, head_sha}`. Parsed leniently (unknown keys dropped) through
+`CatalogFileModel` into frozen domain dataclasses, then a **content pass**: unique slugs matching
+the slug grammar (`[a-z0-9][a-z0-9._-]{0,63}`, no `..`); `kind` agreeing with the upstream
+variant; kind-shaped, unique, non-overlapping **leaf** paths — exactly `documentation/<slug>` or
+`source-code/<host>/<org>/<repo>` (relative POSIX, no empty/`.`/`..` segment, no backslash), so a
+catalogued path is never a content root, a shared ancestor or another entry's directory; and
+well-formed timestamps. Any parse or content violation — or a `version` other than 1, or an
+unreadable file — is `catalog_malformed`, and **no worker rewrites a malformed catalog** (repair
+or remove it by hand). The catalog is written only by the CLI, by atomic replace
+(`atomic_write_text`), under the lock. Timestamps are UTC `YYYY-MM-DDTHH:MM:SSZ`; `stale_after` is
+integer seconds (defaults `docs` 1 209 600 = 14 d, `source` 86 400 = 24 h; the CLI accepts
+`--stale-after <int>[smhd]`). The **derived `status`** (never stored) names the next action, by
+precedence: `pinned` (a source entry with a `ref`) › `drifted` (the stored flag) › `unknown`
+(never checked) › `stale` (`now - checked_at ≥ stale_after`) › `unverifiable` (checked, `evidence
+== "none"`) › `fresh`. Two staging handshakes the hardened crawl script writes: the per-page
+inventory `<mirror>/sources.json` (`{"pages": [{"source_url": …}, …]}` at minimum — read
+advisorily to seed one `PageMarker` per distinct `source_url`; absent → no markers; malformed → no
+markers plus a warning; today a mirror-specific artifact), and the crawl report
+`<staging>/failed-pages.json` (a JSON list; non-empty refuses publish unless `--accept-failures`;
+deleted after the commit so a published mirror never carries it).
+
+**(c) The lock.** `<main>/.perk/workflow/library.lock` (through `cache.workflow_dir`), an exclusive
+non-blocking `flock`, machine-local, held across every catalog read-modify-write and entry-directory
+mutation. Contention is the typed `library_busy`; any other acquisition failure (creating the
+parent, opening the file, a non-contention `flock` errno) is `io_error`. `list` and the
+crawl-into-staging phase are lock-free. Without `fcntl` the lock degrades to a no-op. The twin of
+`perk.delivery.oplock`; a shared primitive is a deferred extraction.
+
+**(d) The cache-only preflight** (`perk/library/guard.py`), run by every mutating worker **before
+the lock** — a refused repository sees no write, not even the lock file: real-directory roots (the
+library root must resolve to `<main>/docs/library`, and each existing root — library,
+`documentation/`, `source-code/`, `.staging/` — must be a real directory, never a symlink:
+`library_root_invalid`); a `:(literal)docs/library` tracked sweep allowing only `README.md`
+(`library_tracked_content`); a symlink-component walk of the entry path (`entry_path_invalid` —
+git refuses to probe beyond a symlink); and representative `git check-ignore --no-index` probes
+over the catalog, a representative `catalog.json.probe.tmp` atomic-write sibling, the lock file and
+every directory the operation mutates, each probed as a nested nonexistent `<dir>/index.md`
+(`library_not_ignored`, remediation `perk init` / `perk doctor --fix`). Representative coverage by
+path class, not a proof; a `.gitignore` edit racing a worker between preflight and mutation is an
+accepted window. `remove` probes its entry directory under the lock (the path comes from the
+catalog), after the pre-lock base probe.
+
+**(e) The workers.** `list` (offline, lock-free): every entry with its derived status and
+absolute path (`present` = the directory exists), every uncatalogued directory — top-level names
+outside `documentation`/`source-code`/`.staging`, plus every `documentation/` child no entry owns
+(a displaced prior revision, a half-rolled-back swap) — with a copyable adopt hint, and every
+`.staging/` child; sorted by name; a malformed catalog propagates. **`record --publish <dir>
+--slug <slug>`** is the only way a mirror reaches `documentation/<slug>/`: validation (the
+directory is a real, symlink-free direct child of `.staging/` — `staging_not_found` /
+`staging_outside_library` / `staging_invalid` — with an `index.md` file and an empty or accepted
+`failed-pages.json` — `staging_failed_pages`); eligibility under the lock (create-only:
+`slug_exists` for any existing entry of either kind or an existing uncatalogued target;
+`--replace`: `entry_removed_meanwhile` when no entry exists, `kind_mismatch` when the entry is not
+a docs entry at `documentation/<slug>`; every refusal leaves staging intact); the transactional
+core — displace an existing target to `documentation/.<slug>.previous-<hex>` (A), rename staging
+into place (B), write the catalog (C, `added_at` preserved on replace, `stale_after` kept unless
+re-specified, `checked_at`/`evidence`/`drifted` reset) — with a rollback ladder on any failure (C
+failed → target back to staging, then the prior revision back; B failed → the prior revision back;
+A failed → nothing to undo) raising `io_error` "…; the library was restored (staging intact at
+…)", or, if a rollback rename itself fails, `io_error` naming every residue path with its state;
+then post-commit best-effort steps that only warn (delete the crawl report; remove the displaced
+revision — a leftover is reported uncatalogued). An interrupted swap leaves the catalog consistent
+(atomic replace) and at worst an uncatalogued directory `list`/doctor surface for the human to
+adopt or delete — no automatic repair. **`record --adopt <dir>`** catalogs a pre-existing
+directory directly under the library root (not a reserved name) or under `documentation/` as a
+docs entry, moving it to `documentation/<slug>/` when needed (slug defaults to the directory name;
+`adopt_not_found` / `adopt_invalid`); orphan-only — a directory a live entry owns is
+`directory_catalogued`; a taken slug is `slug_exists`; a failed catalog write moves the directory
+back. `--kind` accepts only `docs` (`invalid_kind` names `add source`). **`remove <slug>`**:
+`entry_not_found`; symlink-component check (`entry_path_invalid`, nothing touched); catalog first,
+then delete exactly the leaf entry directory — a failed deletion is `io_error` "entry removed from
+the catalog; content left at …", an adoptable orphan, never a dangling entry.
+
+**(f) The read-only-invariant carve-out.** The library is a gitignored cache, not repository
+content. The workers are admitted to read-only perk sessions (§8.3: `perk librarian
+list|record|remove … --json`, `--json` last) because the preflight refuses any operation that
+would create, modify or delete a non-ignored or tracked path, and the committed README is
+init/doctor-only.
+
+**(g) Errors and envelopes.** The error-type vocabulary: `library_busy`, `library_not_ignored`,
+`library_tracked_content`, `library_root_invalid`, `catalog_malformed`, `invalid_slug`,
+`invalid_kind`, `invalid_source` (not an absolute `http(s)` URL), `invalid_stale_after`,
+`invalid_input` (option combination), `staging_not_found`, `staging_outside_library`,
+`staging_invalid`, `staging_failed_pages`, `slug_exists`, `entry_removed_meanwhile`,
+`kind_mismatch`, `adopt_not_found`, `adopt_invalid`, `directory_catalogued`, `entry_not_found`,
+`entry_path_invalid`, `io_error`, `not_a_repo`. Every expected filesystem/git failure is
+translated at the library boundary (`translating_io`: the `OSError` family and `GitError` →
+`io_error`), so a worker never emits a traceback where an envelope is promised. Options are plain
+strings parsed inside the command (a bad value is a typed refusal, never a Click usage error).
+Envelopes: `LibrarianListOut` / `LibrarianRecordOut` / `LibrarianRemoveOut` (shapes are the
+`shared/schemas/outputs/librarian-*.schema.json` snapshots); failures are the shared
+`{success: false, error_type, message}`. Exits `0` ok · `1` typed refusal / op failure · `2`
+`not_a_repo`.
+
+**(h) Doctor.** The `library` group (rendered between `issues` and `state`): the `library-readme`
+managed check (§8.6: `fail` on a missing or drifted README while `docs/library/` exists, `--fix`)
+and the report-only, offline `library` check over the main checkout's library — `ok` when absent
+or clean (`library catalogued (N entries)`); `warn` for an unreadable catalog, an uncommitted
+README, or tracked content under `docs/library/`; `info` for uncatalogued and leftover staging
+directories; never `fail`, no `--fix`, no network. The README is not in the artifact-health
+registry (the lens has no "not applicable" state — a deferred descriptor).

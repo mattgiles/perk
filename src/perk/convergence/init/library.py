@@ -1,6 +1,6 @@
 """The committed ``docs/library/README.md`` — the one tracked file of the perk library.
 
-The library itself is a gitignored cache (contracts.md §8.74); the README explains it and is the
+The library itself is a gitignored cache (contracts.md §8.75); the README explains it and is the
 only thing under ``docs/library/`` a checkout commits. It is converged by ``perk init`` / ``perk
 doctor --fix`` only when ``docs/library/`` already exists in the invocation checkout — a consumer
 without the directory is never surprised by one — and never by a librarian worker. The text is

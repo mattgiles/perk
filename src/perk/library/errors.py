@@ -1,7 +1,7 @@
 """The library's typed refusals and its one expected-failure translation boundary.
 
 Every worker maps a :class:`LibraryError` to the ``--json`` failure envelope by its stable
-``error_type`` (contracts.md §8.74(g)). :func:`translating_io` is the single place an expected
+``error_type`` (contracts.md §8.75(g)). :func:`translating_io` is the single place an expected
 filesystem or git failure becomes a ``LibraryError`` — so a worker never emits a traceback
 where an envelope is promised, and nothing broader than the named failure set is caught.
 """

@@ -1,4 +1,4 @@
-"""Cross-process library lock semantics with real subprocesses (contracts.md §8.74(c)).
+"""Cross-process library lock semantics with real subprocesses (contracts.md §8.75(c)).
 
 (a) a held lock refuses a second writer with the typed ``library_busy`` (staging intact, nothing
 written) and the same command succeeds once released; (b) six concurrent publishers, each

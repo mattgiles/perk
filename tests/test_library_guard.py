@@ -1,4 +1,4 @@
-"""The cache-only preflight (``perk/library/guard.py``, contracts.md §8.74(d)).
+"""The cache-only preflight (``perk/library/guard.py``, contracts.md §8.75(d)).
 
 Each guard over a real scaffolded consumer repo (it carries the managed gitignore block), plus
 the end-to-end promise that a refused publish sees zero filesystem effects — the tree is

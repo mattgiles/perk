@@ -1,5 +1,5 @@
 """The librarian worker cores: ``list`` (lock-free) and the mutating ``publish`` / ``adopt`` /
-``remove`` (contracts.md §8.74(e)).
+``remove`` (contracts.md §8.75(e)).
 
 Each mutating op runs, in order: (1) argument/staging validation, (2) the cache-only preflight
 (``perk.library.guard`` — before the lock, so a refused repository sees no write), (3)

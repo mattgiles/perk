@@ -2,7 +2,7 @@
 
 The inventory seeds a docs entry's per-page change markers (the probes a later ``check`` uses).
 Its shape — ``{"pages": [{"source_url": …}, …]}`` at minimum — is the handshake the hardened
-crawl script must write (contracts.md §8.74(b)); today only hand-built mirrors carry one. The
+crawl script must write (contracts.md §8.75(b)); today only hand-built mirrors carry one. The
 read is never a refusal: an absent inventory records no markers, a malformed one records no
 markers plus a warning.
 """

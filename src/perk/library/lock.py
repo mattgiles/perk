@@ -1,4 +1,4 @@
-"""The machine-local library lock (contracts.md §8.74(c)).
+"""The machine-local library lock (contracts.md §8.75(c)).
 
 One exclusive, non-blocking ``flock`` serializes every catalog read-modify-write and entry
 directory mutation on this machine; ``list`` and the crawl-into-staging phase stay lock-free.

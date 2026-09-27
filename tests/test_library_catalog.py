@@ -1,5 +1,5 @@
 """The ``catalog.json`` envelope: round trip, parse + content pass, derived status
-(contracts.md §8.74(b))."""
+(contracts.md §8.75(b))."""
 
 import json
 from dataclasses import replace

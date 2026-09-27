@@ -1,4 +1,4 @@
-"""``perk librarian record`` — the sole catalog writer (contracts.md §8.74(e)).
+"""``perk librarian record`` — the sole catalog writer (contracts.md §8.75(e)).
 
 ``--publish <staging-dir> --slug <slug>`` moves a staged mirror from ``.staging/`` to
 ``documentation/<slug>/`` and records it atomically (create-only; ``--replace`` refreshes an

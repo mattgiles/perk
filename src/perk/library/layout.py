@@ -2,7 +2,7 @@
 
 ``docs/library/`` holds ``documentation/<slug>/`` mirrors, ``source-code/<host>/<org>/<repo>/``
 checkouts, ``.staging/<dir>/`` in-progress crawls, the machine-owned ``catalog.json`` and the
-committed ``README.md`` (contracts.md §8.74(a)). ``paths.library_dir`` is the one construction
+committed ``README.md`` (contracts.md §8.75(a)). ``paths.library_dir`` is the one construction
 site; :func:`library_root` / :meth:`LibraryLayout.for_repo` add the main-checkout resolution so a
 linked worktree and the main checkout address one library.
 """

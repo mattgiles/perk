@@ -2,7 +2,7 @@
 
 The catalog is written only by the CLI, by atomic replace, under ``library_lock``; a malformed
 catalog is a typed ``catalog_malformed`` refusal and no worker ever rewrites it (contracts.md
-§8.74(b)). Both entry kinds are modeled from day one — ``docs`` mirrors and ``source``
+§8.75(b)). Both entry kinds are modeled from day one — ``docs`` mirrors and ``source``
 checkouts — so every status (incl. ``pinned`` and ``unverifiable``) is derivable now.
 """
 

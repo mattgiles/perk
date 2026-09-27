@@ -1,5 +1,5 @@
 """The library layout: main-checkout resolution, the slug grammar and the kind-shaped entry path
-rule (contracts.md §8.74(a)/(b))."""
+rule (contracts.md §8.75(a)/(b))."""
 
 import subprocess
 from pathlib import Path

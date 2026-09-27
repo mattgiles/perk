@@ -1,4 +1,4 @@
-"""``perk librarian`` — tend the perk library (contracts.md §8.74).
+"""``perk librarian`` — tend the perk library (contracts.md §8.75).
 
 The perk library is the catalogued, gitignored offline reference of external documentation
 mirrors and source checkouts under the MAIN checkout's ``docs/library/``. The group's workers are

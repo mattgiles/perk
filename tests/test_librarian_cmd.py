@@ -1,5 +1,5 @@
 """The ``perk librarian`` CLI surface: ``--json`` envelopes, exit codes, in-command option
-parsing, and the no-traceback promise for injected filesystem failures (contracts.md §8.74)."""
+parsing, and the no-traceback promise for injected filesystem failures (contracts.md §8.75)."""
 
 import json
 import os

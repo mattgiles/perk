@@ -1,5 +1,5 @@
 """The perk library: a catalogued, gitignored offline reference of external documentation
-mirrors and source checkouts (contracts.md §8.74).
+mirrors and source checkouts (contracts.md §8.75).
 
 The library is a gitignored cache that lives in the MAIN checkout's ``docs/library/``, resolved
 from any worktree. Its ``catalog.json`` is written only by the ``perk librarian`` CLI, under the

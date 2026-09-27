@@ -1012,7 +1012,7 @@ const SAFE_PATTERNS = [
   // its own scratch files.
   /^\s*perk\s+pr\s+review-context\s+(?:--expected-pr\s+[1-9][0-9]*|--pr\s+[1-9][0-9]*(?:\s+--stack(?:\s+--pin-base\s+[0-9a-f]{40}(?:\s+--pin-head\s+[1-9][0-9]*=[0-9a-f]{40}){2,})?)?)\s+--json\s*$/,
   /^\s*perk\s+pr\s+feedback\s+--json\s*$/,
-  // The perk library workers' deterministic `--json` forms (contracts.md §8.74(f)). The CLI mutates
+  // The perk library workers' deterministic `--json` forms (contracts.md §8.75(f)). The CLI mutates
   // only the gitignored `docs/library/` cache and refuses — before taking its lock — unless every
   // path it would touch is gitignored and nothing under the library is tracked: the
   // `perk pr review-context` leniency, made operational by the CLI's cache-only preflight.

@@ -1,4 +1,4 @@
-"""The cache-only preflight (contracts.md §8.74(d)) — the read-only-invariant carve-out, made
+"""The cache-only preflight (contracts.md §8.75(d)) — the read-only-invariant carve-out, made
 operational.
 
 The library is a gitignored cache, not repository content, so the workers may run in read-only
