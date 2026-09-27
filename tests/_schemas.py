@@ -33,6 +33,7 @@ from perk.cli.commands.learn.skip_cmd import LearnSkipOut
 from perk.cli.commands.librarian.add.source_cmd import LibrarianAddSourceOut
 from perk.cli.commands.librarian.check_cmd import LibrarianCheckOut
 from perk.cli.commands.librarian.list_cmd import LibrarianListOut
+from perk.cli.commands.librarian.prepare.shared import LibrarianPrepareOut
 from perk.cli.commands.librarian.record_cmd import LibrarianRecordOut
 from perk.cli.commands.librarian.refresh_cmd import LibrarianRefreshOut
 from perk.cli.commands.librarian.remove_cmd import LibrarianRemoveOut
@@ -129,6 +130,7 @@ SCHEMAS: tuple[SchemaEntry, ...] = (
     SchemaEntry("outputs/librarian-add-source.schema.json", LibrarianAddSourceOut, "serialization"),
     SchemaEntry("outputs/librarian-check.schema.json", LibrarianCheckOut, "serialization"),
     SchemaEntry("outputs/librarian-refresh.schema.json", LibrarianRefreshOut, "serialization"),
+    SchemaEntry("outputs/librarian-prepare.schema.json", LibrarianPrepareOut, "serialization"),
 )
 
 

@@ -1,0 +1,108 @@
+{
+  "additionalProperties": false,
+  "description": "The ``--json`` envelope of ``perk librarian prepare`` (order load-bearing).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "action": {
+      "enum": [
+        "add-docs",
+        "refresh-docs"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "url": {
+      "title": "Url",
+      "type": "string"
+    },
+    "slug": {
+      "title": "Slug",
+      "type": "string"
+    },
+    "scope_prefix": {
+      "title": "Scope Prefix",
+      "type": "string"
+    },
+    "staging_dir": {
+      "title": "Staging Dir",
+      "type": "string"
+    },
+    "main_root": {
+      "title": "Main Root",
+      "type": "string"
+    },
+    "current_dir": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Current Dir"
+    },
+    "replace": {
+      "title": "Replace",
+      "type": "boolean"
+    },
+    "crawl_command": {
+      "title": "Crawl Command",
+      "type": "string"
+    },
+    "publish_command": {
+      "title": "Publish Command",
+      "type": "string"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "action",
+    "url",
+    "slug",
+    "scope_prefix",
+    "staging_dir",
+    "main_root",
+    "current_dir",
+    "replace",
+    "crawl_command",
+    "publish_command",
+    "warnings"
+  ],
+  "title": "LibrarianPrepareOut",
+  "type": "object"
+}
