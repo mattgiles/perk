@@ -23,6 +23,8 @@ skills:
   - source: perk
     name: dignified-python
   - source: perk
+    name: librarian
+  - source: perk
     name: perk-address
   - source: perk
     name: perk-domain-modeling
