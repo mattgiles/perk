@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -32,7 +33,16 @@ SITE = "https://d.example"
 SEED = f"{SITE}/docs/start"
 ARTIFACTS = ("failed-pages.json", "sources.json", "index.md")
 
-type SiteValue = str | subprocess.CalledProcessError
+
+@dataclass(frozen=True)
+class _Redirect:
+    """A page served from another URL after curl followed a redirect."""
+
+    to: str
+    html: str
+
+
+type SiteValue = str | _Redirect | subprocess.CalledProcessError
 
 
 @pytest.fixture(scope="module")
@@ -84,12 +94,14 @@ def _fake_site(
     fetched: list[str] = []
     conversions = [0]
 
-    def fetch_html(url: str) -> str:
+    def fetch_html(url: str) -> object:
         fetched.append(url)
         value = pages.get(url, _http_error(url))
         if isinstance(value, subprocess.CalledProcessError):
             raise value
-        return value
+        if isinstance(value, _Redirect):
+            return script.Fetched(html=value.html, url=value.to)
+        return script.Fetched(html=value, url=url)
 
     def convert_html(html_text: str) -> str:
         index = conversions[0]
@@ -151,6 +163,8 @@ def test_dot_and_nul_segments_are_unsafe(script, url_path):
         ("/docs/", "docs-home.md"),
         ("/docs/index.html", "docs-home.md"),
         ("/docs/index", "docs-home.md"),
+        ("/docs/Index.html", "docs-home.md"),
+        ("/docs/INDEX", "docs-home.md"),
         ("/docs/guide/index.html", "guide/index.md"),
         ("/docs/guide/", "guide.md"),
         ("/docs/%2e%2e/x", "%2e%2e/x.md"),
@@ -162,6 +176,36 @@ def test_markdown_path_for_url(script, url_path, expected):
 
 def test_reserved_root_names_are_the_artifacts(script):
     assert frozenset(ARTIFACTS) == script.RESERVED_ROOT_NAMES
+
+
+@pytest.mark.parametrize(
+    "url_path",
+    [
+        "/docs/sources.json/topic",
+        "/docs/failed-pages.json/x",
+        "/docs/index.md/x",
+        "/docs/Sources.JSON/x",
+        "/docs/INDEX.MD/x",
+    ],
+)
+def test_paths_beneath_a_reserved_name_are_unsafe(script, url_path):
+    with pytest.raises(script.UnsafePath):
+        script.markdown_path_for_url(f"{SITE}{url_path}", "/docs/")
+
+
+def test_a_link_beneath_a_reserved_name_is_rejected(script, monkeypatch, tmp_path, capsys):
+    blocked = f"{SITE}/docs/sources.json/topic"
+    pages = {SEED: _page("Start", "/docs/sources.json/topic", "/docs/api"), blocked: "x"}
+    pages[f"{SITE}/docs/api"] = _page("API")
+    fetched = _fake_site(monkeypatch, script, pages)
+    out = tmp_path / "out"
+
+    assert _run(script, [SEED, str(out)]) == 0
+
+    assert blocked not in fetched
+    assert (out / "sources.json").is_file()
+    assert _inventory_paths(out) == [(SEED, "start.md"), (f"{SITE}/docs/api", "api.md")]
+    assert f"WARNING: rejected unsafe URL {blocked}" in capsys.readouterr().err
 
 
 # --- argument and prerequisite refusals --------------------------------------------------------
@@ -417,18 +461,53 @@ class _Interrupted(BaseException):
     pass
 
 
-def test_an_interrupted_crawl_is_unpublishable(script, monkeypatch, scaffolded_perk_repo):
+@pytest.mark.parametrize(
+    ("index_href", "written"),
+    [
+        (None, ["start.md"]),
+        # On a case-insensitive filesystem `Index.md` would be the entrypoint itself.
+        ("/docs/Index.html", ["docs-home.md", "start.md"]),
+    ],
+)
+def test_an_interrupted_crawl_is_unpublishable(
+    script, monkeypatch, scaffolded_perk_repo, index_href, written
+):
+    pages = _three_page_site()
+    if index_href is not None:
+        pages[SEED] = _page("Start", index_href, "/docs/guide/intro", "/docs/api")
+        pages[f"{SITE}{index_href}"] = _page("Upstream home")
+
     def interrupt(index: int) -> None:
-        if index == 1:
+        if index == len(written):
             raise _Interrupted
 
-    _fake_site(monkeypatch, script, _three_page_site(), on_convert=interrupt)
+    _fake_site(monkeypatch, script, pages, on_convert=interrupt)
     staging = LibraryLayout.for_repo(scaffolded_perk_repo).staging / "site"
 
     with pytest.raises(_Interrupted):
         script.main([SEED, str(staging)])
 
-    assert sorted(path.name for path in staging.iterdir()) == ["start.md"]
+    assert sorted(path.name for path in staging.iterdir()) == written
+    assert not any(path.name.casefold() == "index.md" for path in staging.iterdir())
+    with pytest.raises(LibraryError) as excinfo:
+        _publish(scaffolded_perk_repo, staging, accept_failures=True)
+    assert excinfo.value.error_type == "staging_invalid"
+
+
+@pytest.mark.parametrize("artifact", ARTIFACTS)
+def test_a_failed_artifact_write_aborts_before_the_entrypoint(
+    script, monkeypatch, scaffolded_perk_repo, capsys, artifact
+):
+    _fake_site(monkeypatch, script, _three_page_site())
+    _failing_replace(monkeypatch, script, artifact)
+    staging = LibraryLayout.for_repo(scaffolded_perk_repo).staging / "site"
+
+    assert _run(script, [SEED, str(staging)]) == 2
+
+    assert not (staging / "index.md").exists()
+    assert not (staging / artifact).exists()
+    assert _temp_files(staging) == []
+    assert f"ERROR: could not write {staging / artifact}" in capsys.readouterr().err
     with pytest.raises(LibraryError) as excinfo:
         _publish(scaffolded_perk_repo, staging, accept_failures=True)
     assert excinfo.value.error_type == "staging_invalid"
@@ -550,6 +629,24 @@ def test_two_urls_for_one_path_keep_the_first(script, monkeypatch, tmp_path, cap
     )
 
 
+def test_paths_differing_only_in_case_collide(script, monkeypatch, tmp_path, capsys):
+    pages = {
+        SEED: _page("Start", "/docs/API", "/docs/api.md/intro", "/docs/api"),
+        f"{SITE}/docs/API": _page("API upper"),
+        f"{SITE}/docs/api.md/intro": _page("Intro"),
+        f"{SITE}/docs/api": _page("API lower"),
+    }
+    _fake_site(monkeypatch, script, pages)
+    out = tmp_path / "out"
+
+    assert _run(script, [SEED, str(out)]) == 0
+
+    assert _inventory_paths(out) == [(SEED, "start.md"), (f"{SITE}/docs/API", "API.md")]
+    err = capsys.readouterr().err
+    assert f"WARNING: skipped {SITE}/docs/api: path collision with {SITE}/docs/API" in err
+    assert f"WARNING: skipped {SITE}/docs/api.md/intro: path collision with {SITE}/docs/API" in err
+
+
 @pytest.mark.parametrize(
     ("links", "kept", "skipped"),
     [
@@ -594,6 +691,41 @@ def test_fetch_html_fails_on_http_errors_and_follows_bounded_redirects(script, m
     assert "--fail" in argv
     assert "--location" in argv
     assert argv[argv.index("--max-redirs") + 1] == "5"
+
+
+def test_fetch_html_reports_the_effective_url(script, monkeypatch):
+    effective = f"{SITE}/docs/guide/"
+
+    def run_text(command: list[str], stdin_text: str | None = None) -> str:
+        write_out = command[command.index("--write-out") + 1]
+        assert "%{url_effective}" in write_out
+        return "<html>body</html>" + write_out.replace("%{url_effective}", effective)
+
+    monkeypatch.setattr(script, "run_text", run_text)
+
+    fetched = script.fetch_html(f"{SITE}/docs/guide")
+
+    assert (fetched.html, fetched.url) == ("<html>body</html>", effective)
+
+
+def test_relative_links_resolve_against_the_redirect_destination(script, monkeypatch, tmp_path):
+    pages: dict[str, SiteValue] = {
+        SEED: _page("Start", "/docs/guide"),
+        f"{SITE}/docs/guide": _Redirect(to=f"{SITE}/docs/guide/", html=_page("Guide", "intro")),
+        f"{SITE}/docs/guide/intro": _page("Intro"),
+        f"{SITE}/docs/intro": _page("Wrong page"),
+    }
+    fetched = _fake_site(monkeypatch, script, pages)
+    out = tmp_path / "out"
+
+    assert _run(script, [SEED, str(out)]) == 0
+
+    assert f"{SITE}/docs/intro" not in fetched
+    assert _inventory_paths(out) == [
+        (SEED, "start.md"),
+        (f"{SITE}/docs/guide", "guide.md"),
+        (f"{SITE}/docs/guide/intro", "guide/intro.md"),
+    ]
 
 
 # --- the staging handshake round trip -----------------------------------------------------------

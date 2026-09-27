@@ -13985,20 +13985,26 @@ while the crawl script does not (interpreters are never admitted, §8.3). The sc
   `N ≥ 1` — refusals are argparse errors (exit 2). The tools are resolved before any network (a
   missing one is exit 2 with the install hint; `--dry-run` needs only `curl`).
 - *Fetch once.* Breadth-first over in-origin, in-prefix, non-asset links, each page fetched once
-  (`curl --no-progress-meter --fail --location --max-redirs 5`) and that HTML converted by
-  `html2markdown` over stdin — an HTTP status ≥ 400 is a fetch failure, never mirrored content.
+  (`curl --no-progress-meter --fail --location --max-redirs 5`, `--write-out` appending the
+  effective URL after the body) and that HTML converted by `html2markdown` over stdin — an HTTP
+  status ≥ 400 is a fetch failure, never mirrored content. A page keeps its requested URL as its
+  identity and destination; its relative links resolve against the URL it was finally served from
+  (after redirects), then face the same scope rules as any link.
 - *URL → path.* The path splits on `/`, empty segments collapse, a `.`, `..` or NUL-bearing
   segment is `UnsafePath`; segments are never percent-decoded (`%2e%2e` is an inert filename).
   After stripping the scope prefix: no segments → `docs-home.md`, else the segments with the last
   suffix replaced by (or extended with) `.md`. The **reserved root names** `index.md`,
-  `sources.json` and `failed-pages.json` belong to the artifacts: a page mapping to the root
-  `index.md` maps to `docs-home.md` instead (the scope root's name, so the two meet as a
-  collision), and the `.json` names — unreachable, since a `.json` URL is an asset — are refused
-  as a guard. A link whose path is unsafe is **rejected**: never queued, fetched or inventoried,
-  reported as a `WARNING:`, not a failed page.
-- *Collisions.* Destinations are claimed in crawl order; a later page whose path equals a claimed
-  file, lies beneath one (`a.md/b.md` after `a.md`) or is a parent directory of one (`a.md` after
-  `a.md/b.md`) is skipped with a `WARNING:` — neither a failure nor inventoried.
+  `sources.json` and `failed-pages.json` belong to the artifacts and compare **case-folded** (on a
+  case-insensitive filesystem `Index.md` is the entrypoint): a page mapping to the root `index.md`
+  in any case maps to `docs-home.md` instead (the scope root's name, so the two meet as a
+  collision); a page whose first segment is a reserved name (`sources.json/topic.md`) is refused,
+  so no directory can block an artifact write; a page equal to a `.json` name is unreachable (a
+  `.json` URL is an asset) and refused as a guard. A link whose path is unsafe is **rejected**:
+  never queued, fetched or inventoried, reported as a `WARNING:`, not a failed page.
+- *Collisions.* Destinations are claimed in crawl order, paths compared case-folded; a later page
+  whose path equals a claimed file, lies beneath one (`a.md/b.md` after `a.md`) or is a parent
+  directory of one (`a.md` after `a.md/b.md`) is skipped with a `WARNING:` — neither a failure nor
+  inventoried.
 - *Contained, atomic writes.* Every page and artifact write refuses a symlinked directory
   component beneath `OUTPUT_DIR`, a symlinked final target, and a target (or temporary file)
   resolving outside the resolved output root (`UnsafePath`), then writes a temporary sibling

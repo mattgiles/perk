@@ -77,8 +77,8 @@ crawl script is stdlib Python, resolved relative to this skill's directory and i
    `list --json`, a **new or empty** directory (the script refuses a non-empty one; delete a stale
    staging directory before re-crawling). The crawl writes the pages, then `failed-pages.json`,
    `sources.json` and, last, `index.md` — a crawl that did not finish has no `index.md` and cannot
-   be published. Unsafe (`.`/`..`) links are rejected and colliding paths skipped, each with a
-   `WARNING:`. **Exit 1** means pages failed: read `failed-pages.json`, then re-crawl or decide to
+   be published. Unsafe links (`.`/`..` segments, paths beneath an artifact name) are rejected
+   and colliding paths skipped, each with a `WARNING:`. **Exit 1** means pages failed: read `failed-pages.json`, then re-crawl or decide to
    accept. **Exit 2** means the staging directory is untrustworthy: delete it.
 4. **Prune** pages outside the requested doc set (other products or versions, marketing, blog,
    changelog, navigation-only pages), deleting each pruned page's `sources.json` entry and its

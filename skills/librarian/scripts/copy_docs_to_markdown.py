@@ -37,13 +37,17 @@ from urllib.parse import urldefrag, urljoin, urlparse
 SUBPROCESS_TIMEOUT_SECONDS = 120
 MAX_REDIRECTS = 5
 FILE_MODE = 0o644
+# curl appends this line after the body (`--write-out`); the last occurrence is always curl's.
+EFFECTIVE_URL_MARKER = "\n--copy-docs-effective-url: "
 HTML2MARKDOWN_INSTALL_HINT = "brew install html2markdown"
 
 INDEX_FILENAME = "index.md"
 INVENTORY_FILENAME = "sources.json"
 FAILED_PAGES_FILENAME = "failed-pages.json"
 HOME_FILENAME = "docs-home.md"
-# The generated artifacts own these paths at the output root; no page may occupy one.
+# The generated artifacts own these paths at the output root: no page may occupy one or sit
+# beneath one. Compared case-folded, since on a case-insensitive filesystem `Index.md` is the
+# entrypoint itself.
 RESERVED_ROOT_NAMES = frozenset({INDEX_FILENAME, INVENTORY_FILENAME, FAILED_PAGES_FILENAME})
 
 NON_EMPTY_OUTPUT_REFUSAL = (
@@ -106,6 +110,14 @@ class LinkParser(HTMLParser):
 
 
 @dataclass(frozen=True)
+class Fetched:
+    """A fetched page's HTML and the URL it was finally served from (after redirects)."""
+
+    html: str
+    url: str
+
+
+@dataclass(frozen=True)
 class Page:
     url: str
     path: Path
@@ -158,9 +170,9 @@ def run_text(command: list[str], stdin_text: str | None = None) -> str:
     return result.stdout
 
 
-def fetch_html(url: str) -> str:
+def fetch_html(url: str) -> Fetched:
     # `--fail` turns an HTTP error status into a fetch failure instead of a mirrored error page.
-    return run_text(
+    output = run_text(
         [
             "curl",
             "--no-progress-meter",
@@ -168,9 +180,15 @@ def fetch_html(url: str) -> str:
             "--location",
             "--max-redirs",
             str(MAX_REDIRECTS),
+            "--write-out",
+            f"{EFFECTIVE_URL_MARKER}%{{url_effective}}",
             url,
         ]
     )
+    html_text, marker, effective_url = output.rpartition(EFFECTIVE_URL_MARKER)
+    if not marker:
+        return Fetched(html=output, url=url)
+    return Fetched(html=html_text, url=effective_url.strip() or url)
 
 
 def convert_html(html_text: str) -> str:
@@ -257,12 +275,12 @@ def markdown_path_for_url(url: str, scope_prefix: str) -> Path:
     if not segments:
         return Path(HOME_FILENAME)
     relative = Path(*segments).with_suffix(".md")
-    if relative.as_posix() == INDEX_FILENAME:
+    if relative.as_posix().casefold() == INDEX_FILENAME:
         # The scope root's upstream index page shares the scope root's name; the generated
         # entrypoint owns `index.md`.
         return Path(HOME_FILENAME)
-    if relative.as_posix() in RESERVED_ROOT_NAMES:
-        raise UnsafePath(f"{relative.as_posix()} is a reserved artifact name")
+    if relative.parts[0].casefold() in RESERVED_ROOT_NAMES:
+        raise UnsafePath(f"{relative.as_posix()} is or lies beneath a reserved artifact name")
     if relative.is_absolute() or ".." in relative.parts:
         raise UnsafePath(f"{relative} escapes the output directory")
     return relative
@@ -399,15 +417,17 @@ def discover_pages(seed_url: str, scope_prefix: str, max_pages: int) -> Discover
             continue
 
         try:
-            html_text = fetch_html(url)
+            fetched = fetch_html(url)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             failure = Failure(url=url, stage="fetch", reason=describe(exc))
             discovery.failures.append(failure)
             warn(f"failed to fetch {url}: {failure.reason}")
             continue
 
-        discovery.html[url] = html_text
-        for linked_url in parse_links(url, html_text):
+        # The page keeps its requested URL (its identity and destination); relative links resolve
+        # against where it was served from, then face the same scope rules as any link.
+        discovery.html[url] = fetched.html
+        for linked_url in parse_links(fetched.url, fetched.html):
             if linked_url not in seen and admissible(linked_url):
                 queue.append(linked_url)
 
@@ -419,23 +439,25 @@ def claim_paths(urls: list[str], scope_prefix: str) -> tuple[dict[str, Path], li
 
     A later page collides when its path equals a claimed file, sits beneath a claimed file
     (`a.md/b.md` after `a.md`), or is a parent directory of a claimed file (`a.md` after
-    `a.md/b.md`) — so a write never meets a file where it needs a directory.
+    `a.md/b.md`) — so a write never meets a file where it needs a directory. Paths compare
+    case-folded: on a case-insensitive filesystem `API.md` and `api.md` are one file.
     """
     claimed: dict[str, Path] = {}
-    files: dict[Path, str] = {}
-    directories: dict[Path, str] = {}
+    files: dict[str, str] = {}
+    directories: dict[str, str] = {}
     collisions: list[Collision] = []
     for url in urls:
         path = markdown_path_for_url(url, scope_prefix)
-        parents = [parent for parent in path.parents if parent != Path()]
-        first_url = files.get(path) or directories.get(path)
+        key = path.as_posix().casefold()
+        parents = [parent.as_posix().casefold() for parent in path.parents if parent != Path()]
+        first_url = files.get(key) or directories.get(key)
         if first_url is None:
             first_url = next((files[parent] for parent in parents if parent in files), None)
         if first_url is not None:
             collisions.append(Collision(url=url, path=path, first_url=first_url))
             continue
         claimed[url] = path
-        files[path] = url
+        files[key] = url
         for parent in parents:
             directories.setdefault(parent, url)
     return claimed, collisions
@@ -534,8 +556,9 @@ def copy_docs(
     # A page-vs-page duplicate (`/docs/` and `/docs/index.html`) still links to the written copy.
     link_targets = dict(url_to_path)
     for collision in collisions:
-        if url_to_path[collision.first_url] == collision.path:
-            link_targets[collision.url] = collision.path
+        written = url_to_path[collision.first_url]
+        if written.as_posix().casefold() == collision.path.as_posix().casefold():
+            link_targets[collision.url] = written
     link_lookup = build_link_lookup(link_targets)
 
     if dry_run:
