@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Require `cloc`: `perk init` / `perk doctor` report it missing like any required tool, interactive `perk init` offers to install it (brew, else `npm install -g cloc`), and the remote-runner setup action installs it. Install it with `brew install cloc`, `npm install -g cloc`, or your distro package. (0b704d6)
 - Target an existing incremental PR's actual base branch: when the plan's PR already exists, its target branch — not the plan's pinned base or the repository default — governs submit's base, mergeability probe, change stats, and reported `base`. perk never retargets it. (5e06cde)
 - Keep stacked PR bodies under GitHub's 65,536-character cap: a stacked layer's plan embed now yields to a one-line pointer when it would not fit, as the incremental route already did. (573e25c)
+- Show each check's wall-clock duration in the `run_ci` report: every executed row renders as `✓ name (12s)` / `✗ name (exit N, 12s)`, and the structured result carries it as `durationMs` (skipped rows carry none). Warm `/ci` still surfaces only the one-line summary. (50cedb2)
+- Restructure perk's own in-session CI rows: `docs-check` now carries only the docs-scoped guards plus every Astro invocation (site sync + typecheck, then build + post-build checks) serially — the single row that runs Astro, which removes a concurrent content-sync race — while site lint and the site unit tests ride the `lint-js`/`test-js` rows' `docs/site/**` globs, and the non-Astro TypeScript typecheck splits into independently globbed `typecheck-js` and `typecheck-prose-review` rows. `just typecheck` and `just test` are unchanged. (ba1b4ed)
 
 ## [3.7.0] - 2026-09-23
 

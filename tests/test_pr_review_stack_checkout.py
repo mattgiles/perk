@@ -81,6 +81,7 @@ def _wire_stack(monkeypatch, stack: ResolvedStack) -> None:
     monkeypatch.setattr(checkout_cmd, "resolve_stack_from_pr", lambda repo_root, pr: stack)
 
 
+@pytest.mark.slow
 def test_stack_checkout_success_snapshot_envelope(git_repo_with_remote, monkeypatch):
     clone, _remote, advance_origin = git_repo_with_remote
     shas = _seed_linear_stack(clone)
@@ -129,6 +130,7 @@ def test_stack_checkout_success_snapshot_envelope(git_repo_with_remote, monkeypa
     assert all(f"+++ b/{name}.txt" in patch_bytes.decode() for name in ("a", "b", "c"))
 
 
+@pytest.mark.slow
 def test_stack_checkout_refresh_rewrites_the_patch(git_repo_with_remote, monkeypatch):
     # A refreshed checkout (the top head moved) rewrites the sibling patch and reports the new
     # digest — the browser verifies the digest against the file before it opens.
@@ -253,6 +255,7 @@ def test_stack_checkout_base_not_ancestor_of_bottom_refuses(git_repo_with_remote
     assert not review_patch_path(wt).exists()
 
 
+@pytest.mark.slow
 def test_stack_checkout_diff_failure_refuses_before_mutation(git_repo_with_remote, monkeypatch):
     # A failed combined-diff render is a typed git_error refusal before any worktree mutation
     # — an existing checkout and its patch survive untouched.
@@ -304,6 +307,7 @@ def test_stack_checkout_topology_broken_fails_closed(git_repo_with_remote, monke
     assert not review_patch_path(clone / ".worktrees" / "review-2").exists()
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("verdict", [False, None])
 def test_stack_checkout_probe_false_or_indeterminate_preserves_existing_checkout(
     git_repo_with_remote, monkeypatch, verdict
@@ -338,6 +342,7 @@ def test_stack_checkout_probe_false_or_indeterminate_preserves_existing_checkout
     assert review_patch_path(wt).read_bytes() == before
 
 
+@pytest.mark.slow
 def test_stack_checkout_drift_note_warns_not_refuses(git_repo_with_remote, monkeypatch):
     clone, _remote, _advance = git_repo_with_remote
     shas = _seed_linear_stack(clone)
@@ -356,6 +361,7 @@ def test_stack_checkout_drift_note_warns_not_refuses(git_repo_with_remote, monke
     assert len(notes) == 2 and "drift: PR #2" in notes[1]
 
 
+@pytest.mark.slow
 def test_stack_checkout_remote_tracking_only_base(git_repo_with_remote, monkeypatch):
     # The stack base exists ONLY on the remote (no local branch): the bare-branch fetch
     # materializes origin/<base>, which is all the combined merge-base needs.
@@ -410,6 +416,7 @@ def test_stack_flag_combination_refusals(git_repo, monkeypatch):
     assert json.loads(r.stdout)["error_type"] == "invalid_input"
 
 
+@pytest.mark.slow
 def test_stack_objective_arm_routes_to_objective_resolver(git_repo_with_remote, monkeypatch):
     clone, _remote, _advance = git_repo_with_remote
     shas = _seed_linear_stack(clone)

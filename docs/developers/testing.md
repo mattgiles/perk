@@ -60,8 +60,10 @@ A case is marked `slow` when either rule holds:
 - **Threshold** — its serially measured own-cost median is ≥ 1.0 s.
 
 The measurement and the marked cohort are recorded in
-`docs/design/archive/python-test-suite-speedup-phase3-slow-classification.md`. Marks go on tests
-or parameter cases, never on fixtures (pytest rejects marks on fixtures, and a fixture mark would
+`docs/design/archive/python-test-suite-speedup-phase3-slow-classification.md`, and the threshold
+rule's re-application over the grown suite (a setup + call shortlist, then the same serial
+own-cost method) in `docs/design/archive/python-test-suite-speedup-phase4-slow-reclassification.md`.
+Marks go on tests or parameter cases, never on fixtures (pytest rejects marks on fixtures, and a fixture mark would
 protect nothing).
 
 Collection is **strict**: `strict_markers = true` plus `--strict-markers` in `addopts` turn a

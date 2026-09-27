@@ -19,6 +19,7 @@ import { gitInit, loadPerkSession, scaffoldRepo } from "../../../testing/harness
 import {
   changedFiles,
   ciScratchPath,
+  formatCheckSeconds,
   renderCiProgress,
   renderCiProse,
   scratchPersistOutput,
@@ -172,6 +173,13 @@ test("wire mapping: completed → exact executed rows (passed derived from exitC
     assert.ok(runId, "the handed-off session must carry a run id");
     const scratch = (name: string) =>
       join(cwd, ".perk", "workflow", "scratch", "runs", runId as string, `ci-${name}.md`);
+    // Every executed row carries its measured wall-clock duration (nondeterministic, so its
+    // type is pinned here and the value stripped before the exact-bytes comparison).
+    const details = result.details as { checks: { durationMs?: unknown }[] };
+    for (const row of details.checks) {
+      assert.equal(typeof row.durationMs, "number", "an executed row carries durationMs");
+      delete row.durationMs;
+    }
     assert.deepEqual(result.details, {
       ok: true,
       passed: false,
@@ -335,6 +343,54 @@ test("renderCiProse: green subset says so and points at the run-all", () => {
 test("renderCiProse: scope-absent green stays byte-identical to the legacy prose", () => {
   const prose = renderCiProse({ ok: true, passed: true, checks: [passedCheck] });
   assert.equal(prose, "perk CI: all checks passed.\n✓ lint");
+});
+
+test("renderCiProse: an executed row's durationMs renders a whole-seconds suffix", () => {
+  const prose = renderCiProse({
+    ok: true,
+    passed: false,
+    checks: [
+      { ...passedCheck, durationMs: 12_400 },
+      {
+        name: "test",
+        command: "X",
+        exitCode: 1,
+        passed: false,
+        shown: "boom",
+        scratchPath: null,
+        bytesTotal: 4,
+        bytesShown: 4,
+        truncated: false,
+        durationMs: 11_600,
+      },
+      {
+        name: "docs",
+        command: "D",
+        exitCode: 0,
+        passed: true,
+        skipped: true,
+        glob: "docs/**",
+        shown: "",
+        scratchPath: null,
+        bytesTotal: 0,
+        bytesShown: 0,
+        truncated: false,
+      },
+    ],
+  });
+  const lines = prose.split("\n");
+  assert.equal(lines[0], "perk CI: failures detected.", "the first line is unchanged");
+  assert.equal(lines[1], "✓ lint (12s)");
+  assert.equal(lines[2], "✗ test (exit 1, 12s)");
+  assert.equal(lines[3], "⊘ docs (skipped — no changed files match docs/**)");
+});
+
+test("formatCheckSeconds: rounds milliseconds to whole seconds", () => {
+  assert.equal(formatCheckSeconds(0), "0s");
+  assert.equal(formatCheckSeconds(499), "0s");
+  assert.equal(formatCheckSeconds(500), "1s");
+  assert.equal(formatCheckSeconds(12_000), "12s");
+  assert.equal(formatCheckSeconds(125_700), "126s");
 });
 
 test("renderCiProse: a failing run-all carries no green terminal line", () => {
@@ -806,7 +862,8 @@ test("harness: globbed [[ci.checks]] skips end-to-end when only non-matching fil
     const details = result.details as { passed: boolean; checks: unknown[]; scope?: string };
     assert.equal(details.passed, true);
     assert.equal(details.scope, "all");
-    // The exact wire bytes of the skip shape (the union→wire skip-row pin).
+    // The exact wire bytes of the skip shape (the union→wire skip-row pin) — a skipped row
+    // carries no durationMs.
     assert.deepEqual(details.checks, [
       {
         name: "py",

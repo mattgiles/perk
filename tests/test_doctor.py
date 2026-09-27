@@ -1435,6 +1435,7 @@ def _legacy_fix_lines(report):
     return [line for line in report.fixed if line.startswith(".pi/agents/")]
 
 
+@pytest.mark.slow
 def test_legacy_agent_defs_warn_and_are_removed_by_fix(scaffolded_perk_repo):
     # A leftover `.pi/agents/perk/` only SHADOWS the shipped defs (project rank beats package
     # rank), so it is a `warn`, never `fail`; `--fix` removes the flat tree filesystem-only,
@@ -1507,6 +1508,7 @@ def test_legacy_agent_defs_fix_refuses_unexpected_entries(scaffolded_perk_repo, 
     assert len(errors) == 1 and named in errors[0] and "not removed" in errors[0]
 
 
+@pytest.mark.slow
 def test_legacy_agent_defs_fix_refuses_missing_shipped_replacement(scaffolded_perk_repo):
     # No shipped replacement for a legacy def (extension not installed / a retired name): removing
     # it would leave that perk.* name with NO def — a stale shadow is never an outage, so refuse
@@ -2139,6 +2141,7 @@ def test_cache_gc_warns_on_prunable_state(scaffolded_perk_repo):
     assert report.exit_code == 0
 
 
+@pytest.mark.slow
 def test_skills_manifest_drift_detected_and_fixed(scaffolded_perk_repo):
     # A valid legacy source declaration is still drift; report-only leaves it untouched, and
     # `--fix` re-converges it idempotently (grouped under "skills").
@@ -2249,6 +2252,7 @@ def test_native_consumer_ordering_drift_detected_and_fixed(scaffolded_perk_repo)
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
 
 
+@pytest.mark.slow
 def test_models_drift_detected_and_fixed(scaffolded_perk_repo):
     # `[models]` converges inside `settings-wiring` too, so doctor dry-runs/fixes it for free.
     # Select a default model that diverges from settings.json → drift → `--fix` repairs.
@@ -3273,6 +3277,7 @@ def test_library_group_renders():
     assert doctor_mod._MANAGED_GROUP["library-readme"] == "library"
 
 
+@pytest.mark.slow
 def test_library_readme_managed_check_and_fix(scaffolded_perk_repo):
     repo = scaffolded_perk_repo
     absent = _library_readme_check(run_doctor(repo, verify=False))

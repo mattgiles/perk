@@ -458,6 +458,7 @@ def _materialize_context(root: Path, *, run_id: str, context_json: str) -> str:
     return authoring.artifact_digest(context_json)
 
 
+@pytest.mark.slow
 def test_refinement_save_worker_saves_the_comment_and_only_the_comment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -146,6 +146,7 @@ def _invoke(runner: CliRunner, args: list[str]) -> dict[str, object]:
 # --------------------------------------------------------------------------- the lifecycle
 
 
+@pytest.mark.slow
 def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     ws = FakeLinearWorkspace()
     _patch_linear(monkeypatch, ws)
@@ -1328,6 +1329,7 @@ def test_repair_creates_a_missing_blocking_relation_between_observed_nodes(
 # ------------------------------------------------------------------- the gist round trip (§8.41)
 
 
+@pytest.mark.slow
 def test_gist_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     """The §8.41 consumption round trip over the stateful fake: create a gist on each tier, prove
     the unchanged adoption doors consume it in place, and that adoption is exactly what flips

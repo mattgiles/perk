@@ -126,15 +126,15 @@ docs-build:
 docs-preview:
     npm run docs:preview
 
-# the standalone docs gate: docs-scoped pytest guards, site lint + typecheck (so a docs-scoped
-# change misses no gate — e.g. tokens.css/tsconfig.json match no code-suffix ci glob), site unit
-# tests, static build (schema/link/anchor/escape/sidebar-slug gates), post-build
+# the standalone docs gate: the docs-scoped pytest guards, then every Astro invocation in one
+# serial chain (Astro must never run in two rows at once, so no other [[ci.checks]] row reaches
+# it; site lint and the site unit tests reach `docs/site` through the `lint-js`/`test-js` rows'
+# `docs/site/**` globs instead) — `astro sync` + site typecheck, then the static build
+# (schema/link/anchor/escape/sidebar-slug gates) + the corpus-reading site tests and post-build
 # corpus/H1/TOC/EC/Pagefind checks
 docs-check:
-    uv run pytest tests/test_user_docs_metadata.py tests/test_user_docs_cli_reference.py tests/test_user_docs_reference_facts.py tests/test_explanation_boundary.py tests/test_user_docs_findability.py tests/test_docs_site_tokens.py tests/test_docs_site_system.py tests/test_docs_gates.py "tests/test_packaging.py::test_docs_site_publish_isolation" -q
-    npx biome check docs/site
+    uv run pytest -n0 tests/test_user_docs_metadata.py tests/test_user_docs_cli_reference.py tests/test_user_docs_reference_facts.py tests/test_explanation_boundary.py tests/test_user_docs_findability.py tests/test_docs_site_tokens.py tests/test_docs_site_system.py tests/test_docs_gates.py "tests/test_packaging.py::test_docs_site_publish_isolation" -q
     npm run docs:typecheck
-    node --test --test-reporter=dot "docs/site/src/**/*.test.mjs"
     npm run docs:check
 
 # the opt-in prose-review workbench gate (never mirrored by a CI row): workspace tsc + the

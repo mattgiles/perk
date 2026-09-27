@@ -559,6 +559,77 @@ test("runCiChecks: a throwing persist port → error reported, exit code intact,
   assert.ok(c.error?.includes("persist exploded"));
 });
 
+// --- per-check duration through the injected clock ----------------------------------------
+
+/** A scripted clock: each call returns the next tick; running out fails loudly (so a test
+ * proves exactly how many samples the run took). */
+function scriptedClock(...ticks: number[]): () => number {
+  const queue = [...ticks];
+  return () => {
+    const next = queue.shift();
+    if (next === undefined) throw new Error("scripted clock exhausted");
+    return next;
+  };
+}
+
+test("runCiChecks: an executed check carries durationMs from the clock; a skipped one none", async () => {
+  const outcome = await runCi(
+    {
+      checks: [
+        { name: "lint-py", command: "PY", glob: "*.py" },
+        { name: "lint-js", command: "JS", glob: "*.ts" },
+      ],
+    },
+    {
+      runCheck: fakeRun({ JS: { code: 0, output: "ok" } }),
+      observeChangedFiles: observing(["extension/x.ts"]),
+      now: scriptedClock(1_000, 13_250),
+    },
+  );
+  assert.equal(outcome.kind, "completed");
+  if (outcome.kind !== "completed") return;
+  const [skipped, executed] = outcome.checks;
+  assert.equal(skipped?.kind, "skipped");
+  assert.equal(skipped !== undefined && "durationMs" in skipped, false, "skips carry no duration");
+  assert.equal(executed?.kind, "executed");
+  if (executed?.kind !== "executed") return;
+  assert.equal(executed.durationMs, 12_250, "after-settle sample minus before-launch sample");
+});
+
+test("runCiChecks: a run-port throw still carries durationMs (the failure shape is measured)", async () => {
+  const outcome = await runCi(
+    { checks: [{ name: "boom", command: "BOOM" }] },
+    {
+      runCheck: async () => {
+        throw new Error("spawn failed");
+      },
+      observeChangedFiles: noObserve,
+      now: scriptedClock(5_000, 5_042),
+    },
+  );
+  assert.equal(outcome.kind, "completed");
+  if (outcome.kind !== "completed") return;
+  const c = outcome.checks[0];
+  assert.equal(c?.kind, "executed");
+  if (c?.kind !== "executed") return;
+  assert.equal(c.exitCode, -1);
+  assert.equal(c.durationMs, 42);
+});
+
+test("runCiChecks: an omitted clock defaults to wall time (a non-negative number)", async () => {
+  const outcome = await runCi(
+    { checks: [{ name: "ok", command: "K" }] },
+    { runCheck: fakeRun({ K: { code: 0, output: "fine" } }), observeChangedFiles: noObserve },
+  );
+  assert.equal(outcome.kind, "completed");
+  if (outcome.kind !== "completed") return;
+  const c = outcome.checks[0];
+  assert.equal(c?.kind, "executed");
+  if (c?.kind !== "executed") return;
+  assert.equal(typeof c.durationMs, "number");
+  assert.ok(Number.isFinite(c.durationMs) && c.durationMs >= 0);
+});
+
 // --- change-scoped gating through the ObserveChangedFiles port ---------------------------
 
 test("runCiChecks: globbed check skipped when no changed file matches; basename matches at any depth", async () => {

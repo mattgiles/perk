@@ -526,6 +526,7 @@ def test_combined_diff_translates_a_substrate_git_error_with_stack_context(monke
     assert isinstance(excinfo.value.__cause__, git_mod.GitError)
 
 
+@pytest.mark.slow
 def test_stack_context_two_workers_interleaved_ref_isolation(git_repo_with_remote, monkeypatch):
     # Concurrent reviewer lanes all fetch the SAME top PR while sharing ONE ref store, so the
     # per-invocation temp-ref namespace is the ONLY thing separating their refs. Worker B's

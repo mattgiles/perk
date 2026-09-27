@@ -993,6 +993,7 @@ def _assert_b_never_saw_a(machine_a: _Machine, machine_b: _Machine) -> None:
 # ----------------------------------------------------------------- SYNC arms
 
 
+@pytest.mark.slow
 def test_sync_all_after_concludes_from_a_fresh_clone(tmp_path):
     # Machine A died after the REAL atomic push (both refs moved on the origin), before
     # verification. Machine B — a separately initialized clone with separately constructed
@@ -1027,6 +1028,7 @@ def test_sync_all_after_concludes_from_a_fresh_clone(tmp_path):
     _assert_b_never_saw_a(machine_a, machine_b)
 
 
+@pytest.mark.slow
 def test_sync_all_before_abandons_with_proof_from_a_fresh_clone(tmp_path):
     # Machine A died after `append_prepared` — the atomic push never ran (the origin still
     # holds the before refs). Machine B's recover proves all-before against the REAL origin
@@ -1097,6 +1099,7 @@ def _publish_record(
     )
 
 
+@pytest.mark.slow
 def test_publish_bottom_layer_all_after_reports_then_submit_resume_completes(tmp_path):
     # Machine A died after the branch push + PR create on a BOTTOM layer (its `after` has
     # no stack membership — a true all-after). Machine B's recover REPORTS the owning
@@ -1152,6 +1155,7 @@ def test_publish_bottom_layer_all_after_reports_then_submit_resume_completes(tmp
     _assert_b_never_saw_a(machine_a, machine_b)
 
 
+@pytest.mark.slow
 def test_publish_non_bottom_partial_reports_mixed_then_submit_resume_converges(tmp_path):
     # Machine A died after the second layer's PR create but BEFORE the stack mutation. The
     # classification is layer-position-dependent: a non-bottom `after` includes stack

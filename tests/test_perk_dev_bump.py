@@ -287,6 +287,7 @@ _PACKAGE_LOCK = {
 }
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(
     shutil.which("uv") is None or shutil.which("npm") is None,
     reason="requires uv and npm on PATH",

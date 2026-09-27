@@ -89,9 +89,10 @@ first — and only — client script, one processed module `<script>` importing 
 framework-free controller `src/core-flow-controller.mjs` (enhance = collapse the disclosures,
 drive the supplementary tooltips, re-open around print). The controller is jsdom-unit-tested
 by `src/core-flow-controller.test.mjs`, which rides the existing `docs/site/src/**/*.test.mjs`
-glob run by `just test` and `just docs-check` — the site's `scripts.check` stays deliberately
-unchanged (an asymmetry recorded here: unit tests need no build, so they never run inside
-`check`).
+glob run by `just test-js` (and so `just test`) — in-session, by the `test-js` `[[ci.checks]]`
+row, whose glob includes `docs/site/**`. It never runs inside the site's `scripts.check` (an
+asymmetry recorded here: unit tests need no build; `check` carries only the two site tests that
+read the `docs/user-docs/` corpus), so `just docs-check` alone does not run it.
 
 ## Visual system stylesheet (`src/styles/system.css`)
 
@@ -239,12 +240,18 @@ From the repo root:
 just docs-dev      # Starlight dev server (astro dev)
 just docs-build    # static build to docs/site/dist (local-only; Pagefind included)
 just docs-preview  # serve the built site (the Pagefind-accurate acceptance surface)
-just docs-check    # the standalone docs gate (pytest guards, lint, typecheck, unit tests, build + checks)
+just docs-check    # the standalone docs gate (docs pytest guards, then sync + typecheck, build + checks)
+just lint-js       # companion: Biome over the site (with the extension and tools)
+just test-js       # companion: the site unit tests (with the extension suite)
 ```
 
-Each delegates to the root npm scripts (`docs:dev` / `docs:build` / `docs:preview` /
-`docs:typecheck` / `docs:check`), which run the workspace scripts here. Two workspace scripts
-carry the site's own gates:
+`just docs-check` is the docs row's gate, not the whole site gate: the site's Biome lint and unit
+tests live in `just lint-js` and `just test-js`, so run all three for a full local check of a
+site change.
+
+The four `docs-*` recipes delegate to the root npm scripts (`docs:dev` / `docs:build` /
+`docs:preview` / `docs:typecheck` / `docs:check`), which run the workspace scripts here. Two
+workspace scripts carry the site's own gates:
 
 - **`typecheck`** — `astro sync && tsc --noEmit`: sync regenerates the gitignored
   `.astro/types.d.ts` first, so a fresh checkout typechecks. The site's five `.astro`
@@ -254,14 +261,18 @@ carry the site's own gates:
   compilation (a malformed component fails `astro build`, which `just docs-build`/`docs:check`
   run in CI) plus the post-build structural assertions below — a component gaining props or
   frontmatter logic wires `@astrojs/check` then. `checkJs` stays off; the `.mjs` plugins and
-  the core-flow controller are unit-tested instead. Runs inside `just typecheck-js`. (`.astro`
-  files also sit outside Biome's `files.includes` — the same accepted-coverage record.)
+  the core-flow controller are unit-tested instead. Runs inside `just typecheck-js` (GitHub CI)
+  and `just docs-check`. (`.astro` files also sit outside Biome's `files.includes` — the same
+  accepted-coverage record.)
 - **`check`** — `astro build && node --test "src/in-session-reference.test.mjs"
-  "checks/**/*.test.mjs"`: the static build (which enforces the schema and link/anchor/escape
-  gates), the source/runtime in-session vocabulary guard, and the **post-build checks** in
-  `checks/` — deliberately outside `src/`, so the unit-test glob never runs them without a
-  build. `built-site.test.mjs` asserts the complete corpus is routed, the single-rendered-H1
-  contract (H1 text = frontmatter `title`), the Starlight TOC landmark on sectioned pages,
+  "src/sidebar.test.mjs" "checks/**/*.test.mjs"`: the static build (which enforces the schema
+  and link/anchor/escape gates), the two site tests that read the `docs/user-docs/` corpus (the
+  source/runtime in-session vocabulary guard and the sidebar↔frontmatter guard — so a
+  user-docs-only change, which skips the `test-js` row, still reaches them), and the
+  **post-build checks** in `checks/` — deliberately outside `src/`, so the unit-test glob never
+  runs them without a build. `built-site.test.mjs` asserts the complete corpus is routed, the
+  single-rendered-H1 contract (H1 text = frontmatter `title`), the Starlight TOC landmark on
+  sectioned pages,
   Expressive Code markup, the exact tutorials-chain pagination edges, the exclusion proofs
   (no built output for `_authoring`; the `data-pagefind-body` page set — the search-index
   membership — equals the routed corpus), and the
@@ -281,10 +292,13 @@ CI reaches every docs gate through `just lint`/`just typecheck`/`just test`;
 `tests/test_docs_gates.py` is the structural proof of that wiring (scripts, recipes,
 workflow steps, and the scope-aware `docs-check` `[[ci.checks]]` row — whose triggers include
 the canonical/site docs, perk-expert mirror, and shared provider/schema authorities, keeping
-catalog- or mirror-only changes verified when code-suffix globs skip). `just docs-check` runs the
-site's Biome lint and typecheck itself for the same reason: docs-scoped files like
-`src/styles/tokens.css` or `tsconfig.json` match no code-suffix check glob, so the docs row
-must reach every gate GitHub CI would run for them.
+catalog- or mirror-only changes verified when code-suffix globs skip). That row carries the
+docs pytest guards plus **every** Astro invocation — site sync + typecheck, then build + checks —
+in one serial chain: it is the only row that runs Astro, because two rows syncing Astro content
+at once race on the same generated files. The site's Biome lint and unit tests reach `docs/site`
+through the `lint-js` and `test-js` rows instead, whose globs include `docs/site/**` — so
+docs-scoped files like `src/styles/tokens.css` or `tsconfig.json` still trigger every gate GitHub
+CI would run for them.
 
 ## Workspace and lock layout
 
