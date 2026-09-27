@@ -38,6 +38,7 @@ from typing import Literal
 from pydantic import Field
 
 from perk.boundary import LenientParseModel, ValidationError
+from perk.substrate.fs import atomic_write_text
 from perk.substrate.proc import ProcFailure, run_captured
 
 INSTALL_HINT = (
@@ -134,7 +135,7 @@ def diff_pairs(pairs: DiffPairs, *, workdir: Path) -> DiffReport:
         raise ClocError("missing", f"cloc is not installed. {INSTALL_HINT}")
     workdir.mkdir(parents=True, exist_ok=True)
     list_file = workdir / _PAIRS_FILENAME
-    list_file.write_text(render_list_file(pairs, workdir=workdir), encoding="utf-8")
+    atomic_write_text(list_file, render_list_file(pairs, workdir=workdir))
     argv = [
         "cloc",
         "--diff-list-file",

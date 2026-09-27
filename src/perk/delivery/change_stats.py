@@ -320,8 +320,8 @@ def _count(run_cloc: ClocRunner, pairs: cloc.DiffPairs, *, workdir: Path) -> clo
         if exc.kind == "missing":
             raise ChangeStatsUnavailable("cloc_missing", exc.message) from exc
         raise ChangeStatsUnavailable("cloc_failed", f"{exc.kind}: {exc.message}") from exc
-    except OSError as exc:
-        raise ChangeStatsUnavailable("cloc_failed", f"spawn: {exc}") from exc
+    except (OSError, UnicodeError) as exc:
+        raise ChangeStatsUnavailable("cloc_failed", f"list file: {exc}") from exc
 
 
 def _fold(totals: dict[str, list[int]], partition_id: str, report: cloc.DiffReport) -> None:
