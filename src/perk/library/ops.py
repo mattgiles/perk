@@ -181,6 +181,8 @@ def publish(
         displaced_probe = layout.documentation / f".{slug}.previous-probe"
         require_real_roots(layout)
         require_no_tracked_content(layout)
+        # Before the ignore probe: git refuses to evaluate a path beyond a symlink.
+        require_unlinked_components(layout, layout.relative(target))
         require_ignored(layout, probe_paths_for(layout, dirs=[target, displaced_probe, staged]))
         with library_lock(repo_root):
             catalog = load_catalog(layout)
@@ -423,6 +425,7 @@ def adopt(
         target = layout.docs_entry_dir(chosen)
         require_real_roots(layout)
         require_no_tracked_content(layout)
+        require_unlinked_components(layout, layout.relative(target))
         require_ignored(layout, probe_paths_for(layout, dirs=[target, original]))
         with library_lock(repo_root):
             catalog = load_catalog(layout)
@@ -529,9 +532,10 @@ def remove(repo_root: Path, *, slug: str) -> RemoveOutcome:
             entry = catalog.get(slug)
             if entry is None:
                 raise LibraryError("entry_not_found", f"no library entry named {slug}")
-            # Deleting non-ignored content would change the repository's untracked set.
-            require_ignored(layout, probe_paths_for(layout, dirs=[layout.root / entry.path]))
+            # The symlink walk first (git refuses to probe a path beyond a symlink), then the
+            # ignore probe: deleting non-ignored content would change the untracked set.
             content = require_unlinked_components(layout, entry.path)
+            require_ignored(layout, probe_paths_for(layout, dirs=[content]))
             write_catalog(layout, catalog.without(slug))
             removed = False
             if content.exists():

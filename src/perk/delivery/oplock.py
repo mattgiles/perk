@@ -13,6 +13,9 @@ The lock file lives beside the continuation manifests at the MAIN checkout
 a sync from a ``plan-<N>`` worktree and a recover from the main checkout contend on ONE file.
 A busy lock raises :class:`OperationLockBusy`; the operations map it to the typed refusal
 ``operation_in_progress``.
+
+``perk.library.lock`` is this module's twin (the same guarded-``fcntl`` shape); extracting a
+shared non-blocking flock primitive under ``perk.substrate`` is a deferred refactor.
 """
 
 import contextlib

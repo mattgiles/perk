@@ -3251,3 +3251,122 @@ def test_artifact_health_never_fails_and_serializes(scaffolded_perk_repo):
         statuses[fields["key"]] = fields["status"]
     assert statuses["agents-block"] == "state-missing"
     assert statuses["gitignore-block"] == "up-to-date"
+
+
+# --- the perk library (managed README + the report-only library check) ----------------------
+
+
+def _library(repo):
+    library = repo / "docs" / "library"
+    library.mkdir(parents=True, exist_ok=True)
+    return library
+
+
+def _library_readme_check(report):
+    return next(c for c in report.checks if c.name == "library-readme")
+
+
+def test_library_group_renders():
+    assert "library" in render.GROUP_ORDER
+    assert render.GROUP_ORDER.index("issues") < render.GROUP_ORDER.index("library")
+    assert render.GROUP_ORDER.index("library") < render.GROUP_ORDER.index("state")
+    assert doctor_mod._MANAGED_GROUP["library-readme"] == "library"
+
+
+def test_library_readme_managed_check_and_fix(scaffolded_perk_repo):
+    repo = scaffolded_perk_repo
+    absent = _library_readme_check(run_doctor(repo, verify=False))
+    assert (absent.status, absent.group) == ("ok", "library")
+    _library(repo)
+    drifted = _library_readme_check(run_doctor(repo, verify=False))
+    assert drifted.status == "fail"
+    assert "docs/library/README.md: created" in drifted.detail
+    assert drifted.remediation == "perk doctor --fix"
+    run_doctor(repo, verify=False, fix=True)
+    assert (repo / "docs" / "library" / "README.md").read_text(encoding="utf-8") == (
+        init.LIBRARY_README
+    )
+    assert _library_readme_check(run_doctor(repo, verify=False)).status == "ok"
+
+
+def test_library_check_absent_is_ok(scaffolded_perk_repo):
+    check = doctor_mod._library_check(scaffolded_perk_repo)
+    assert (check.name, check.group, check.status) == ("library", "library", "ok")
+    assert "absent" in check.message
+
+
+def test_library_check_clean_is_ok(scaffolded_perk_repo):
+    library = _library(scaffolded_perk_repo)
+    (library / "README.md").write_text(init.LIBRARY_README, encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "docs/library/README.md"],
+        cwd=scaffolded_perk_repo,
+        check=True,
+        capture_output=True,
+    )
+    check = doctor_mod._library_check(scaffolded_perk_repo)
+    assert check.status == "ok"
+    assert check.message == "library catalogued (0 entries)"
+
+
+def test_library_check_warns_on_a_malformed_catalog(scaffolded_perk_repo):
+    library = _library(scaffolded_perk_repo)
+    (library / "catalog.json").write_text("{nope", encoding="utf-8")
+    check = doctor_mod._library_check(scaffolded_perk_repo)
+    assert check.status == "warn"
+    assert check.message == "docs/library/catalog.json unreadable"
+    assert "never rewrites a malformed catalog" in check.remediation
+
+
+def test_library_check_warns_on_an_untracked_readme(scaffolded_perk_repo):
+    library = _library(scaffolded_perk_repo)
+    (library / "README.md").write_text(init.LIBRARY_README, encoding="utf-8")
+    check = doctor_mod._library_check(scaffolded_perk_repo)
+    assert check.status == "warn"
+    assert check.message == "docs/library/README.md is not committed"
+    assert "git add docs/library/README.md" in check.remediation
+
+
+def test_library_check_warns_on_tracked_mirror_content(scaffolded_perk_repo):
+    library = _library(scaffolded_perk_repo)
+    (library / "pi").mkdir()
+    (library / "pi" / "index.md").write_text("# pi\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "-f", "docs/library/pi/index.md"],
+        cwd=scaffolded_perk_repo,
+        check=True,
+        capture_output=True,
+    )
+    check = doctor_mod._library_check(scaffolded_perk_repo)
+    assert check.status == "warn"
+    assert "docs/library/pi/index.md" in check.detail
+    assert "git rm --cached" in check.remediation
+
+
+def test_library_check_reports_uncatalogued_and_staging_as_info(scaffolded_perk_repo):
+    library = _library(scaffolded_perk_repo)
+    (library / "hunk").mkdir()
+    (library / ".staging" / "pi-01ARZ").mkdir(parents=True)
+    check = doctor_mod._library_check(scaffolded_perk_repo)
+    assert check.status == "info"
+    assert "hunk" in check.detail
+    assert "pi-01ARZ" in check.detail
+
+
+def test_library_check_never_fails(scaffolded_perk_repo):
+    library = _library(scaffolded_perk_repo)
+    (library / "catalog.json").write_text("{nope", encoding="utf-8")
+    (library / "README.md").write_text("x\n", encoding="utf-8")
+    (library / "hunk").mkdir()
+    (library / "pi").mkdir()
+    (library / "pi" / "index.md").write_text("# pi\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "-f", "docs/library/pi/index.md"],
+        cwd=scaffolded_perk_repo,
+        check=True,
+        capture_output=True,
+    )
+    check = doctor_mod._library_check(scaffolded_perk_repo)
+    assert check.status == "warn"
+    assert check.status != "fail"
+    assert check.detail.count("; ") >= 2
