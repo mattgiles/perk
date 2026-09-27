@@ -8,7 +8,8 @@
 // Beside the gate lives STAGE_TOOLS: per-stage active-tool scoping for the scoped universe
 // (perk's OWN registered tools + the enumerated borrowed-package census), keyed off the
 // workflow-state `stage` field and applied at the same rebuild points (contracts.md §8.40) —
-// fail-open where the gate is fail-closed.
+// fail-open where the gate is fail-closed, save the one refused call: a borrowed lazy loader
+// invoked where the tools it enables are ineligible.
 //
 // Substrate only: perk-owned plan mode and the read-only CI executor are the consumers of the
 // `enter`/`exit` surface; the allowlist-restore is wired into the existing
@@ -23,18 +24,23 @@ import { branchCarries, branchOf, WORKFLOW_STATE_TYPE } from "./workflowState.ts
  * The `web` seam providers' research tools: the UNION of all known web-provider tool names,
  * enumerated statically and inert when the package is absent (the plan_review precedent —
  * setActiveTools simply has nothing to enable). None mutate the repo — fetch_content's
- * GitHub-clone path writes only to its own cache outside the worktree, morally equivalent to the
- * already-allowlisted curl. perk does NOT normalize names, so all three providers' divergent
- * names are listed: pi-web-access (default: web_search/code_search/fetch_content/
- * get_search_content — `code_search` is not registered by any current version; kept as an inert
- * static name for version tolerance), @ollama/pi-web-search (ollama_web_search/ollama_web_fetch),
- * and @juicesharp/rpiv-web-tools (web_search shared, web_fetch). All register at load time.
+ * GitHub-clone path (and source_check's page fetches) write only to their own cache outside the
+ * worktree, morally equivalent to the already-allowlisted curl. perk does NOT normalize names, so
+ * all three providers' divergent names are listed: pi-web-access (its four default tools
+ * web_search/source_check/fetch_content/get_search_content, plus its lazy loader `web_enable` —
+ * see LAZY_TOOL_LOADERS; `code_search` is not registered by any current version and is kept as an
+ * inert static name for version tolerance), @ollama/pi-web-search (ollama_web_search/
+ * ollama_web_fetch), and @juicesharp/rpiv-web-tools (web_search shared, web_fetch). All register
+ * at load time; `web_enable` registers only when pi-web-access's dynamic-tools probe passes (an
+ * inert name otherwise).
  */
 export const WEB_RESEARCH_TOOLS: readonly string[] = [
   "web_search",
   "code_search",
   "fetch_content",
   "get_search_content",
+  "source_check",
+  "web_enable",
   "ollama_web_search",
   "ollama_web_fetch",
   "web_fetch",
@@ -88,19 +94,66 @@ export const LINEAR_MUTATING_TOOLS: readonly string[] = [
  * pi-subagents' delegation family. `subagent`/`wait` register at load time; the parent supervisor
  * tool `subagent_supervisor` registers during pi-subagents' own `session_start` — AFTER perk's
  * sync (perk is the first `packages` entry) — and is admitted by the `resources_discover`
- * re-apply as a late registrant (see `admitLate`): inside the diet at launch, kept where a stage
- * list carries it. `intercom` is the separate pi-intercom bridge's tool name — a static census
- * entry, inert unless that package is present. Child-side tools (`structured_output`,
- * `contact_supervisor`) are out of scope for the STAGE census — spawned children stay
- * stage-unscoped by design (§8.40 adopt-never-impersonates) — but they DO ride READ_ONLY_TOOLS,
- * because the read-only gate IS inherited by adopted children (see SUBAGENT_CHILD_TOOLS).
+ * re-apply as a late registrant (see `baseline`): inside the diet at launch, kept where a stage
+ * list carries it. `subagents_enable` is pi-subagents' lazy loader (see LAZY_TOOL_LOADERS): it
+ * registers at load time when the host supports dynamic tools; pi-subagents hides `subagent` in
+ * its own `session_start`/`session_tree` handlers on a message-less branch (or replays the
+ * transcript's recorded `toolsAdded`/`toolsRemoved`), and re-adds the loader to the active set
+ * and `selectedTools` in its own `before_agent_start` — which runs AFTER perk's handlers
+ * (extension order), so perk can refuse the loader but never hide it. `intercom` is the separate
+ * pi-intercom bridge's tool name — a static census entry, inert unless that package is present.
+ * Child-side tools (`structured_output`, `contact_supervisor`) are out of scope for the STAGE
+ * census — spawned children stay stage-unscoped by design (§8.40 adopt-never-impersonates) — but
+ * they DO ride READ_ONLY_TOOLS, because the read-only gate IS inherited by adopted children (see
+ * SUBAGENT_CHILD_TOOLS).
  */
 export const SUBAGENT_TOOLS: readonly string[] = [
   "subagent",
+  "subagents_enable",
   "wait",
   "subagent_supervisor",
   "intercom",
 ];
+
+/**
+ * Borrowed lazy-activation loaders → the tools each one activates (contracts.md §8.40). A
+ * lazy-owned tool's ACTIVATION is its owner's decision — the owner hides it until the model calls
+ * the loader, and replays the recorded selection on navigation; perk owns only its ELIGIBILITY
+ * (mode/stage). Each loader rides the same family constant as the tools it enables, so its
+ * eligibility equals theirs everywhere (pinned). Look entries up with `Object.hasOwn` first: a
+ * tool named like a prototype key must not match.
+ */
+export const LAZY_TOOL_LOADERS: Readonly<Record<string, readonly string[]>> = {
+  subagents_enable: ["subagent"],
+  web_enable: ["web_search", "source_check", "fetch_content", "get_search_content"],
+};
+
+/** Every tool some lazy loader activates — membership follows the owner's live selection. */
+const LAZY_OWNED_TOOLS: ReadonlySet<string> = new Set(Object.values(LAZY_TOOL_LOADERS).flat());
+
+/**
+ * Owner-selected membership: drop a lazy-owned name unless its owner currently has it active
+ * (`current` = the live active set). Every other name passes through.
+ */
+function ownerSelected(names: Iterable<string>, current: ReadonlySet<string>): string[] {
+  return [...names].filter((name) => !LAZY_OWNED_TOOLS.has(name) || current.has(name));
+}
+
+/** Where a loader call was refused: under the gate (optionally stage-scoped), or by a stage. */
+export type LazyLoaderRefusalScope =
+  | { kind: "gated"; stage: string | null }
+  | { kind: "stage"; stage: string };
+
+/** The stage-naming refusal reason for a loader called outside its tools' eligibility. */
+export function lazyLoaderRefusalReason(loader: string, scope: LazyLoaderRefusalScope): string {
+  const enabled = Object.hasOwn(LAZY_TOOL_LOADERS, loader) ? LAZY_TOOL_LOADERS[loader] : undefined;
+  const tools = (enabled ?? []).join(", ");
+  if (scope.kind === "gated") {
+    const where = scope.stage === null ? "this gated session" : `the gated ${scope.stage} session`;
+    return `perk read-only mode: ${loader} is blocked (its tools — ${tools} — are not allowlisted in ${where}).`;
+  }
+  return `perk stage scoping: ${loader} is blocked (its tools — ${tools} — are not available in the ${scope.stage} stage).`;
+}
 
 /**
  * pi-subagents' CHILD-side engine tools. `structured_output` and `contact_supervisor` register
@@ -183,6 +236,14 @@ export const PLANNOTATOR_PHASE_TOOLS: readonly string[] = [
  *    `ask_user_question` schema at all.
  *  - @ff-labs/pi-fff (FFF_SEARCH_TOOLS): registration timing load-time (both modes); no
  *    `setFooter` (only a keyed optional-chained `setStatus`); zero bundled skills.
+ *  - Lazy owners (LAZY_TOOL_LOADERS): pi-subagents and pi-web-access each hide their heavy
+ *    tools behind a loader and replay the selection on `session_start`/`session_tree` — with
+ *    DIFFERENT rules. pi-subagents: recorded declarations → replay; no messages → hide;
+ *    messages without declarations → keep the current state; its `before_agent_start` edits
+ *    `selectedTools` AND the active set. pi-web-access: declarations → replay; no messages →
+ *    hide; messages without declarations → enable ALL its tools; its `before_agent_start` only
+ *    re-adds the loader to the active set. perk's single answer to both: owner-selected
+ *    membership at every reconciliation (`ownerSelected`) + the loader refusal in `tool_call`.
  */
 export const BORROWED_TOOLS: readonly string[] = [
   ...WEB_RESEARCH_TOOLS,
@@ -245,7 +306,9 @@ export const READ_ONLY_TOOLS = [
   // `subagent_supervisor`, kept by every gate-ON re-apply because it is allowlisted here —
   // letting the parent answer ad-hoc children's supervisor asks) stay
   // reachable while gated for the other delegation flows (the gated objective-plan guidance now
-  // names the `explore_objective_node` tool below, not a direct spawn). ACCEPTED LENIENCY,
+  // names the `explore_objective_node` tool below, not a direct spawn). The `subagents_enable`
+  // loader rides along; `subagent` itself is lazy-owned, so the gate installs it only while
+  // pi-subagents has it selected (the allowlist is a ceiling, never an activation). ACCEPTED LENIENCY,
   // deliberately documented: spawned children are unscoped by design (§8.40
   // adopt-never-impersonates), and the `subagent` tool itself can spawn ad-hoc read-write
   // children — a posture choice with NO agent-allowlist backstop, consistent with the arg-blind
@@ -1115,7 +1178,8 @@ function isReadOnlyMode(mode: string | undefined): boolean {
 }
 
 /** The engagement record: the host's active starting set (the restore authority — never
- * `getAllTools()`), the registry census at snapshot time, and the late registrants admitted so far. */
+ * `getAllTools()` — for every name EXCEPT lazy-owned ones, whose membership is the owner's live
+ * selection), the registry census at snapshot time, and the late registrants admitted so far. */
 type Engaged = { snapshot: readonly string[]; census: ReadonlySet<string>; admitted: Set<string> };
 
 export function registerToolGating(
@@ -1148,16 +1212,21 @@ export function registerToolGating(
 
   /**
    * Recompute + install the active tool set from both concerns (contracts.md §8.40):
-   *  - gate ON → exactly READ_ONLY_TOOLS, NO stage filter (the decided composition: the gated
-   *    set is already the diet, and a strict intersection would break the documented warm
-   *    `/objective-plan` carve-out and recreate the seed/gate contradiction class). "The gate
-   *    never widens a stage's set and vice versa" still holds: engaging the gate only ever
-   *    narrows, and stage scoping never adds a tool.
-   *  - gate OFF + stage scoped → a SUBTRACTIVE filter over the baseline (`admitLate`): names
+   *  - gate ON → the stage's gated allowlist (READ_ONLY_TOOLS, or refinement's own), NO stage
+   *    filter (the decided composition: the gated set is already the diet, and a strict
+   *    intersection would break the documented warm `/objective-plan` carve-out and recreate the
+   *    seed/gate contradiction class). "The gate never widens a stage's set and vice versa" still
+   *    holds: engaging the gate only ever narrows, and stage scoping never adds a tool.
+   *  - gate OFF + stage scoped → a SUBTRACTIVE filter over the baseline (`baseline`): names
    *    outside the scoped universe (builtins, un-enumerated foreign tools) pass through untouched;
    *    scoped names (PERK_TOOLS ∪ BORROWED_TOOLS) survive only when the stage's list carries them.
    *  - neither engaged → restore the baseline and forget it (a session that never engages gets
    *    ZERO setActiveTools calls — bare warm sessions stay byte-identical).
+   * Lazy-owned names (LAZY_TOOL_LOADERS) take their membership from the owner's live selection
+   * in every arm: the gated allowlist is a ceiling (installed only while the owner has the tool
+   * selected), and the baseline neither restores one the owner hid nor drops one it enabled.
+   * perk never re-activates or restores a lazy-owned tool — Pi's transcript restore and the
+   * owner's recorded-selection replay do; perk only keeps it or (by stage) strips it.
    * While engaged the set is re-installed on every sync (tree navigation across mode entries
    * must recompute correctly).
    */
@@ -1166,16 +1235,20 @@ export function registerToolGating(
   const SCOPED_TOOL_NAMES: ReadonlySet<string> = new Set([...PERK_TOOLS, ...BORROWED_TOOLS]);
 
   /**
-   * The gate-OFF reconciliation baseline `snapshot ∪ admitted`. A tool the census never saw
-   * (pi-subagents' `subagent_supervisor` registers in its own `session_start`, after perk's sync)
-   * is admitted the first time it is seen active and stays admitted through perk's own filtering
-   * (so a navigation back to an admitting stage restores it); an owner that deactivates its late
-   * tool before perk ever sees it active is respected; a tool the census saw inactive is never
-   * re-activated. Gate-OFF paths only (the gate-ON set is by name — no bookkeeping there).
+   * The gate-OFF reconciliation baseline: `snapshot ∪ admitted` under owner-selected membership,
+   * plus every lazy-owned tool currently active. A tool the census never saw (pi-subagents'
+   * `subagent_supervisor` registers in its own `session_start`, after perk's sync) is admitted
+   * the first time it is seen active and stays admitted through perk's own filtering (so a
+   * navigation back to an admitting stage restores it); an owner that deactivates its late tool
+   * before perk ever sees it active is respected; a tool the census saw inactive is never
+   * re-activated. A lazy-owned snapshot member the owner has since hidden is dropped, and one the
+   * owner enabled after the snapshot is kept. Gate-OFF paths only (the gate-ON set is by name —
+   * no bookkeeping there).
    */
-  function admitLate(e: Engaged): string[] {
-    for (const name of pi.getActiveTools()) if (!e.census.has(name)) e.admitted.add(name);
-    return [...new Set([...e.snapshot, ...e.admitted])];
+  function baseline(e: Engaged, current: ReadonlySet<string>): string[] {
+    for (const name of current) if (!e.census.has(name)) e.admitted.add(name);
+    const lazyActive = [...current].filter((name) => LAZY_OWNED_TOOLS.has(name));
+    return [...new Set([...ownerSelected([...e.snapshot, ...e.admitted], current), ...lazyActive])];
   }
 
   function apply(nextActive: boolean, nextStage: string | null): void {
@@ -1191,10 +1264,14 @@ export function registerToolGating(
         admitted: new Set(),
       };
     }
+    // The owner's live selection, read once per install (after the snapshot literal above, so
+    // the fail-closed ordering is unchanged).
+    const current: ReadonlySet<string> =
+      effective || engaged !== null ? new Set(pi.getActiveTools()) : new Set();
     if (effective) {
-      pi.setActiveTools([...gatedToolsFor(nextStage)]);
+      pi.setActiveTools(ownerSelected(gatedToolsFor(nextStage), current));
     } else if (engaged !== null) {
-      const base = admitLate(engaged);
+      const base = baseline(engaged, current);
       if (stageList !== undefined) {
         pi.setActiveTools(
           base.filter((name) => !SCOPED_TOOL_NAMES.has(name) || stageList.includes(name)),
@@ -1216,9 +1293,32 @@ export function registerToolGating(
     apply(active, stageId);
   });
 
+  /**
+   * The lazy-loader refusal (the one stage-enforced `tool_call`, contracts.md §8.40): a loader
+   * called where the tools it enables are ineligible is refused with a stage-naming reason. The
+   * owner re-advertises its loader every turn in its own `before_agent_start`, AFTER perk's
+   * handler, so schema removal cannot hide it — refusing the activation call is the only way to
+   * keep a stage-excluded tool from being reintroduced. The activated tool itself stays under
+   * the fail-open stage filter. An unscoped or unknown-stage session never refuses.
+   */
+  function lazyLoaderRefusal(toolName: string): string | null {
+    if (!Object.hasOwn(LAZY_TOOL_LOADERS, toolName)) return null;
+    if (isActive()) {
+      return gatedToolNames().has(toolName)
+        ? null
+        : lazyLoaderRefusalReason(toolName, { kind: "gated", stage: stageId });
+    }
+    if (stageId === null || !Object.hasOwn(STAGE_TOOLS, stageId)) return null;
+    return STAGE_TOOLS[stageId]?.includes(toolName) === false
+      ? lazyLoaderRefusalReason(toolName, { kind: "stage", stage: stageId })
+      : null;
+  }
+
   // Enforce the whole allowlist even if toolset narrowing failed or foreign tools registered late.
   pi.on("tool_call", async (event) => {
     try {
+      const refusal = lazyLoaderRefusal(event.toolName);
+      if (refusal !== null) return { block: true, reason: refusal };
       if (!isActive()) return;
       if (event.toolName === "edit" || event.toolName === "write") {
         return {

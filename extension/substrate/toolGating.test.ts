@@ -16,16 +16,20 @@ import {
 } from "../testing/harness.ts";
 import { REFUSAL_REASONS } from "./commandPositions.ts";
 import {
+  BORROWED_TOOLS,
   FFF_SEARCH_TOOLS,
   gatedToolsFor,
   isReadOnlyBashCommand,
+  LAZY_TOOL_LOADERS,
   LINEAR_READ_TOOLS,
+  lazyLoaderRefusalReason,
   READ_ONLY_CONTEXT,
   READ_ONLY_TOOLS,
   REFINEMENT_READ_ONLY_CONTEXT,
   REFINEMENT_READ_ONLY_TOOLS,
   readOnlyBashVerdict,
   registerToolGating,
+  STAGE_TOOLS,
   SUBAGENT_CHILD_TOOLS,
   WEB_RESEARCH_TOOLS,
 } from "./toolGating.ts";
@@ -35,8 +39,22 @@ type Hook = (
   ctx: ExtensionContext,
 ) => Promise<{ block?: boolean; message?: { content: string }; messages?: unknown[] } | undefined>;
 
-function gateFixture(floor: () => boolean) {
+/** The fake host's active (and registered) set — it carries no lazy-owned name by default. */
+const FIXTURE_ACTIVE: readonly string[] = ["read", "write", "plan_save"];
+
+/** Every tool some lazy loader enables (its membership is the owner's live selection). */
+const LAZY_OWNED: ReadonlySet<string> = new Set(Object.values(LAZY_TOOL_LOADERS).flat());
+
+/** The installed gate-ON set: the allowlist minus the lazy-owned tools the owner has not selected. */
+function expectedGated(list: readonly string[], current: readonly string[] = FIXTURE_ACTIVE) {
+  return list.filter((name) => !LAZY_OWNED.has(name) || current.includes(name));
+}
+
+function gateFixture(floor: () => boolean, initial: readonly string[] = FIXTURE_ACTIVE) {
   const hooks = new Map<string, Hook>();
+  // The host's live active set as the owners see it (installs are recorded, not applied, so a
+  // test moves it explicitly to model an owner's toggle between reconciliations).
+  let active: readonly string[] = initial;
   let fail: "snapshot" | "census" | "toolset" | "append" | undefined;
   const appends: unknown[] = [];
   const installed: string[][] = [];
@@ -46,11 +64,11 @@ function gateFixture(floor: () => boolean) {
     },
     getActiveTools: () => {
       if (fail === "snapshot") throw new Error("snapshot");
-      return ["read", "write", "plan_save"];
+      return [...active];
     },
     getAllTools: () => {
       if (fail === "census") throw new Error("census");
-      return ["read", "write", "plan_save"].map((name) => ({ name }));
+      return active.map((name) => ({ name }));
     },
     setActiveTools: (names: string[]) => {
       if (fail === "toolset") throw new Error("toolset");
@@ -74,6 +92,9 @@ function gateFixture(floor: () => boolean) {
     installed,
     fail: (value: typeof fail) => {
       fail = value;
+    },
+    setActive: (names: readonly string[]) => {
+      active = names;
     },
     call: (name: string, event: Parameters<Hook>[0] = {}) => hooks.get(name)?.(event, ctx),
   };
@@ -116,7 +137,7 @@ test("floor enforces all observations before sync, despite snapshot/census/tools
       h.gate.exit();
       assert.deepEqual(h.appends, [], "floor exit never appends read-write");
       h.gate.syncFromState("read-write", undefined);
-      assert.deepEqual(h.installed.at(-1), READ_ONLY_TOOLS);
+      assert.deepEqual(h.installed.at(-1), expectedGated(READ_ONLY_TOOLS));
       await assertBackstop(h);
     }
   }
@@ -155,7 +176,7 @@ test("a census-read failure on a cold read-only sync stays closed, records no ha
   // snapshot + census and installs the gated set; the exit then restores that fresh snapshot.
   h.fail(undefined);
   await h.call("resources_discover");
-  assert.deepEqual(h.installed, [READ_ONLY_TOOLS]);
+  assert.deepEqual(h.installed, [expectedGated(READ_ONLY_TOOLS)]);
   await assertBackstop(h);
   h.gate.exit();
   assert.equal(h.gate.isActive(), false);
@@ -198,6 +219,8 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     "code_search",
     "fetch_content",
     "get_search_content",
+    "source_check",
+    "web_enable",
     "ollama_web_search",
     "ollama_web_fetch",
     "web_fetch",
@@ -225,8 +248,9 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     "ffgrep",
     "fff-multi-grep",
     "multi_grep",
-    // The delegation carve-in (the gated flows' spawn surface).
+    // The delegation carve-in (the gated flows' spawn surface) + pi-subagents' lazy loader.
     "subagent",
+    "subagents_enable",
     "wait",
     "subagent_supervisor",
     "intercom",
@@ -303,6 +327,8 @@ test("READ_ONLY_TOOLS: contains the UNION of all web-seam providers' research to
     "code_search",
     "fetch_content",
     "get_search_content",
+    "source_check",
+    "web_enable",
     "ollama_web_search",
     "ollama_web_fetch",
     "web_fetch",
@@ -1810,6 +1836,10 @@ test("REFINEMENT_READ_ONLY_TOOLS: the exact refinement gate-ON selection (no cla
     ...LINEAR_READ_TOOLS,
     ...FFF_SEARCH_TOOLS,
   ]);
+  // The web family carries pi-web-access's full default set and its lazy loader.
+  for (const tool of ["source_check", "web_enable"]) {
+    assert.ok(REFINEMENT_READ_ONLY_TOOLS.includes(tool), `missing ${tool}`);
+  }
   for (const forbidden of [
     "objective_node",
     "plan_draft",
@@ -1821,6 +1851,7 @@ test("REFINEMENT_READ_ONLY_TOOLS: the exact refinement gate-ON selection (no cla
     "explore_objective_node",
     "run_scout_wave",
     "subagent",
+    "subagents_enable",
     "edit",
     "write",
   ]) {
@@ -1837,7 +1868,7 @@ test("gate ON in the refinement stage: the active set, the tool_call backstop an
   const h = gateFixture(() => false);
   // An already-gated UNBOUND session (default flavor installed) that then enters refinement.
   h.gate.syncFromState("read-only", undefined);
-  assert.deepEqual(h.installed.at(-1), READ_ONLY_TOOLS);
+  assert.deepEqual(h.installed.at(-1), expectedGated(READ_ONLY_TOOLS));
   assert.equal((await h.call("before_agent_start"))?.message?.content, READ_ONLY_CONTEXT);
   assert.equal(
     (await h.call("tool_call", { toolName: "objective_refinement_draft", input: {} }))?.block,
@@ -1847,7 +1878,7 @@ test("gate ON in the refinement stage: the active set, the tool_call backstop an
   assert.equal(await h.call("tool_call", { toolName: "objective_node", input: {} }), undefined);
 
   h.gate.syncFromState("read-only", "objective-refine");
-  assert.deepEqual(h.installed.at(-1), REFINEMENT_READ_ONLY_TOOLS);
+  assert.deepEqual(h.installed.at(-1), expectedGated(REFINEMENT_READ_ONLY_TOOLS));
   assert.equal(
     await h.call("tool_call", { toolName: "objective_refinement_draft", input: {} }),
     undefined,
@@ -1906,4 +1937,139 @@ test("gate ON in the refinement stage: the active set, the tool_call backstop an
     messages: [stale, current, { role: "user", content: "[READ-ONLY REFINEMENT MODE] echo" }, user],
   });
   assert.deepEqual(off, { messages: [] });
+});
+
+// ---------------------------------------------------------------------------
+// Lazy-owned tools and their loaders (contracts.md §8.40): membership follows the owner's live
+// selection; a loader has exactly its tools' eligibility and is refused outside it.
+// ---------------------------------------------------------------------------
+
+test("gate ON: the allowlist is a ceiling — a lazy-owned tool installs only while its owner has it selected", () => {
+  const withSubagent = [...FIXTURE_ACTIVE, "subagent", "subagents_enable", "web_enable"];
+  const h = gateFixture(() => false, withSubagent);
+  h.gate.syncFromState("read-only", "plan");
+  const installed = h.installed.at(-1) ?? [];
+  assert.deepEqual(installed, expectedGated(READ_ONLY_TOOLS, withSubagent));
+  assert.ok(installed.includes("subagent"), "the owner-selected lazy tool is kept");
+  for (const hidden of ["web_search", "source_check", "fetch_content", "get_search_content"]) {
+    assert.ok(
+      !installed.includes(hidden),
+      `the owner-hidden lazy tool is not installed: ${hidden}`,
+    );
+  }
+  for (const loader of Object.keys(LAZY_TOOL_LOADERS)) {
+    assert.ok(installed.includes(loader), `loaders are ordinary allowlisted names: ${loader}`);
+  }
+});
+
+test("gate OFF baseline: a lazy-owned snapshot member the owner hid is dropped; one it enabled later is kept; the stage filter still applies", () => {
+  const start = [...FIXTURE_ACTIVE, "subagent", "web_search", "subagents_enable", "web_enable"];
+  const h = gateFixture(() => false, start);
+  h.gate.syncFromState("read-write", "implement");
+  assert.deepEqual(
+    h.installed.at(-1),
+    start.filter((name) => name !== "plan_save"),
+    "the first engagement keeps the owner's selection (the implement filter drops plan_save)",
+  );
+  // Between reconciliations the web owner hides web_search and the model enables source_check.
+  const next = [...FIXTURE_ACTIVE, "subagent", "subagents_enable", "web_enable", "source_check"];
+  h.setActive(next);
+  h.gate.syncFromState("read-write", "implement");
+  const implement = h.installed.at(-1) ?? [];
+  assert.ok(!implement.includes("web_search"), "never restored from the snapshot once hidden");
+  assert.ok(implement.includes("source_check"), "an owner-enabled lazy tool is kept");
+  assert.ok(implement.includes("subagent"));
+  // Stage eligibility is perk's: gist-save excludes the delegation family (loader included).
+  h.gate.syncFromState("read-write", "gist-save");
+  const gist = h.installed.at(-1) ?? [];
+  assert.ok(!gist.includes("subagent"), "an owner-enabled lazy tool is stripped by the stage");
+  assert.ok(!gist.includes("subagents_enable"), "its loader is stripped with it");
+  assert.ok(gist.includes("source_check") && gist.includes("web_enable"));
+  // Leaving every concern restores the baseline under the same owner-selected rule.
+  h.gate.syncFromState("read-write", undefined);
+  assert.deepEqual(h.installed.at(-1), next);
+});
+
+test("the loader refusal: stage-naming reasons under the gate and under stage scoping", async () => {
+  const subagentsGated =
+    "perk read-only mode: subagents_enable is blocked (its tools — subagent — are not allowlisted in the gated objective-refine session).";
+  const subagentsStage =
+    "perk stage scoping: subagents_enable is blocked (its tools — subagent — are not available in the gist-save stage).";
+  const call = async (h: ReturnType<typeof gateFixture>, toolName: string) =>
+    (await h.call("tool_call", { toolName, input: {} })) as
+      | { block?: boolean; reason?: string }
+      | undefined;
+
+  // Gate ON, refinement: the delegation loader is refused by name; the web loader passes.
+  const refine = gateFixture(() => false);
+  refine.gate.syncFromState("read-only", "objective-refine");
+  assert.deepEqual(await call(refine, "subagents_enable"), {
+    block: true,
+    reason: subagentsGated,
+  });
+  assert.equal(await call(refine, "web_enable"), undefined);
+
+  // Gate ON in plan and unscoped: READ_ONLY_TOOLS carries both loaders.
+  for (const stage of ["plan", undefined]) {
+    const gated = gateFixture(() => false);
+    gated.gate.syncFromState("read-only", stage);
+    for (const loader of Object.keys(LAZY_TOOL_LOADERS)) {
+      assert.equal(await call(gated, loader), undefined, `${loader} passes gated in ${stage}`);
+    }
+  }
+
+  // Gate OFF, gist-save: stage scoping refuses the delegation loader; the web loader passes.
+  const gist = gateFixture(() => false);
+  gist.gate.syncFromState("read-write", "gist-save");
+  assert.deepEqual(await call(gist, "subagents_enable"), { block: true, reason: subagentsStage });
+  assert.equal(await call(gist, "web_enable"), undefined);
+  assert.equal(await call(gist, "constructor"), undefined, "a prototype key is never a loader");
+
+  // Gate OFF, no stage or an unknown stage: never refused (fail-open).
+  for (const stage of [undefined, "future-stage", "constructor"]) {
+    const open = gateFixture(() => false);
+    if (stage !== "constructor") open.gate.syncFromState("read-write", stage);
+    for (const loader of Object.keys(LAZY_TOOL_LOADERS)) {
+      assert.equal(await call(open, loader), undefined, `${loader} passes in ${stage}`);
+    }
+  }
+
+  // The unscoped gated wording is unreachable by today's loaders — pinned through the format.
+  assert.equal(
+    lazyLoaderRefusalReason("web_enable", { kind: "gated", stage: null }),
+    "perk read-only mode: web_enable is blocked (its tools — web_search, source_check, fetch_content, get_search_content — are not allowlisted in this gated session).",
+  );
+  assert.equal(
+    lazyLoaderRefusalReason("subagents_enable", { kind: "gated", stage: "objective-refine" }),
+    subagentsGated,
+  );
+  assert.equal(
+    lazyLoaderRefusalReason("subagents_enable", { kind: "stage", stage: "gist-save" }),
+    subagentsStage,
+  );
+});
+
+test("LAZY_TOOL_LOADERS: each loader and its tools are borrowed, and a loader's eligibility equals its tools' everywhere", () => {
+  const lists: [string, readonly string[]][] = [
+    ["READ_ONLY_TOOLS", READ_ONLY_TOOLS],
+    ["REFINEMENT_READ_ONLY_TOOLS", REFINEMENT_READ_ONLY_TOOLS],
+    ...Object.entries(STAGE_TOOLS).map(([stage, list]): [string, readonly string[]] => [
+      `STAGE_TOOLS.${stage}`,
+      list,
+    ]),
+  ];
+  assert.ok(Object.keys(LAZY_TOOL_LOADERS).length > 0);
+  for (const [loader, tools] of Object.entries(LAZY_TOOL_LOADERS)) {
+    assert.ok(tools.length > 0, `${loader} enables at least one tool`);
+    for (const name of [loader, ...tools]) {
+      assert.ok(BORROWED_TOOLS.includes(name), `${name} must be in BORROWED_TOOLS`);
+    }
+    for (const [label, list] of lists) {
+      assert.equal(
+        list.includes(loader),
+        tools.every((tool) => list.includes(tool)),
+        `${label}: ${loader} must be eligible exactly where ${tools.join(", ")} are`,
+      );
+    }
+  }
 });
