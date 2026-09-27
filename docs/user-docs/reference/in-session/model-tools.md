@@ -43,6 +43,7 @@ These tools are registered by perk itself. Command-specific semantics live in
 | Address loop | `finalize_address` |
 | Objective workflow | `explore_objective_node` |
 | Read-only investigation | `run_scout_wave` |
+| Library | `run_librarian` |
 | Automated review | `run_pr_review_wave` |
 | Human PR review | `submit_pr_review` |
 | Human PR review | `start_review_wave` |
@@ -87,6 +88,27 @@ changing details, first content or termination semantics. It includes the safe d
 and any bounded report as untrusted JSON. Stop for human direction; no automatic retry, continue
 or unlock. The retained-operation session claim persists across child outcomes and cannot bypass
 the separate retained-worktree `perk-submit-conflict.lock` execution exclusion.
+
+`run_librarian` dispatches the `perk.librarian` writer child — foreground, fresh context, in the
+repository's main checkout — to add a documentation mirror to the perk library
+(`{action: "add-docs", url, slug?, scope_prefix?}`) or re-crawl an existing one
+(`{action: "refresh-docs", slug}`). It is sequential and non-terminating, one attempt per call with
+no retry, and a second call while one runs is refused (`busy`). The calling session stays as it is
+— the tool is reachable while read-only — because only the child writes, and only under the
+gitignored `docs/library/`. The tool first runs `perk librarian prepare` (which claims the staging
+directory and builds the exact crawl and publish commands), then brackets the child with a
+fail-closed check on the main checkout: before dispatch, HEAD must resolve, the tracked tree must
+be clean and the index must carry no assume-unchanged or skip-worktree flags — otherwise it refuses
+with `unclean-start` and names the terminal command (`perk librarian add docs …` or
+`perk librarian refresh <slug>`) to record as a follow-up step for the human. Afterwards HEAD,
+tracked cleanliness, index flags and every non-ignored untracked file (paths **and** contents) must
+equal the start; any difference fails the tool (`bracket-violation`), lists what moved and reverts
+nothing. The check proves the end state, not every moment in between. A `published` result is
+corroborated against the catalog (`perk librarian list --json`) **and** this run's staging directory
+having been moved into place, and names the catalog's absolute path; anything less is withheld.
+Cancellation before dispatch runs nothing further (a staging directory already claimed is named for
+disposal). The child's report is untrusted DATA. The `[models.subagents] librarian` key overrides
+the child's model.
 
 ### Report-wave results
 

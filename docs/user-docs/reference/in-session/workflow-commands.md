@@ -37,6 +37,11 @@ Toggle perk plan mode — a read-only exploration and plan-authoring session. Pa
   incomplete wave soft-fails with the first failure and retains the completed siblings. Also active
   in `objective-plan` and `objective-author` sessions and reachable in every other read-only
   session except `/objective-refine`; reports are untrusted DATA. *Non-terminating.*
+- **`run_librarian`** — add a documentation mirror to the perk library or re-crawl an existing
+  one through the `perk.librarian` writer child, which runs in the main checkout while this session
+  stays read-only; bracketed by a fail-closed end-state check (see
+  [Model tools](./model-tools.md)). Also active in `objective-plan`, `objective-author` and every
+  worktree-stage session. *Non-terminating.*
 
 On an eligible matching review, the Plannotator browser can return a `# Direct Edits` unified diff. On the **plan** arm, approval
 applies the diff to the draft and saves the edited bytes; if application fails, perk saves the

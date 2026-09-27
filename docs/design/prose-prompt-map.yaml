@@ -363,6 +363,18 @@ routes:
     audience: shipped
     role: tool-contract
     priority: 85
+  - id: agent-librarian
+    match: { paths: ["agents/librarian.md"] }
+    capability: extension.utilities
+    audience: shipped
+    role: subagent-instruction
+    priority: 85
+  - id: ts-librarian
+    match: { paths: ["extension/pi/v1/librarian.ts"] }
+    capability: extension.utilities
+    audience: shipped
+    role: tool-contract
+    priority: 85
 
   - id: py-plan-seed-data
     match: { paths: ["src/perk/cli/seed_file.py", "src/perk/cli/commands/plan/from_cmd.py"] }

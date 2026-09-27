@@ -379,6 +379,38 @@ The docs door's atomic `mkdir` of the session's empty `.staging/<slug>[-N]` dire
 never deletes a staging directory.
 _Avoid_: staging lock (there is none — the library lock covers publish, not crawling)
 
+**Prepare worker**:
+`perk librarian prepare docs|refresh … --json`: the docs doors' pre-session half plus the staging
+claim, emitted as the crawl plan the `run_librarian` tool dispatches its child with; launches
+nothing.
+_Avoid_: docs door (that launches a session)
+
+**Writer child**:
+A foreground, fresh-context, floor-less subagent perk dispatches to mutate on the parent's behalf
+(`perk.conflict-resolver`, `perk.librarian`), through the one foreground-delegation transport;
+contrast the read-only report lanes.
+_Avoid_: writer lane, worker
+
+**Bracket**:
+The fail-closed clean-start / end-state check around `run_librarian`'s child on the main
+checkout (HEAD, tracked cleanliness, index flags, the non-ignored untracked inventory with content
+digests); it detects violations after the fact, never prevents them, never reverts. Its claim is
+end-state equality, not mid-window immutability.
+_Avoid_: sandbox, guard
+
+**Clean-start policy**:
+The precondition the bracket requires before dispatch — HEAD resolvable, tracked tree clean, no
+assume-unchanged/skip-worktree flags, the non-ignored untracked files inventoried; an unclean
+start is the typed `unclean-start` refusal naming the terminal door.
+_Avoid_: clean tree (untracked non-ignored paths are allowed at start — inventoried, not
+forbidden)
+
+**Corroboration** (of a librarian publish):
+The parent's machine evidence for a `published` claim: the catalog entry present via
+`list --json` AND this run's claimed staging directory moved into place. The child's record
+alone is never proof.
+_Avoid_: verification (the child's own checks), confirmation
+
 **Staging handshakes**:
 `sources.json` (the per-page inventory) and `failed-pages.json` (the crawl's failure report),
 written by the `librarian` skill's crawl script into the staging directory and consumed by

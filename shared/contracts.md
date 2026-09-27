@@ -713,8 +713,10 @@ objective-plan session's OPTIONAL explore step: it spawns the read-only `perk.ob
 child over the already-carved-in delegation family and writes nothing to the worktree) +
 `run_scout_wave` (the authoring sessions' scout launcher: one read-only `perk.scout` lane per
 brief over the carved-in delegation family; no worktree writes; reachable in every gated stage
-except `objective-refine` on the `explore_objective_node` precedent; §8.70) + the pi-subagents
-**child-side engine tools** (`SUBAGENT_CHILD_TOOLS` = `structured_output` +
+except `objective-refine` on the `explore_objective_node` precedent; §8.70) + `run_librarian`
+(the library writer launcher: the parent stays gated; the `perk.librarian` child writes only the
+gitignored library in the main checkout, proven by the §8.75(l) end-state bracket) + the
+pi-subagents **child-side engine tools** (`SUBAGENT_CHILD_TOOLS` = `structured_output` +
 `contact_supervisor` — delivered through the child prompt runtime / native supervisor bridge,
 inert when absent in parents; native wakes require no wait-tool carve-in; kept active so a gated
 **adopted** child can make the engine-required `structured_output` completion call — stripping it
@@ -966,7 +968,9 @@ owns the provider seams); the read-only CI executor
 `browser.ts` / `submit.ts` / `checkout.ts` / `extension/pi/v1/providers/plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
 `perk-pr-review/` / `perk-pr-review-terminal/` / `perk-pr-review-browser/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
 (`extension/delivery/conflictResolution.ts` + `extension/pi/v1/delivery/submitConflict.ts` +
-`conflictResolverEngine.ts`; the probe contract stays in §8.4). The Pi-free resolver is mode-discriminated:
+`conflictResolverEngine.ts`; the probe contract stays in §8.4); the library writer drive
+(`extension/library/librarian.ts` + `extension/pi/v1/librarian.ts` + `librarianEngine.ts`;
+§8.75(l)); both writers' shared transport (`extension/pi/v1/foregroundDelegation.ts`). The Pi-free resolver is mode-discriminated:
 PR input is unchanged; retained input reuses `SyncConflictDispatch` plus parent session/run identity
 and optional model, with one child-target `worktree` field. It accepts no task/script/agent,
 publication flag, extension list or worktree allocation. Submit/address PR-rebase uses
@@ -979,8 +983,10 @@ once at entry. Active writers exclude replacement priming. Later submit/valid fi
 malformed finalizer input does not. Address still publishes, resolves all threads, then decides
 conflicts; only full finalization can prime. No counter mutation or automatic retry in the tool.
 
-The engine carries the public delegation event literals and emits on Pi's bus — no loader,
-preflight, profile evidence or digest; presence is Pi's tool census (no `subagent` tool →
+The foreground-delegation transport (`pi/v1/foregroundDelegation.ts`) carries the public
+delegation event literals for both writers and refuses an already-aborted signal before
+subscribing; the conflict engine emits through it on Pi's bus — no loader, preflight, profile
+evidence or digest; presence is Pi's tool census (no `subagent` tool →
 `unavailable`, no lock). The resolver definition, the shipped `agents/conflict-resolver.md`
 (package-discovered by pi-subagents), drifts only by reviewed repo change — no dispatch check. Cwd
 NUL/CR/LF refused, other bytes single-quoted in the built `cd`; flagless `perk pr review-context
@@ -1110,8 +1116,9 @@ read-only tools, `inheritProjectContext: false` and `inheritSkills: false`. No d
 (a stray field is ignored, not rejected), so a report-only lane completes on its validated
 `structured_output` report — the required report contract is unchanged (a missing/invalid report
 still fails the lane) and non-mutation is enforced by Perk's restrictions + the rubric
-prohibitions. `conflict-resolver` leaves definition async absent (the engine default — it IS
-expected to mutate), retaining writer tools and project/skill inheritance true. All thirteen explicitly set `inheritGlobalContext: false` and omit both
+prohibitions. `conflict-resolver` and `librarian` leave definition async absent (the engine
+default — each IS expected to mutate), retaining writer tools and project/skill inheritance true.
+All fourteen explicitly set `inheritGlobalContext: false` and omit both
 `extensions` and `subagentOnlyExtensions` (empty is not equivalent). Reports use ambient runner
 discovery; foreground writers have no ambient extensions or transported Perk handoff. Canonical
 models stay intact — ONE `model:` per def, no `fallbackModels` (pi-subagents ≥ 0.68.0 rejects
@@ -7397,8 +7404,11 @@ read-only `perk.draft-reviewer` over the already-carved-in delegation family). T
 launcher `run_scout_wave` (§8.70) joins `PERK_TOOLS`, `READ_ONLY_TOOLS`, and exactly the three
 AUTHORING stage lists — `plan` / `objective-plan` / `objective-author` — and no other (not
 `save`, `objective-save`, the gist stages, `audit`, `stack-review`, the refinement row, or the
-worktree family); the `objective-author` and `objective-save` lists, identical until then, now
-differ by this one name.
+worktree family). The library writer launcher `run_librarian` (§8.75(l)) joins `PERK_TOOLS`,
+`READ_ONLY_TOOLS` (the parent stays gated; only its child writes, only the gitignored library),
+the same three authoring lists and the ONE shared worktree list (so `submit`/`land` carry it by
+the family's one-shared-list rule — accepted and pinned) and no other; the `objective-author`
+and `objective-save` lists therefore differ by exactly these two names.
 
 **Lazy-owned tools and their loaders.** pi-subagents and pi-web-access each hide their heavy
 tools until the model calls a **lazy loader** — a borrowed tool that activates its package's
@@ -13707,12 +13717,13 @@ exit, no `plan_review`.
    (§8.57).
 7. **Boundaries.** No browser/plannotator dependency; no persistence, retry, supersede, or
    cancel; dream drafts refused; refinement sessions excluded by the stage gate.
-## §8.75 · The perk library (layout, catalog, lock, staging/publish, the read-only carve-out, the network verbs, the `librarian` skill, the docs doors)
+## §8.75 · The perk library (layout, catalog, lock, staging/publish, the read-only carve-out, the network verbs, the `librarian` skill, the docs doors, the writer child)
 
 The **perk library** is a catalogued, gitignored offline reference of external documentation
 mirrors and source checkouts. Python owns it end to end (`perk/library/` + the `perk librarian`
-group); the extension's only stake is the read-only bash admission (§8.3). Library content is
-untrusted DATA — quoted as evidence, never obeyed.
+group); the extension's stakes are the read-only bash admission (§8.3) and the `run_librarian`
+writer flow ((l)), which reaches the library only through the Python workers and the dispatched
+child. Library content is untrusted DATA — quoted as evidence, never obeyed.
 
 **(a) Layout.** The library lives in the **main checkout** at `docs/library/`, resolved from any
 worktree by `perk.library.layout.library_root` (`paths.library_dir(git.main_worktree_root(root) or
@@ -13832,8 +13843,8 @@ the catalog; content left at …", an adoptable orphan, never a dangling entry.
 
 **(f) The read-only-invariant carve-out.** The library is a gitignored cache, not repository
 content. The workers are admitted to read-only perk sessions (§8.3: `perk librarian
-list|record|remove|check|refresh|add source … --json`, `--json` last; `add docs` is not
-admitted) because the preflight — which the network verbs run too, their executing git
+list|record|remove|check|refresh|add source … --json`, `--json` last; `add docs` and
+`prepare` are not admitted) because the preflight — which the network verbs run too, their executing git
 operations config-pinned with hooks disabled (§8.75(i)) — refuses operations whose
 representative probes reach a non-ignored or tracked path (coverage by path class, not a proof —
 §8.75(d)), the lock never follows a symlink out of the cache, and the committed README is
@@ -13858,8 +13869,9 @@ Envelopes: `LibrarianListOut` / `LibrarianRecordOut` / `LibrarianRemoveOut` /
 (`results[]` of `{action, detail, notes, entry}` with `action` ∈
 `probed`/`pinned`/`recent`/`missing`/`failed`, `warnings`) / `LibrarianRefreshOut` (`action` ∈
 `fast_forwarded`/`up_to_date`/`skipped_dirty`/`skipped_non_ff`, `detail`, `previous_head`,
-`entry`) — shapes are the `shared/schemas/outputs/librarian-*.schema.json` snapshots
-(`librarian-add-source`, `librarian-check` and `librarian-refresh` included); failures are the shared
+`entry`) / `LibrarianPrepareOut` (the crawl plan, (k)) — shapes are the
+`shared/schemas/outputs/librarian-*.schema.json` snapshots (`librarian-add-source`,
+`librarian-check`, `librarian-refresh` and `librarian-prepare` included); failures are the shared
 `{success: false, error_type, message}`. Exits `0` ok · `1` typed refusal / op failure · `2`
 `not_a_repo`.
 
@@ -14007,18 +14019,18 @@ ambient and description-discovered (no `disable-model-invocation`) — the §8.5
 only the entries a task depends on whose status is `stale` **or `unknown`** (a published or added
 entry is `unknown` until its first check baselines it, and never ages into `stale`); (3)
 **refresh only on evidence** (`drifted`, or `unverifiable` plus task-evidenced drift; source →
-`refresh --json`, docs → the docs-refresh door (k)); (4) **reuse before acquiring** (an installed
-dependency under `node_modules/`, `.pi/npm/node_modules/` or `site-packages` metadata); (5) **add
-when missing** (docs → the `add docs` door (k)) — plus the documentation workflow the door
-sessions follow (dry-run → scope → crawl into the seeded staging directory, or by hand a new or
+`refresh --json`, docs → `run_librarian` `refresh-docs` (l) from a session or the docs-refresh
+door (k) from a terminal); (4) **reuse before acquiring** (an installed dependency under
+`node_modules/`, `.pi/npm/node_modules/` or `site-packages` metadata); (5) **add when missing**
+(docs → `run_librarian` `add-docs` (l) or the `add docs` door (k)) — plus the documentation
+workflow the door sessions and the writer child follow (dry-run → scope → crawl into the seeded staging directory, or by hand a new or
 empty direct child of `.staging/` → prune → fix → `record --publish`) and the source path
 (`add source`, pinned to the version the repo uses when known; `git@`/`ssh://` for private
-repositories). The skill names the doors (`perk librarian add docs <url> …`, the human
-`perk librarian refresh <slug>`) as the only way a documentation mirror is added or refreshed, and
-states that the `--json` workers run in read-only sessions while the crawl script does not
-(interpreters are never admitted, §8.3) — a documentation mirror is added or refreshed through the
-doors (k), never from a read-only session (a needed mirror is recorded as a follow-up door command
-for the human). The script
+repositories). The skill states that the `--json` workers run in read-only sessions while the
+crawl script does not (interpreters are never admitted, §8.3) — a documentation mirror is added or
+refreshed from a read-only session through `run_librarian` (l); the doors (k) (`perk librarian
+add docs <url> …`, the human `perk librarian refresh <slug>`) are the terminal alternative the
+`unclean-start` refusal names (recorded as a follow-up step for the human). The script
 (stdlib-only, Python ≥ 3.10, `python3 <skill-dir>/scripts/copy_docs_to_markdown.py`; `curl` and
 `html2markdown` on `PATH`):
 
@@ -14129,3 +14141,97 @@ session-free add**: pruning and artifact fixes are judgment work.
 - *Surfaces.* `add docs` has no `--json` (its success is an exec; the dry-run payload is the
   script's human map); trailing arguments pass through to `pi`. Neither door is admitted to
   read-only sessions (§8.3 admits only the `--json` worker forms).
+- *The `prepare` worker.* `prepare docs <url> [--slug] [--scope-prefix] --json` / `prepare
+  refresh <slug> --json` run exactly the pre-session order above through the claim and emit the
+  `DocsCrawlPlan` envelope (`LibrarianPrepareOut`: `action, url, slug, scope_prefix, staging_dir,
+  main_root, current_dir, replace, crawl_command, publish_command, warnings`; `python` and the
+  script path travel only inside `crawl_command` — one construction of the commands) — the
+  `run_librarian` tool's worker; launches nothing; the doors' error types and exits; not admitted
+  to read-only sessions (the tool reaches it through the extension's own exec, `runColdDoor`).
+
+**(l) The `perk.librarian` writer child and `run_librarian`** (`extension/library/librarian.ts` —
+the Pi-free core — `extension/pi/v1/librarianEngine.ts`, `extension/pi/v1/librarian.ts`, the
+shared transport `extension/pi/v1/foregroundDelegation.ts`, the snapshot policy
+`extension/substrate/checkoutSnapshot.ts` and its probes in `substrate/git.ts`).
+
+- *The def.* `agents/librarian.md` (§8.3's writer profile: writer tools, async absent,
+  project/skill inheritance true, `inheritGlobalContext: false`; `[models.subagents] librarian`
+  overrides its model). Its categorical rules: write only under the gitignored library (the named
+  staging directory, and `documentation/` through `record --publish`); never commit, stage,
+  stash, checkout, reset or run another mutating `git` command; never create or modify a path
+  outside `docs/library/`; never create or edit `docs/library/README.md`; never hand-edit
+  `catalog.json`; never delete a staging directory other than the named one; never spawn
+  subagents; stop and report on a missing prerequisite or a refusal — never work around it.
+- *The tool.* `run_librarian` — parameters `{action: "add-docs", url, slug?, scope_prefix?}` |
+  `{action: "refresh-docs", slug}` (closed; a strict decoder refuses control characters, fields
+  over 2,048 characters, a non-http(s) URL, an off-grammar slug, a blank or spaced prefix and
+  `refresh-docs` with `url`/`scope_prefix` as `bad_input`); sequential, non-terminating, in-session
+  single flight (`busy`). Stage placement: `READ_ONLY_TOOLS` (§8.3's carve-in — the parent stays
+  gated), `PERK_TOOLS`, the `plan` / `objective-plan` / `objective-author` lists and the shared
+  worktree list (submit/land carry it by the one-shared-list rule), never refinement.
+- *One cancellation signal.* The execute slot ∪ `ctx.signal`, threaded through `prepare`, `list`
+  (as the cold-door `ctx.signal`) and the dispatch.
+- *The flow, in order* (every arm a typed soft failure): decode → single flight → already-aborted
+  (`cancelled`, nothing ran) → the main checkout (`realpath(mainCheckoutRoot)`, proven by the
+  fail-closed `worktreeGitDir`, else `checkout-unresolved`) → engine presence (`unavailable`) and
+  the native `worktree` default (§8.3; `incompatible-worktree-default` with the fix) → the
+  **clean-start policy** (`unclean-start`, naming the terminal door `perk librarian add docs
+  '<url>' [--slug …] [--scope-prefix '…']` / `perk librarian refresh <slug>` as a follow-up step
+  for the human; nothing prepared) → `prepare` (a refusal passes its `error_type` through; an
+  abort during or after it is `cancelled` naming the claimed staging directory — no dispatch, no
+  bracket) → plane agreement (`realpath(main_root)` must equal the session's main checkout, else
+  `checkout-mismatch`) → the code-built task (`null` on a NUL/CR/LF → `bad_output`) → ONE
+  foreground dispatch through the transport (`agent perk.librarian`, `cwd` = the main checkout,
+  `nodeId librarian`, parent `ownerRunId` = the run id or the session id, `context: "fresh"`,
+  `timeoutMs` the transport's 30 min, the plain-JSON record schema, the optional model, **no
+  `extensionBindings`**; the engine and the transport each refuse an already-aborted signal before
+  emitting) → the **end-state bracket, always once a request was emitted** (a transport failure,
+  a cancelled or an unconfirmed child included) → classification → corroboration.
+- *The record* (`LIBRARIAN_RECORD_SCHEMA`, closed): `action`, `outcome` ∈ `published` /
+  `publish-refused` / `crawl-failed` / `stopped-before-mutation`, `slug`, `published_path`
+  (non-null exactly for `published`), `pages_published` / `failures_accepted` (non-negative
+  integers; 0 for every non-`published` outcome) and a bounded `summary`. The counts' defined
+  source: the staged `sources.json` `pages` entries and — only with `--accept-failures` — the
+  staged `failed-pages.json` records, read immediately before the publish command (the publish
+  reports neither and deletes the report). Child-derived DATA, rendered but never relied on. A
+  record naming another action or slug, or inconsistent with its outcome, is `withheld /
+  invalid-outcome`; a consistent non-`published` outcome is `withheld / not-published`.
+- *Corroboration* of a `published` record: a `perk librarian list --json` entry (`slug`, `kind
+  docs`, `present`) **and** this run's claimed staging directory absent (`lstat` ENOENT —
+  `record --publish` moves it into place, the only sanctioned removal); an entry alone cannot
+  tell a refresh from the untouched prior mirror. Presence, an unreadable state or a failed
+  listing withholds `not-corroborated`. A `published` result renders the **catalog's** absolute
+  path and status, never the child's `published_path`.
+- *The receipt* (whitelist): parent session/run ids, request id, `nodeId`, action, slug, `cwd`,
+  staging directory, `termination`, native status/run id/agent/exit code, the native config
+  observation, the bracket outcome — no task, report text, raw error or output.
+- *Failures* (the tool's own vocabulary): `busy`, `checkout-unresolved`, `checkout-mismatch`,
+  `unclean-start`, `unavailable`, `incompatible-worktree-default`, `cancelled`,
+  `transport-failed`, `native-failed`, `malformed-result`, `termination-unconfirmed`,
+  `bracket-violation`; `prepare` refusals pass their Python `error_type` through; the decode arm is
+  `bad_input`, the envelope arm `bad_output`; withholdings are `not-published`, `invalid-outcome`,
+  `not-corroborated`.
+- *The bracket's claim.* **Clean start** = HEAD resolvable + tracked tree clean (`status
+  --porcelain -z --untracked-files=no` empty) + no assume-unchanged/skip-worktree index flags +
+  the non-ignored untracked inventory recorded as `{path, kind, digest}` (`ls-files --others
+  --exclude-standard -z`; sha256 per file, the target per symlink) — untracked paths are allowed
+  at start, never forbidden. **End state** = HEAD, tracked cleanliness, flags and the untracked
+  inventory **equal** to the start: added, removed and content/type-changed entries are each
+  violations, all named. Any probe failure — an unreadable untracked file included — is a
+  violation (and an unclean start). A violation fails the tool (`bracket-violation`), reports what
+  moved and never auto-reverts. The claim is **end-state equality, not mid-window immutability**
+  (a transient modify-and-restore inside the window is invisible — §8.65's accepted residual);
+  ignored writes (the library, `.perk/workflow/`) are invisible by design; a child-created or
+  child-overwritten `docs/library/README.md` (non-ignored through the negation) fails the bracket.
+  Hashing every non-ignored untracked file is an accepted, uncapped cost (a cap would reopen the
+  overwritten-in-place blind spot).
+- *Accepted residuals.* No structural write-sandbox (the def's categorical rules are the first
+  line; the bracket detects after the fact); no cross-session lock (in-session single flight;
+  distinct claims never share a staging directory and the library lock serializes publish; a
+  sibling session's write is reported by whichever bracket observes it — the bracket names what
+  moved, never who); a `termination-unconfirmed` child may still be running after the bracket
+  observed equality (the message says so); a child that publishes nothing but deletes its own
+  staging directory defeats the staging-absence half of corroboration (the categorical rules
+  forbid it; the catalog-entry half still holds). Deferred: a cross-session librarian lock, a
+  per-launch timeout knob, background execution of the writer child, a catalog-level publication
+  revision marker.
