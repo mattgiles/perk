@@ -46,6 +46,22 @@ def _catalog(repo: Path) -> cat.Catalog:
     return cat.load_catalog(_layout(repo))
 
 
+def _entry(repo: Path, slug: str = "widget") -> cat.Entry:
+    entry = _catalog(repo).get(slug)
+    assert entry is not None
+    return entry
+
+
+def _head_sha(entry: cat.Entry) -> str | None:
+    assert isinstance(entry.upstream, cat.SourceUpstream)
+    return entry.upstream.head_sha
+
+
+def _detail(outcome: source.RefreshOutcome) -> str:
+    assert outcome.detail is not None
+    return outcome.detail
+
+
 def _catalog_bytes(repo: Path) -> bytes | None:
     path = _layout(repo).catalog_path
     return path.read_bytes() if path.exists() else None
@@ -141,7 +157,7 @@ def test_rerun_with_stale_after_updates_only_the_window(repo, upstream):
     outcome = _add(repo, stale_after=3_600)
     assert outcome.action == "reused"
     assert outcome.view.entry.stale_after == 3_600
-    assert _catalog(repo).get("widget").stale_after == 3_600
+    assert _entry(repo).stale_after == 3_600
 
 
 def test_pinned_clone_reuse_and_repin(repo, upstream):
@@ -151,7 +167,7 @@ def test_pinned_clone_reuse_and_repin(repo, upstream):
     assert outcome.action == "cloned"
     assert outcome.view.entry.ref == "v1"
     assert outcome.view.status == "pinned"
-    assert _head(checkout) == v1 == outcome.view.entry.upstream.head_sha
+    assert _head(checkout) == v1 == _head_sha(outcome.view.entry)
     assert git.current_branch(checkout) is None
 
     assert _add(repo, pin="v1").action == "reused"
@@ -163,8 +179,8 @@ def test_pinned_clone_reuse_and_repin(repo, upstream):
     assert repinned.action == "repinned"
     assert _head(checkout) == v2
     entry = repinned.view.entry
-    assert (entry.ref, entry.upstream.head_sha, entry.checked_at) == ("v2", v2, None)
-    assert _catalog(repo).get("widget") == entry
+    assert (entry.ref, _head_sha(entry), entry.checked_at) == ("v2", v2, None)
+    assert _entry(repo) == entry
     _assert_docs_clean(repo)
 
 
@@ -210,8 +226,8 @@ def test_uncatalogued_valid_checkout_is_adopted_at_its_head(repo, upstream):
     assert run_git(checkout, "rev-parse", "origin/main").strip() != head
     outcome = _add(repo)
     assert outcome.action == "reused"
-    assert outcome.view.entry.upstream.head_sha == head
-    assert _catalog(repo).get("widget") == outcome.view.entry
+    assert _head_sha(outcome.view.entry) == head
+    assert _entry(repo) == outcome.view.entry
     _assert_docs_clean(repo)
 
 
@@ -258,7 +274,7 @@ def test_missing_unpinned_checkout_is_recloned(repo, upstream):
     shutil.rmtree(_checkout(repo))
     outcome = _add(repo)
     assert outcome.action == "cloned"
-    assert _catalog(repo).get("widget").upstream.head_sha == _head(_checkout(repo))
+    assert _head_sha(_entry(repo)) == _head(_checkout(repo))
 
 
 def test_slug_taken_by_a_docs_entry_is_refused(repo, upstream):
@@ -373,7 +389,7 @@ def test_repin_catalog_write_failure_names_the_completing_rerun(repo, upstream, 
     assert _catalog_bytes(repo) == before
     outcome = _add(repo, pin="v2")
     assert outcome.action == "repinned"
-    assert _catalog(repo).get("widget").ref == "v2"
+    assert _entry(repo).ref == "v2"
 
 
 def test_fresh_clone_catalog_write_failure_removes_the_clone(repo, upstream, monkeypatch):
@@ -408,7 +424,7 @@ def test_refresh_up_to_date_records_strong_evidence(repo, upstream):
     )
     assert outcome.previous_head == upstream.sha("main")
     assert outcome.view.status == "fresh"
-    assert _catalog(repo).get("widget") == entry
+    assert _entry(repo) == entry
     _assert_docs_clean(repo)
 
 
@@ -418,7 +434,7 @@ def test_refresh_fast_forwards(repo, upstream):
     new = upstream.advance_origin()
     outcome = _refresh(repo)
     assert outcome.action == "fast_forwarded"
-    assert (outcome.previous_head, outcome.view.entry.upstream.head_sha) == (old, new)
+    assert (outcome.previous_head, _head_sha(outcome.view.entry)) == (old, new)
     assert _head(_checkout(repo)) == new
     assert git.current_branch(_checkout(repo)) == "main"
     _assert_docs_clean(repo)
@@ -429,8 +445,8 @@ def test_refresh_skips_a_dirty_checkout_without_writing(repo, upstream):
     (_checkout(repo) / "scratch.txt").write_text("wip\n", encoding="utf-8")
     outcome = _refresh(repo)
     assert outcome.action == "skipped_dirty"
-    assert str(_checkout(repo)) in outcome.detail
-    assert _catalog(repo).get("widget").checked_at is None
+    assert str(_checkout(repo)) in _detail(outcome)
+    assert _entry(repo).checked_at is None
 
 
 def test_refresh_reports_local_commits_ahead(repo, upstream):
@@ -438,9 +454,9 @@ def test_refresh_reports_local_commits_ahead(repo, upstream):
     local = _commit(_checkout(repo), "local.txt")
     outcome = _refresh(repo)
     assert outcome.action == "skipped_non_ff"
-    assert "local commits ahead of origin/main" in outcome.detail
+    assert "local commits ahead of origin/main" in _detail(outcome)
     entry = outcome.view.entry
-    assert (entry.drifted, entry.upstream.head_sha, entry.evidence) == (True, local, "strong")
+    assert (entry.drifted, _head_sha(entry), entry.evidence) == (True, local, "strong")
     assert _head(_checkout(repo)) == local
 
 
@@ -450,7 +466,7 @@ def test_refresh_reports_divergence(repo, upstream):
     upstream.advance_origin()
     outcome = _refresh(repo)
     assert outcome.action == "skipped_non_ff"
-    assert "diverged from origin/main" in outcome.detail
+    assert "diverged from origin/main" in _detail(outcome)
     assert outcome.view.entry.drifted is True
     assert _head(_checkout(repo)) == local
 
@@ -465,8 +481,8 @@ def test_refresh_skips_a_detached_head_without_fetching(repo, upstream, monkeypa
     monkeypatch.setattr(git, "fetch", no_fetch)
     outcome = _refresh(repo)
     assert outcome.action == "skipped_non_ff"
-    assert "detached" in outcome.detail
-    assert _catalog(repo).get("widget").checked_at is None
+    assert "detached" in _detail(outcome)
+    assert _entry(repo).checked_at is None
 
 
 def test_refresh_refuses_pinned_docs_missing_and_unknown(repo, upstream):
@@ -511,7 +527,7 @@ def test_refresh_fetch_failure_writes_nothing(repo, upstream, monkeypatch):
 
     monkeypatch.setattr(git, "fetch", failing_fetch)
     assert _refusal(lambda: _refresh(repo)).error_type == "fetch_failed"
-    assert _catalog(repo).get("widget").checked_at is None
+    assert _entry(repo).checked_at is None
 
 
 def test_refresh_write_failure_after_a_fast_forward_is_recorded_by_a_rerun(
@@ -531,7 +547,7 @@ def test_refresh_write_failure_after_a_fast_forward_is_recorded_by_a_rerun(
     assert _head(_checkout(repo)) == new
     outcome = _refresh(repo)
     assert outcome.action == "up_to_date"
-    assert _catalog(repo).get("widget").upstream.head_sha == new
+    assert _head_sha(_entry(repo)) == new
 
 
 def test_hooks_dir_is_removed_after_the_op(repo, upstream, monkeypatch):

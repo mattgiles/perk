@@ -46,6 +46,21 @@ def _catalog(repo: Path) -> cat.Catalog:
     return cat.load_catalog(_layout(repo))
 
 
+def _head_sha(entry: cat.Entry) -> str | None:
+    assert isinstance(entry.upstream, cat.SourceUpstream)
+    return entry.upstream.head_sha
+
+
+def _docs(entry: cat.Entry) -> cat.DocsUpstream:
+    assert isinstance(entry.upstream, cat.DocsUpstream)
+    return entry.upstream
+
+
+def _detail(result: check.CheckResult) -> str:
+    assert result.detail is not None
+    return result.detail
+
+
 def _set_entry(repo: Path, entry: cat.Entry) -> cat.Entry:
     layout = _layout(repo)
     catalog = cat.load_catalog(layout) if layout.catalog_path.exists() else cat.Catalog()
@@ -62,9 +77,9 @@ def _docs_entry(
     mirror: bool = True,
 ) -> cat.Entry:
     if mirror:
-        mirror = _layout(repo).docs_entry_dir(slug)
-        mirror.mkdir(parents=True, exist_ok=True)
-        (mirror / "index.md").write_text("# docs\n", encoding="utf-8")
+        directory = _layout(repo).docs_entry_dir(slug)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "index.md").write_text("# docs\n", encoding="utf-8")
     return _set_entry(
         repo,
         cat.Entry(
@@ -176,12 +191,12 @@ def test_source_probe_detects_drift_until_refreshed(repo, upstream: Upstream):
     assert result.action == "probed"
     entry = result.view.entry
     assert (entry.evidence, entry.drifted, result.view.status) == ("strong", False, "fresh")
-    head = entry.upstream.head_sha
+    head = _head_sha(entry)
 
     upstream.advance_origin()
     drifted = _only(_check(repo, force=True))
     assert drifted.view.entry.drifted is True
-    assert drifted.view.entry.upstream.head_sha == head
+    assert _head_sha(drifted.view.entry) == head
     assert drifted.view.status == "drifted"
     assert _only(_check(repo, force=True)).view.entry.drifted is True
 
@@ -232,7 +247,7 @@ def test_pinned_and_missing_entries_are_never_probed(repo, upstream, monkeypatch
     by_slug = {result.view.entry.slug: result for result in outcome.results}
     assert by_slug["widget"].action == "pinned"
     assert by_slug["pi"].action == "missing"
-    assert "record --publish" in by_slug["pi"].detail
+    assert "record --publish" in _detail(by_slug["pi"])
     assert calls == []
 
 
@@ -247,7 +262,7 @@ def test_throttle_skips_recent_entries_without_network(repo, upstream, monkeypat
     monkeypatch.setattr(git, "remote_branch_head", lambda *a, **k: calls.append(a) or real(*a, **k))
     outcome = _check(repo, now=NOW + timedelta(hours=1))
     assert [result.action for result in outcome.results] == ["recent", "recent"]
-    assert "pass --force" in outcome.results[0].detail
+    assert "pass --force" in _detail(outcome.results[0])
     assert calls == []
 
     site = _site()
@@ -299,13 +314,13 @@ def test_a_changed_leaf_validator_drifts_the_entry(repo):
     first = _only(_check(repo, site))
     entry = first.view.entry
     assert (entry.evidence, entry.drifted, first.view.status) == ("strong", False, "fresh")
-    assert [page.etag for page in entry.upstream.pages] == ['"0-v1"', '"1-v1"', '"2-v1"']
+    assert [page.etag for page in _docs(entry).pages] == ['"0-v1"', '"1-v1"', '"2-v1"']
 
     site.pages[API] = ("<p>new api</p>", '"2-v2"')
     second = _only(_check(repo, site, force=True))
     assert second.view.entry.drifted is True
     assert second.view.status == "drifted"
-    assert [page.etag for page in second.view.entry.upstream.pages][2] == '"2-v1"'
+    assert [page.etag for page in _docs(second.view.entry).pages][2] == '"2-v1"'
 
 
 def test_a_validator_less_site_is_unverifiable_never_fresh(repo):
@@ -325,11 +340,11 @@ def test_llms_txt_is_weak_evidence(repo):
     site.llms = "# docs\n- guide\n"
     first = _only(_check(repo, site))
     assert (first.view.entry.evidence, first.view.status) == ("weak", "fresh")
-    assert first.view.entry.upstream.fingerprint.startswith("llms=")
+    assert (_docs(first.view.entry).fingerprint or "").startswith("llms=")
     site.llms = "# docs\n- guide\n- api\n"
     second = _only(_check(repo, site, force=True))
     assert second.view.entry.drifted is True
-    assert second.view.entry.upstream.fingerprint == first.view.entry.upstream.fingerprint
+    assert _docs(second.view.entry).fingerprint == _docs(first.view.entry).fingerprint
 
 
 def test_sitemap_lastmod_is_strong_evidence(repo):
@@ -339,7 +354,7 @@ def test_sitemap_lastmod_is_strong_evidence(repo):
     first = _only(_check(repo, site))
     assert first.view.entry.evidence == "strong"
     assert first.view.entry.drifted is False
-    assert {page.sitemap_lastmod for page in first.view.entry.upstream.pages} == {"2026-09-01"}
+    assert {page.sitemap_lastmod for page in _docs(first.view.entry).pages} == {"2026-09-01"}
     site.sitemap = _sitemap((SEED, "2026-09-01"), (GUIDE, "2026-09-01"), (API, "2026-09-20"))
     second = _only(_check(repo, site, force=True))
     assert second.view.entry.drifted is True
@@ -353,7 +368,7 @@ def test_a_sitemap_index_is_followed_into_its_children(repo):
     site.children[child] = _sitemap((API, "2026-09-01"))
     result = _only(_check(repo, site))
     assert result.view.entry.evidence == "strong"
-    assert result.view.entry.upstream.pages[2].sitemap_lastmod == "2026-09-01"
+    assert _docs(result.view.entry).pages[2].sitemap_lastmod == "2026-09-01"
     assert child in site.requests
 
 
@@ -391,7 +406,7 @@ def test_every_request_failing_is_a_failed_result(repo):
     site.all_down = True
     result = _only(_check(repo, site, force=True))
     assert result.action == "failed"
-    assert "ConnectError" in result.detail
+    assert "ConnectError" in _detail(result)
     assert _catalog(repo) == before
 
 
@@ -412,7 +427,7 @@ def test_the_page_bound_limits_requests(repo):
     site = Site(pages={url: ("x", f'"{url}"') for url in (SEED, *urls)})
     result = _only(_check(repo, site))
     assert len(site.page_requests()) == probe.DOCS_PAGE_PROBE_LIMIT
-    pages = result.view.entry.upstream.pages
+    pages = _docs(result.view.entry).pages
     assert pages[0].url == SEED
     assert all(page.etag is not None for page in pages[: probe.DOCS_PAGE_PROBE_LIMIT])
     assert all(page.etag is None for page in pages[probe.DOCS_PAGE_PROBE_LIMIT :])
@@ -459,7 +474,9 @@ def test_a_newer_observation_written_meanwhile_is_never_overwritten(repo, monkey
     def racing_lock(root):
         layout = _layout(repo)
         catalog = cat.load_catalog(layout)
-        entry = replace(catalog.get("pi"), checked_at="2026-09-28T13:00:00Z", drifted=True)
+        current = catalog.get("pi")
+        assert current is not None
+        entry = replace(current, checked_at="2026-09-28T13:00:00Z", drifted=True)
         cat.write_catalog(layout, catalog.with_entry(entry))
         newer.append(entry)
         with real_lock(root):
@@ -469,7 +486,7 @@ def test_a_newer_observation_written_meanwhile_is_never_overwritten(repo, monkey
     outcome = _check(repo, _site())
     result = _only(outcome)
     assert result.action == "failed"
-    assert "changed or was checked meanwhile" in result.detail
+    assert "changed or was checked meanwhile" in _detail(result)
     assert outcome.warnings == ("pi: entry changed or was checked meanwhile — rerun",)
     assert _catalog(repo).get("pi") == newer[0]
 
@@ -548,5 +565,6 @@ def test_inventory_fingerprint_is_order_independent():
     first = probe.inventory_fingerprint([("b", None), ("a", "1")], b"llms")
     second = probe.inventory_fingerprint([("a", "1"), ("b", None)], b"llms")
     assert first == second
+    assert first is not None
     assert first.startswith("sitemap=") and ";llms=" in first
     assert probe.inventory_fingerprint([], None) is None

@@ -374,7 +374,8 @@ def test_check_probes_over_the_transport_seam(repo, monkeypatch):
     assert result.exit_code == 0, result.stderr
     [line] = result.stderr.splitlines()
     assert line.split() == ["probed", "fresh", "docs", "pi"]
-    assert cat.load_catalog(LibraryLayout.for_repo(repo)).get("pi").evidence == "strong"
+    entry = cat.load_catalog(LibraryLayout.for_repo(repo)).get("pi")
+    assert entry is not None and entry.evidence == "strong"
 
 
 def test_check_human_render_lists_notes_and_details(repo, monkeypatch):
