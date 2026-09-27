@@ -1043,7 +1043,7 @@ the installed `.pi/npm/node_modules/@mgiles/perk/agents/` in consumer repos and 
 root's own `package.json` in perk's checkout — and passes them through the same
 defaults/`agentOverrides` pipeline as project defs. Rank is `builtin < package < user < project`:
 a same-named project/user def **shadows** a package def (never a collision). Each `skillPath`
-entry is def-dir-relative; the reviewer defs carry a two-candidate list covering the installed
+entry is def-dir-relative; the reviewer defs and `simplifier` carry a two-candidate list covering the installed
 layout (`../../../@dietrichgebert/ponytail/…`) then the dev-checkout layout
 (`../.pi/npm/node_modules/@dietrichgebert/ponytail/…`), the engine skipping a missing candidate.
 `.pi/agents/perk/` is **no longer perk-managed**: `perk init` neither creates nor touches
@@ -1060,30 +1060,35 @@ error naming the cause and deletes nothing. After a passing preflight each `unli
 survivors keep shadowing theirs until the next `--fix` resumes — so the removal is all-or-nothing
 at the preflight, not transactional across I/O. `.pi/agents/.gitkeep` goes only when it is the
 sole leftover. No Python plane consumer of `agents/` remains (no wheel/sdist entry).
-Ten shipped reports
+Eleven shipped reports
 (`pr-reviewer`, `review-classifier`, `objective-explorer`, `learn-analyst`, `harvest-analyst`,
-`dream-analyst`, `dream-reducer`, `adversarial-reviewer`, `draft-reviewer`, `scout`) plus the repo-local
-`perk-dev.session-auditor` select definition `async: true`. All eleven keep replacement base prompts,
+`dream-analyst`, `dream-reducer`, `adversarial-reviewer`, `draft-reviewer`, `scout`, `simplifier`) plus the repo-local
+`perk-dev.session-auditor` select definition `async: true`. All twelve keep replacement base prompts,
 read-only tools, `inheritProjectContext: false` and `inheritSkills: false`. No def carries a
 `completionGuard` field: pi-subagents 0.70.1 removed the engine's completion **mutation** guard
 (a stray field is ignored, not rejected), so a report-only lane completes on its validated
 `structured_output` report — the required report contract is unchanged (a missing/invalid report
 still fails the lane) and non-mutation is enforced by Perk's restrictions + the rubric
 prohibitions. `conflict-resolver` leaves definition async absent (the engine default — it IS
-expected to mutate), retaining writer tools and project/skill inheritance true. All twelve explicitly set `inheritGlobalContext: false` and omit both
+expected to mutate), retaining writer tools and project/skill inheritance true. All thirteen explicitly set `inheritGlobalContext: false` and omit both
 `extensions` and `subagentOnlyExtensions` (empty is not equivalent). Reports use ambient runner
 discovery; foreground writers have no ambient extensions or transported Perk handoff. Canonical
 models stay intact — ONE `model:` per def, no `fallbackModels` (pi-subagents ≥ 0.68.0 rejects
 any def carrying that removed field wholesale at load; `[models.subagents]` remains the
 spawn-time override) — as do exact-source Ponytail skillPath exceptions
-(pr/adversarial `ponytail-review`, draft `ponytail`). Explicit assignment skills are not discovered
+(pr/adversarial `ponytail-review`, draft and simplifier `ponytail`). Explicit assignment skills are not discovered
 skill inheritance. The auditor is not added to the shipped set; user/manual agents are outside
 this closed profile policy. `scout` (`agents/scout.md`) is the general-purpose read-only analysis
 lane — no fixed rubric; each spawn's task defines the scope and the report format, with
 `structured_output` honored when a schema is supplied. `run_scout_wave` (§8.70) is its perk-owned
 launcher — the enforced path (the spawn-level facts + the restriction packet); a direct `subagent`
 spawn (the leniency above) stays reachable but carries none of the spawn-level facts. The former
-repo-local `perk-dev.analyst` it was promoted from is retired without alias.
+repo-local `perk-dev.analyst` it was promoted from is retired without alias. `simplifier`
+(`agents/simplifier.md`) is the Ponytail-mandated draft-cut lane — the exact-source core
+`ponytail` skill, a `{diagnosis, cuts, proposal, kept, net}` `structured_output` report; it ships
+**dormant**: built and tested (`extension/waves/simplifyWave.ts::runSimplifyWave`, one strict
+no-retry lane) with no perk-owned launcher until the simplify doors land, so a direct `subagent`
+spawn (the leniency above) is its only reachable path and carries none of the spawn-level facts.
 
 
 ---

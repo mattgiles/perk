@@ -328,6 +328,7 @@ test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
       'dream-analyst = "a/dreamer"\n' +
       'dream-reducer = "a/reducer"\n' +
       'scout = "a/scout"\n' +
+      'simplifier = "a/simplifier"\n' +
       'session-auditor = "a/auditor"\n',
   });
   assert.deepEqual(loadPerkConfig(cwd).subagents, {
@@ -342,6 +343,7 @@ test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
     "dream-analyst": "a/dreamer",
     "dream-reducer": "a/reducer",
     scout: "a/scout",
+    simplifier: "a/simplifier",
     "session-auditor": "a/auditor",
   });
 });
