@@ -23,7 +23,7 @@ that session.
      `learn-code`, `learn-harvest`, `learn-dream`, `pr-review`, `pr-review-terminal`,
      `pr-review-browser`, `stack-review-browser`, `plan-review-browser`,
      `objective-review-browser`, `skills-create`, `skills-refine`, `simplify-plan`,
-     `simplify-objective`. A `command:<id>` outside that set validates but **never fires**. When a command is also a registry stage, bind `stage:<id>`.
+     `simplify-objective`, `librarian-add`, `librarian-refresh`. A `command:<id>` outside that set validates but **never fires**. When a command is also a registry stage, bind `stage:<id>`.
 2. **Choose `nudge` or `transclude`** (`mode`).
    - `nudge` — a short pointer (``Follow the `<skill>` skill (read
      `.agents/skills/<skill>/SKILL.md`).``). The pointer carries the skill's read path, so it works

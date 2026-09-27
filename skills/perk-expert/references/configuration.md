@@ -76,6 +76,10 @@ The shipped `librarian` skill carries the model-facing rules (consult once, chec
 `unknown` entries a task depends on, refresh only on evidence, reuse installed dependencies, add
 when missing) and the documentation workflow: its bundled crawl script writes a new
 `.staging/<slug>/` directory, which `perk librarian record --publish` then publishes.
+Documentation mirrors are added with `perk librarian add docs <url>` and refreshed with
+`perk librarian refresh <slug>`, each launching a curating session from a terminal (no
+session-free add; `add docs --dry-run` previews the URL → file map; both need the `librarian`
+skill synced by `perk init` and `curl` + `html2markdown` on `PATH`).
 
 **One perk-owned path lives *outside* the repo.** `~/.perk/last-seen-version` is the user-level,
 machine-local store behind the one-line post-upgrade notice (the `perk release-notes` pointer):

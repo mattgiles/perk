@@ -112,3 +112,9 @@ bindings:
   - trigger: "command:simplify-objective"
     skill: perk-simplify
     mode: nudge
+  - trigger: "command:librarian-add"
+    skill: librarian
+    mode: nudge
+  - trigger: "command:librarian-refresh"
+    skill: librarian
+    mode: nudge

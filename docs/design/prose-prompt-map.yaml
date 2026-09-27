@@ -229,6 +229,12 @@ routes:
     audience: shipped
     role: launch
     priority: 90
+  - id: prompt-librarian
+    match: { paths: ["prompts/stages/librarian/**"] }
+    capability: extension.utilities
+    audience: shipped
+    role: launch
+    priority: 90
   - id: prompt-session
     match: { paths: ["prompts/contexts/read-only.md", "prompts/common/resume-advisory.md", "prompts/commit-and-compact.md", "prompts/commit-and-compact-continuation.md", "prompts/draft-and-compact.md", "prompts/draft-and-compact-continuation.md"] }
     capability: foundation.session

@@ -62,6 +62,8 @@ EXPECTED_DEFAULTS = [
     ("command:skills-refine", "perk-skill-author", "nudge"),
     ("command:simplify-plan", "perk-simplify", "nudge"),
     ("command:simplify-objective", "perk-simplify", "nudge"),
+    ("command:librarian-add", "librarian", "nudge"),
+    ("command:librarian-refresh", "librarian", "nudge"),
 ]
 
 
@@ -318,6 +320,8 @@ def test_deliverable_command_targets_match_the_curated_set():
                 "skills-refine",
                 "simplify-plan",
                 "simplify-objective",
+                "librarian-add",
+                "librarian-refresh",
             }
         )
         == DELIVERABLE_COMMAND_TARGETS

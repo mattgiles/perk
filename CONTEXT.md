@@ -368,6 +368,17 @@ adding library entries, plus the documentation crawl workflow — paired with th
 CLI group, the deterministic workers it drives. The skill decides; the workers act.
 _Avoid_: library skill, docs skill
 
+**Docs door**:
+`perk librarian add docs <url>` and the human `perk librarian refresh <slug>` on a documentation
+entry: the write-capable cold doors (the `save`-descriptor borrow) that claim a staging directory
+and launch the curating session, as opposed to the `--json` workers.
+_Avoid_: docs worker, crawl command
+
+**Staging claim**:
+The docs door's atomic `mkdir` of the session's empty `.staging/<slug>[-N]` directory; the door
+never deletes a staging directory.
+_Avoid_: staging lock (there is none — the library lock covers publish, not crawling)
+
 **Staging handshakes**:
 `sources.json` (the per-page inventory) and `failed-pages.json` (the crawl's failure report),
 written by the `librarian` skill's crawl script into the staging directory and consumed by

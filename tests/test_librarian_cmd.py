@@ -418,13 +418,13 @@ def test_refresh_json_envelope(repo, upstream):
 
 
 def test_refresh_docs_entry_needs_a_session(repo):
+    # The human form of a docs entry is the refresh door (test_librarian_docs_door.py).
     _publish_pi(repo)
     result = _run(["refresh", "pi", "--json"])
     assert result.exit_code == 1
-    assert _json(result)["error_type"] == "needs_session"
-    human = _run(["refresh", "pi"])
-    assert human.exit_code == 1
-    assert "judgment work" in human.stderr
+    payload = _json(result)
+    assert payload["error_type"] == "needs_session"
+    assert "`perk librarian refresh pi` (without --json)" in payload["message"]
 
 
 def test_refresh_pinned_entry_is_refused(repo, upstream):
