@@ -340,6 +340,24 @@ export async function summarizeBtwThread(
   return extractText(response.content) || "(No summary generated)";
 }
 
+const PASTE_START = "\u001b[200~";
+const PASTE_END = "\u001b[201~";
+
+/**
+ * Clean a complete bracketed paste BEFORE the Input inserts it, so its cursor advances by the
+ * cleaned length (scrubbing the value afterwards would leave the cursor at the raw offset). Pi's
+ * terminal delivers a paste whole, `ESC[200~<content>ESC[201~` in one chunk. The framing mirrors
+ * `Input.handleInput`: the first start marker is removed and everything before the first end
+ * marker is the pasted text. Data without a complete paste passes through untouched.
+ */
+function scrubBracketedPaste(data: string): string {
+  if (!data.includes(PASTE_START)) return data;
+  const body = data.replace(PASTE_START, "");
+  const end = body.indexOf(PASTE_END);
+  if (end === -1) return data;
+  return `${PASTE_START}${stripTerminalControls(body.slice(0, end))}${body.slice(end)}`;
+}
+
 class BtwOverlay extends Container implements Focusable {
   private readonly input: Input;
   private readonly tui: TuiLike;
@@ -396,9 +414,12 @@ class BtwOverlay extends Container implements Focusable {
       return;
     }
 
-    this.input.handleInput(data);
-    // A paste can carry ESC/BEL/C1 bytes the Input keeps and echoes inside the frame; scrub the
-    // draft (not `data`: bracketed-paste markers and arrow keys are themselves CSI sequences).
+    // A paste can carry ESC/BEL/C1 bytes the Input keeps and echoes inside the frame. Clean the
+    // pasted text itself (never the whole of `data`: bracketed-paste markers and arrow keys are
+    // themselves CSI sequences), so the cursor stays right after the paste.
+    this.input.handleInput(scrubBracketedPaste(data));
+    // Backstop for control bytes that arrive any other way (a paste split across chunks): the
+    // draft stays control-free, though Input.setValue only clamps the cursor there.
     const value = this.input.getValue();
     const clean = stripTerminalControls(value);
     if (clean !== value) this.input.setValue(clean);

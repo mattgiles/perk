@@ -947,10 +947,27 @@ test("overlay: the pending question + a multi-line provider error fold into sing
   );
 });
 
-test("overlay: tool rows fold a model-authored tool name and a newline-bearing path; the raw name still correlates tool_execution_end", async () => {
+test("overlay: tool rows fold a model-authored tool name and a newline-bearing path; the raw name still correlates tool_execution_end", async (t) => {
+  const rawName = `loo${ESC}]0;NAME-PAYLOAD\u0007kup`;
   const reg = await fauxModelRuntime();
-  let snapshot: string[] | null = null;
   let mounted: Awaited<ReturnType<typeof mountBtwOverlay>> | null = null;
+  // Render the overlay immediately BEFORE btw's listener sees each end event: a renderer that
+  // folded the stored tool names in place would break the raw-name match that event performs.
+  const beforeEnd: { toolName: string; rows: string[] }[] = [];
+  const subscribe = AgentSession.prototype.subscribe;
+  t.mock.method(
+    AgentSession.prototype,
+    "subscribe",
+    function (this: AgentSession, listener: Parameters<AgentSession["subscribe"]>[0]) {
+      return subscribe.call(this, (event) => {
+        if (event.type === "tool_execution_end" && mounted !== null) {
+          beforeEnd.push({ toolName: event.toolName, rows: mounted.overlay().render(100) });
+        }
+        return listener(event);
+      });
+    },
+  );
+  let snapshot: string[] | null = null;
   const factory: FauxResponseFactory = () => {
     snapshot = mounted?.overlay().render(100) ?? null;
     return fauxAssistantMessage([fauxText("done")], { stopReason: "stop" });
@@ -958,7 +975,7 @@ test("overlay: tool rows fold a model-authored tool name and a newline-bearing p
   reg.setResponses([
     fauxAssistantMessage(
       [
-        fauxToolCall(`loo${ESC}]0;NAME-PAYLOAD\u0007kup`, {}),
+        fauxToolCall(rawName, {}),
         fauxToolCall("read", { path: `/tmp/a\nb${ESC}]0;TOOL-PAYLOAD\u0007.txt` }),
       ],
       { stopReason: "toolUse" },
@@ -967,20 +984,34 @@ test("overlay: tool rows fold a model-authored tool name and a newline-bearing p
   ]);
   mounted = await mountBtwOverlay(reg);
   await mounted.handler("look it up", mounted.ctx);
+
+  const rowFor = (rows: readonly string[], needle: (row: string) => boolean) =>
+    overlayRegions(rows).transcript.map(unstyled).find(needle);
+  const isLookup = (row: string) => row.includes("lookup");
+  const isRead = (row: string) => row.includes("read") && row.includes("/tmp/a b.txt");
+
+  // Mid-flight: each call rendered folded and still running before its end event arrived.
+  assert.deepEqual(
+    beforeEnd.map((e) => e.toolName).sort(),
+    [rawName, "read"].sort(),
+    "the end events carry the raw tool names",
+  );
+  for (const { toolName, rows } of beforeEnd) {
+    assertCleanRows(rows);
+    const row = rowFor(rows, toolName === "read" ? isRead : isLookup);
+    assert.ok(row?.includes("▸"), `running before its end event: ${JSON.stringify(row)}`);
+  }
+
+  // Afterwards: both calls finished, so the render did not disturb the raw-name match.
   assert.ok(snapshot, "the follow-up request snapshotted the overlay");
   const rows = snapshot as string[];
   assertCleanRows(rows);
   for (const leak of ["NAME-PAYLOAD", "TOOL-PAYLOAD"]) {
-    assert.ok(!rows.some((row) => row.includes(leak)), `${leak} leaked: ${rows.join("\n")}`);
+    const all = [...rows, ...beforeEnd.flatMap((e) => e.rows)];
+    assert.ok(!all.some((row) => row.includes(leak)), `${leak} leaked: ${rows.join("\n")}`);
   }
-  const transcript = overlayRegions(rows).transcript.map(unstyled);
-  const lookup = transcript.find((row) => row.includes("lookup"));
-  const read = transcript.find((row) => row.includes("read") && row.includes("/tmp/a b.txt"));
-  assert.ok(lookup, transcript.join("\n"));
-  assert.ok(read, transcript.join("\n"));
-  // Both calls finished (the stored raw name matched its end event): never the running glyph.
-  for (const row of [lookup, read]) {
-    assert.ok(/[✗✓]/.test(row) && !row.includes("▸"), JSON.stringify(row));
+  for (const row of [rowFor(rows, isLookup), rowFor(rows, isRead)]) {
+    assert.ok(row && /[✗✓]/.test(row) && !row.includes("▸"), JSON.stringify(row));
   }
 });
 
@@ -1018,6 +1049,33 @@ test("overlay: a pasted draft is scrubbed of control bytes on entry; typed keys 
   assert.ok(!rows.some((row) => row.includes("PASTE-PAYLOAD")), rows.join("\n"));
   component.handleInput("x");
   assert.equal(component.getDraft(), "abcx", "the scrub is inert without controls");
+  // A paste split across chunks is cleaned by the backstop once the Input completes it.
+  component.handleInput(`${ESC}[200~d${ESC}]0;SPLIT-PAYLOAD`);
+  component.handleInput(`\u0007e${ESC}[201~`);
+  assert.equal(component.getDraft(), "abcxde");
   rows = component.render(100);
   assertCleanRows(rows);
+  assert.ok(!rows.some((row) => row.includes("SPLIT-PAYLOAD")), rows.join("\n"));
+});
+
+test("overlay: a control-bearing paste into the middle of a draft leaves the cursor after the pasted text", async () => {
+  const reg = await fauxModelRuntime();
+  const { handler, ctx, overlay } = await mountBtwOverlay(reg);
+  await handler("", ctx);
+  await settle();
+  const component = overlay();
+  const LEFT = `${ESC}[D`;
+  // `ab|cd`: type the draft, then move the cursor two characters left.
+  for (const key of ["a", "b", "c", "d", LEFT, LEFT]) component.handleInput(key);
+  component.handleInput(`${ESC}[200~${ESC}[31mX${ESC}]0;PASTE-PAYLOAD\u0007${ESC}[0m${ESC}[201~`);
+  assert.equal(component.getDraft(), "abXcd");
+  // The next keystroke lands right after the paste, not at the displaced raw offset.
+  component.handleInput("Y");
+  assert.equal(component.getDraft(), "abXYcd");
+  // A lone control byte in a paste (BEL) is dropped without moving later edits either.
+  component.handleInput(LEFT);
+  component.handleInput(`${ESC}[200~Z\u0007${ESC}[201~`);
+  component.handleInput("W");
+  assert.equal(component.getDraft(), "abXZWYcd");
+  assertCleanRows(component.render(100));
 });
