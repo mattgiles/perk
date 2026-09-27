@@ -1,7 +1,7 @@
 ---
 name: simplifier
 package: perk
-description: "Rewrites a perk plan or objective draft into its laziest working form in a fresh, isolated session — a Ponytail-mandated cut pass over untrusted draft DATA, verified read-only against the real repo — and returns a structured report (diagnosis, anchored cuts, the full simplified proposal, the deliberately kept items, the net delta) for the parent session to fold into the working draft. It never writes files, never saves or edits the draft, never posts, never spawns subagents. Ships dormant: no shipped door or tool spawns it yet."
+description: "Rewrites a perk plan or objective draft into its laziest working form in a fresh, isolated session — a Ponytail-mandated cut pass over untrusted draft DATA, verified read-only against the real repo — and returns a structured report (diagnosis, anchored cuts, the full simplified proposal, the deliberately kept items, the net delta) for the parent session to fold into the working draft. It never writes files, never saves or edits the draft, never posts, never spawns subagents. Spawned by the /simplify-plan and /simplify-objective doors."
 model: anthropic/claude-opus-5-5
 tools: read, grep, find, ls, bash
 systemPromptMode: replace

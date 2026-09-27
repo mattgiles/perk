@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **234** canonical source units
-- **1245** logical fragments
+- **239** canonical source units
+- **1259** logical fragments
 - **16** session shapes and **12** assemblies
 - **14** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -840,6 +840,7 @@ Human and agent review surfaces for gists, objectives, and plans.
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
+| `markdown:agents/simplifier.md` | `subagent-instruction` | `shipped` | [`agents/simplifier.md`](../../agents/simplifier.md) · `file` | — |
 | `markdown:prompts/contexts/adapters/plannotator-gist.md` | `adapter` | `shipped` | [`prompts/contexts/adapters/plannotator-gist.md`](../../prompts/contexts/adapters/plannotator-gist.md) · `file` | — |
 | `markdown:prompts/contexts/adapters/plannotator-objective.md` | `adapter` | `shipped` | [`prompts/contexts/adapters/plannotator-objective.md`](../../prompts/contexts/adapters/plannotator-objective.md) · `file` | — |
 | `markdown:prompts/contexts/adapters/plannotator-plan.md` | `adapter` | `shipped` | [`prompts/contexts/adapters/plannotator-plan.md`](../../prompts/contexts/adapters/plannotator-plan.md) · `file` | — |
@@ -847,6 +848,8 @@ Human and agent review surfaces for gists, objectives, and plans.
 | `markdown:prompts/contexts/adapters/tombell-plan.md` | `adapter` | `shipped` | [`prompts/contexts/adapters/tombell-plan.md`](../../prompts/contexts/adapters/tombell-plan.md) · `file` | — |
 | `markdown:prompts/stages/objective-review-browser.md` | `adapter` | `shipped` | [`prompts/stages/objective-review-browser.md`](../../prompts/stages/objective-review-browser.md) · `file` | — |
 | `markdown:prompts/stages/plan-review-browser.md` | `adapter` | `shipped` | [`prompts/stages/plan-review-browser.md`](../../prompts/stages/plan-review-browser.md) · `file` | — |
+| `markdown:prompts/stages/simplify.md` | `launch` | `shipped` | [`prompts/stages/simplify.md`](../../prompts/stages/simplify.md) · `file` | — |
+| `markdown:skills/perk-simplify/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-simplify/SKILL.md`](../../skills/perk-simplify/SKILL.md) · `file` | — |
 | `typescript-model-call:extension/pi/v1/draftReview.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/draftReview.ts`](../../extension/pi/v1/draftReview.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/draftReview.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/draftReview.ts`](../../extension/pi/v1/draftReview.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/0` | — |
@@ -861,6 +864,8 @@ Human and agent review surfaces for gists, objectives, and plans.
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/2` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/3` | — |
+| `typescript-model-call:extension/pi/v1/simplify.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/simplify.ts`](../../extension/pi/v1/simplify.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/simplify.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/simplify.ts`](../../extension/pi/v1/simplify.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-tool:collect_draft_review_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/draftReviewWaveTools.ts`](../../extension/pi/v1/draftReviewWaveTools.ts) · `tool:collect_draft_review_wave` | — |
 | `typescript-tool:plan_review` | `tool-contract` | `shipped` | [`extension/pi/v1/plan.ts`](../../extension/pi/v1/plan.ts) · `tool:plan_review` | plan.cold, plan.warm |
 | `typescript-tool:start_draft_review_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/draftReviewWaveTools.ts`](../../extension/pi/v1/draftReviewWaveTools.ts) · `tool:start_draft_review_wave` | — |
@@ -868,6 +873,10 @@ Human and agent review surfaces for gists, objectives, and plans.
 <details>
 <summary>Logical fragments</summary>
 
+- `markdown:agents/simplifier.md`
+  - `frontmatter:description` — Discovery description (`frontmatter.description`)
+  - `section:what-you-do` — What you do (`heading:what-you-do`)
+  - `section:report-call-structured-output-exactly-once-and-stop` — Report — call `structured_output` exactly once and stop (`heading:report-call-structured-output-exactly-once-and-stop`)
 - `markdown:prompts/contexts/adapters/plannotator-gist.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/contexts/adapters/plannotator-objective.md`
@@ -882,6 +891,17 @@ Human and agent review surfaces for gists, objectives, and plans.
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/plan-review-browser.md`
   - `body` — Document body (`file-body`)
+- `markdown:prompts/stages/simplify.md`
+  - `body` — Document body (`file-body`)
+- `markdown:skills/perk-simplify/SKILL.md`
+  - `frontmatter:description` — Discovery description (`frontmatter.description`)
+  - `section:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors` — Behind the simplify fold-in (the /simplify-plan and /simplify-objective doors) (`heading:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors`)
+  - `section:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/what-the-door-already-did` — What the door already did (`heading:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/what-the-door-already-did`)
+  - `section:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/the-report-vocabulary` — The report vocabulary (`heading:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/the-report-vocabulary`)
+  - `section:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/ponytail-s-ladder-applied-to-a-draft` — Ponytail's ladder, applied to a draft (`heading:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/ponytail-s-ladder-applied-to-a-draft`)
+  - `section:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/an-ultra-requirement-challenge` — An `ultra` requirement challenge (`heading:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/an-ultra-requirement-challenge`)
+  - `section:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/objective-roadmap-mechanics` — Objective roadmap mechanics (`heading:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/objective-roadmap-mechanics`)
+  - `section:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/trust` — Trust (`heading:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/trust`)
 - `typescript-model-call:extension/pi/v1/draftReview.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/draftReview.ts:module:sendUserMessage:1`
@@ -910,6 +930,10 @@ Human and agent review surfaces for gists, objectives, and plans.
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
 - `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:3`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
+- `typescript-model-call:extension/pi/v1/simplify.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/pi/v1/simplify.ts:module:sendUserMessage:1`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-tool:collect_draft_review_wave`
   - `description` — description (`tool:collect_draft_review_wave.description`)
   - `promptSnippet` — promptSnippet (`tool:collect_draft_review_wave.promptSnippet`)

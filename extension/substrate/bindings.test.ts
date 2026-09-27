@@ -31,6 +31,8 @@ const EXPECTED: ReadonlyArray<readonly [string, string, string]> = [
   ["command:objective-review-browser", "perk-objective-review-browser", "nudge"],
   ["command:skills-create", "perk-skill-author", "nudge"],
   ["command:skills-refine", "perk-skill-author", "nudge"],
+  ["command:simplify-plan", "perk-simplify", "nudge"],
+  ["command:simplify-objective", "perk-simplify", "nudge"],
 ];
 
 test("loadDefaultBindings: returns the shipped default bindings", () => {

@@ -14,8 +14,8 @@
 // `skill: "ponytail"` and carries `requiredSkill: PONYTAIL_CORE_SKILL`, so a failed preflight
 // launches nothing and settles as a keyed `skill-unavailable` failure.
 //
-// DORMANT: no production module imports this entrypoint until the simplify doors land; it ships
-// built and tested so the door flips the lane live atomically (contracts.md §8.3).
+// The `/simplify-plan` / `/simplify-objective` doors (`extension/pi/v1/simplify.ts`) are the
+// production callers — this module is the mechanism, the door is the installer (contracts.md §8.74).
 
 import { PONYTAIL_CORE_SKILL } from "./ponytail.ts";
 import type { ReportWave, ReportWaveRequest, ReportWaveResult } from "./reportWave.ts";
@@ -30,6 +30,11 @@ export const SIMPLIFY_ASSIGNMENT_KEY = "simplify";
 export const SIMPLIFY_INTENSITIES = ["lite", "full", "ultra"] as const;
 
 export type SimplifyIntensity = (typeof SIMPLIFY_INTENSITIES)[number];
+
+/** Exact, case-sensitive membership in `SIMPLIFY_INTENSITIES` (the runtime guard beside its SSOT). */
+export function isSimplifyIntensity(value: string): value is SimplifyIntensity {
+  return (SIMPLIFY_INTENSITIES as readonly string[]).includes(value);
+}
 
 /** The closed cut-action vocabulary (schema enum + task tail + agent def). */
 export const SIMPLIFY_CUT_ACTIONS = ["delete", "reuse", "shrink", "merge"] as const;

@@ -10,6 +10,7 @@ import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.t
 import {
   OBJECTIVE_DRAFT_ARTIFACT,
   type ObjectiveDraft,
+  preservedObjectiveFields,
   renderObjectiveDraft,
   resumeObjectiveDraft,
   reviseObjectiveDraft,
@@ -496,4 +497,69 @@ test("renderObjectiveDraft: the dream parts append as the final section (byte-st
     "**Delivery: incremental** (the default — each plan lands independently)\n\n" +
       `Just prose.\n\n${block.parts.join("\n\n")}\n`,
   );
+});
+
+// ------------------------------------------------------------ the preserved structured fields
+
+test("preservedObjectiveFields: every omitted field round-trips keyed by node id, roadmap order", () => {
+  const fields = preservedObjectiveFields({
+    prose: "P",
+    base: "release/2",
+    delivery: "stacked",
+    roadmap: [
+      {
+        id: "1.1",
+        slug: "first-node",
+        comment: "why it exists",
+        adopt_issue: "#12",
+        pr: "#34",
+        status: "in_progress",
+        description: "rendered — not preserved",
+        depends_on: [],
+      },
+      { id: "1.2", description: "bare" },
+    ],
+  });
+  assert.deepEqual(fields, {
+    base: "release/2",
+    delivery: "stacked",
+    nodes: {
+      "1.1": {
+        slug: "first-node",
+        comment: "why it exists",
+        adopt_issue: "#12",
+        pr: "#34",
+        status: "in_progress",
+      },
+      "1.2": {},
+    },
+  });
+  assert.deepEqual(Object.keys(fields.nodes), ["1.1", "1.2"]);
+});
+
+test("preservedObjectiveFields: id-less/blank-id nodes omitted; blank/mistyped fields dropped; base/delivery absent ⇒ keys absent", () => {
+  const fields = preservedObjectiveFields({
+    prose: "P",
+    roadmap: [
+      { description: "no id", slug: "orphan" },
+      { id: "  ", slug: "blank-id" },
+      { id: 7, slug: "numeric-id" },
+      "not an object",
+      { id: "2.1", slug: " ", pr: 42, comment: "" },
+    ],
+  });
+  assert.deepEqual(fields, { nodes: { "2.1": {} } });
+  assert.equal("base" in fields, false);
+  assert.equal("delivery" in fields, false);
+});
+
+test("preservedObjectiveFields: a duplicate id keeps the last node", () => {
+  const fields = preservedObjectiveFields({
+    prose: "P",
+    roadmap: [
+      { id: "1.1", pr: "#1" },
+      { id: "1.1", slug: "later" },
+    ],
+  });
+  assert.deepEqual(fields, { nodes: { "1.1": { slug: "later" } } });
 });

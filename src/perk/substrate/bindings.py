@@ -73,6 +73,8 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
         "objective-review-browser",
         "skills-create",
         "skills-refine",
+        "simplify-plan",
+        "simplify-objective",
     }
 )
 

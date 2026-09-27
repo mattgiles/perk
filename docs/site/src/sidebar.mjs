@@ -53,6 +53,7 @@ export const sidebar = [
           "how-to/track-implement-progress",
           "how-to/send-feedback-from-hunk-watch",
           "how-to/delegate-an-investigation-to-perk-scout",
+          "how-to/simplify-a-baroque-draft",
         ],
       },
       {

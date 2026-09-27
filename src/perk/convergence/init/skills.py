@@ -35,6 +35,7 @@ PERK_SKILLS: tuple[str, ...] = (
     "perk-pr-review-browser",
     "perk-pr-review-terminal",
     "perk-replan",
+    "perk-simplify",
     "perk-skill-author",
 )
 

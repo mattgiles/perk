@@ -60,6 +60,8 @@ EXPECTED_DEFAULTS = [
     ("command:objective-review-browser", "perk-objective-review-browser", "nudge"),
     ("command:skills-create", "perk-skill-author", "nudge"),
     ("command:skills-refine", "perk-skill-author", "nudge"),
+    ("command:simplify-plan", "perk-simplify", "nudge"),
+    ("command:simplify-objective", "perk-simplify", "nudge"),
 ]
 
 
@@ -314,6 +316,8 @@ def test_deliverable_command_targets_match_the_curated_set():
                 "objective-review-browser",
                 "skills-create",
                 "skills-refine",
+                "simplify-plan",
+                "simplify-objective",
             }
         )
         == DELIVERABLE_COMMAND_TARGETS

@@ -16,6 +16,7 @@ import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import { PONYTAIL_CORE_SKILL, type RequiredPonytailSkill } from "./ponytail.ts";
 import { reportWaveOver } from "./reportWave.ts";
 import {
+  isSimplifyIntensity,
   runSimplifyWave,
   SIMPLIFY_ASSIGNMENT_KEY,
   SIMPLIFY_CUT_ACTIONS,
@@ -155,6 +156,13 @@ test("SIMPLIFY_REPORT_SCHEMA semantics: nullable non-blank target, closed enums/
   assert.equal(validator.Check({ ...minimal, proposal: "p".repeat(40_001) }), false);
   assert.equal(validator.Check({ ...minimal, cuts: Array.from({ length: 24 }, () => cut) }), true);
   assert.equal(validator.Check({ ...minimal, cuts: Array.from({ length: 25 }, () => cut) }), false);
+});
+
+test("isSimplifyIntensity accepts exactly lite/full/ultra (case-sensitive, untrimmed)", () => {
+  for (const value of ["lite", "full", "ultra"]) assert.equal(isSimplifyIntensity(value), true);
+  for (const value of ["", "Ultra", "ultra ", "max"]) {
+    assert.equal(isSimplifyIntensity(value), false, JSON.stringify(value));
+  }
 });
 
 // --------------------------------------------------------------------- the task composition

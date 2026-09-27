@@ -53,8 +53,8 @@ export interface PerkConfig {
    * `harvest-analyst` — consumed by `run_harvest_wave` at execute time — `dream-analyst` and
    * `dream-reducer` — consumed by `run_dream_wave` at execute time — `scout` — the
    * general-purpose read-only analysis lane (task-defined scope), consumed by `run_scout_wave`
-   * at execute time — `simplifier` — the Ponytail-mandated draft-cut lane, dormant until the
-   * simplify doors land: no shipped door or tool consumes the key yet) — and the
+   * at execute time — `simplifier` — the Ponytail-mandated draft-cut lane, consumed by the
+   * `/simplify-plan` / `/simplify-objective` doors at invocation) — and the
    * dev-only `session-auditor`, whose def is repo-local to perk's own repository
    * (`.pi/agents/perk-dev/session-auditor.md`, a project agent, never shipped), so the key is
    * dormant in consumer repos. Each configured
@@ -340,7 +340,7 @@ export const SUBAGENT_KEYS = [
   "dream-analyst",
   "dream-reducer",
   "scout",
-  // Dormant until the simplify doors land: no shipped door or tool consumes the key yet.
+  // The simplify doors' lane (resolved at invocation).
   "simplifier",
   // Dev-only: the perk-dev session-audit judgment wave's auditor (dormant in consumer repos).
   "session-auditor",
