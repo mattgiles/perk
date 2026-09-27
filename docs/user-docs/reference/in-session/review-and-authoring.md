@@ -439,7 +439,8 @@ Two warm doors run a Ponytail-mandated cut pass over the working draft when you 
 baroque — the invocation is the verdict. Each runs ONE fresh-context read-only `perk.simplifier`
 lane (model: `[models.subagents] simplifier`) and injects its report for the agent to fold back
 into the draft. Nothing is saved and no review opens; run the door again for another pass, then
-review when you are ready.
+review when you are ready. For the task walkthrough, see
+[How to simplify a baroque draft](../../how-to/simplify-a-baroque-draft.md).
 
 Both share one grammar: an optional first token `lite`, `full` or `ultra` (exact, lower-case;
 default `ultra`), and any remaining text as a focus hint that scopes the lane's attention. A focus
@@ -483,8 +484,6 @@ The door refuses outside those stages, when the draft is missing or invalid, and
 
 - **Do:** [How to review a foreign PR](../../how-to/review-a-foreign-pr.md) — run the human-triaged
   flow end to end.
-- **Do:** [How to simplify a baroque draft](../../how-to/simplify-a-baroque-draft.md) — cut a plan
-  or objective draft down before review.
 - **Look up:** [Model-facing tools](./model-tools.md) — check every tool name and its stage/gate
   restrictions.
 - **Look up:** [In-session commands & tools](../in-session.md) — return to the stable surface map.
