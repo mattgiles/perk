@@ -100,7 +100,7 @@ def add_source(
         require_unlinked_components(layout, rel)
         require_ignored(layout, probe_paths_for(layout, dirs=[target]))
         fresh = not (target.exists() or target.is_symlink())
-        _eligibility(
+        snapshot, _chosen = _eligibility(
             load_catalog(layout), ref=ref, rel=rel, requested=requested, pin=pin, fresh=fresh
         )
         with hooks_dir() as hooks:
@@ -125,9 +125,19 @@ def add_source(
                 )
                 committed = True
             finally:
-                if fresh and not committed:
+                if fresh and not committed and not _catalogued_meanwhile(layout, rel, snapshot):
                     shutil.rmtree(target, ignore_errors=True)
         return outcome
+
+
+def _catalogued_meanwhile(layout: LibraryLayout, rel: str, snapshot: Entry | None) -> bool:
+    """Whether another operation catalogued (or changed) the entry owning ``rel`` since the
+    pre-clone snapshot — a checkout another run has published is no longer this run's to
+    delete. An unreadable catalog counts as yes: when in doubt, keep the directory."""
+    try:
+        return load_catalog(layout).owner_of(rel) != snapshot
+    except LibraryError:
+        return True
 
 
 def _validate_pin(pin: str) -> None:
@@ -336,7 +346,7 @@ def _record_source(
 
 
 def _repin(checkout: Path, pin: str, hooks: Path) -> None:
-    if git.is_dirty(checkout):
+    if git.is_dirty(checkout, pinned=hooks):
         raise LibraryError(
             "checkout_dirty",
             f"{checkout} has uncommitted changes — commit, stash or discard them before "
@@ -433,7 +443,7 @@ def _refresh_checkout(
         else git.detect_trunk_branch(checkout)
     )
     moment = (now or utc_now)()
-    if git.is_dirty(checkout):
+    if git.is_dirty(checkout, pinned=hooks):
         return RefreshOutcome(
             action="skipped_dirty",
             detail=f"{checkout} has uncommitted changes",
@@ -453,7 +463,8 @@ def _refresh_checkout(
     if previous is None:  # _require_checkout saw a resolvable HEAD a moment ago
         raise LibraryError("io_error", f"refresh: HEAD of {checkout} no longer resolves")
     try:
-        git.fetch(checkout, pinned=hooks)
+        # Pruned: a stale tracking ref of a branch deleted upstream must not read as its tip.
+        git.fetch(checkout, prune=True, pinned=hooks)
     except git.GitError as exc:
         raise LibraryError("fetch_failed", f"fetching into {checkout} failed: {exc}") from exc
     tracking = f"origin/{branch}"

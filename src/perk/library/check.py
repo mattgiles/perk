@@ -271,6 +271,9 @@ def _inventory(run: _DocsRun, root: str) -> tuple[dict[str, str | None], str | N
     if response is not None and response.status == 200 and response.body is not None:
         doc = parse_sitemap(response.body)
         if doc is None:
+            # A rejected body is not an observation: comparing the rest would read its URLs
+            # as definitively gone.
+            definitive = False
             run.notes.append(f"{root}: the sitemap is not parseable — ignored")
         else:
             urls.extend(doc.urls)
@@ -286,6 +289,7 @@ def _inventory(run: _DocsRun, root: str) -> tuple[dict[str, str | None], str | N
                     continue
                 child_doc = parse_sitemap(child_response.body)
                 if child_doc is None:
+                    definitive = False
                     run.notes.append(f"{child}: the sitemap is not parseable — ignored")
                 else:
                     urls.extend(child_doc.urls)
@@ -307,6 +311,8 @@ def _definitive(response: TextResponse | None) -> bool:
 
 @dataclass(frozen=True)
 class _PageVerdict:
+    """``observed`` = every recorded comparison of the page was repeated this run."""
+
     marker: PageMarker
     moved: bool
     strong: bool
@@ -325,20 +331,23 @@ def _apply_page(
         return _PageVerdict(marker, moved=False, strong=False, observed=False)
     baselined = marker
     moved = strong = False
+    complete = True
     for name, observed in (
         ("etag", response.etag),
         ("last_modified", response.last_modified),
         ("sitemap_lastmod", observed_lastmod),
     ):
+        recorded = getattr(marker, name)
         if observed is None:
+            # A recorded marker this response omits is a comparison not repeated.
+            complete &= recorded is None
             continue
         strong = True
-        recorded = getattr(marker, name)
         if recorded is None:
             baselined = replace(baselined, **{name: observed})
         elif recorded != observed:
             moved = True
-    return _PageVerdict(baselined, moved=moved, strong=strong, observed=True)
+    return _PageVerdict(baselined, moved=moved, strong=strong, observed=complete)
 
 
 def _has_marker(marker: PageMarker) -> bool:
@@ -383,7 +392,12 @@ def _probe_docs(entry: Entry, http: HttpProbe, now: datetime) -> _Probed:
         consecutive_errors = 0
         verdict = _apply_page(marker, response, lastmods.get(marker.url))
         if not verdict.observed:
-            run.notes.append(f"{marker.url}: HTTP {response.status} — not observed")
+            reason = (
+                "a recorded marker was not returned"
+                if response.status == 200
+                else f"HTTP {response.status}"
+            )
+            run.notes.append(f"{marker.url}: {reason} — not observed")
             unobserved += 1 if _has_marker(marker) else 0
         markers.append(verdict.marker)
         moved |= verdict.moved

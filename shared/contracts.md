@@ -13783,12 +13783,13 @@ mutation) is a typed refusal whose message names the library's state and the rer
 completes the operation.
 
 - *Config-pinned git.* Every executing git operation over a library checkout (clone, fetch,
-  detach, fast-forward, the `ls-remote` probe) runs with `GIT_CONFIG_GLOBAL=/dev/null` +
+  detach, fast-forward, the dirty check — `git status` can run an fsmonitor hook or a clean
+  filter — and the `ls-remote` probe) runs with `GIT_CONFIG_GLOBAL=/dev/null` +
   `GIT_CONFIG_NOSYSTEM=1` (`git.LIBRARY_GIT_ENV`) and `-c core.hooksPath=<an empty temporary
   directory>` — the `pinned=` keyword of `clone_partial` / `fetch` / `merge_ff_only` /
-  `checkout_detached` / `remote_branch_head` (`None` keeps every other caller unchanged). No
-  configured hook, filter driver, credential helper, `insteadOf` rewrite or config-file proxy
-  applies, so nothing a cloned tree selects can execute. Documented costs: private repositories
+  `checkout_detached` / `remote_branch_head` / `is_dirty` (`None` keeps every other caller
+  unchanged). No configured hook, filter driver, fsmonitor, credential helper, `insteadOf`
+  rewrite or config-file proxy applies, so nothing a cloned tree selects can execute. Documented costs: private repositories
   use the `git@`/`ssh://` form (ssh-agent auth is outside git config); LFS content arrives as
   pointer files. Env config (`GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`) and env proxies still apply.
   Repo-local config of a checkout perk did not create is not audited.
@@ -13826,7 +13827,9 @@ completes the operation.
   `evidence` / `drifted` reset) or unchanged (only a given `stale_after` applies — no marker
   refresh), and is written only when it changed. Actions `cloned` / `reused` / `repinned`.
   **Nothing is deleted that this run did not create**: a fresh clone is removed on any later
-  failure (nothing catalogued, nothing left behind); a catalog write failing after a re-pin is
+  failure (nothing catalogued, nothing left behind) — unless the catalog's owner of the path
+  changed since the pre-clone read (another run adopted the checkout meanwhile), or the catalog
+  cannot be read, in which case the directory is kept; a catalog write failing after a re-pin is
   `io_error` saying the checkout is already at the new pin and that rerunning the same command
   completes the re-pin. There is no unpin verb: `remove` + `add source` tracks the default
   branch again.
@@ -13837,8 +13840,9 @@ completes the operation.
   entry (`entry_removed_meanwhile`); the symlink walk and ignore probe of the checkout; a
   missing checkout is `entry_missing` (`add source <source>` re-clones it); the checkout
   validator above. A dirty tree is `skipped_dirty`, a HEAD detached or on another branch
-  `skipped_non_ff` — both before any fetch, nothing written. Then the fetch (`fetch_failed`,
-  nothing written) and a classification by **ancestry, never by the merge's exit code**
+  `skipped_non_ff` — both before any fetch, nothing written. Then the fetch — pruned, so a
+  branch deleted upstream leaves no stale tracking ref (`fetch_failed`, nothing written) — and a
+  classification by **ancestry, never by the merge's exit code**
   (`merge --ff-only` also exits 0 for "Already up to date"): `origin/<branch>` gone →
   `skipped_non_ff` with evidence `none` and `drifted` kept; the tip equal to HEAD →
   `up_to_date`; HEAD an ancestor of the tip → fast-forward → `fast_forwarded`; otherwise
@@ -13860,16 +13864,19 @@ completes the operation.
   `DOCS_PAGE_PROBE_LIMIT` = 20 conditional `GET`s that read no body (`If-None-Match` /
   `If-Modified-Since` from the recorded marker) — plus the inventory at the site root:
   `sitemap.xml` (on 404 `sitemap-index.xml`; an index followed into at most 5 children) and
-  `llms.txt`, bodies capped at 2 MiB, a DOCTYPE-bearing sitemap ignored. Bounds: 10 s per HTTP
-  operation, 5 redirects, 3 consecutive page transport errors abandon the remaining pages, and a
-  60 s wall-clock budget per entry checked between requests (skips are noted); accepted
-  leniency — httpx reads intermediate redirect bodies. Per page: `304` → unchanged, strong;
+  `llms.txt`, bodies capped at 2 MiB, a sitemap that is DOCTYPE-bearing or unparseable (incl.
+  an unknown / multi-byte declared encoding) ignored. Bounds: 10 s per HTTP operation (httpx's
+  per-operation timeout — connect, each read — not a per-request deadline), 5 redirects, 3
+  consecutive page transport errors abandon the remaining pages, and a 60 s wall-clock budget per
+  entry checked **between** requests (skips are noted) — both soft: a trickling response can
+  overrun them; accepted leniency — httpx reads intermediate redirect bodies. Per page: `304` → unchanged, strong;
   `200` → each of ETag / Last-Modified / the sitemap's per-URL `lastmod` is **baselined** when
-  recorded `None`, **moved** when both differ, any observed one strong; `404`/`410` → moved,
-  strong; any other status or a transport error → not observed (noted). The **inventory
-  fingerprint** (`sitemap=<sha256 of the sorted loc⇥lastmod lines>` and/or `llms=<sha256 of the
-  body>`, `;`-joined — never an HTML body) is compared only when every inventory request answered
-  definitively (200 or 404/410), baselined / moved alike. Evidence: `strong` if any page gave
+  recorded `None`, **moved** when both differ, any observed one strong — and a recorded marker
+  the response omits leaves that page not re-observed; `404`/`410` → moved, strong; any other
+  status or a transport error → not observed (noted). The **inventory fingerprint**
+  (`sitemap=<sha256 of the sorted loc⇥lastmod lines>` and/or `llms=<sha256 of the body>`,
+  `;`-joined — never an HTML body) is compared only when every inventory request answered
+  definitively (a readable 200 whose sitemap parsed, or 404/410), baselined / moved alike. Evidence: `strong` if any page gave
   strong evidence, else `weak` if a fingerprint was observed, else `none`. **Markers are the
   mirror's revision**: baselined once and never overwritten by a probe (only `record --publish
   --replace` replaces them); `drifted` is recomputed when evidence exists — any moved comparison,

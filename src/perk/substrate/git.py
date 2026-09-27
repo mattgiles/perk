@@ -482,20 +482,33 @@ def push_with_exact_lease(
         raise
 
 
-def is_dirty(cwd: Path) -> bool:
-    """True if the worktree at ``cwd`` has uncommitted changes (tracked or untracked)."""
-    return bool(_run(["status", "--porcelain"], cwd=cwd).strip())
+def is_dirty(cwd: Path, *, pinned: Path | None = None) -> bool:
+    """True if the worktree at ``cwd`` has uncommitted changes (tracked or untracked).
+
+    ``status`` can run a configured fsmonitor hook or an attributes-selected clean filter;
+    ``pinned`` (an empty hooks directory) runs it config-pinned (:data:`LIBRARY_GIT_ENV`).
+    """
+    out = _run(
+        [*_pinned_prefix(pinned), "status", "--porcelain"],
+        cwd=cwd,
+        env_overlay=_pinned_env(pinned),
+    )
+    return bool(out.strip())
 
 
-def fetch(repo: Path, *, remote: str = "origin", pinned: Path | None = None) -> None:
+def fetch(
+    repo: Path, *, remote: str = "origin", prune: bool = False, pinned: Path | None = None
+) -> None:
     """Fetch ``remote`` into ``repo`` (a **network** op; ``GitError`` on failure).
 
     Callers that need offline tolerance should treat the failure as best-effort. A longer
-    ``timeout`` than the default is used because the network can be slow. ``pinned`` (an empty
-    hooks directory) runs the fetch config-pinned (:data:`LIBRARY_GIT_ENV`).
+    ``timeout`` than the default is used because the network can be slow. ``prune`` drops
+    remote-tracking refs whose branch is gone upstream (a stale tracking ref otherwise still
+    resolves). ``pinned`` (an empty hooks directory) runs the fetch config-pinned
+    (:data:`LIBRARY_GIT_ENV`).
     """
     _run(
-        [*_pinned_prefix(pinned), "fetch", remote],
+        [*_pinned_prefix(pinned), "fetch", *(["--prune"] if prune else []), remote],
         cwd=repo,
         timeout=120,
         env_overlay=_pinned_env(pinned),

@@ -147,13 +147,15 @@ def parse_sitemap(body: bytes) -> SitemapDoc | None:
     """Parse a ``<urlset>`` or ``<sitemapindex>``; ``None`` when unparseable or neither.
 
     A document declaring a DOCTYPE is refused (sitemaps never carry one — the entity-expansion
-    guard for an untrusted body).
+    guard for an untrusted body). Besides ``ParseError``, the parser raises ``LookupError`` for
+    an unknown or non-text declared encoding and ``ValueError`` for a multi-byte one; all three
+    mean "not a parseable sitemap".
     """
     if b"<!DOCTYPE" in body.upper():
         return None
     try:
         root = ElementTree.fromstring(body)
-    except ElementTree.ParseError:
+    except (ElementTree.ParseError, LookupError, ValueError):
         return None
     kind = _local(root.tag)
     if kind == "urlset":

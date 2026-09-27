@@ -5,6 +5,8 @@ Offline: the ``upstream`` fixture's bare repository is reached through git's own
 checked against the cache-only promise: ``git status`` reports nothing under ``docs/``.
 """
 
+import contextlib
+import os
 import shutil
 import stat
 import subprocess
@@ -317,6 +319,37 @@ def test_a_concurrently_created_target_is_never_deleted(repo, upstream, monkeypa
     assert checkout.is_dir()
 
 
+def test_a_clone_another_run_catalogued_meanwhile_is_never_deleted(repo, upstream, monkeypatch):
+    # Interleaving: this run finishes its clone; before it takes the lock, another run adopts
+    # the valid checkout under another slug. This run's eligibility re-check then refuses —
+    # and its cleanup must leave the now-catalogued checkout alone.
+    real_lock = source.library_lock
+    adopted: list[cat.Entry] = []
+
+    @contextlib.contextmanager
+    def adopting_lock(root):
+        if not adopted:
+            entry = cat.Entry(
+                kind="source",
+                slug="gadget",
+                source=CLONE_URL,
+                path=ENTRY_PATH,
+                added_at="2026-09-27T00:00:00Z",
+                stale_after=86_400,
+                upstream=cat.SourceUpstream(branch="main", head_sha=_head(_checkout(repo))),
+            )
+            _set_entry(repo, entry)
+            adopted.append(entry)
+        with real_lock(root):
+            yield
+
+    monkeypatch.setattr(source, "library_lock", adopting_lock)
+    error = _refusal(lambda: _add(repo, slug="widget"))
+    assert error.error_type == "invalid_input"
+    assert _checkout(repo).is_dir()
+    assert _catalog(repo).entries == tuple(adopted)
+
+
 def test_clone_failure_leaves_nothing_behind(repo, upstream, monkeypatch):
     def failing_clone(url, dest, **_kwargs):
         (dest / "partial").write_text("x", encoding="utf-8")
@@ -368,6 +401,60 @@ def test_the_clone_never_executes_configured_hooks_or_filters(
     assert (_checkout(repo) / ".gitattributes").is_file()
     assert not hook_canary.exists()
     assert not filter_canary.exists()
+
+
+def _ran_in(canary: Path, checkout: Path) -> bool:
+    """Whether a canary helper recorded running inside ``checkout`` (helpers log their cwd)."""
+    if not canary.exists():
+        return False
+    lines = canary.read_text(encoding="utf-8").splitlines()
+    return any(Path(line).resolve() == checkout.resolve() for line in lines)
+
+
+def test_refresh_and_repin_never_execute_status_helpers(repo, upstream, tmp_path, monkeypatch):
+    # The dirty check (`git status`) runs before any fetch: a globally configured fsmonitor
+    # hook or an attributes-selected clean filter must not run inside a library checkout.
+    upstream.tag("v1", "HEAD~1")
+    (upstream.seed / ".gitattributes").write_text("* filter=canary\n", encoding="utf-8")
+    run_git(upstream.seed, "add", ".gitattributes")
+    run_git(upstream.seed, "commit", "-qm", "attributes")
+    run_git(upstream.seed, "push", "-q", "origin", "main")
+    _add(repo)
+    checkout = _checkout(repo)
+    fsmonitor_canary = tmp_path / "canary-fsmonitor"
+    filter_canary = tmp_path / "canary-filter"
+    fsmonitor = tmp_path / "fsmonitor-hook"
+    fsmonitor.write_text(f"#!/bin/sh\npwd >> '{fsmonitor_canary}'\nexit 1\n", encoding="utf-8")
+    fsmonitor.chmod(fsmonitor.stat().st_mode | stat.S_IXUSR)
+    gitconfig = tmp_path / "gitconfig"
+    gitconfig.write_text(
+        f"[core]\n\tfsmonitor = {fsmonitor}\n"
+        f"[filter \"canary\"]\n\tclean = pwd >> '{filter_canary}' && cat\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(gitconfig))
+    stamp = iter(range(1, 100))
+
+    def force_recheck() -> None:
+        # A new mtime makes `git status` re-hash the file through the clean filter.
+        moment = (checkout / "f.txt").stat().st_mtime + 10 * next(stamp)
+        os.utime(checkout / "f.txt", (moment, moment))
+
+    # Control: a bare `git status` under the same environment fires both helpers.
+    force_recheck()
+    subprocess.run(
+        ["git", "status", "--porcelain"], cwd=checkout, check=True, capture_output=True, timeout=60
+    )
+    assert _ran_in(fsmonitor_canary, checkout) and _ran_in(filter_canary, checkout)
+    fsmonitor_canary.unlink()
+    filter_canary.unlink()
+
+    force_recheck()
+    assert _refresh(repo).action == "up_to_date"
+    force_recheck()
+    assert _add(repo, pin="v1").action == "repinned"
+    assert not _ran_in(fsmonitor_canary, checkout)
+    assert not _ran_in(filter_canary, checkout)
 
 
 def test_repin_catalog_write_failure_names_the_completing_rerun(repo, upstream, monkeypatch):
@@ -517,6 +604,20 @@ def test_refresh_of_a_deleted_checkout_is_entry_missing(repo, upstream):
     error = _refusal(lambda: _refresh(repo))
     assert error.error_type == "entry_missing"
     assert f"perk librarian add source {CLONE_URL}" in str(error)
+
+
+def test_refresh_sees_a_deleted_upstream_branch(repo, upstream):
+    # The fetch prunes: a stale `origin/main` tracking ref must not read as up to date.
+    _add(repo)
+    run_git(upstream.seed, "push", "-q", "origin", "HEAD~1:refs/heads/other")
+    run_git(upstream.remote, "symbolic-ref", "HEAD", "refs/heads/other")
+    run_git(upstream.remote, "branch", "-D", "main")
+    outcome = _refresh(repo)
+    assert outcome.action == "skipped_non_ff"
+    assert _detail(outcome) == "origin/main is gone after fetch"
+    entry = outcome.view.entry
+    assert (entry.evidence, entry.drifted) == ("none", False)
+    assert outcome.view.status == "unverifiable"
 
 
 def test_refresh_fetch_failure_writes_nothing(repo, upstream, monkeypatch):

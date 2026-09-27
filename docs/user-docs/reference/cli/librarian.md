@@ -208,8 +208,9 @@ The host is lowercased; deeper paths (`/tree/main`), GitLab subgroups, ports, cr
 URL, and query strings are refused.
 
 **The git policy.** Every git operation that runs over a library checkout — the clone, fetches,
-checkouts, fast-forwards, and `check`'s probe — ignores your global and system git config and
-runs with hooks disabled, so nothing a cloned repository (or your config) selects can execute.
+checkouts, fast-forwards, the uncommitted-changes check, and `check`'s probe — ignores your
+global and system git config and runs with hooks disabled, so nothing a cloned repository (or
+your config — hooks, filters, an fsmonitor) selects can execute.
 The costs: no credential helper, no `insteadOf` rewrite, and no config-file proxy (proxy
 environment variables still apply). **Private repositories** therefore need the `git@…` or
 `ssh://…` form (ssh-agent authentication does not depend on git config). Repositories that use
@@ -266,8 +267,9 @@ the checkout holds; a different tip marks the entry `drifted` until `refresh` fa
 
 **Documentation entries** send conditional requests for the recorded pages (the source URL
 first) and read the site's inventory: `sitemap.xml` (or `sitemap-index.xml`, following up to five
-child sitemaps) and `llms.txt`. Page bodies are never downloaded or hashed. The **evidence**
-tiers:
+child sitemaps) and `llms.txt`. A page's own body is never read or hashed (when a page
+redirects, the HTTP client does read each intermediate redirect response's body — small in
+practice). The **evidence** tiers:
 
 - `strong` — a page answered with a validator (`ETag`, `Last-Modified`) or its sitemap entry
   carries a `lastmod`, or a page is gone (`404`/`410`).
@@ -279,13 +281,17 @@ tiers:
 The first check records each marker as the mirror's baseline; later checks compare against that
 baseline and never overwrite it (only re-publishing with `record --publish … --replace` does). A
 changed validator, lastmod, or fingerprint, or a vanished page, marks the entry `drifted`. A
-check that cannot re-observe a comparison (a server error, a timeout) keeps an existing drift
-rather than clearing it, and notes why.
+check that cannot re-observe a comparison (a server error, a timeout, a page that stops
+returning a recorded validator, an unparseable sitemap) keeps an existing drift rather than
+clearing it, and notes why.
 
 **Request bounds.** Per documentation entry: at most 20 page requests, up to 8 inventory
-requests, 10 seconds per request, 5 redirects, and 60 seconds of wall-clock time; three page
-errors in a row stop the page requests. Inventory bodies are read up to 2 MiB. Skipped requests
-are listed as notes.
+requests, and 5 redirects per request; three page errors in a row stop the page requests.
+Inventory bodies are read up to 2 MiB. Skipped requests are listed as notes. The time limits are
+**soft**: the 10-second timeout applies to each network operation (connecting, each read), not to
+a whole request, and the 60-second per-entry budget is checked only between requests — so a
+server that keeps trickling a response can hold one request, and the check, past those
+figures.
 
 A completed check exits `0` even when some results are `failed`; exit `1` means the whole command
 was refused (an unknown slug, a malformed catalog, a preflight refusal, `library_busy`).
@@ -305,7 +311,7 @@ fetched or recorded. Outcomes:
 | `fast_forwarded` | The checkout moved to the upstream tip; `previous_head` is where it was. |
 | `up_to_date` | The checkout already matches the upstream tip. |
 | `skipped_dirty` | The checkout has uncommitted changes — commit, stash, or discard them. |
-| `skipped_non_ff` | The checkout is detached or on another branch, has local commits ahead, or has diverged; the detail says which. Local commits or divergence mark the entry `drifted`. |
+| `skipped_non_ff` | The checkout is detached or on another branch, has local commits ahead, or has diverged — or the default branch no longer exists upstream; the detail says which. Local commits or divergence mark the entry `drifted`; a vanished branch leaves it `unverifiable`. |
 
 Refusals: a documentation entry is `needs_session` — refreshing a mirror means re-crawling into
 `docs/library/.staging/`, curating, and `perk librarian record --publish … --replace` from a perk

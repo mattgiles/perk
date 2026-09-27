@@ -1687,6 +1687,10 @@ def test_clone_partial_unpinned_keeps_the_ambient_config(monkeypatch, tmp_path):
     [
         (lambda repo, hooks: git.fetch(repo, pinned=hooks), ["fetch", "origin"]),
         (
+            lambda repo, hooks: git.fetch(repo, prune=True, pinned=hooks),
+            ["fetch", "--prune", "origin"],
+        ),
+        (
             lambda repo, hooks: git.merge_ff_only(repo, "origin/main", pinned=hooks),
             ["merge", "--ff-only", "origin/main"],
         ),
@@ -1698,6 +1702,7 @@ def test_clone_partial_unpinned_keeps_the_ambient_config(monkeypatch, tmp_path):
             lambda repo, hooks: git.remote_branch_head(repo, "main", pinned=hooks),
             ["ls-remote", "origin", "refs/heads/main"],
         ),
+        (lambda repo, hooks: git.is_dirty(repo, pinned=hooks), ["status", "--porcelain"]),
     ],
 )
 def test_pinned_library_ops_prefix_the_hooks_pin(monkeypatch, tmp_path, call, tail):
