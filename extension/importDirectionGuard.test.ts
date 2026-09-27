@@ -31,7 +31,7 @@
 //      `waves/`, `worker/`) or future (`config/`, `execution/`, `session/` — the
 //      module-contracts ownership map's stable layer) — have no edge into the feature-policy
 //      homes (`adapters/`, `authoring/`, `codeReview/`, `delivery/`, `factories/`,
-//      `learning/` — cheap literals cover absent homes from the day they appear; `doors/`
+//      `learning/`, `library/` — cheap literals cover absent homes from the day they appear; `doors/`
 //      left the list when it was evacuated and deleted). Zero edges, with no allowlist.
 //      Mechanisms take dependencies as parameters; feature policy calls mechanisms, never the
 //      reverse. (`surfaces/` is the sanctioned rendering seam, not a feature home —
@@ -42,7 +42,7 @@
 //      `.ts` anchor in the scanned corpus — the activation ratchet that forces every future
 //      home through this guard.
 //   D. Features never import Pi or the RPC wire: `PI_FREE_HOMES` (`authoring/`, `codeReview/`,
-//      `learning/`, `session/`) carry no `@earendil-works/*` specifier, no edge to `waves/rpcAdapter.ts`, no edge
+//      `learning/`, `library/`, `session/`) carry no `@earendil-works/*` specifier, no edge to `waves/rpcAdapter.ts`, no edge
 //      into `surfaces/` (the report shape these homes need is re-exported through
 //      `substrate/sessionData.ts`, so a surfaces edge is never necessary), and no edge into
 //      `pi/` (the module-contracts law: the adapter imports the feature, never the reverse).
@@ -87,7 +87,7 @@
 //      `reportWaveOver`'s parameter is not mechanically preventable — that residue is owned by
 //      the guard-census review posture, not claimed as a structural guarantee.
 //   H. Storage freedom: the storage-free feature homes (`authoring/`, `codeReview/`,
-//      `delivery/`, `learning/` — NOT `session/`, the session engine legitimately owns these
+//      `delivery/`, `learning/`, `library/` — NOT `session/`, the session engine legitimately owns these
 //      imports; `doors/` was evacuated and deleted) have NO edge — type-only edges count —
 //      into the storage-interior modules (`substrate/workflowState.ts`,
 //      `substrate/sessionData.ts`, `substrate/cache.ts`, `substrate/git.ts`, plus
@@ -137,6 +137,7 @@ const FEATURE_HOMES = [
   "delivery/",
   "factories/",
   "learning/",
+  "library/",
 ];
 
 // The FROZEN extension/ top-level directory census — the directories that existed when this
@@ -164,6 +165,7 @@ const ANCHORED_DIRS: Record<string, string[]> = {
   codeReview: ["codeReview/submission.ts"],
   delivery: ["delivery/ci.ts"],
   learning: ["learning/capture.ts"],
+  library: ["library/librarian.ts"],
   pi: ["pi/v1/gist.ts"],
   session: ["session/workflowSession.ts"],
 };
@@ -173,14 +175,21 @@ const ANCHORED_DIRS: Record<string, string[]> = {
  * bans — `@earendil-works/*`, the RPC transport module, and the `surfaces/` rendering seam —
  * with NO sanctioned re-export seams for these homes (see the header).
  */
-const PI_FREE_HOMES = ["authoring/", "codeReview/", "delivery/", "learning/", "session/"];
+const PI_FREE_HOMES = [
+  "authoring/",
+  "codeReview/",
+  "delivery/",
+  "learning/",
+  "library/",
+  "session/",
+];
 
 /**
  * The storage-free feature homes (Rule H sources): the census's deny set applies to feature
  * policy only — `session/` (the engine that owns the storage seams) is deliberately outside;
  * `doors/` was evacuated and deleted.
  */
-const STORAGE_FREE_HOMES = ["authoring/", "codeReview/", "delivery/", "learning/"];
+const STORAGE_FREE_HOMES = ["authoring/", "codeReview/", "delivery/", "learning/", "library/"];
 
 /**
  * The storage-interior modules (Rule H banned targets) — exact module paths used as
@@ -628,44 +637,53 @@ test("Rule H: storage-free feature homes never import the storage interior", () 
   }
 });
 
-// Native foreground conflict dispatch is deliberately independent of the report-wave family.
+// Native foreground writer dispatch is deliberately independent of the report-wave family: the
+// delegation event family is confined to ONE transport both writers ride.
+const DELEGATION_TRANSPORT = "pi/v1/foregroundDelegation.ts";
 const CONFLICT_ENGINE = "pi/v1/delivery/conflictResolverEngine.ts";
+const LIBRARIAN_ENGINE = "pi/v1/librarianEngine.ts";
 const CONFLICT_TRANSPORT_TOKEN = /prompt-template:subagent:/;
 const PRIVATE_CONFLICT_EXECUTOR =
   /src\/runs\/foreground|\brunSync\b|\bexecuteDelegated\b|workflowScript/;
+const WRITER_MODULES = [
+  DELEGATION_TRANSPORT,
+  "delivery/conflictResolution.ts",
+  CONFLICT_ENGINE,
+  "pi/v1/delivery/submitConflict.ts",
+  "pi/v1/delivery/stackConflictResolver.ts",
+  "pi/v1/delivery/stackSync.ts",
+  "delivery/stackConflict.ts",
+  "library/librarian.ts",
+  LIBRARIAN_ENGINE,
+  "pi/v1/librarian.ts",
+];
 
-test("Rule I: the delegation event family is confined to the engine; conflicts never use waves or private execution", () => {
+test("Rule I: the delegation event family is confined to the transport; writers never use waves or private execution", () => {
   const { files, edges } = scan();
   assert.deepEqual(
     files.filter((file) => CONFLICT_TRANSPORT_TOKEN.test(readProductionFile(file))),
-    [CONFLICT_ENGINE],
+    [DELEGATION_TRANSPORT],
   );
-  const conflicts = [
-    "delivery/conflictResolution.ts",
-    CONFLICT_ENGINE,
-    "pi/v1/delivery/submitConflict.ts",
-    "pi/v1/delivery/stackConflictResolver.ts",
-    "pi/v1/delivery/stackSync.ts",
-    "delivery/stackConflict.ts",
-  ];
-  for (const file of conflicts) {
-    assert.ok(files.includes(file), `missing conflict anchor ${file}`);
+  for (const file of WRITER_MODULES) {
+    assert.ok(files.includes(file), `missing writer anchor ${file}`);
     assert.doesNotMatch(readProductionFile(file), PRIVATE_CONFLICT_EXECUTOR);
     assert.deepEqual(
       (edges.get(file) ?? []).filter((target) => target.startsWith("waves/")),
       [],
     );
   }
-  assert.deepEqual(
-    (edges.get("delivery/conflictResolution.ts") ?? []).filter((target) =>
-      target.startsWith("substrate/"),
-    ),
-    [],
-  );
+  for (const pure of ["delivery/conflictResolution.ts", "library/librarian.ts"])
+    assert.deepEqual(
+      (edges.get(pure) ?? []).filter((target) => target.startsWith("substrate/")),
+      [],
+      `${pure} stays substrate-free`,
+    );
+  assert.ok(edges.get(CONFLICT_ENGINE)?.includes(DELEGATION_TRANSPORT));
   assert.ok(edges.get(CONFLICT_ENGINE)?.includes("substrate/worktreeResolverLock.ts"));
+  assert.ok(edges.get(LIBRARIAN_ENGINE)?.includes(DELEGATION_TRANSPORT));
 });
 
-test("Rule I controls: raw channels/private execution and conflict→wave edges bite", () => {
+test("Rule I controls: raw channels/private execution and writer→wave edges bite", () => {
   assert.ok(CONFLICT_TRANSPORT_TOKEN.test('events.emit("prompt-template:subagent:request", data)'));
   for (const source of [
     "runSync()",
@@ -674,14 +692,10 @@ test("Rule I controls: raw channels/private execution and conflict→wave edges 
     'workflowScript: "child"',
   ])
     assert.ok(PRIVATE_CONFLICT_EXECUTOR.test(source));
-  assert.deepEqual(
-    checkDirection(
-      new Map([["delivery/conflictResolution.ts", ["waves/reportWave.ts"]]]),
-      ["delivery/conflictResolution.ts"],
-      ["waves/"],
-    ),
-    [{ from: "delivery/conflictResolution.ts", to: "waves/reportWave.ts" }],
-  );
+  for (const writer of ["delivery/conflictResolution.ts", "library/librarian.ts"])
+    assert.deepEqual(checkDirection(new Map([[writer, ["waves/x.ts"]]]), [writer], ["waves/"]), [
+      { from: writer, to: "waves/x.ts" },
+    ]);
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -745,6 +759,7 @@ test("control 8: every contractual Rule B prefix bites (literal, array-independe
     "delivery/",
     "factories/",
     "learning/",
+    "library/",
   ];
   assert.deepEqual(MECHANISM_HOMES, sources, "MECHANISM_HOMES drifted from the contract list");
   assert.deepEqual(FEATURE_HOMES, targets, "FEATURE_HOMES drifted from the contract list");

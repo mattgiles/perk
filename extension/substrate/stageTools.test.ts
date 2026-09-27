@@ -87,8 +87,8 @@ test("STAGE_TOOLS: the two objective stage lists are pinned exactly (least privi
   // (e.g. the §8.66 ready-time reconcile guidance deliberately avoids naming `ready`, so the
   // zero-argument ready tool never rides an unbound main-root objective session where it could
   // act on the cached selector's plan instead of the continuation's). The two lists differ by
-  // exactly ONE name: the authoring session carries the scout launcher; the save session does
-  // not.
+  // exactly TWO names: the authoring session carries the scout launcher and the library writer
+  // launcher; the save session carries neither.
   const pinned = [
     "ask_user_question",
     "objective_draft",
@@ -105,7 +105,7 @@ test("STAGE_TOOLS: the two objective stage lists are pinned exactly (least privi
     ...FFF_SEARCH_TOOLS,
   ];
   const expected: Record<string, string[]> = {
-    "objective-author": [...pinned, "run_scout_wave"].sort(),
+    "objective-author": [...pinned, "run_scout_wave", "run_librarian"].sort(),
     "objective-save": [...pinned].sort(),
   };
   for (const [stage, tools] of Object.entries(expected)) {
@@ -130,6 +130,30 @@ test("STAGE_TOOLS: run_scout_wave rides exactly the three authoring stage lists"
     );
   }
   assert.ok(PERK_TOOLS.includes("run_scout_wave"));
+});
+
+test("STAGE_TOOLS: run_librarian rides exactly the plan / objective-plan / objective-author lists and the worktree family", () => {
+  // The library writer launcher's gate-OFF placement (contracts.md §8.75(l)): the three
+  // authoring stages plus the ONE shared worktree list — so submit/land carry it by the
+  // family's one-shared-list rule (accepted, pinned here) — and NO other stage.
+  const carriers = new Set([
+    "plan",
+    "objective-plan",
+    "objective-author",
+    "implement",
+    "submit",
+    "address",
+    "land",
+    "learn",
+  ]);
+  for (const [stage, tools] of Object.entries(STAGE_TOOLS)) {
+    assert.equal(
+      tools.includes("run_librarian"),
+      carriers.has(stage),
+      `run_librarian ${carriers.has(stage) ? "must ride" : "must not ride"} STAGE_TOOLS.${stage}`,
+    );
+  }
+  assert.ok(PERK_TOOLS.includes("run_librarian"));
 });
 
 test("STAGE_TOOLS: keys set-equal the registry stage ids", () => {

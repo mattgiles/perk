@@ -3,12 +3,22 @@
 // Node builtins only (so it loads cleanly under `node --test`); shells `git` via `execFileSync`,
 // never with a shell. Fail-open by design: every failure degrades to the caller's `cwd` (or null
 // where stated) rather than throwing — the carriers that use this must never wedge a session.
-// `revalidationBracket` and `worktreeGitDir` deliberately fail closed: snapshot proofs and
-// writer coordination must never invent identity from a failed probe.
+// `revalidationBracket`, `worktreeGitDir` and the checkout-bracket probes (`trackedChanges`,
+// `untrackedInventory`, `checkoutCleanStart`, `checkoutBracket`) deliberately fail closed:
+// snapshot proofs and writer coordination must never invent identity from a failed probe.
 
 import { execFileSync } from "node:child_process";
-import { realpathSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import {
+  type BracketOutcome,
+  type CheckoutSnapshot,
+  cleanStart,
+  compareEndState,
+  type SnapshotObservation,
+  type UntrackedEntry,
+} from "./checkoutSnapshot.ts";
 
 /**
  * The MAIN working tree's root, even when `cwd` is inside a linked worktree — the TS twin of
@@ -202,9 +212,9 @@ export function worktreeDirty(cwd: string): boolean | null {
  * `git status --porcelain`, so a status-based cleanliness proof over a flagged index is not a
  * proof. **Fail-open to null** on any failure (not a repo, git missing) — callers must NOT
  * conflate null with "no flags". Own `execFileSync` rather than the `git()` helper: `git()`
- * conflates empty output (an empty index — meaningful here) with failure. Module-private:
- * `revalidationBracket`'s default flags probe is the one consumer (tests reach the arms through
- * the bracket — real-repo flag arms — and its `probes` seam for the null arm).
+ * conflates empty output (an empty index — meaningful here) with failure. Module-private: the
+ * default flags probe of `revalidationBracket` and `observeCheckout` (tests reach the arms through
+ * the brackets — real-repo flag arms — and their `probes` seams for the null arm).
  */
 function indexHidesChanges(cwd: string): boolean | null {
   try {
@@ -276,6 +286,115 @@ export function revalidationBracket(
     };
   }
   return { ok: true, detail: null };
+}
+
+/** The bracket probes' output budget: whole-checkout listings can be large. */
+const LISTING_MAX_BUFFER = 64 * 1024 * 1024;
+
+/** Run one listing command; raw stdout (empty = meaningful), null on ANY failure. */
+function listing(cwd: string, args: string[]): string | null {
+  try {
+    return execFileSync("git", ["--no-optional-locks", ...args], {
+      cwd,
+      encoding: "utf8",
+      timeout: 60_000,
+      maxBuffer: LISTING_MAX_BUFFER,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The tracked paths with uncommitted changes (staged or not) — `[]` = the tracked tree is clean;
+ * untracked and ignored paths never appear. Parses `status --porcelain=v1 -z
+ * --untracked-files=no`: a record whose X or Y status is a rename/copy is followed by its
+ * original path as the next NUL token, which is consumed (the new path is reported). **Fails
+ * closed to null** on any failure — never conflate null with clean.
+ */
+export function trackedChanges(cwd: string): string[] | null {
+  const out = listing(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=no"]);
+  if (out === null) return null;
+  const tokens = out.split("\0");
+  const paths: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const record = tokens[i] ?? "";
+    if (record === "") continue;
+    if (record.length < 4) return null;
+    const x = record[0];
+    const y = record[1];
+    paths.push(record.slice(3));
+    if (x === "R" || x === "C" || y === "R" || y === "C") i++;
+  }
+  return paths;
+}
+
+/**
+ * The non-ignored untracked inventory (`ls-files --others --exclude-standard -z` — ignored paths
+ * and empty directories never appear, so nothing git could commit is missed), each path with its
+ * kind and digest: a file's sha256, a symlink's target, `""` for anything else. Sorted by path;
+ * `[]` when none. **Fails closed to null** on any git, lstat or read failure — an untracked file
+ * the probe cannot read is unprovable. Hashing is uncapped on purpose: a cap would reopen the
+ * overwritten-in-place blind spot.
+ */
+export function untrackedInventory(cwd: string): UntrackedEntry[] | null {
+  const out = listing(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]);
+  if (out === null) return null;
+  const entries: UntrackedEntry[] = [];
+  try {
+    for (const path of out.split("\0")) {
+      if (path === "") continue;
+      const absolute = resolve(cwd, path);
+      const stat = lstatSync(absolute);
+      if (stat.isSymbolicLink()) {
+        entries.push({ path, kind: "symlink", digest: readlinkSync(absolute) });
+      } else if (stat.isFile()) {
+        const digest = createHash("sha256").update(readFileSync(absolute)).digest("hex");
+        entries.push({ path, kind: "file", digest });
+      } else {
+        entries.push({ path, kind: "other", digest: "" });
+      }
+    }
+  } catch {
+    return null;
+  }
+  return entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+/** The bracket's probe seam (the `revalidationBracket` pattern): tests pin each null arm. */
+export interface CheckoutProbes {
+  head?: (cwd: string) => string | null;
+  trackedChanges?: (cwd: string) => string[] | null;
+  flags?: (cwd: string) => boolean | null;
+  untracked?: (cwd: string) => UntrackedEntry[] | null;
+}
+
+/** One observation of the checkout through the (overridable) fail-closed probes. */
+export function observeCheckout(cwd: string, probes?: CheckoutProbes): SnapshotObservation {
+  return {
+    head: (probes?.head ?? headSha)(cwd),
+    trackedChanges: (probes?.trackedChanges ?? trackedChanges)(cwd),
+    flags: (probes?.flags ?? indexHidesChanges)(cwd),
+    untracked: (probes?.untracked ?? untrackedInventory)(cwd),
+  };
+}
+
+/** The clean-start policy over a live observation (contracts.md §8.75(l)). */
+export function checkoutCleanStart(
+  cwd: string,
+  probes?: CheckoutProbes,
+): { ok: true; snapshot: CheckoutSnapshot } | { ok: false; detail: string } {
+  return cleanStart(observeCheckout(cwd, probes));
+}
+
+/** The end-state bracket over a live observation: equality with the snapshot, fail-closed. */
+export function checkoutBracket(
+  cwd: string,
+  snapshot: CheckoutSnapshot,
+  probes?: CheckoutProbes,
+): BracketOutcome {
+  return compareEndState(snapshot, observeCheckout(cwd, probes));
 }
 
 /**

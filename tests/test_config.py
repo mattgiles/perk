@@ -498,6 +498,7 @@ def test_subagents_selection_parsed(tmp_path):
         'dream-reducer = "a/reducer"\n'
         'scout = "a/scout"\n'
         'simplifier = "a/simplifier"\n'
+        'librarian = "a/librarian"\n'
         'session-auditor = "a/auditor"\n',
     )
     # The RESOLVED domain mapping (not just model parsing): a key added to SubagentsTable
@@ -516,6 +517,7 @@ def test_subagents_selection_parsed(tmp_path):
         "dream-reducer": "a/reducer",
         "scout": "a/scout",
         "simplifier": "a/simplifier",
+        "librarian": "a/librarian",
         "session-auditor": "a/auditor",
     }
 

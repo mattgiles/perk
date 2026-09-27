@@ -19,6 +19,33 @@ export const completedRetainedResolution = {
   verification: "passed",
   summary: "Offline checks passed.",
 };
+/** A consistent `published` librarian record (the child's untrusted report) for `slug`. */
+export function publishedLibrarianRecord(
+  slug: string,
+  action: "add-docs" | "refresh-docs" = "add-docs",
+) {
+  return {
+    action,
+    outcome: "published",
+    slug,
+    published_path: `docs/library/documentation/${slug}`,
+    pages_published: 3,
+    failures_accepted: 0,
+    summary: "Crawled 3 pages, pruned none, no failures.",
+  };
+}
+/** The slug + action a librarian task names (the code-authored `Entry slug:`/action lines). */
+export function librarianTaskFacts(task: unknown): {
+  slug: string;
+  action: "add-docs" | "refresh-docs";
+} {
+  const text = typeof task === "string" ? task : "";
+  const slug = /^Entry slug: (.+)$/m.exec(text)?.[1] ?? "";
+  const action = /^LIBRARIAN TASK — action: refresh-docs\.$/m.test(text)
+    ? "refresh-docs"
+    : "add-docs";
+  return { slug, action };
+}
 export function retainedDispatch(worktree: string) {
   return {
     operationId: RETAINED_OPERATION,
@@ -69,6 +96,7 @@ export function fakeConflictResolver(
   return {
     requests,
     resolverEngine: { configPath: join(cwd, "absent-native-config.json") },
+    librarianEngine: { configPath: join(cwd, "absent-native-config.json") },
     extension(pi: ExtensionAPI) {
       pi.registerTool({
         name: "subagent",
@@ -92,9 +120,14 @@ export function fakeConflictResolver(
             result: {
               kind: "structured",
               value:
-                r.nodeId === "retained-conflict"
-                  ? completedRetainedResolution
-                  : completedResolution,
+                r.nodeId === "librarian"
+                  ? (() => {
+                      const facts = librarianTaskFacts(r.task);
+                      return publishedLibrarianRecord(facts.slug, facts.action);
+                    })()
+                  : r.nodeId === "retained-conflict"
+                    ? completedRetainedResolution
+                    : completedResolution,
             },
           });
       });

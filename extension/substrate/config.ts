@@ -342,6 +342,8 @@ export const SUBAGENT_KEYS = [
   "scout",
   // The simplify doors' lane (resolved at invocation).
   "simplifier",
+  // The run_librarian tool's writer child.
+  "librarian",
   // Dev-only: the perk-dev session-audit judgment wave's auditor (dormant in consumer repos).
   "session-auditor",
 ] as const;
