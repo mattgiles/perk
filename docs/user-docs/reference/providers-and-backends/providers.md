@@ -97,8 +97,6 @@ The providers do not share a normalized tool vocabulary:
 
 The read-only gate recognizes the union of those names. `pi-web-access` is zero-config;
 `ollama-web-search` requires a local Ollama daemon, and `juicesharp-web-tools` requires an API key.
-The bundled `librarian` skill depends on `pi-web-access`, so selecting either alternative removes
-that skill from the delivered package surface.
 
 ### Built in, not selectable
 

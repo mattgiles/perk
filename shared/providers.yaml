@@ -73,14 +73,12 @@
 # The WEB seam is the OTHER INTERFACE seam (no durable artifact to bridge), but with a genuine
 # novelty: it is the ONLY seam whose `default: true` provider has a NON-NULL `package`. perk owns
 # no native web-research implementation, so the behavior-preserving reference (`pi-web-access`,
-# zero-config Exa search + content fetch + the bundled `librarian` skill) is itself a foreign npm
-# package. Selection simply SWAPS which web package the provider-convergence installs — `adapter:
-# null`, no shim, and there is NO perk surface to vacate at registration time because perk registers
-# NO web tools of its own. The read-only allowlist statically carries the UNION of all known web
-# tool names (inert when absent); perk does NOT normalize tool names across providers. `librarian`
-# is pi-web-access-specific (it depends on `fetch_content`'s GitHub-clone path) and is accepted as
-# lost under a foreign web selection. Fail-safe: any config-read error resolves to `pi-web-access`,
-# keeping today's behavior exactly.
+# zero-config Exa search + content fetch) is itself a foreign npm package. Selection simply SWAPS
+# which web package the provider-convergence installs — `adapter: null`, no shim, and there is NO
+# perk surface to vacate at registration time because perk registers NO web tools of its own. The
+# read-only allowlist statically carries the UNION of all known web tool names (inert when absent);
+# perk does NOT normalize tool names across providers. Fail-safe: any config-read error resolves to
+# `pi-web-access`, keeping today's behavior exactly.
 #
 # There is NO review seam: the two surface-named review doors (`/pr-review-terminal` — the hunk
 # terminal TUI; `/pr-review-browser` — the plannotator browser UI) are the selection (the command
@@ -172,7 +170,7 @@ providers:
     package: "npm:pi-web-access"   # NON-NULL default package: the novelty — perk has no native web provider
     adapter: null            # VACATE-ONLY interface seam: no durable artifact, and perk registers NO web
                              # tools, so there is no perk surface to vacate. Selection just swaps the package.
-    default: true            # the behavior-preserving no-config pick (zero-config Exa search + `librarian`)
+    default: true            # the behavior-preserving no-config pick (zero-config Exa search + content fetch)
     # No `package_filter`: `pi-web-access`'s sole extension is its root `./index.ts` (verified via
     # `npm view pi-web-access pi`), so omitting the filter loads exactly that one extension.
   - id: ollama-web-search    # REAL web provider — VACATE-ONLY (interface seam, no adapter)

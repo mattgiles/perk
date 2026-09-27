@@ -153,8 +153,7 @@ Provider tool vocabularies are not normalized:
 - `juicesharp-web-tools`: `web_search` and `web_fetch`.
 
 The read-only gate recognizes the union. `pi-web-access` is zero-config; `ollama-web-search`
-requires a local Ollama daemon; `juicesharp-web-tools` requires an API key. The bundled `librarian`
-skill is specific to `pi-web-access`, so either alternative removes it from the delivered surface.
+requires a local Ollama daemon; `juicesharp-web-tools` requires an API key.
 
 ### Built in, not selectable
 
@@ -475,7 +474,7 @@ a live workspace, so this is not part of ordinary Linear readiness.
 - GitHub Issues Sync interactions are outside coverage; prefer a team without that two-way sync
   unless separately validated.
 - `pi-status-footer` hides extension status; non-default web providers have local credential or
-  daemon requirements and remove the `pi-web-access`-specific `librarian` skill.
+  daemon requirements.
 
 Canonical operator sources:
 

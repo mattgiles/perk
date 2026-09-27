@@ -85,8 +85,7 @@ during a review counts as a changed destination. Python remains the authority fo
 - `pi-status-footer` does not render extension statuses, so perk's objective progress is not
   visible there. `powerline-footer` and `pi-bar-footer` do render those statuses.
 - `pi-web-access` is the only zero-config web choice. `ollama-web-search` requires a local Ollama
-  daemon; `juicesharp-web-tools` requires an API key. Selecting either non-default web provider
-  also removes the `pi-web-access`-specific `librarian` skill.
+  daemon; `juicesharp-web-tools` requires an API key.
 - Linear behavior has broad offline regression coverage and dated live validation for the core
   issue lifecycle, project-backed objectives, and attachment metadata. Workspace-specific auth,
   team, label, Project-scope, and workflow-state readiness still requires the verify-gated live

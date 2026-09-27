@@ -548,7 +548,7 @@ include_packages = true
 [skills.stages]
 ast-grep = ["implement", "address"]
 dignified-python = "all"
-librarian = []
+agent-browser = []
 ```
 
 The model **engages only when in use**: some skill declares `stages:` frontmatter, or any

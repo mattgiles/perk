@@ -655,12 +655,12 @@ def test_skills_stages_all_and_list_rows(tmp_path):
         tmp_path,
         "perk.toml",
         '[skills.stages]\ndignified-python = "all"\nast-grep = ["implement", " address "]\n'
-        "librarian = []\n",
+        "agent-browser = []\n",
     )
     assert load_config(tmp_path).skills.stages == {
         "dignified-python": None,  # "all" -> None (the re-widening row)
         "ast-grep": ("implement", "address"),
-        "librarian": (),
+        "agent-browser": (),
     }
 
 

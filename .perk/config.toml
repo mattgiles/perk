@@ -170,9 +170,8 @@ codebase-design = ["plan", "objective-plan", "objective-author"]
 agent-browser = []
 # Package-bundled skills (gitignored `.pi/npm` tier — sanctioned by the static PACKAGE_SKILLS
 # literal in tests/test_skill_declarations.py). `pi-subagents` mirrors where the `subagent` tool
-# lives (the worktree stages); `librarian` follows the deep-research stages.
+# lives (the worktree stages).
 pi-subagents = ["implement", "submit", "address", "land", "learn"]
-librarian = ["plan", "objective-plan", "objective-author", "implement", "address"]
 
 # ═══ Where work happens ═══
 
