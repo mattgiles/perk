@@ -112,6 +112,16 @@ def _guidance_from_source(store: objective_store.ObjectiveStore, *, source_id: s
     )
 
 
+def _refuse_subject_alias(objective_id: str) -> UserFacingCliError:
+    """The ``invalid_input`` refusal for guidance that names the objective being replanned —
+    shared by the instant local check and the backend-canonical check."""
+    return UserFacingCliError(
+        f"--from names the objective being replanned (#{objective_id}); its text is already "
+        "materialized as <untrusted_objective> — pass a separate source or file as guidance.",
+        error_type="invalid_input",
+    )
+
+
 def _render_guidance(guidance: _Guidance) -> str:
     """The scratch's ``<untrusted_replan_guidance>`` block. The source title/url are untrusted
     too, so the ``from:`` label sits INSIDE the container alongside the content."""
@@ -359,12 +369,7 @@ def replan_objective(
                         "No guidance given for --from", error_type="invalid_input"
                     )
                 if guidance_source_id == objective_id:
-                    raise UserFacingCliError(
-                        f"--from names the objective being replanned (#{objective_id}); its "
-                        "text is already materialized as <untrusted_objective> — pass a "
-                        "separate source or file as guidance.",
-                        error_type="invalid_input",
-                    )
+                    raise _refuse_subject_alias(objective_id)
 
         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
         # any side effect (objective-author is cold_remote:false).
@@ -395,6 +400,15 @@ def replan_objective(
             facts = prepared.replan
             if facts is None:
                 raise RuntimeError("replan Prepare returned no replan context")
+            # The local check above only catches identical spellings; the backend is the identity
+            # authority (GitHub resolves `042` / `+42` to issue 42). Compare the canonical ids both
+            # reads returned — still before the engagement reads, the scratch write, and launch.
+            if (
+                guidance is not None
+                and guidance.kind == "source"
+                and guidance.ref == facts.objective_id
+            ):
+                raise _refuse_subject_alias(facts.objective_id)
             unfinished = [n for n in facts.nodes if n.status in _UNFINISHED]
             stacked_facts = facts if facts.delivery == "stacked" else None
 

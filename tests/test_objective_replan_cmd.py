@@ -5,6 +5,7 @@ The objective store, issue backend, and `launch.launch_stage` are stubbed (no Gi
 the fresh-run-id + `supersedes` handoff threading, and the refusals.
 """
 
+import contextlib
 import json
 from pathlib import Path
 
@@ -73,9 +74,13 @@ class _FakeStore:
         self.source_calls.append(source_id)
         # With a `sources` map the fake answers ONLY from it (a miss is `None` — the subject's
         # prose read then falls back to the title); without one it returns the default
-        # old-objective prose every existing test relies on.
+        # old-objective prose every existing test relies on. Keys resolve the way the GitHub
+        # store resolves ids (`int(id.removeprefix("#"))`), so `042` / `+42` reach source 42.
         if self._sources is not None:
-            return self._sources.get(source_id)
+            key = source_id.removeprefix("#")
+            with contextlib.suppress(ValueError):
+                key = str(int(key))
+            return self._sources.get(key)
         return AdoptableObjectiveSource(
             id=source_id, url="u/42", title="Old objective", prose="The old objective rationale."
         )
@@ -795,6 +800,33 @@ def test_from_aliasing_the_objective_refuses_invalid_input(
     assert store.source_calls == []  # never read as guidance (nor as the subject's prose)
     assert service.requests == []
     assert "skills \u00b7" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("subject", "alias"),
+    [("42", "042"), ("42", "+42"), ("042", "42"), ("#042", "#42")],
+)
+def test_from_backend_equivalent_objective_spelling_refuses_invalid_input(
+    monkeypatch, unborn_git_repo_factory, subject, alias
+):
+    # The instant local check compares cleaned spellings only; the store resolves `042` / `+42`
+    # to the SAME issue the save would close. The backend-canonical check (the guidance source's
+    # id vs Prepare's objective id) refuses before the scratch write and launch.
+    subject_src = AdoptableObjectiveSource(id="42", url="u/42", title="Old objective", prose="Old.")
+    store = _FakeStore(state=_state(_UNFINISHED_NODES), sources={"42": subject_src})
+    service = _patch(monkeypatch, store)
+    monkeypatch.setattr(launch, "launch_stage", _boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", subject, "--from", alias, "--json"])
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout)
+        assert not any((Path(d) / ".perk/workflow/scratch").glob("objective-replan-*"))
+    assert payload["error_type"] == "invalid_input"
+    assert "#42" in payload["message"]
+    # Only the read-only Prepare snapshot ran — it is where the subject's canonical id comes from.
+    assert len(service.requests) == 1
 
 
 def test_from_aliasing_the_replan_scratch_refuses_invalid_input(
