@@ -27,7 +27,7 @@ import {
   recordSessionPointer,
   type SessionPointer,
 } from "./substrate/sessionPointers.ts";
-import { LAZY_TOOL_LOADERS, READ_ONLY_CONTEXT, READ_ONLY_TOOLS } from "./substrate/toolGating.ts";
+import { READ_ONLY_CONTEXT, READ_ONLY_TOOLS } from "./substrate/toolGating.ts";
 import { WORKFLOW_STATE_TYPE } from "./substrate/workflowState.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 
@@ -413,17 +413,16 @@ test("composition: a post-gate branch-read failure leaves the gate applied and r
   const errors: string[] = [];
   t.mock.method(console, "error", (message: unknown) => errors.push(String(message)));
   let gateSynced = false;
-  // A perk-only session registers no lazy-owned tool, so the gate installs the allowlist minus
-  // every lazy-owned name (the allowlist is a ceiling, contracts.md §8.40).
-  const lazyOwned = new Set(Object.values(LAZY_TOOL_LOADERS).flat());
-  const gated = READ_ONLY_TOOLS.filter((name) => !lazyOwned.has(name));
   const original = AgentSession.prototype.setActiveToolsByName;
   t.mock.method(
     AgentSession.prototype,
     "setActiveToolsByName",
     function (this: AgentSession, names: string[]) {
       original.call(this, names);
-      if (names.length === gated.length && names.every((name, i) => name === gated[i])) {
+      if (
+        names.length === READ_ONLY_TOOLS.length &&
+        names.every((name, i) => name === READ_ONLY_TOOLS[i])
+      ) {
         gateSynced = true;
       }
     },

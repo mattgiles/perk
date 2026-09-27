@@ -1067,6 +1067,52 @@ test("lazy owners, a declaration-less non-empty transcript: perk follows each ow
   }
 });
 
+test("eager owner (no loader registered): a gate toggle through a non-admitting stage restores delegation on re-entry", async () => {
+  // An owner that registers its tools eagerly — an older pi-subagents, or the current one's
+  // host-probe fallback — registers no loader, so nothing can re-enable a tool perk stripped.
+  // Without a registered loader the name is NOT lazy-owned: the gate-ON allowlist installs it.
+  const runId = "01LAZYEAGERPLAN";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "plan" } });
+  const h = await loadAt(cwd, {
+    env: { PERK_RUN_ID: runId },
+    extraExtensions: [fakeBorrowedPackage(["subagent", ...WEB_LAZY_TOOLS])],
+  });
+  try {
+    const eager = { subagent: true, ...webTools(true) };
+    assertActivity(h, eager, "after a gated startup");
+    await h.invokeCommand("plan");
+    assertActivity(h, { subagent: false, ...webTools(true) }, "after the gate exits into plan");
+    await h.invokeCommand("plan");
+    assertActivity(h, eager, "after the gate re-engages");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("lazy owners, bare session: a tool the owner hid before perk engaged, enabled by its loader, survives the warm gate's exit and a later toggle", async () => {
+  // The owners hide their registered tools in session_start, BEFORE perk's first engagement
+  // (the warm /plan toggle) — so the enabled tool is in neither the snapshot nor the
+  // admissions (the census saw it); only the live lazy-owned selection keeps it.
+  const cwd = scaffoldRepo();
+  const h = await loadAt(cwd, { env: { PERK_RUN_ID: undefined }, extraExtensions: lazyOwners() });
+  try {
+    assertActivity(h, HIDDEN_WITH_LOADERS, "after a bare startup");
+    await h.invokeCommand("plan");
+    await h.invokeTool("subagents_enable", {});
+    await h.invokeTool("web_enable", {});
+    const enabled = { subagent: true, ...webTools(true) };
+    assertActivity(h, enabled, "after both loaders ran under the gate");
+    await h.invokeCommand("plan");
+    assertActivity(h, { ...enabled, edit: true }, "after the gate exits");
+    // A perk-only reconciliation pair (enter + exit) neither restores nor evicts them.
+    await h.invokeCommand("plan");
+    await h.invokeCommand("plan");
+    assertActivity(h, { ...enabled, edit: true }, "after a second gate toggle");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("headless prompt turn: the model-visible census after startup", async () => {
   // One real (faux-runtime) prompt turn: the provider sees a TranscriptContext (pi-ai ≥ 0.87
   // declares the tool loadout through the system messages' `toolsAdded`/`toolsRemoved`, not a

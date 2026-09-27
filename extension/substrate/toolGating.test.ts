@@ -39,18 +39,32 @@ type Hook = (
   ctx: ExtensionContext,
 ) => Promise<{ block?: boolean; message?: { content: string }; messages?: unknown[] } | undefined>;
 
-/** The fake host's active (and registered) set — it carries no lazy-owned name by default. */
+/** The fake host's default active (and registered) set — no lazy loader, so no lazy-owned tool. */
 const FIXTURE_ACTIVE: readonly string[] = ["read", "write", "plan_save"];
 
-/** Every tool some lazy loader enables (its membership is the owner's live selection). */
-const LAZY_OWNED: ReadonlySet<string> = new Set(Object.values(LAZY_TOOL_LOADERS).flat());
-
-/** The installed gate-ON set: the allowlist minus the lazy-owned tools the owner has not selected. */
-function expectedGated(list: readonly string[], current: readonly string[] = FIXTURE_ACTIVE) {
-  return list.filter((name) => !LAZY_OWNED.has(name) || current.includes(name));
+/**
+ * The installed gate-ON set: the allowlist minus the tools of every REGISTERED loader that the
+ * owner does not currently have active.
+ */
+function expectedGated(list: readonly string[], active: readonly string[], registered = active) {
+  const lazyOwned = new Set(
+    registered.flatMap((name) =>
+      Object.hasOwn(LAZY_TOOL_LOADERS, name) ? [...(LAZY_TOOL_LOADERS[name] ?? [])] : [],
+    ),
+  );
+  return list.filter((name) => !lazyOwned.has(name) || active.includes(name));
 }
 
-function gateFixture(floor: () => boolean, initial: readonly string[] = FIXTURE_ACTIVE) {
+/**
+ * The gate's fake host. `initial` is the live active set; `registered` (default: the same names)
+ * is the registry census — independent, so an owner can hide a registered tool before perk's
+ * first engagement.
+ */
+function gateFixture(
+  floor: () => boolean,
+  initial: readonly string[] = FIXTURE_ACTIVE,
+  registered: readonly string[] = initial,
+) {
   const hooks = new Map<string, Hook>();
   // The host's live active set as the owners see it (installs are recorded, not applied, so a
   // test moves it explicitly to model an owner's toggle between reconciliations).
@@ -68,7 +82,7 @@ function gateFixture(floor: () => boolean, initial: readonly string[] = FIXTURE_
     },
     getAllTools: () => {
       if (fail === "census") throw new Error("census");
-      return active.map((name) => ({ name }));
+      return registered.map((name) => ({ name }));
     },
     setActiveTools: (names: string[]) => {
       if (fail === "toolset") throw new Error("toolset");
@@ -137,7 +151,7 @@ test("floor enforces all observations before sync, despite snapshot/census/tools
       h.gate.exit();
       assert.deepEqual(h.appends, [], "floor exit never appends read-write");
       h.gate.syncFromState("read-write", undefined);
-      assert.deepEqual(h.installed.at(-1), expectedGated(READ_ONLY_TOOLS));
+      assert.deepEqual(h.installed.at(-1), READ_ONLY_TOOLS);
       await assertBackstop(h);
     }
   }
@@ -176,7 +190,7 @@ test("a census-read failure on a cold read-only sync stays closed, records no ha
   // snapshot + census and installs the gated set; the exit then restores that fresh snapshot.
   h.fail(undefined);
   await h.call("resources_discover");
-  assert.deepEqual(h.installed, [expectedGated(READ_ONLY_TOOLS)]);
+  assert.deepEqual(h.installed, [READ_ONLY_TOOLS]);
   await assertBackstop(h);
   h.gate.exit();
   assert.equal(h.gate.isActive(), false);
@@ -1868,7 +1882,7 @@ test("gate ON in the refinement stage: the active set, the tool_call backstop an
   const h = gateFixture(() => false);
   // An already-gated UNBOUND session (default flavor installed) that then enters refinement.
   h.gate.syncFromState("read-only", undefined);
-  assert.deepEqual(h.installed.at(-1), expectedGated(READ_ONLY_TOOLS));
+  assert.deepEqual(h.installed.at(-1), READ_ONLY_TOOLS);
   assert.equal((await h.call("before_agent_start"))?.message?.content, READ_ONLY_CONTEXT);
   assert.equal(
     (await h.call("tool_call", { toolName: "objective_refinement_draft", input: {} }))?.block,
@@ -1878,7 +1892,7 @@ test("gate ON in the refinement stage: the active set, the tool_call backstop an
   assert.equal(await h.call("tool_call", { toolName: "objective_node", input: {} }), undefined);
 
   h.gate.syncFromState("read-only", "objective-refine");
-  assert.deepEqual(h.installed.at(-1), expectedGated(REFINEMENT_READ_ONLY_TOOLS));
+  assert.deepEqual(h.installed.at(-1), REFINEMENT_READ_ONLY_TOOLS);
   assert.equal(
     await h.call("tool_call", { toolName: "objective_refinement_draft", input: {} }),
     undefined,
@@ -1962,9 +1976,35 @@ test("gate ON: the allowlist is a ceiling — a lazy-owned tool installs only wh
   }
 });
 
+test("no registered loader: an eager owner's tools are ordinary names — the gate restores what a stage stripped", () => {
+  // An older pi-subagents (or the current one's host-probe fallback) registers `subagent`
+  // eagerly and no `subagents_enable`: nothing could re-enable a stripped tool, so the gate-ON
+  // allowlist installs it by name exactly as before lazy ownership existed.
+  const eager = [...FIXTURE_ACTIVE, "subagent", "web_search"];
+  const h = gateFixture(() => false, eager);
+  h.gate.syncFromState("read-only", "plan");
+  assert.deepEqual(h.installed.at(-1), expectedGated(READ_ONLY_TOOLS, eager));
+  // Gate exit into plan strips subagent (the stage excludes delegation); re-entry restores it.
+  h.gate.syncFromState("read-write", "plan");
+  const stripped = h.installed.at(-1) ?? [];
+  assert.ok(!stripped.includes("subagent") && stripped.includes("web_search"));
+  h.setActive(stripped);
+  h.gate.syncFromState("read-only", "plan");
+  assert.ok((h.installed.at(-1) ?? []).includes("subagent"), "re-entry restores the eager tool");
+  // The same sequence with the loader registered: the stripped lazy tool stays with its owner.
+  const lazy = [...eager, "subagents_enable"];
+  const owned = gateFixture(() => false, lazy);
+  owned.gate.syncFromState("read-write", "plan");
+  owned.setActive(owned.installed.at(-1) ?? []);
+  owned.gate.syncFromState("read-only", "plan");
+  assert.ok(!(owned.installed.at(-1) ?? []).includes("subagent"), "a lazy tool is never restored");
+});
+
 test("gate OFF baseline: a lazy-owned snapshot member the owner hid is dropped; one it enabled later is kept; the stage filter still applies", () => {
   const start = [...FIXTURE_ACTIVE, "subagent", "web_search", "subagents_enable", "web_enable"];
-  const h = gateFixture(() => false, start);
+  // source_check is REGISTERED from the start but hidden by its owner, so the census saw it:
+  // it is never admitted, and only the live lazy-owned selection can keep it once enabled.
+  const h = gateFixture(() => false, start, [...start, "source_check"]);
   h.gate.syncFromState("read-write", "implement");
   assert.deepEqual(
     h.installed.at(-1),
@@ -1988,6 +2028,25 @@ test("gate OFF baseline: a lazy-owned snapshot member the owner hid is dropped; 
   // Leaving every concern restores the baseline under the same owner-selected rule.
   h.gate.syncFromState("read-write", undefined);
   assert.deepEqual(h.installed.at(-1), next);
+});
+
+test("warm gate: a registered tool its owner hid before perk engaged, enabled by its loader, survives gate exit and a perk-only toggle", () => {
+  // Bare session: the owner hid `subagent` in its own session_start, before perk's first
+  // engagement (the warm /plan toggle) — absent from the snapshot, never admitted (the census
+  // saw it).
+  const registered = [...FIXTURE_ACTIVE, "subagent", "subagents_enable"];
+  const hidden = [...FIXTURE_ACTIVE, "subagents_enable"];
+  const h = gateFixture(() => false, hidden, registered);
+  h.gate.enter();
+  assert.ok(!(h.installed.at(-1) ?? []).includes("subagent"), "the gate honors the owner's hiding");
+  const enabled = [...hidden, "subagent"];
+  h.setActive(enabled);
+  h.gate.exit();
+  assert.deepEqual(h.installed.at(-1), enabled, "the gate exit keeps the loader-enabled tool");
+  h.gate.enter();
+  assert.ok((h.installed.at(-1) ?? []).includes("subagent"), "kept under the gate's ceiling");
+  h.gate.exit();
+  assert.deepEqual(h.installed.at(-1), enabled, "and again after a perk-only toggle");
 });
 
 test("the loader refusal: stage-naming reasons under the gate and under stage scoping", async () => {
@@ -2028,7 +2087,7 @@ test("the loader refusal: stage-naming reasons under the gate and under stage sc
   // Gate OFF, no stage or an unknown stage: never refused (fail-open).
   for (const stage of [undefined, "future-stage", "constructor"]) {
     const open = gateFixture(() => false);
-    if (stage !== "constructor") open.gate.syncFromState("read-write", stage);
+    open.gate.syncFromState("read-write", stage);
     for (const loader of Object.keys(LAZY_TOOL_LOADERS)) {
       assert.equal(await call(open, loader), undefined, `${loader} passes in ${stage}`);
     }

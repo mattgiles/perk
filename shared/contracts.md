@@ -731,8 +731,9 @@ other path refused; no worktree writes), and `run_dream_wave` (the gated learn-d
 wave call: NO parameters — its manifest read AND its one write, the fixed-name run-scratch
 bundle beside that manifest, are both derived from the claimed run's manifest path, §8.61 —
 the no-aimable-writer posture on both sides)) via `pi.setActiveTools` — lazy-owned members
-(`subagent` and pi-web-access's four default tools) are installed only while their owner has them
-selected (§8.40) — **snapshot-then-restore** (the restore
+(`subagent` and pi-web-access's four default tools, while their loader is registered) are installed
+only while their owner has them selected (§8.40; the tool-call check below keeps the full set) —
+**snapshot-then-restore** (the restore
 falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) rejects
 **every** tool outside that same `READ_ONLY_TOOLS` set at `tool_call`, including `plan_save`, delivery
 and unknown/late foreign mutators, even when toolset narrowing failed. This backstop applies to all
@@ -7365,13 +7366,19 @@ differ by this one name.
 tools until the model calls a **lazy loader** — a borrowed tool that activates its package's
 other tools on demand. `LAZY_TOOL_LOADERS` (`toolGating.ts`, loader → tools) is the SSOT:
 `subagents_enable` → `subagent`; `web_enable` → `web_search`, `source_check`, `fetch_content`,
-`get_search_content`. A **lazy-owned tool**'s ACTIVATION is its owner's decision; perk owns only
-its ELIGIBILITY (mode/stage). At EVERY reconciliation (gate ON and OFF) a lazy-owned name's
-membership is its owner's current selection (the live active set): the gate-ON allowlist is a
+`get_search_content`. A tool is **lazy-owned** only while its loader is REGISTERED (active or not,
+read from the registry at each reconciliation): an owner that registers its tools eagerly and no
+loader — an older version, or its host-probe fallback — owns nothing lazily, so its tools keep the
+ordinary snapshot/allowlist behavior (nothing could re-enable a tool perk stripped). A
+lazy-owned tool's ACTIVATION is its owner's decision; perk owns only its ELIGIBILITY (mode/stage).
+At EVERY reconciliation (gate ON and OFF) a lazy-owned name's membership is its owner's current
+selection (the live active set): the gate-ON allowlist is a
 ceiling (installed only while the owner has it selected); the gate-OFF baseline drops snapshot
 members the owner has since hidden and keeps ones the owner has since enabled; and the stage
 filter still applies over that baseline (an owner-enabled `subagent` is stripped in a stage whose
-list excludes it, e.g. `objective-plan`, `gist-save`). perk never re-activates or restores a
+list excludes it, e.g. `objective-plan`, `gist-save`). Owner selection shapes only the INSTALLED
+set: the gate's `tool_call` backstop still checks the full allowlist, so lazy hiding is never an
+authorization boundary. perk never re-activates or restores a
 lazy-owned tool — Pi's transcript restore (which runs before `session_tree` handlers) and the
 owner's recorded-selection replay on `session_start`/`session_tree` do; perk only keeps or (by
 stage) strips. A loader has exactly the eligibility of the tools it enables — it rides the same

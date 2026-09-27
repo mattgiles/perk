@@ -116,10 +116,10 @@ export const SUBAGENT_TOOLS: readonly string[] = [
 ];
 
 /**
- * Borrowed lazy-activation loaders → the tools each one activates (contracts.md §8.40). A
- * lazy-owned tool's ACTIVATION is its owner's decision — the owner hides it until the model calls
- * the loader, and replays the recorded selection on navigation; perk owns only its ELIGIBILITY
- * (mode/stage). Each loader rides the same family constant as the tools it enables, so its
+ * Borrowed lazy-activation loaders → the tools each one activates (contracts.md §8.40). While
+ * the loader is registered, a lazy-owned tool's ACTIVATION is its owner's decision — the owner
+ * hides it until the model calls the loader, and replays the recorded selection on navigation;
+ * perk owns only its ELIGIBILITY (mode/stage). Each loader rides the same family constant as the tools it enables, so its
  * eligibility equals theirs everywhere (pinned). Look entries up with `Object.hasOwn` first: a
  * tool named like a prototype key must not match.
  */
@@ -128,15 +128,30 @@ export const LAZY_TOOL_LOADERS: Readonly<Record<string, readonly string[]>> = {
   web_enable: ["web_search", "source_check", "fetch_content", "get_search_content"],
 };
 
-/** Every tool some lazy loader activates — membership follows the owner's live selection. */
-const LAZY_OWNED_TOOLS: ReadonlySet<string> = new Set(Object.values(LAZY_TOOL_LOADERS).flat());
+/**
+ * The tools lazy-owned in this session: those of every loader currently REGISTERED (active or
+ * not). An owner that registers its tools eagerly and no loader — an older version, or its
+ * host-probe fallback — owns nothing lazily: nothing could re-enable a tool perk stripped, so its
+ * tools keep the ordinary snapshot/allowlist behavior.
+ */
+function lazyOwnedBy(registered: Iterable<string>): ReadonlySet<string> {
+  const owned = new Set<string>();
+  for (const name of registered) {
+    if (!Object.hasOwn(LAZY_TOOL_LOADERS, name)) continue;
+    for (const tool of LAZY_TOOL_LOADERS[name] ?? []) owned.add(tool);
+  }
+  return owned;
+}
+
+/** The live tool state one install reads: the active set + the tools lazy-owned right now. */
+type LiveSelection = { active: ReadonlySet<string>; lazyOwned: ReadonlySet<string> };
 
 /**
- * Owner-selected membership: drop a lazy-owned name unless its owner currently has it active
- * (`current` = the live active set). Every other name passes through.
+ * Owner-selected membership: drop a lazy-owned name unless its owner currently has it active.
+ * Every other name passes through.
  */
-function ownerSelected(names: Iterable<string>, current: ReadonlySet<string>): string[] {
-  return [...names].filter((name) => !LAZY_OWNED_TOOLS.has(name) || current.has(name));
+function ownerSelected(names: Iterable<string>, live: LiveSelection): string[] {
+  return [...names].filter((name) => !live.lazyOwned.has(name) || live.active.has(name));
 }
 
 /** Where a loader call was refused: under the gate (optionally stage-scoped), or by a stage. */
@@ -393,6 +408,11 @@ export const REFINEMENT_READ_ONLY_TOOLS: readonly string[] = [
   ...LINEAR_READ_TOOLS,
   ...FFF_SEARCH_TOOLS,
 ];
+
+/** A stage's gate-OFF list; undefined for no stage or an unknown one (a prototype key included). */
+function stageToolsFor(stage: string | null): readonly string[] | undefined {
+  return stage !== null && Object.hasOwn(STAGE_TOOLS, stage) ? STAGE_TOOLS[stage] : undefined;
+}
 
 /** The gate-ON allowlist for a stage: refinement's own selection, else READ_ONLY_TOOLS. */
 export function gatedToolsFor(stage: string | null): readonly string[] {
@@ -1222,8 +1242,8 @@ export function registerToolGating(
    *    scoped names (PERK_TOOLS ∪ BORROWED_TOOLS) survive only when the stage's list carries them.
    *  - neither engaged → restore the baseline and forget it (a session that never engages gets
    *    ZERO setActiveTools calls — bare warm sessions stay byte-identical).
-   * Lazy-owned names (LAZY_TOOL_LOADERS) take their membership from the owner's live selection
-   * in every arm: the gated allowlist is a ceiling (installed only while the owner has the tool
+   * Lazy-owned names (the tools of every REGISTERED loader in LAZY_TOOL_LOADERS) take their
+   * membership from the owner's live selection in every arm: the gated allowlist is a ceiling (installed only while the owner has the tool
    * selected), and the baseline neither restores one the owner hid nor drops one it enabled.
    * perk never re-activates or restores a lazy-owned tool — Pi's transcript restore and the
    * owner's recorded-selection replay do; perk only keeps it or (by stage) strips it.
@@ -1245,17 +1265,25 @@ export function registerToolGating(
    * owner enabled after the snapshot is kept. Gate-OFF paths only (the gate-ON set is by name —
    * no bookkeeping there).
    */
-  function baseline(e: Engaged, current: ReadonlySet<string>): string[] {
-    for (const name of current) if (!e.census.has(name)) e.admitted.add(name);
-    const lazyActive = [...current].filter((name) => LAZY_OWNED_TOOLS.has(name));
-    return [...new Set([...ownerSelected([...e.snapshot, ...e.admitted], current), ...lazyActive])];
+  function baseline(e: Engaged, live: LiveSelection): string[] {
+    for (const name of live.active) if (!e.census.has(name)) e.admitted.add(name);
+    const lazyActive = [...live.active].filter((name) => live.lazyOwned.has(name));
+    return [...new Set([...ownerSelected([...e.snapshot, ...e.admitted], live), ...lazyActive])];
+  }
+
+  /** The owner's live selection, read per install (after the first-engagement snapshot). */
+  function readLive(): LiveSelection {
+    return {
+      active: new Set(pi.getActiveTools()),
+      lazyOwned: lazyOwnedBy(pi.getAllTools().map((t) => t.name)),
+    };
   }
 
   function apply(nextActive: boolean, nextStage: string | null): void {
     // Fail-closed: a read-only sync engages the in-memory gate BEFORE the fallible reads/installs.
     if (nextActive) active = true;
     const effective = nextActive || hasFloor();
-    const stageList = nextStage === null ? undefined : STAGE_TOOLS[nextStage];
+    const stageList = stageToolsFor(nextStage);
     // First engagement of either concern: ONE literal (a throwing read records no half state).
     if ((effective || stageList !== undefined) && engaged === null) {
       engaged = {
@@ -1264,14 +1292,11 @@ export function registerToolGating(
         admitted: new Set(),
       };
     }
-    // The owner's live selection, read once per install (after the snapshot literal above, so
-    // the fail-closed ordering is unchanged).
-    const current: ReadonlySet<string> =
-      effective || engaged !== null ? new Set(pi.getActiveTools()) : new Set();
+    // The live reads follow the snapshot literal above, so the fail-closed ordering is unchanged.
     if (effective) {
-      pi.setActiveTools(ownerSelected(gatedToolsFor(nextStage), current));
+      pi.setActiveTools(ownerSelected(gatedToolsFor(nextStage), readLive()));
     } else if (engaged !== null) {
-      const base = baseline(engaged, current);
+      const base = baseline(engaged, readLive());
       if (stageList !== undefined) {
         pi.setActiveTools(
           base.filter((name) => !SCOPED_TOOL_NAMES.has(name) || stageList.includes(name)),
@@ -1308,8 +1333,8 @@ export function registerToolGating(
         ? null
         : lazyLoaderRefusalReason(toolName, { kind: "gated", stage: stageId });
     }
-    if (stageId === null || !Object.hasOwn(STAGE_TOOLS, stageId)) return null;
-    return STAGE_TOOLS[stageId]?.includes(toolName) === false
+    const stageList = stageToolsFor(stageId);
+    return stageId !== null && stageList !== undefined && !stageList.includes(toolName)
       ? lazyLoaderRefusalReason(toolName, { kind: "stage", stage: stageId })
       : null;
   }

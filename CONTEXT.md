@@ -69,8 +69,8 @@ elsewhere.
 _Avoid_: enable tool, activation tool, meta-tool
 
 **Lazy-owned tool**:
-A borrowed tool whose activation its owner toggles through a lazy loader; perk applies its
-mode/stage eligibility but takes its membership from the owner's live selection.
+A borrowed tool whose activation its owner toggles through a registered lazy loader; perk applies
+its mode/stage eligibility but takes its membership from the owner's live selection.
 _Avoid_: hidden tool, deferred tool, heavy tool
 
 ### Read-only bash gate

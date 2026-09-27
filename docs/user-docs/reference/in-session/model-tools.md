@@ -168,7 +168,8 @@ review without Plannotator's phase tools. Bare unscoped Pi sessions retain their
 tools.
 
 **Lazy loaders.** pi-subagents and pi-web-access hide their heavy tools until the model asks for
-them: `subagent` appears only after the model calls `subagents_enable`, and `web_search`,
+them (when the package registers its loader; an older version or a host it cannot verify keeps
+the tools always available, and perk treats them like any other tool): `subagent` appears only after the model calls `subagents_enable`, and `web_search`,
 `source_check`, `fetch_content` and `get_search_content` only after it calls `web_enable`. The
 packages also restore that selection when you navigate the session tree. Perk honors the
 package's selection in every mode — it never re-enables a tool the package hid, and never drops
@@ -201,9 +202,11 @@ bridge is active.
 ### Structural read-only gate
 
 Effective read-only gating is the existing workflow mode **or** a captured runner restriction
-floor. Perk installs `READ_ONLY_TOOLS` as the active set and independently checks the same full
-allowlist at tool-call time — minus any lazy-loaded tool its package currently hides (the loaders
-themselves are allowlisted, so the model can still enable them) — except in an `objective-refine` session, whose gate-ON set is its
+floor. Perk installs `READ_ONLY_TOOLS` as the active set — minus any lazy-loaded tool its package
+currently hides (the loaders themselves are allowlisted, so the model can still enable them) — and
+independently checks the full allowlist at tool-call time. Lazy hiding only shapes the active set;
+it is not a call-time boundary, and a hidden tool the gate allows is not refused when called. The
+exception is an `objective-refine` session, whose gate-ON set is its
 own narrower refinement allowlist (read/research/question, `plan_review`, and
 `objective_refinement_draft` — no node claim, no other draft or save tool, no delegation) and
 whose hidden guidance is the `[READ-ONLY REFINEMENT MODE]` flavor naming that writer. Every excluded tool is denied, including `edit`, `write`, save/delivery
