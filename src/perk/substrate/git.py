@@ -77,6 +77,20 @@ type RebaseOutcome = RebaseCompleted | RebaseConflict
 
 
 @dataclass(frozen=True)
+class DiffEntry:
+    """One changed path from :func:`diff_name_status` (repo-relative, POSIX).
+
+    ``status`` is git's name-status letter with a type change (``T``) folded to ``M`` — both
+    sides still exist at the same path. ``old_path`` is set only for a rename (``R``): the
+    source path, while ``path`` is the destination.
+    """
+
+    status: Literal["A", "D", "M", "R"]
+    path: str
+    old_path: str | None = None
+
+
+@dataclass(frozen=True)
 class MergeProbe:
     """The result of a best-effort local merge-conflict probe (`detect_merge_conflicts`).
 
@@ -726,6 +740,92 @@ def diff_range(repo: Path, base: str, head: str) -> str:
         ],
         cwd=repo,
         timeout=60,
+    )
+
+
+def diff_name_status(repo: Path, base: str, head: str) -> tuple[DiffEntry, ...]:
+    """The changed paths between ``base`` and ``head`` (``git diff --name-status -z``).
+
+    The argv pins the knobs that would otherwise leak user config into the listing:
+    ``--find-renames`` regardless of ``diff.renames``, ``--no-ext-diff`` / ``--no-textconv``
+    (the never-execute posture of :func:`diff_range`), ``--no-color``. ``--diff-filter=ADMRT``
+    admits the statuses a line count can use (copies, unmerged and unknown entries are out);
+    ``-z`` keeps every path raw (no C-quoting) with NUL separators, so a rename record is
+    ``R<score>\\0<old>\\0<new>\\0``. Raises ``GitError`` on failure.
+    """
+    out = _run(
+        [
+            "diff",
+            "--name-status",
+            "-z",
+            "--find-renames",
+            "--diff-filter=ADMRT",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            base,
+            head,
+        ],
+        cwd=repo,
+        timeout=60,
+    )
+    return _parse_name_status_z(out)
+
+
+def _parse_name_status_z(out: str) -> tuple[DiffEntry, ...]:
+    if not out:
+        return ()
+    fields = out.removesuffix("\0").split("\0")
+    entries: list[DiffEntry] = []
+    index = 0
+    while index < len(fields):
+        status = fields[index]
+        index += 1
+        if not status:
+            continue
+        letter = status[0]
+        if letter == "R":
+            if index + 1 >= len(fields):
+                raise GitError(f"truncated rename record in git diff output: {status!r}")
+            entries.append(DiffEntry("R", fields[index + 1], fields[index]))
+            index += 2
+            continue
+        if index >= len(fields):
+            raise GitError(f"truncated record in git diff output: {status!r}")
+        path = fields[index]
+        index += 1
+        if letter == "A":
+            entries.append(DiffEntry("A", path))
+        elif letter == "D":
+            entries.append(DiffEntry("D", path))
+        elif letter in ("M", "T"):
+            entries.append(DiffEntry("M", path))
+        else:
+            raise GitError(f"unexpected git diff status {status!r} for {path!r}")
+    return tuple(entries)
+
+
+def archive_paths(repo: Path, ref: str, paths: Sequence[str], *, dest: Path) -> None:
+    """Write a tar of ``paths`` as they exist at ``ref`` to ``dest`` (``git archive``).
+
+    Each path is passed under the ``:(literal)`` pathspec magic so glob characters in a real
+    file name (``[id].tsx``) match only themselves. ``git archive`` honours the archived
+    tree's ``export-ignore`` / ``export-subst`` attributes, so a caller that needs every path
+    must check what the tar actually holds. The caller batches long path lists (argv length).
+    Raises ``GitError`` on failure (including a path absent at ``ref``).
+    """
+    _run(
+        [
+            "archive",
+            "--format=tar",
+            "-o",
+            str(dest),
+            ref,
+            "--",
+            *(f":(literal){path}" for path in paths),
+        ],
+        cwd=repo,
+        timeout=120,
     )
 
 

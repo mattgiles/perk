@@ -1502,3 +1502,76 @@ def test_is_ignored_unexpected_exit_raises(git_repo, monkeypatch):
     monkeypatch.setattr(subprocess, "run", _record)
     with pytest.raises(git.GitError, match="check-ignore"):
         git.is_ignored(git_repo, ".perk/local.toml")
+
+
+def _change_matrix_repo(git_repo) -> tuple[str, str]:
+    """Commit a base, then a head that adds, deletes, modifies, renames and type-changes."""
+    (git_repo / "keep.py").write_text("a = 1\n", encoding="utf-8")
+    (git_repo / "gone.py").write_text("x = 1\n", encoding="utf-8")
+    (git_repo / "helper.py").write_text("".join(f"line_{n} = {n}\n" for n in range(20)))
+    (git_repo / "flip.txt").write_text("text\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "base")
+    base = _sha(git_repo)
+    (git_repo / "keep.py").write_text("a = 2\n", encoding="utf-8")
+    (git_repo / "gone.py").unlink()
+    (git_repo / "tests").mkdir()
+    _git(git_repo, "mv", "helper.py", "tests/helper.py")
+    with (git_repo / "tests" / "helper.py").open("a", encoding="utf-8") as fh:
+        fh.write("extra = 1\n")
+    (git_repo / "[id].tsx").write_text("export {}\n", encoding="utf-8")
+    (git_repo / "flip.txt").unlink()
+    (git_repo / "flip.txt").symlink_to("keep.py")
+    _git(git_repo, "add", "-A")
+    _git(git_repo, "commit", "-qm", "head")
+    return base, _sha(git_repo)
+
+
+def test_diff_name_status_parses_every_status(git_repo):
+    base, head = _change_matrix_repo(git_repo)
+    entries = git.diff_name_status(git_repo, base, head)
+    assert sorted(entries, key=lambda e: e.path) == [
+        git.DiffEntry("A", "[id].tsx"),
+        git.DiffEntry("M", "flip.txt"),  # the file→symlink type change folds to M
+        git.DiffEntry("D", "gone.py"),
+        git.DiffEntry("M", "keep.py"),
+        git.DiffEntry("R", "tests/helper.py", "helper.py"),
+    ]
+    assert git.diff_name_status(git_repo, head, head) == ()
+
+
+def test_diff_name_status_unknown_ref_raises(git_repo):
+    with pytest.raises(git.GitError):
+        git.diff_name_status(git_repo, "HEAD", "no-such-ref")
+
+
+def test_parse_name_status_rejects_truncated_and_unknown_records():
+    with pytest.raises(git.GitError, match="truncated rename"):
+        git._parse_name_status_z("R100\0only-old\0")
+    with pytest.raises(git.GitError, match="unexpected git diff status"):
+        git._parse_name_status_z("C75\0a\0")
+
+
+def test_archive_paths_holds_exactly_the_requested_paths(git_repo, tmp_path):
+    import tarfile
+
+    base, head = _change_matrix_repo(git_repo)
+    dest = tmp_path / "head.tar"
+    git.archive_paths(git_repo, head, ["[id].tsx", "tests/helper.py"], dest=dest)
+    with tarfile.open(dest) as tar:
+        files = sorted(m.name for m in tar.getmembers() if m.isfile())
+        helper = tar.extractfile("tests/helper.py")
+        assert helper is not None
+        content = helper.read()
+    assert files == ["[id].tsx", "tests/helper.py"]
+    assert content == _git(git_repo, "show", f"{head}:tests/helper.py").encode()
+
+    old = tmp_path / "base.tar"
+    git.archive_paths(git_repo, base, ["gone.py"], dest=old)
+    with tarfile.open(old) as tar:
+        assert [m.name for m in tar.getmembers() if m.isfile()] == ["gone.py"]
+
+
+def test_archive_paths_missing_path_raises(git_repo, tmp_path):
+    with pytest.raises(git.GitError):
+        git.archive_paths(git_repo, "HEAD", ["no-such-file.py"], dest=tmp_path / "x.tar")
