@@ -140,34 +140,42 @@ def test_concurrent_publishers_lose_no_update_and_readers_see_no_torn_catalog(
     stagings = [_stage(repo, f"{slug}-crawl") for slug in slugs]
     observed: list[int] = []
     failures: list[BaseException] = []
-    stop = threading.Event()
+    writers_done = threading.Event()
 
     def reader() -> None:
+        # Sample for the whole write phase (bounded), so the torn-read check spans every write.
+        deadline = time.monotonic() + 300
         try:
-            for _ in range(200):
+            while not writers_done.is_set() and time.monotonic() < deadline:
                 observed.append(len(cat.load_catalog(layout).entries))
-                if stop.is_set():
-                    break
-                time.sleep(0.005)
+                time.sleep(0.002)
         except BaseException as exc:  # surfaced to the main thread below
             failures.append(exc)
 
     thread = threading.Thread(target=reader)
     thread.start()
-    writers = [
-        subprocess.Popen(
-            [sys.executable, "-c", _RETRYING_PUBLISHER, str(staging), slug, SOURCE],
-            cwd=repo,
-            env=_env(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        for staging, slug in zip(stagings, slugs, strict=True)
-    ]
-    results = [writer.communicate(timeout=300) for writer in writers]
-    stop.set()
-    thread.join(timeout=60)
+    writers: list[subprocess.Popen[str]] = []
+    try:
+        writers = [
+            subprocess.Popen(
+                [sys.executable, "-c", _RETRYING_PUBLISHER, str(staging), slug, SOURCE],
+                cwd=repo,
+                env=_env(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for staging, slug in zip(stagings, slugs, strict=True)
+        ]
+        results = [writer.communicate(timeout=300) for writer in writers]
+    finally:
+        writers_done.set()
+        for writer in writers:
+            if writer.poll() is None:
+                writer.kill()
+                writer.wait(timeout=30)
+        thread.join(timeout=60)
+    assert not thread.is_alive(), "the reader never stopped"
     assert not failures, failures
     for writer, (stdout, stderr) in zip(writers, results, strict=True):
         assert writer.returncode == 0, stdout + stderr
@@ -175,5 +183,9 @@ def test_concurrent_publishers_lose_no_update_and_readers_see_no_torn_catalog(
     assert sorted(entry.slug for entry in final.entries) == sorted(slugs)
     for slug in slugs:
         assert (layout.docs_entry_dir(slug) / "index.md").is_file()
+    # Every sample was taken while the writers ran: it started before any write landed and saw
+    # at least one catalog revision land — so the no-torn-read claim covers real writes.
     assert observed, "the reader never ran"
+    assert observed[0] == 0, "the reader started after a write had already landed"
+    assert any(count > 0 for count in observed), "the reader observed no catalog revision"
     assert observed == sorted(observed)

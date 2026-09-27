@@ -2,10 +2,11 @@
 operational.
 
 The library is a gitignored cache, not repository content, so the workers may run in read-only
-perk sessions — but only because these checks refuse any operation that would create, modify
-or delete a non-ignored or tracked path. Pure git reads + ``lstat``; no writes. The mutating
-workers call them BEFORE ``library_lock`` is taken, so a refused repository sees zero
-filesystem effects (not even the lock file).
+perk sessions — but only because these checks refuse operations that would reach a
+non-ignored or tracked path. Pure git reads + ``lstat``; no writes. ``publish`` and ``adopt``
+call them all BEFORE ``library_lock`` is taken, so their refusals have zero filesystem effects;
+``remove`` probes its entry directory under the lock (the path comes from the catalog), after a
+pre-lock probe of the base set that covers the lock file.
 
 The ignore probes are representative coverage by path class, not a proof: a ``.gitignore``
 edit racing a worker between preflight and mutation is outside the threat model.

@@ -172,6 +172,7 @@ def test_record_adopt_envelope_and_human_render(repo):
         (["--adopt", "y", "--source", SOURCE, "--accept-failures"], "invalid_input"),
         (["--publish", "x", "--slug", "pi", "--source", "ftp://x"], "invalid_source"),
         (["--publish", "x", "--slug", "pi", "--source", "pi.dev/docs"], "invalid_source"),
+        (["--publish", "x", "--slug", "pi", "--source", "https://[::1"], "invalid_source"),
         (
             ["--publish", "x", "--slug", "pi", "--source", SOURCE, "--stale-after", "7w"],
             "invalid_stale_after",

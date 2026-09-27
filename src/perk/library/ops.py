@@ -321,7 +321,8 @@ def _publish_eligibility(
         raise LibraryError(
             "kind_mismatch",
             f"slug {slug} is a {existing.kind} entry at {existing.path}; docs cannot replace it "
-            f"— `perk librarian remove {slug}` first or choose another slug",
+            f"— choose another slug, or `perk librarian remove {slug}` first (which deletes its "
+            "content)",
         )
     if target_present:
         require_unlinked_components(layout, layout.relative(target))
@@ -433,8 +434,11 @@ def adopt(
             if owner is not None:
                 raise LibraryError(
                     "directory_catalogued",
-                    f"{original} is already catalogued as {owner.slug}; `perk librarian remove "
-                    f"{owner.slug}` first, or refresh it with `record --publish … --replace`",
+                    f"{original} is already in the library as entry {owner.slug} — adoption "
+                    "catalogs uncatalogued directories only and never renames an entry; keep "
+                    f"using {owner.slug}, or refresh its content with `perk librarian record "
+                    f"--publish <staging-dir> --slug {owner.slug} --source <url> --replace` "
+                    f"(`perk librarian remove {owner.slug}` would delete this directory)",
                 )
             if catalog.get(chosen) is not None or (
                 (target.exists() or target.is_symlink()) and target != original

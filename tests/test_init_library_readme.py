@@ -4,6 +4,8 @@ Converged only when ``docs/library/`` already exists in the invocation checkout;
 idempotent, repaired on drift, refused through a symlinked library.
 """
 
+from pathlib import Path
+
 import pytest
 
 from perk.cli.ensure import UserFacingCliError
@@ -41,6 +43,39 @@ def test_symlinked_library_is_refused(tmp_path, tmp_path_factory):
     with pytest.raises(UserFacingCliError) as excinfo:
         converge_library_readme(tmp_path, apply=True)
     assert excinfo.value.error_type == "library_symlink"
+
+
+def test_symlinked_readme_leaf_is_refused_and_its_target_untouched(tmp_path):
+    library = tmp_path / "docs" / "library"
+    library.mkdir(parents=True)
+    root_readme = tmp_path / "README.md"
+    root_readme.write_text("ROOT README\n", encoding="utf-8")
+    (library / "README.md").symlink_to(Path("..") / ".." / "README.md")
+    for apply in (False, True):
+        with pytest.raises(UserFacingCliError) as excinfo:
+            converge_library_readme(tmp_path, apply=apply)
+        assert excinfo.value.error_type == "library_symlink"
+    assert root_readme.read_text(encoding="utf-8") == "ROOT README\n"
+
+
+def test_non_regular_readme_is_refused(tmp_path):
+    library = tmp_path / "docs" / "library"
+    (library / "README.md").mkdir(parents=True)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        converge_library_readme(tmp_path, apply=True)
+    assert excinfo.value.error_type == "library_symlink"
+
+
+def test_symlinked_docs_ancestor(tmp_path, tmp_path_factory):
+    elsewhere = tmp_path_factory.mktemp("docs-elsewhere")
+    (tmp_path / "docs").symlink_to(elsewhere, target_is_directory=True)
+    # No library behind the redirect: nothing to converge, never a surprise failure.
+    assert converge_library_readme(tmp_path, apply=True) == []
+    (elsewhere / "library").mkdir()
+    with pytest.raises(UserFacingCliError) as excinfo:
+        converge_library_readme(tmp_path, apply=True)
+    assert excinfo.value.error_type == "library_symlink"
+    assert not (elsewhere / "library" / "README.md").exists()
 
 
 def test_readme_names_the_library_model():

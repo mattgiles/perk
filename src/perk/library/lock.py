@@ -7,13 +7,16 @@ every worktree contends on one file.
 
 This is the twin of ``perk.delivery.oplock`` (the same guarded-``fcntl`` shape); a shared
 non-blocking flock primitive under ``perk.substrate`` is a deferred extraction. Unlike the
-oplock, acquisition failures other than contention are translated to ``io_error``.
+oplock, the lock file is opened without following a symlink (the ignore probes evaluate its
+pathname, not a link target), and acquisition failures other than contention are translated to
+typed refusals.
 """
 
 import contextlib
 import errno
+import os
+import stat
 from collections.abc import Iterator
-from io import TextIOWrapper
 from pathlib import Path
 from types import ModuleType
 
@@ -33,6 +36,16 @@ LIBRARY_LOCK_FILENAME = "library.lock"
 
 # flock(LOCK_NB) reports contention as EWOULDBLOCK (== EAGAIN on macOS/Linux).
 _CONTENTION_ERRNOS = frozenset({errno.EWOULDBLOCK, errno.EAGAIN})
+# Never follow a symlinked lock path (the pre-open check's race backstop); O_NONBLOCK keeps a
+# FIFO swapped in after the check from blocking the open (it is a no-op for a regular file).
+_OPEN_FLAGS = (
+    os.O_WRONLY
+    | os.O_CREAT
+    | os.O_APPEND
+    | os.O_CLOEXEC
+    | os.O_NONBLOCK
+    | getattr(os, "O_NOFOLLOW", 0)
+)
 
 
 def lock_path(repo_root: Path) -> Path:
@@ -51,28 +64,45 @@ def library_lock(repo_root: Path) -> Iterator[None]:
     """Hold the exclusive machine-local library lock for the ``with`` body.
 
     Non-blocking: a held lock raises :class:`LibraryLockBusy` immediately (never a silent
-    wait). Creating the lock file's parent or opening it failing is ``io_error``. On a platform
-    without ``fcntl`` the lock degrades to a no-op.
+    wait). The lock file is opened without following a symlink, so acquisition can never create
+    or touch a file outside the cache: a symlinked or non-regular lock path is
+    ``library_lock_invalid``. Creating the parent or opening the file failing otherwise is
+    ``io_error``. On a platform without ``fcntl`` the lock degrades to a no-op.
     """
     path = lock_path(repo_root)
     with translating_io("library lock"):
         path.parent.mkdir(parents=True, exist_ok=True)
-        handle = path.open("a")
-    with handle:
-        _acquire(handle, path)
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise _lock_invalid(path)
+        fd = os.open(path, _OPEN_FLAGS, 0o644)
+    try:
+        with translating_io("library lock"):
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise _lock_invalid(path)
+        _acquire(fd, path)
         try:
             yield
         finally:
             if fcntl is not None:
                 with contextlib.suppress(OSError):
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
-def _acquire(handle: TextIOWrapper, path: Path) -> None:
+def _lock_invalid(path: Path) -> LibraryError:
+    return LibraryError(
+        "library_lock_invalid",
+        f"{path} is a symlink or not a regular file — refusing to open the library lock through "
+        "a redirected path; remove it and rerun",
+    )
+
+
+def _acquire(fd: int, path: Path) -> None:
     if fcntl is None:
         return
     try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as exc:
         if exc.errno in _CONTENTION_ERRNOS:
             raise LibraryLockBusy(

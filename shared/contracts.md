@@ -797,9 +797,11 @@ workers are admitted in their deterministic `--json` forms only — `perk librar
 list|record|remove … --json` with `--json` last and any whitespace-separated arguments before it
 (`add source`/`check`/`refresh` are not yet admitted). They mutate only the gitignored
 `docs/library/` cache: the same accepted leniency as `perk pr review-context`'s scratch write,
-made operational by the CLI's cache-only preflight (§8.75(d)), which refuses before the lock
-unless every path the operation would touch is gitignored and nothing under the library is
-tracked. The destructive veto still blocks real-file redirects and chained mutations.
+made operational by the CLI's cache-only preflight (§8.75(d)), which refuses unless its
+representative ignore probes pass (one path per class the operation writes, before the lock —
+except `remove`'s entry-directory probe, which needs the catalog and runs under it) and nothing
+under the library is tracked. The destructive veto still blocks real-file redirects and chained
+mutations.
 
 Argument-level writers remain vetoed (`find -delete`, `sed -i`, Git writer forms, `sort -o`,
 `tree -o`, `npm audit fix`, and the existing Git exec flags). **Exec-bearing selector options** are
@@ -13574,7 +13576,10 @@ crawls), `catalog.json` (machine-owned) and the committed `README.md`. The manag
 carries `/docs/library/**` + `!/docs/library/README.md` (the rule ignores the directory's contents,
 not the directory, so the negation works). The README is converged by `perk init` /
 `perk doctor --fix` (`init/library.py`, the `library-readme` managed convergence) **only when
-`docs/library/` already exists** in the invocation checkout, and is never written by a worker. In a
+`docs/library/` already exists** in the invocation checkout, and is never written by a worker; a
+symlinked `docs/`, `docs/library/` or `README.md`, a library resolving elsewhere, or a non-regular
+README refuses convergence (`library_symlink`, surfaced by doctor as an unverifiable managed check)
+rather than reading or writing through the redirect. In a
 linked worktree `docs/library/` holds only the README; `perk librarian list` prints the main
 checkout's absolute paths. A `[library] root` override is deferred.
 
@@ -13605,13 +13610,18 @@ deleted after the commit so a published mirror never carries it).
 
 **(c) The lock.** `<main>/.perk/workflow/library.lock` (through `cache.workflow_dir`), an exclusive
 non-blocking `flock`, machine-local, held across every catalog read-modify-write and entry-directory
-mutation. Contention is the typed `library_busy`; any other acquisition failure (creating the
-parent, opening the file, a non-contention `flock` errno) is `io_error`. `list` and the
+mutation. The lock file is opened without following a symlink (`O_NOFOLLOW`, after an `lstat`
+check, then an `fstat` regular-file check): the ignore probe evaluates its pathname, not a link
+target, so a symlinked or non-regular lock path is the typed `library_lock_invalid` and acquisition
+never creates or touches a file outside the cache. Contention is the typed `library_busy`; any
+other acquisition failure (creating the parent, opening the file, a non-contention `flock` errno)
+is `io_error`. `list` and the
 crawl-into-staging phase are lock-free. Without `fcntl` the lock degrades to a no-op. The twin of
 `perk.delivery.oplock`; a shared primitive is a deferred extraction.
 
-**(d) The cache-only preflight** (`perk/library/guard.py`), run by every mutating worker **before
-the lock** — a refused repository sees no write, not even the lock file: real-directory roots (the
+**(d) The cache-only preflight** (`perk/library/guard.py`), run by every mutating worker before it
+changes anything — for `publish` and `adopt` wholly **before the lock**, so their refusals write
+nothing, not even the lock file: real-directory roots (the
 library root must resolve to `<main>/docs/library`, and each existing root — library,
 `documentation/`, `source-code/`, `.staging/` — must be a real directory, never a symlink:
 `library_root_invalid`); a `:(literal)docs/library` tracked sweep allowing only `README.md`
@@ -13622,7 +13632,8 @@ every directory the operation mutates, each probed as a nested nonexistent `<dir
 (`library_not_ignored`, remediation `perk init` / `perk doctor --fix`). Representative coverage by
 path class, not a proof; a `.gitignore` edit racing a worker between preflight and mutation is an
 accepted window. `remove` probes its entry directory under the lock (the path comes from the
-catalog), after the pre-lock base probe.
+catalog), after the pre-lock base probe — so a `library_not_ignored` refusal there can leave the
+lock file (itself covered by the pre-lock probe) behind.
 
 **(e) The workers.** `list` (offline, lock-free): every entry with its derived status and
 absolute path (`present` = the directory exists), every uncatalogued directory — top-level names
@@ -13643,25 +13654,39 @@ failed → target back to staging, then the prior revision back; B failed → th
 A failed → nothing to undo) raising `io_error` "…; the library was restored (staging intact at
 …)", or, if a rollback rename itself fails, `io_error` naming every residue path with its state;
 then post-commit best-effort steps that only warn (delete the crawl report; remove the displaced
-revision — a leftover is reported uncatalogued). An interrupted swap leaves the catalog consistent
-(atomic replace) and at worst an uncatalogued directory `list`/doctor surface for the human to
-adopt or delete — no automatic repair. **`record --adopt <dir>`** catalogs a pre-existing
+revision — a leftover is reported uncatalogued). The catalog write is atomic; the whole publish is
+not, and an **interrupted** publish (the process killed mid-core; no rollback runs) has no automatic
+repair — `list`/doctor surface the state for the human: killed between A and B, the entry is still
+catalogued but its target is missing (`present: false`), the displaced
+`documentation/.<slug>.previous-*` is the only copy of the prior revision, and staging is intact —
+recover by rerunning the same `record --publish … --replace` from the intact staging directory
+(eligible: the entry is a docs entry at its own path; nothing is displaced) or by renaming the
+displaced revision back to `documentation/<slug>/`, and only then delete the leftover; adopting the
+displaced directory is refused (`slug_exists`) while the slug is catalogued. Killed between B and
+C, the new revision sits at the target while the catalog is unchanged: a fresh publish's target is
+an uncatalogued `documentation/` orphan to adopt under its slug; a replace keeps the prior entry
+record over the new content (rerun the replace from a fresh crawl to refresh its inventory), and
+the displaced `.previous-*` is disposable. After the commit, a leftover `.previous-*` is always
+disposable. **`record --adopt <dir>`** catalogs a pre-existing
 directory directly under the library root (not a reserved name) or under `documentation/` as a
 docs entry, moving it to `documentation/<slug>/` when needed (slug defaults to the directory name;
-`adopt_not_found` / `adopt_invalid`); orphan-only — a directory a live entry owns is
-`directory_catalogued`; a taken slug is `slug_exists`; a failed catalog write moves the directory
-back. `--kind` accepts only `docs` (`invalid_kind` names `add source`). **`remove <slug>`**:
+`adopt_not_found` / `adopt_invalid`); orphan-only and never a rename — a directory a live entry
+owns is `directory_catalogued`, whose remediation is content-preserving (keep the entry, or refresh
+it with `record --publish … --replace`; it names `remove` only as the deletion it is); a taken slug
+is `slug_exists`; a failed catalog write moves the directory back. `--kind` accepts only `docs` (`invalid_kind` names `add source`). **`remove <slug>`**:
 `entry_not_found`; symlink-component check (`entry_path_invalid`, nothing touched); catalog first,
 then delete exactly the leaf entry directory — a failed deletion is `io_error` "entry removed from
 the catalog; content left at …", an adoptable orphan, never a dangling entry.
 
 **(f) The read-only-invariant carve-out.** The library is a gitignored cache, not repository
 content. The workers are admitted to read-only perk sessions (§8.3: `perk librarian
-list|record|remove … --json`, `--json` last) because the preflight refuses any operation that
-would create, modify or delete a non-ignored or tracked path, and the committed README is
-init/doctor-only.
+list|record|remove … --json`, `--json` last) because the preflight refuses operations whose
+representative probes reach a non-ignored or tracked path (coverage by path class, not a proof —
+§8.75(d)), the lock never follows a symlink out of the cache, and the committed README is
+init/doctor-only (converged only through non-symlinked `docs/`, `docs/library/` and `README.md`
+paths).
 
-**(g) Errors and envelopes.** The error-type vocabulary: `library_busy`, `library_not_ignored`,
+**(g) Errors and envelopes.** The error-type vocabulary: `library_busy`, `library_lock_invalid`, `library_not_ignored`,
 `library_tracked_content`, `library_root_invalid`, `catalog_malformed`, `invalid_slug`,
 `invalid_kind`, `invalid_source` (not an absolute `http(s)` URL), `invalid_stale_after`,
 `invalid_input` (option combination), `staging_not_found`, `staging_outside_library`,

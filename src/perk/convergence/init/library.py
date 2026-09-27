@@ -41,17 +41,20 @@ def converge_library_readme(root: Path, *, apply: bool) -> list[str]:
     """Create or restore ``docs/library/README.md`` when ``docs/library/`` exists under ``root``.
 
     ``root`` is the invocation checkout (the README is checkout-local committed content, not
-    the main-checkout cache). An absent directory converges to ``[]``; a symlinked one refuses.
+    the main-checkout cache). An absent directory converges to ``[]``. Nothing is read or written
+    through a redirected path: a symlinked ``docs/``, ``docs/library/`` or ``README.md``, a
+    library that resolves elsewhere, or a README that is not a regular file refuses.
     """
     library = paths.library_dir(root)
+    readme = library / README_FILENAME
     if library.is_symlink():
-        raise UserFacingCliError(
-            f"{paths.LIBRARY_REL} is a symlink — refusing to converge its README",
-            error_type="library_symlink",
-        )
+        raise _redirected(paths.LIBRARY_REL)
     if not library.is_dir():
         return []
-    readme = library / README_FILENAME
+    if library.parent.is_symlink() or library.resolve() != paths.library_dir(root.resolve()):
+        raise _redirected(paths.LIBRARY_REL)
+    if readme.is_symlink() or (readme.exists() and not readme.is_file()):
+        raise _redirected(LIBRARY_README_LABEL)
     current = readme.read_text(encoding="utf-8") if readme.is_file() else None
     if current == LIBRARY_README:
         return []
@@ -59,3 +62,11 @@ def converge_library_readme(root: Path, *, apply: bool) -> list[str]:
     if apply:
         readme.write_text(LIBRARY_README, encoding="utf-8")
     return [f"{LIBRARY_README_LABEL}: {verb}"]
+
+
+def _redirected(label: str) -> UserFacingCliError:
+    return UserFacingCliError(
+        f"{label} is a symlink, not a regular path, or resolves outside this checkout — refusing "
+        "to converge the library README through a redirected path",
+        error_type="library_symlink",
+    )

@@ -81,3 +81,42 @@ def test_unwritable_lock_parent_is_io_error_not_a_raw_oserror(tmp_path):
     assert excinfo.value.error_type == "io_error"
     assert not isinstance(excinfo.value, OSError)
     assert str(excinfo.value).startswith("library lock:")
+
+
+def test_a_symlinked_lock_is_refused_without_touching_its_target(tmp_path):
+    repo = _repo(tmp_path)
+    target = tmp_path / "outside" / "created-by-lock"
+    target.parent.mkdir()
+    path = lock.lock_path(repo)
+    path.parent.mkdir(parents=True)
+    path.symlink_to(target)
+    with pytest.raises(LibraryError) as excinfo, lock.library_lock(repo):
+        pass
+    assert excinfo.value.error_type == "library_lock_invalid"
+    assert not target.exists()
+
+
+def test_a_non_regular_lock_path_is_refused(tmp_path):
+    repo = _repo(tmp_path)
+    lock.lock_path(repo).mkdir(parents=True)
+    with pytest.raises(LibraryError) as excinfo, lock.library_lock(repo):
+        pass
+    assert excinfo.value.error_type == "library_lock_invalid"
+
+
+def test_the_no_follow_open_backstops_a_racing_symlink(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    target = tmp_path / "outside-target"
+    path = lock.lock_path(repo)
+    path.parent.mkdir(parents=True)
+    path.symlink_to(target)
+    real_is_symlink = Path.is_symlink
+    # Simulate the link appearing between the pre-open check and the open.
+    monkeypatch.setattr(
+        Path, "is_symlink", lambda self: False if self == path else real_is_symlink(self)
+    )
+    monkeypatch.setattr(Path, "exists", lambda self, **_kw: False)
+    with pytest.raises(LibraryError) as excinfo, lock.library_lock(repo):
+        pass
+    assert excinfo.value.error_type == "io_error"
+    assert not target.exists()

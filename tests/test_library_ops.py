@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from perk.library import catalog as cat
-from perk.library import ops
+from perk.library import lock, ops
 from perk.library.errors import LibraryError
 from perk.library.layout import LibraryLayout
 
@@ -459,6 +459,29 @@ def test_a_failed_rollback_names_the_residue(scaffolded_perk_repo, monkeypatch):
     assert displaced[0] in report.uncatalogued
 
 
+def test_a_replace_killed_between_displace_and_swap_recovers_by_rerunning_it(
+    scaffolded_perk_repo,
+):
+    # Simulate the kill window (A done, B/C not): the target displaced, staging intact.
+    repo = scaffolded_perk_repo
+    _publish(repo, _stage(repo, body="# v1\n"))
+    layout = _layout(repo)
+    target = layout.docs_entry_dir("pi")
+    displaced = layout.documentation / ".pi.previous-deadbeef0000"
+    target.rename(displaced)
+    staging = _stage(repo, "pi-02", body="# v2\n")
+    report = ops.list_library(repo, now=lambda: NOW)
+    assert report.entries[0].present is False
+    assert displaced in report.uncatalogued
+    # The displaced revision cannot be adopted back under the catalogued slug...
+    assert _refusal(lambda: _adopt(repo, displaced, slug="pi")).error_type == "slug_exists"
+    # ...but rerunning the replace from the intact staging directory completes it.
+    outcome = _publish(repo, staging, replace=True)
+    assert outcome.replaced_previous is False
+    assert (target / "index.md").read_text(encoding="utf-8") == "# v2\n"
+    assert displaced.is_dir()  # the human deletes the leftover afterwards
+
+
 # --- post-commit best-effort warnings --------------------------------------------------------
 
 
@@ -581,7 +604,9 @@ def test_adopt_refuses_a_live_entry_directory(scaffolded_perk_repo):
     before_listing = sorted(str(p) for p in target.rglob("*"))
     error = _refusal(lambda: _adopt(repo, target, slug="pi2"))
     assert error.error_type == "directory_catalogued"
-    assert "perk librarian remove pi" in str(error)
+    assert "never renames an entry" in str(error)
+    assert "--slug pi --source <url> --replace" in str(error)
+    assert "would delete this directory" in str(error)
     assert _catalog_bytes(repo) == before_catalog
     assert sorted(str(p) for p in target.rglob("*")) == before_listing
 
@@ -616,6 +641,18 @@ def test_remove_a_source_entry_deletes_only_its_leaf(scaffolded_perk_repo):
 def test_remove_unknown_entry(scaffolded_perk_repo):
     error = _refusal(lambda: ops.remove(scaffolded_perk_repo, slug="nope"))
     assert error.error_type == "entry_not_found"
+
+
+def test_a_symlinked_lock_never_creates_an_outside_file(scaffolded_perk_repo, tmp_path_factory):
+    repo = scaffolded_perk_repo
+    target = tmp_path_factory.mktemp("outside") / "created-by-lock"
+    lock_file = lock.lock_path(repo)
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    lock_file.unlink(missing_ok=True)
+    lock_file.symlink_to(target)
+    error = _refusal(lambda: ops.remove(repo, slug="nope"))
+    assert error.error_type == "library_lock_invalid"
+    assert not target.exists()
 
 
 def test_remove_refuses_a_symlinked_entry_directory(scaffolded_perk_repo, tmp_path_factory):
