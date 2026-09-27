@@ -46,12 +46,13 @@ in-session gate says exactly what you expect before you rely on it.
    confirmation and latch approval for the rest of that session, or you can launch with
    `--allow-project-ci`. A headless session with none of these grants refuses fail-closed.
 3. **Prove a pass.** Ask the agent to call `run_ci` with no check argument. Each command that
-   exits successfully reports `✓`; in the example, `pass` reports `✓ pass`. Warm `/ci` runs the
-   same checks when you want only the one-line overall summary.
+   exits successfully reports `✓`; in the example, `pass` reports `✓ pass (0s)` — every executed
+   row's `(Ns)` suffix is its wall-clock duration in whole seconds. Warm `/ci` runs the same
+   checks when you want only the one-line overall summary.
 4. **Prove a failure is reported, never fixed.** Leave `green.marker` absent for the first run.
-   The `gate` row reports `✗ gate` and its captured output (`(no output captured)` when the
-   command is silent). Diagnose and fix the cause yourself — perk reports the failure but never
-   edits the repository or loops for you.
+   The `gate` row reports `✗ gate (exit 1, 0s)` and its captured output (`(no output captured)`
+   when the command is silent). Diagnose and fix the cause yourself — perk reports the failure
+   but never edits the repository or loops for you.
 5. **Prove the glob gate.** With no changed `.py` file relative to the detected trunk, the `code`
    row reports `⊘` and says it is out of scope. Glob gating applies only to a run-all: selecting
    `code` explicitly with `run_ci` or `/ci code` always runs that row. If perk cannot determine

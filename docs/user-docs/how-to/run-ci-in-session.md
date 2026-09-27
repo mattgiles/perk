@@ -28,7 +28,8 @@ project runs.
    argument when you need the full per-check report. For a quick human-run summary, run warm
    [`/ci`](../reference/in-session/workflow-commands.md#ci): it executes the same check set but surfaces only the
    one-line overall result. While `run_ci` works, its live progress line shows per-check status
-   and elapsed time; its final report lists every result in declared order.
+   and elapsed time; its final report lists every result in declared order, with each executed
+   check's wall-clock duration.
 3. **Run a subset (optional).** Ask the agent to call `run_ci` with one check name or a
    comma-separated list. The human-run summary twins are `/ci <check-name>` and
    `/ci <name1>,<name2>`.

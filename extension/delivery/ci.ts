@@ -35,6 +35,9 @@ export type CiCheckOutcome =
       bytesTotal: number;
       bytesShown: number;
       truncated: boolean;
+      /** Wall-clock milliseconds from launching the run port to its settlement (the persist +
+       * cap work after it is excluded). Always measured — a run-port throw carries it too. */
+      durationMs: number;
       error?: string;
     }
   | { kind: "skipped"; name: string; command: string; glob: string };
@@ -115,18 +118,22 @@ export function decideCiScope(args: {
  * through the `PersistCheckOutput` port, cap the model-visible output. Never throws — a
  * run-port throw becomes `exitCode: -1` with the error captured; a persistence throw folds to
  * the same failure shape (`error` = the thrown message, `outputPath: null`) with the exit code
- * intact.
+ * intact. `durationMs` is sampled from the injected clock immediately before the run port is
+ * invoked and immediately after it settles (resolve OR throw), so both shapes carry it.
  */
 async function runOneCheck(
   check: CiCheck,
   runCheck: RunConfiguredCheck,
   persistOutput: PersistCheckOutput,
+  now: () => number,
   signal?: AbortSignal,
 ): Promise<CiCheckOutcome> {
   let outcome: CiExecOutcome;
+  const startedAt = now();
   try {
     outcome = await runCheck(check, { signal });
   } catch (err) {
+    const durationMs = now() - startedAt;
     const message = err instanceof Error ? err.message : String(err);
     return {
       kind: "executed",
@@ -138,9 +145,11 @@ async function runOneCheck(
       bytesTotal: 0,
       bytesShown: 0,
       truncated: false,
+      durationMs,
       error: message,
     };
   }
+  const durationMs = now() - startedAt;
 
   // Persist the full output through the port: a returned string IS the location; ANY throw
   // folds to the failure shape (the port owns write+verify semantics — no post-write probe).
@@ -165,6 +174,7 @@ async function runOneCheck(
     bytesTotal: capped.bytesTotal,
     bytesShown: capped.bytesShown,
     truncated: capped.truncated,
+    durationMs,
     ...(writeError ? { error: writeError } : {}),
   };
 }
@@ -212,6 +222,9 @@ export interface RunCiChecksDeps {
   /** Optional typed live-progress sink. Failure-owned here: each call is wrapped in try/catch,
    * so a throwing sink cannot affect the run (the callback contract is synchronous `void`). */
   onProgress?: (event: CiProgressEvent) => void;
+  /** The millisecond clock each executed check's `durationMs` is sampled from (defaults to
+   * `Date.now`, resolved per call) — a dependency so tests stay deterministic. */
+  now?: () => number;
 }
 
 /**
@@ -310,6 +323,7 @@ export async function runCiChecks(
   // or the outcome. Progress is cosmetic: a throwing sink is contained (the callback
   // contract is synchronous `void`).
   const onProgress = deps.onProgress;
+  const now = deps.now ?? (() => Date.now());
   const states = selected.map((check): { name: string; state: CiProgressState } => ({
     name: check.name,
     state: skipsByGlob(check) ? "skipped" : "running",
@@ -336,14 +350,16 @@ export async function runCiChecks(
       if (glob !== undefined && skipsByGlob(check)) {
         return Promise.resolve(skippedResult(check, glob));
       }
-      return runOneCheck(check, deps.runCheck, deps.persistOutput, opts.signal).then((result) => {
-        const entry = states[i];
-        if (entry) {
-          entry.state = result.kind === "executed" && result.exitCode === 0 ? "passed" : "failed";
-        }
-        emit("check_settled");
-        return result;
-      });
+      return runOneCheck(check, deps.runCheck, deps.persistOutput, now, opts.signal).then(
+        (result) => {
+          const entry = states[i];
+          if (entry) {
+            entry.state = result.kind === "executed" && result.exitCode === 0 ? "passed" : "failed";
+          }
+          emit("check_settled");
+          return result;
+        },
+      );
     }),
   );
   return {
