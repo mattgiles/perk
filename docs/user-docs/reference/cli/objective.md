@@ -280,6 +280,15 @@ node-issues are Canceled; on **GitHub** carried nodes are authored as fresh road
 old issue is closed. See
 [How to replan an objective](../../how-to/replan-an-objective.md).
 
+`--from <guidance>` accepts a local file path (relative or absolute; an existing file wins) or a
+backend source id (a gist, an issue, or a Linear project id); its text is materialized beside the
+old objective as untrusted guidance that steers the re-author. It is guidance only: the source is
+not adopted, modified, or closed, and the successor is still a fresh superseding objective. It may
+not name the objective being replanned or that replan's own scratch file (`invalid_input`).
+Errors: `seed_file_error` (unreadable or empty file), `guidance_not_found`, `guidance_empty`
+(a source with no body text), `invalid_input` (blank or aliasing). `--dry-run --json` adds `from`
+and `from_kind` (`file` | `source`).
+
 ### `perk objective next NUMBER` (alias `n`)
 
 Print the next plannable node (pending, or a resumable `planning` claim). For a **stacked**

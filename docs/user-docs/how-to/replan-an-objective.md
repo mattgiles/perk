@@ -33,21 +33,26 @@ This runs in a **read-only** authoring session and is **local-only**.
 1. **Replan it.** Run [`perk objective replan 42`](../reference/cli/objective.md#perk-objective-replan-number),
    where `42` is the open objective's id. perk materializes the old objective's prose + its
    unfinished nodes and launches a read-only authoring session.
-2. **Re-investigate.** Explore the current codebase — what shipped, what changed, what each
+2. **Steer it (optional).** `perk objective replan 42 --from ./steer.md` (or `--from 99` for a
+   gist or issue) hands the session your direction for the replan — what to emphasize, drop, or
+   pivot toward. It is read as untrusted DATA and weighed against the re-investigation, and the
+   gist or file itself is left untouched (close a consumed gist by hand). Pass a separate source —
+   not objective 42 itself.
+3. **Re-investigate.** Explore the current codebase — what shipped, what changed, what each
    unfinished node should become now. The materialized scratch also surfaces the objective's (and
    its node-issues') **human comments and description edits** as untrusted DATA.
-3. **Author the net-new objective.** Draft the prose + structured roadmap carrying forward only the
+4. **Author the net-new objective.** Draft the prose + structured roadmap carrying forward only the
    unfinished work; reference the completed phases in prose. On Linear, set each carried node's
    `adopt_issue` to its existing node-issue ref to move it across.
-4. **Answer the delivery question again (pre-publication only).** While nothing is published, a
+5. **Answer the delivery question again (pre-publication only).** While nothing is published, a
    replan re-asks the delivery choice (incremental recommended); a stacked successor reuses the
    predecessor's train lineage automatically. Once a stacked predecessor has **published**
    layers, the delivery policy is immutable — the session doesn't re-ask, and the successor
    stays stacked (see below).
-5. **Review and save.** On approval, the save **closes the old objective** and creates the
+6. **Review and save.** On approval, the save **closes the old objective** and creates the
    superseding one automatically — the `supersedes` link rides the run handoff; you never pass it by
    hand. The new objective's header carries `supersedes`, the old one gets `superseded_by`.
-6. **Preview without launching (optional).** Add `--dry-run` to materialize the old objective and
+7. **Preview without launching (optional).** Add `--dry-run` to materialize the old objective and
    print the seed without opening a session: `perk objective replan 42 --dry-run`.
 
 > **Don't churn.** If re-investigation finds nothing material changed, don't save — a replan that

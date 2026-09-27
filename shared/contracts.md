@@ -6264,6 +6264,29 @@ stashes `supersedes=<OLD>` in the run
 **handoff** so the link survives the save path (recovered by `_supersedes_from_handoff`, mirroring
 `_adopt_from_handoff`). Objective + node-issue engagement is read fail-soft (`render_objective_engagement`).
 
+**Guidance (`--from`).** `perk objective replan <N> --from <guidance>` steers the re-author with
+untrusted human DATA. Detection is file-first (`seed_file.detect_seed_file` → `read_seed_file`;
+`seed_file_error` on an unreadable/empty file), then a backend source id cleaned as
+`objective author --from` cleans it (`strip().lstrip("#").strip()`) and read via
+`ObjectiveStore.read_objective_source` (`guidance_not_found` on a miss, `guidance_empty` on a
+bodiless source; deliberately **no** OPEN/kind refusals — those are adoption concerns); a blank
+id is `invalid_input`. **Alias policy:** the replan mutates exactly two resources — the subject
+objective (closed on save) and its scratch file (rewritten at launch, dry-run included) — and
+`--from` refuses to alias either (`invalid_input`: a cleaned source id equal to the objective id;
+a resolved file path equal to the replan scratch path), checked locally before the banner, any
+network read, or the scratch write; any other readable source (another perk objective included)
+is accepted as DATA. The guidance rides the replan scratch as an `<untrusted_replan_guidance>`
+block (after `<untrusted_objective_unfinished_nodes>`, before `<stacked_delivery_facts>`; the
+`from:` label sits inside the container — a source's title/url are untrusted too); the seed
+gains a closed-vocabulary `has_guidance` arm (the guidance ref never enters the seed); `--dry-run`
+JSON adds `from` + `from_kind` (`file` | `source`) before `dry_run`, only when passed; the
+source-arm read is narrated as its own `io_step` before the objective lookup (so
+`guidance_not_found` precedes `objective_not_found`). Guidance changes nothing else — the
+objective argument stays the subject, the `supersedes` handoff is unchanged, there is no
+`adopt_from`, the guidance source is never adopted/modified/closed by the guidance handling (a
+consumed gist stays open — the human closes it), and absent `--from` every artifact (scratch,
+seed, stderr, `--json` payload) is byte-identical.
+
 **The lineage fields.** `ObjectiveHeader` includes `supersedes` and `superseded_by` (both
 `str | None`, rendered by `objective.render_header_block`): `supersedes=<OLD>` on the NEW header,
 `superseded_by=<NEW>` on the OLD header — backend-neutral values (GitHub refs are `#<n>`; Linear
@@ -6343,6 +6366,8 @@ exactly as `adopt_from` does, so no TS schema edit is needed.
 Both adoption cold doors **also** accept a relative or absolute path to a local file. This is a
 distinct **seed-from-file** mode, NOT in-place adoption: a file has no canonical backend identity,
 so there is nothing to stamp perk's metadata into (the §8.29/§8.30 in-place model does not apply).
+`objective replan --from` reuses the leaf's detect/read pair for **guidance only** (§8.32) — it
+is not a seed-from-source door (no fresh artifact is seeded from the file).
 
 **Disambiguation (`seed_file.detect_seed_file`).** Both doors auto-detect an existing file
 **before** any id parsing / backend read: `Path(arg).expanduser()` (relative resolves against the
