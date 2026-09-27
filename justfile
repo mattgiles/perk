@@ -46,12 +46,12 @@ bump-pi version:
 
 # format everything (ruff + biome)
 fmt:
-    uv run ruff format src/perk packages/perk-dev/src tests
+    uv run ruff format src/perk packages/perk-dev/src tests skills
     npm run format
 
 # lint python (ruff)
 lint-py:
-    uv run ruff check src/perk packages/perk-dev/src tests
+    uv run ruff check src/perk packages/perk-dev/src tests skills
 
 # lint typescript (biome)
 lint-js:
