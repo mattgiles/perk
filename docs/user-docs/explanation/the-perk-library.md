@@ -91,8 +91,10 @@ dependency, and leaves the decision to use it to the task.
 
 ## Why a documentation mirror needs judgment
 
-A source checkout needs no judgment: `perk librarian add source` is deterministic, clones the
-repository and pins it to the version the repo uses. A documentation mirror is different. A crawl
+A source checkout needs no judgment: `perk librarian add source` is deterministic. It clones the
+repository and, when given an explicit `--ref`, holds the checkout at that tag, branch or commit;
+without one the checkout tracks the upstream default branch, and a check compares it with that
+branch's tip. A documentation mirror is different. A crawl
 lands in a staging directory under `.staging/` and reaches `documentation/<slug>/` only through a
 publish step, so the prior revision survives a crawl that fails or is abandoned. Between the crawl
 and the publish sits work no script does well: choosing the scope when a site hosts several

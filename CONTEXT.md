@@ -424,6 +424,14 @@ written by the `librarian` skill's crawl script into the staging directory and c
 unless accepted).
 _Avoid_: manifest, crawl log
 
+**Adoption** (of a library directory):
+The orphan-only `perk librarian record --adopt` gesture that catalogs a pre-existing uncatalogued
+directory as a docs entry: a top-level one is moved into `documentation/<slug>/`, an orphan
+already under `documentation/` stays put. It never renames a catalogued entry
+(`directory_catalogued`) and, unlike publish, validates no `index.md`. Distinct from the delivery
+glossary's **Adoption** (of a layer head).
+_Avoid_: import, migration
+
 **Repo-ref**:
 The user-facing spelling of a source repository (`owner/repo`, `host/org/repo`, `https://…`,
 `ssh://…`, `git@host:org/repo`), normalised by `parse_repo_ref` to a `RepoRef` (host/org/repo plus
