@@ -55,6 +55,19 @@ def page(title: str, *hrefs: str) -> str:
     return f"<html><body><h1>{title}</h1><p>{title} body.</p>{links}</body></html>"
 
 
+def redirect_stub(to: str) -> str:
+    """The mike version-alias page (a `/latest/`-style stub) served `200`: a `<noscript>` meta
+    refresh, a `location.replace` split over lines, and one fallback anchor — the live shape."""
+    return (
+        "<!DOCTYPE html><html><head><title>Redirecting</title>"
+        f'<noscript><meta http-equiv="refresh" content="1; url={to}" /></noscript>'
+        "<script>window.location.replace(\n"
+        f'  "{to}" + window.location.search + window.location.hash\n'
+        ");</script></head>"
+        f'<body>Redirecting to <a href="{to}">{to}</a>...</body></html>'
+    )
+
+
 def http_error(url: str, status: int = 404) -> subprocess.CalledProcessError:
     return subprocess.CalledProcessError(
         22, ["curl", url], stderr=f"curl: (22) The requested URL returned error: {status}\n"

@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from urllib.parse import urlparse
 
 import pytest
 from _librarian_site import Redirect as _Redirect
@@ -20,6 +21,7 @@ from _librarian_site import SiteValue, load_script
 from _librarian_site import fake_site as _fake_site
 from _librarian_site import http_error as _http_error
 from _librarian_site import page as _page
+from _librarian_site import redirect_stub as _redirect_stub
 from _librarian_site import run_script as _run
 
 from perk.library import ops
@@ -140,6 +142,9 @@ def test_a_link_beneath_a_reserved_name_is_rejected(script, monkeypatch, tmp_pat
         ["ftp://d.example/docs/start"],
         ["/docs/start"],
         [SEED, "--max-pages", "0"],
+        # A seed the crawl would never fetch: outside the scope prefix, or an asset URL.
+        [f"{SITE}/docs", "--scope-prefix", "/docs/"],
+        [f"{SITE}/docs/logo.png"],
     ],
 )
 def test_bad_arguments_exit_2_and_create_nothing(script, monkeypatch, tmp_path, argv):
@@ -646,6 +651,221 @@ def test_relative_links_resolve_against_the_redirect_destination(script, monkeyp
         (SEED, "start.md"),
         (f"{SITE}/docs/guide", "guide.md"),
         (f"{SITE}/docs/guide/intro", "guide/intro.md"),
+    ]
+
+
+# --- the seed redirect ------------------------------------------------------------------------
+
+ALIAS = f"{SITE}/latest/"
+VERSION = f"{SITE}/0.5.4/"
+
+
+@pytest.mark.parametrize(
+    ("html_text", "expected"),
+    [
+        pytest.param(_redirect_stub("../0.5.4/"), VERSION, id="mike-stub"),
+        pytest.param(
+            '<head><meta http-equiv="Refresh" content="0;URL=\'../0.5.4/\'"></head>',
+            VERSION,
+            id="meta-only-quoted",
+        ),
+        pytest.param('<script>location.href = "../0.5.4/"</script>', VERSION, id="script-only"),
+        pytest.param(
+            '<script>\nwindow.location.replace(\n  "../0.5.4/"\n);\n</script>',
+            VERSION,
+            id="replace-split-over-lines",
+        ),
+        pytest.param(
+            '<meta http-equiv="refresh" content="0; url=../0.5.4/">'
+            '<a href="../0.5.4/">here</a><a href="/latest/guide/">Guide</a>',
+            None,
+            id="refresh-beside-navigation",
+        ),
+        pytest.param('<meta http-equiv="refresh" content="30">', None, id="auto-reload"),
+        pytest.param(
+            '<meta http-equiv="refresh" content="0; url=./#top">', None, id="self-refresh"
+        ),
+        pytest.param(_page("Docs", "/latest/guide/"), None, id="plain-page"),
+        pytest.param(
+            '<script>if (location.href == "../0.5.4/") {}</script>', None, id="comparison"
+        ),
+    ],
+)
+def test_html_redirect_target(script, html_text, expected):
+    assert script.html_redirect_target(html_text, ALIAS) == expected
+
+
+def test_html_redirect_target_resolves_against_the_fetched_url(script):
+    assert script.html_redirect_target(_redirect_stub("2.0/"), f"{SITE}/docs/") == (
+        f"{SITE}/docs/2.0/"
+    )
+
+
+@pytest.mark.parametrize(
+    "to",
+    [
+        pytest.param("data:text/html,stub", id="data"),
+        pytest.param("javascript:alert(1)", id="javascript"),
+        pytest.param("//:80/x", id="schemeless-hostless"),
+        pytest.param("https://[bad", id="malformed-authority"),
+        pytest.param("/" + "a" * 2048, id="oversized"),
+        pytest.param("../0.5 .4/", id="whitespace"),
+        pytest.param("../0.5\x01.4/", id="control-character"),
+    ],
+)
+def test_an_unusable_redirect_target_is_not_a_seed_redirect(script, to):
+    for html_text in (
+        _redirect_stub(to),
+        f'<meta http-equiv="refresh" content="0; url=\'{to}\'">',
+        f'<script>location.assign("{to}")</script>',
+    ):
+        assert script.html_redirect_target(html_text, ALIAS) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (VERSION, True),
+        ("http://d.example/x?y=1", True),
+        ("https://d.example/" + "a" * (2048 - len("https://d.example/")), True),
+        ("https://d.example/" + "a" * (2049 - len("https://d.example/")), False),
+        ("https://d.example", False),
+        ("ftp://d.example/x", False),
+        ("data:text/html,stub", False),
+        ("javascript:alert(1)", False),
+        ("https://:80/x", False),
+        ("https://[bad/x", False),
+        ("https://d.example/a b", False),
+        ("https://d.example/a\x7f", False),
+        ("https://d.example/a\x00", False),
+        ("", False),
+    ],
+)
+def test_reissuable_url(script, text, expected):
+    assert script.reissuable_url(text) is expected
+
+
+@pytest.mark.parametrize(
+    ("seed", "redirect", "scope", "expected"),
+    [
+        (ALIAS, VERSION, "/latest/", "/0.5.4/"),
+        (ALIAS, VERSION, "/", "/0.5.4/"),
+        (f"{SITE}/latest/guide/intro", f"{SITE}/0.5.4/guide/intro", "/latest/", "/0.5.4/"),
+        (f"{SITE}/docs/latest/", f"{SITE}/docs/2.0/", "/docs/", "/docs/2.0/"),
+        (ALIAS, f"{SITE}/0.5.4/index.html", "/latest/", "/0.5.4/"),
+        (ALIAS, f"{SITE}/", "/latest/", "/"),
+        # A whole-segment suffix only: `index.html` is not the tail of the segment `myindex.html`.
+        (
+            f"{SITE}/latest/index.html",
+            f"{SITE}/0.5.4/myindex.html",
+            "/latest/",
+            "/0.5.4/",
+        ),
+    ],
+)
+def test_implied_scope_prefix(script, seed, redirect, scope, expected):
+    implied = script.implied_scope_prefix(seed, redirect, scope)
+
+    assert implied == expected
+    assert urlparse(redirect).path.startswith(implied)  # the reissue admits its own seed
+
+
+def _blocker(stdout: str) -> dict[str, Any]:
+    lines = stdout.splitlines()
+    assert len(lines) == 1, stdout
+    return json.loads(lines[0])
+
+
+def test_a_redirect_stub_seed_dry_run_exits_3_with_one_blocker_line(
+    script, monkeypatch, tmp_path, capsys
+):
+    fetched = _fake_site(monkeypatch, script, {ALIAS: _redirect_stub("../0.5.4/")})
+    out = tmp_path / "out"
+
+    assert _run(script, [ALIAS, str(out), "--scope-prefix", "/latest/", "--dry-run"]) == 3
+
+    captured = capsys.readouterr()
+    assert _blocker(captured.out) == {
+        "blocker": "seed-redirect",
+        "seed_url": ALIAS,
+        "fetched_url": ALIAS,
+        "redirect_url": VERSION,
+        "scope_prefix": "/0.5.4/",
+    }
+    assert (
+        f"ERROR: the seed {ALIAS} is only an HTML redirect page (meta refresh / script) to "
+        f"{VERSION}" in captured.err
+    )
+    assert fetched == [ALIAS]
+    assert not out.exists()
+
+
+def test_a_redirect_stub_seed_crawl_writes_nothing(script, monkeypatch, tmp_path, capsys):
+    fetched = _fake_site(monkeypatch, script, {ALIAS: _redirect_stub("../0.5.4/")})
+    out = tmp_path / "out"
+    out.mkdir()
+
+    assert _run(script, [ALIAS, str(out)]) == 3
+
+    assert list(out.iterdir()) == []
+    assert fetched == [ALIAS]
+    assert _blocker(capsys.readouterr().out)["scope_prefix"] == "/0.5.4/"
+
+
+def test_the_redirect_target_resolves_against_the_http_redirect_destination(
+    script, monkeypatch, tmp_path, capsys
+):
+    served = f"{SITE}/v/latest/"
+    pages: dict[str, SiteValue] = {
+        ALIAS: _Redirect(to=served, html=_redirect_stub("../0.5.4/")),
+    }
+    _fake_site(monkeypatch, script, pages)
+
+    assert _run(script, [ALIAS, str(tmp_path / "out"), "--dry-run"]) == 3
+
+    blocker = _blocker(capsys.readouterr().out)
+    assert (blocker["fetched_url"], blocker["redirect_url"]) == (served, f"{SITE}/v/0.5.4/")
+    assert blocker["scope_prefix"] == "/v/0.5.4/"
+
+
+def test_the_seed_probe_fetches_exactly_the_seed(script, monkeypatch, tmp_path, capsys):
+    fetched = _fake_site(monkeypatch, script, _three_page_site())
+    probe = [str(tmp_path / "out"), "--max-pages", "1", "--dry-run"]
+
+    assert _run(script, [SEED, *probe]) == 0
+    assert fetched == [SEED]
+
+    fetched = _fake_site(monkeypatch, script, {ALIAS: _redirect_stub("../0.5.4/")})
+    assert _run(script, [ALIAS, *probe]) == 3
+    assert fetched == [ALIAS]
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_stub_without_a_reissuable_target_is_mirrored_as_served(script, monkeypatch, tmp_path):
+    fetched = _fake_site(monkeypatch, script, {ALIAS: _redirect_stub("data:text/html,stub")})
+    out = tmp_path / "out"
+
+    assert _run(script, [ALIAS, str(out)]) == 0
+
+    assert fetched == [ALIAS]
+    assert _inventory_paths(out) == [(ALIAS, "latest.md")]
+
+
+def test_a_non_seed_redirect_stub_is_an_ordinary_page(script, monkeypatch, tmp_path):
+    pages = {
+        SEED: _page("Start", "/docs/old"),
+        f"{SITE}/docs/old": _redirect_stub("/docs/new"),
+        f"{SITE}/docs/new": _page("New"),
+    }
+    _fake_site(monkeypatch, script, pages)
+    out = tmp_path / "out"
+
+    assert _run(script, [SEED, str(out)]) == 0
+
+    assert _inventory_paths(out) == [
+        (SEED, "start.md"),
+        (f"{SITE}/docs/old", "old.md"),
+        (f"{SITE}/docs/new", "new.md"),
     ]
 
 
