@@ -7,30 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of a4cc75d -->
+<!-- As of 90c8151 -->
+
+## [3.8.0] - 2026-09-28
+
+### Major Changes
+
+- **Offline dependency library.** Keep documentation mirrors and source checkouts in `docs/library/` with `perk librarian`. Sessions can reuse these references across worktrees, check for upstream changes, and refresh them when needed. Documentation mirrors are curated in a dedicated session or through `run_librarian`; source checkouts can be pinned to the version your project uses. Run `perk init` after upgrading to install the new `librarian` skill.
 
 ### Added
 
-- Add /simplify-plan and /simplify-objective: run a Ponytail-mandated cut pass over the working plan or objective draft in a fresh perk.simplifier lane (intensity lite|full|ultra, default ultra, optional focus hint) and fold its proposal back through plan_draft / objective_draft — nothing is saved. The lane model is [models.subagents] simplifier. (d1ab3f8)
-- Report change stats on every submitted PR: the body gains a **Change stats** table of lines added / removed / modified, split into Code, Tests, Comments, Learned docs (`docs/learned/`), and Other, counted by cloc over the PR's exact range and refreshed whenever perk rewrites the PR. `perk pr submit --json` adds `change_stats` and `change_stats_note`, and the `/submit` success line ends with a `change stats: …` line. A cloc or range failure never fails the submit — the table reads "Unavailable" with the reason. (5e06cde)
-- Add `perk pr stats [--base REF] [--fetch] [--json]`: count the current branch's change stats without publishing (read-only, no GitHub access). (2ce0098)
+- Add `/simplify-plan` and `/simplify-objective` to review a working draft for unnecessary complexity and fold the proposed cuts back into it before saving. Choose `lite`, `full`, or `ultra` intensity and an optional focus.
+- Add `/draft-and-compact` to checkpoint a plan, objective, gist, or refinement draft, compact the conversation, and resume with the draft and its unresolved questions preserved.
+- Report change statistics on submitted PRs, separating code, tests, comments, learned docs, and other files. Use `perk pr stats` to inspect the current branch without publishing. If statistics cannot be calculated, the PR reports the reason and submission still succeeds.
+- Add `perk objective replan --from <guidance>` to steer a replacement objective with a local file or an existing backend source.
 
 ### Changed
 
-- Require `cloc`: `perk init` / `perk doctor` report it missing like any required tool, interactive `perk init` offers to install it (brew, else `npm install -g cloc`), and the remote-runner setup action installs it. Install it with `brew install cloc`, `npm install -g cloc`, or your distro package. (0b704d6)
-- Target an existing incremental PR's actual base branch: when the plan's PR already exists, its target branch — not the plan's pinned base or the repository default — governs submit's base, mergeability probe, change stats, and reported `base`. perk never retargets it. (5e06cde)
-- Keep stacked PR bodies under GitHub's 65,536-character cap: a stacked layer's plan embed now yields to a one-line pointer when it would not fit, as the incremental route already did. (573e25c)
-- Show each check's wall-clock duration in the `run_ci` report: every executed row renders as `✓ name (12s)` / `✗ name (exit N, 12s)`, and the structured result carries it as `durationMs` (skipped rows carry none). Warm `/ci` still surfaces only the one-line summary. (50cedb2)
-- Restructure perk's own in-session CI rows: `docs-check` now carries only the docs-scoped guards plus every Astro invocation (site sync + typecheck, then build + post-build checks) serially — the single row that runs Astro, which removes a concurrent content-sync race — while site lint and the site unit tests ride the `lint-js`/`test-js` rows' `docs/site/**` globs, and the non-Astro TypeScript typecheck splits into independently globbed `typecheck-js` and `typecheck-prose-review` rows. `just typecheck` and `just test` are unchanged. (ba1b4ed)
-- Retire a hidden skill-binding message rendered for a superseded trigger or `[[bindings]]` overlay from context and re-deliver the current render (your own prompts are still never removed). (ef6126e)
+- Require `cloc` for change statistics. `perk init` can offer to install it, `perk doctor` reports it when missing, and remote runners install it automatically. Install it with `brew install cloc`, `npm install -g cloc`, or your system package manager.
+- Use an existing incremental PR's actual target branch for submission, mergeability checks, and change statistics, preserving a target you changed manually.
+- Show each executed check's duration in the `run_ci` report and its structured output.
+- Allow more read-only Git and text-processing commands in planning sessions, and treat heredoc content as data while still checking commands inside expanding heredocs.
 
 ### Deprecated
 
-- Deprecate `[providers] plan = "tombell-plan"`: it stays selectable with no behavior change, but `plannotator-plan` is the supported foreign plan provider. (ef6126e)
+- Deprecate the `tombell-plan` plan provider. Existing configurations still work; `plannotator-plan` is the supported foreign plan provider.
 
 ### Fixed
 
-- Deliver the `stage:plan` skill bindings (perk's `perk-plan` nudge or your override) to a plain session with `/plan` on, as a hidden context message re-delivered after compaction and never in perk's read-only subagent lanes; other read-only sessions without a stage resolve to the same trigger once no seeded binding pointer is in context. (ef6126e)
+- Keep stacked PR descriptions within GitHub's size limit by linking to the plan when the embedded plan would not fit.
+- Deliver planning skill bindings when `/plan` is enabled in a plain session, restore them after compaction, and replace stale hidden guidance when bindings change.
+- Support lazy tool activation in `pi-subagents` and `pi-web-access`, preserving tools the model enables where the workflow allows them. Extend the SDK bridge to cover the `typebox/value` import used by current package versions.
+- Recognize `src/perk/…` source references when scanning learned documentation for stale pointers.
+- Avoid a second compaction in `/commit-and-compact` when automatic compaction already completed during the checkpoint turn.
+
+### Security
+
+- Strengthen the read-only Bash gate to check nested command positions, reject write flags and program-launch options, and block environment assignments that can redirect execution. This remains a structural command check with documented limits.
+- Strip terminal control sequences from perk displays and `/btw` output and pasted input, while preserving stored conversation content.
 
 ## [3.7.0] - 2026-09-23
 
