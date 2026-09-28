@@ -144,6 +144,10 @@ def test_librarian_prose_invariants():
         "`pages_published`",
         "`failures_accepted`",
         "`--accept-failures`",
+        # The seed redirect: stop without crawling, hand the parent the reissue.
+        "**Exit 3**",
+        "`redirect_url`",
+        "`stopped-before-mutation`, the summary leading with",
     ):
         assert clause in compact, clause
 
