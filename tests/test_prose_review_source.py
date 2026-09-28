@@ -765,7 +765,7 @@ def test_every_real_python_backed_fragment_resolves_and_recomposes(
         if unit.candidate.kind == "python-symbol"
         or (unit.candidate.kind == "managed-prose" and Path(unit.candidate.path).suffix == ".py")
     ]
-    assert len(units) == 16
+    assert len(units) == 18
     for unit in units:
         expected = (ROOT / unit.candidate.path).read_text(encoding="utf-8")
         fragments = snapshot.fragments_for_unit(unit.candidate.id)
@@ -1519,7 +1519,7 @@ def test_every_real_typescript_fragment_is_batch_covered_through_the_python_adap
             selectors.append(routed_fragment.fragment.selector)
             total += 1
 
-    assert total == 313
+    assert total == 323
     assert "extension/pi/v1/delivery/submitConflict.ts" in selectors_by_path
     adapter = _typescript_adapter()
     for relative, selectors in selectors_by_path.items():

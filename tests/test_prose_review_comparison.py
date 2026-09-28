@@ -176,6 +176,24 @@ def test_concern_relatives_preserve_member_order_standing_and_copy(
             "typescript-tool:plan_save",
             "Review-first save · Mechanical persistence surface.",
         ),
+        ("markdown:skills/librarian/SKILL.md", "Library awareness · canonical"),
+        (
+            "typescript-tool:run_librarian",
+            "Library awareness · Writer-child launcher named by the skill.",
+        ),
+        ("markdown:agents/librarian.md", "Library awareness · Writer child following the skill."),
+        (
+            "markdown:prompts/stages/librarian/add-docs.md",
+            "Library awareness · Door seed carrying flow only.",
+        ),
+        (
+            "markdown:prompts/stages/librarian/refresh-docs.md",
+            "Library awareness · Door seed carrying flow only.",
+        ),
+        (
+            "markdown:skills/perk-expert/references/customization-recipes.md",
+            "Library awareness · Operator recipe mirror.",
+        ),
     ]
     assert all(choice.target.shape is None for choice in choices)
     assert all(choice.target.assembly is None for choice in choices)

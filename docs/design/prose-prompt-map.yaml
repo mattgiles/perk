@@ -835,6 +835,17 @@ concerns:
       - { unit: "typescript-tool:run_learn_wave", relation: Code-owned analyst wave. }
       - { unit: "typescript-tool:run_pr_review_wave", relation: Code-owned reviewer wave. }
       - { unit: "markdown:agents/learn-analyst.md", relation: Bounded child contract. }
+  - id: library-awareness
+    label: Library awareness
+    summary: External-dependency work can reach the `librarian` skill; every other carrier points at it as needed and never restates its rules.
+    canonical_unit: "markdown:skills/librarian/SKILL.md"
+    related:
+      - { unit: "markdown:skills/perk-plan/SKILL.md", relation: Plan-grounding awareness sentence; the external-dependency trigger. }
+      - { unit: "typescript-tool:run_librarian", relation: Writer-child launcher named by the skill. }
+      - { unit: "markdown:agents/librarian.md", relation: Writer child following the skill. }
+      - { unit: "markdown:prompts/stages/librarian/add-docs.md", relation: Door seed carrying flow only. }
+      - { unit: "markdown:prompts/stages/librarian/refresh-docs.md", relation: Door seed carrying flow only. }
+      - { unit: "markdown:skills/perk-expert/references/customization-recipes.md", relation: Operator recipe mirror. }
 
 lineage:
   - id: delivered-skills
