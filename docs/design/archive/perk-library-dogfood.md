@@ -80,6 +80,11 @@ cd /Users/mattgiles/dev/github/mattgiles/perk
   { perk doctor; echo "--- librarian skill"; ls -la .agents/skills/librarian; } 2>&1 | tee /tmp/perk-library-dogfood/p0.2-doctor.log
   ```
 
+  P0.2 deliberately runs before P0.3, so it runs whichever `perk` is on `PATH`: a pre-library
+  build reports its own version-skew drift and cannot know the `librarian` skill. Answer the
+  blind-spot question with the checkout's doctor (`uv run perk doctor` in a checkout whose
+  `.agents/skills/` is still stale), not with that build.
+
 - **P0.3** The CLI on `PATH`. Expected on this machine: `No such command 'librarian'` (the PyPI
   3.7.0 tool install predates the group). Then install the checkout editable and rerun — the six
   verbs listed:
@@ -298,12 +303,12 @@ with an explicit count._
 
 | Field | Value |
 | --- | --- |
-| Date | _pending_ |
-| Run SHA (`<main>` HEAD at P0.1) | _pending_ |
-| `perk --version` + interpreter | _pending_ |
-| `pi --version` | _pending_ |
-| pi-subagents `<V>` | _pending_ |
-| Child model (`[models.subagents] librarian`) | _pending_ |
+| Date | 2026-09-28 (P0 at 10:48–10:50 local) |
+| Run SHA (`<main>` HEAD at P0.1) | `33bf73cde10c8a315d583b99226a47a86bb64f62` (`main`, one local commit "Check in planning doc" ahead of `origin/main` `dc00eb2e`) |
+| `perk --version` + interpreter | before P0.3: `perk 3.7.0`, `#!/Users/mattgiles/.local/share/uv/tools/perk/bin/python3` (PyPI build); after: `perk 3.7.0`, `#!/Users/mattgiles/.local/share/uv/tools/perk/bin/python` (editable, `perk==3.7.0 (from file:///Users/mattgiles/dev/github/mattgiles/perk)`, CPython 3.13.9) |
+| `pi --version` | `0.87.1` |
+| pi-subagents `<V>` | `0.71.0` (P0.6) |
+| Child model (`[models.subagents] librarian`) | `openai/gpt-6-sol` (`<main>/.perk/config.toml`) |
 
 ### B.2 Session stores
 
@@ -343,11 +348,47 @@ with an explicit count._
 | Id | Observed | Finding | Remediation |
 | --- | --- | --- | --- |
 | F1 | planning session; confirm at P0.3 | The `perk` on `PATH` is the non-editable PyPI 3.7.0 uv tool install, which predates the group: `perk librarian list --json` → `No such command 'librarian'`, exit 2 — even though the read-only gate admitted the command. | `just install-cli` (`uv tool install --editable . --force`). |
-| F2 | planning session; confirm at P0.2/P0.4 | `<main>/.agents/skills/` symlinks into the skills-CLI cache at `87c1514d` (synced 2026-09-26 13:15), which predates the `librarian` skill: no `librarian`, the retired `copy-docs-to-markdown` still linked. `run_librarian` and the docs doors would refuse `skill_missing`, and the planning session's available skills carried no `librarian`. | `perk init` re-syncs `.agents/skills/` from `github.com/mattgiles/perk@main`. |
+| F2 | planning session; confirmed at P0.2, fixed at P0.4 | `<main>/.agents/skills/` symlinks into the skills-CLI cache at `87c1514d` (synced 2026-09-26 13:15), which predates the `librarian` skill: no `librarian`, the retired `copy-docs-to-markdown` still linked. `run_librarian` and the docs doors would refuse `skill_missing`, and the planning session's available skills carried no `librarian`. P0.2: `".agents/skills/librarian": No such file or directory (os error 2)`. | `perk init` re-syncs `.agents/skills/` from `github.com/mattgiles/perk@main` — P0.4: `.agents/skills/: synchronized via skills update --sync`; the links now resolve into the cache at `dc00eb2e`. |
+| F3 | P0.2 | P0.2 runs whichever `perk` is on `PATH` — here the pre-library PyPI build, so its doctor is the old build's view: three version-skew drift failures (`runner-workflow`, `gitignore-block`, `skills-manifest`, each `updated`) and a **green** `skills-delivery` while `.agents/skills/librarian` was absent (that build's managed skill set has no `librarian`). Not a doctor blind spot: the checkout's doctor over the same stale-link shape (the implement worktree's `.agents/skills/`, materialized from `<main>`'s links before P0.4) fails it — `✗ skills-delivery: 2 perk skill(s) not delivered — delivered set stale — .agents/skills/ lacks librarian, perk-simplify present on origin/main`. After P0.3 + P0.4, P0.5's doctor is healthy with no drift. | Record-only (operator environment). |
+| F4 | implement session | The implement worktree's `.agents/skills/` was materialized at worktree creation (2026-09-28 10:30) from `<main>`'s then-stale links, so this implementing session's available skills carry no `librarian` even though its `stages:` include `implement`; P0.4 fixed `<main>` only. | Record-only (operator environment; a fresh worktree after P0.4 carries the skill). |
 
 ### B.5 Per-leg excerpts
 
-_pending_
+**P0 (human, 2026-09-28 10:48–10:50, logs `/tmp/perk-library-dogfood/p0.*.log`).**
+
+- P0.1 — status empty; `--- HEAD` `33bf73cde10c8a315d583b99226a47a86bb64f62`.
+- P0.2 (the PyPI 3.7.0 build — see F3):
+
+  ```text
+  ✗ repository (5/7 checks)
+     ✗ runner-workflow: runner-workflow drift — .github/actions/perk-remote-setup/action.yml: updated
+     ✗ gitignore-block: gitignore-block drift — .gitignore: updated
+  ✓ registry (1 checks)
+  ✗ skills (2/3 checks)
+     ✗ skills-manifest: skills-manifest drift — .agents/manifest.d/perk.yaml: updated
+  …
+  ✗ 3 check(s) failed
+  --- librarian skill
+  ".agents/skills/librarian": No such file or directory (os error 2)
+  ```
+
+- P0.3 — before: `perk 3.7.0` / `#!/Users/mattgiles/.local/share/uv/tools/perk/bin/python3` /
+  `Error: No such command 'librarian'.`; `just install-cli` → `+ perk==3.7.0 (from
+  file:///Users/mattgiles/dev/github/mattgiles/perk)` / `Installed 1 executable: perk`; after:
+  `perk librarian --help` lists `add`, `check`, `list`, `prepare`, `record`, `refresh`, `remove`
+  (the six worker verbs plus the `prepare` worker the `run_librarian` tool drives).
+- P0.4 — `perk init`: `Converged:` / `- .agents/skills/: synchronized via skills update --sync`;
+  verify: `.agents/skills/librarian/scripts/copy_docs_to_markdown.py` present (25k); the
+  `copy-docs` grep empty (the retired link is gone — no hand removal needed); the pointer
+  delivered at `.agents/skills/perk-plan/SKILL.md:125` (`When a plan leans on an external
+  dependency's docs or source, the `librarian` skill (read`); status empty (no tracked file
+  touched). `.agents/skills/librarian` → `…/perk/dc00eb2e3e14c055116c36a13f630d9c2584c0ca/skills/librarian`.
+- P0.5 — `/usr/bin/curl`, `/opt/homebrew/bin/html2markdown`; doctor `✓ healthy (40 ok)` with
+  `• library: 8 uncatalogued library directories — uncatalogued: dbt-duckdb, diffs,
+  divio-documentation, hunk, linear, pi, plannotator, starlight` (plus the standing
+  `subagent-compat` / `cache-gc` warnings, unrelated); status empty.
+- P0.6 — `0.71.0`; `.pi/npm/node_modules/pi-subagents/src` (15 directories) and `/docs` (10
+  pages) installed; `prek` → `/Users/mattgiles/.local/bin/prek` (a binary, no local source).
 
 ### B.6 Fixture deviations
 
