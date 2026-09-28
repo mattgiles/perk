@@ -304,6 +304,41 @@ tools: read, grep, find, ls, bash
 The system prompt body — role, task framing, constraints.
 ```
 
+## Keep an offline reference of a dependency (`perk librarian`)
+
+The perk library is a per-repo, catalogued offline reference of external documentation mirrors
+and source checkouts under `docs/library/` in the **main checkout** — gitignored except
+`docs/library/README.md`. Nothing to configure: the shipped `librarian` skill carries the
+model-facing rules (read it; do not restate them), and a `perk plan` session's grounding guidance
+points to it when a plan leans on an external dependency. The operator recipe:
+
+1. `perk librarian list` — offline, lock-free, absolute paths from any worktree, one status per
+   entry (plus `uncatalogued:` / `staging:` directories).
+2. Reuse what is installed first — `node_modules/<pkg>/`, `.pi/npm/node_modules/<pkg>/`,
+   `.venv/lib/python*/site-packages/<dist>-<version>.dist-info/METADATA`.
+3. Source: `perk librarian add source <repo-ref> --ref <pin>` (`owner/repo`, `host/org/repo`,
+   `https://…`, `ssh://…`, `git@host:org/repo`; pin to the version the repo uses). Private repos
+   need the `git@…` / `ssh://…` form — the library's git runs config-pinned, no credential helper.
+4. Docs: `perk librarian add docs <url> --dry-run` first (the URL → file map), then
+   `perk librarian add docs <url> [--slug <slug>] [--scope-prefix <prefix>]` — it launches the
+   curating session. From inside a session (read-only included) the agent calls `run_librarian`
+   `{action: "add-docs", url, slug?, scope_prefix?}` instead. Needs `curl` + `html2markdown`.
+5. **First use only:** the workers never write `docs/library/README.md`; once `docs/library/`
+   exists, `perk doctor --fix` (or `perk init`) creates it — commit it (it is the route a linked
+   worktree follows to the main checkout's library).
+6. `perk librarian check <slug>` only for `stale` / `unknown` entries a task depends on — the
+   only network probe; never check the whole library.
+7. `perk librarian refresh <slug>` only on `drifted`, or `unverifiable` plus task-evidenced drift
+   (source: fast-forward; docs: a refresh session, or `run_librarian`
+   `{action: "refresh-docs", slug}`).
+8. `perk librarian remove <slug>` drops an entry.
+
+Statuses: `fresh` = a recent check found change evidence and no drift against the recorded
+baseline (which the first check only records — it is not proof the mirror matches upstream);
+`unverifiable` = the site offers no change evidence — judge it with task evidence; `unknown` = never
+checked; `pinned` = a source checkout at a fixed ref, never probed. `[models.subagents] librarian`
+overrides the `run_librarian` writer child's model.
+
 ## Prefer pi's regular TUI mode (`tuiMode`)
 
 perk seeds `"tuiMode": "fullscreen"` into `.pi/settings.json` — but only when the key is absent
@@ -331,4 +366,4 @@ perk's doing.
 *Canonical source: the `docs/user-docs/how-to/` customization & provider guides
 (`attach-a-skill-to-a-stage`, `write-a-custom-subagent`, `run-ci-in-session`, `select-a-provider`,
 `scope-pi-resources-per-project`, `switch-to-linear`, `target-a-non-default-base-branch`,
-`delegate-an-investigation-to-perk-scout`).*
+`delegate-an-investigation-to-perk-scout`, `keep-an-offline-reference-of-a-dependency`).*
