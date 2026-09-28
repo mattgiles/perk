@@ -458,3 +458,4 @@ a `publish_command` carrying `--replace`. An unknown slug or a source entry is `
 
 - **Look up:** [CLI commands](../cli.md) — the hub and shared conventions.
 - **Look up:** [Repository layout](../configuration/repository-layout.md) — where the library lives and what is committed.
+- **Understand:** [The perk library](../../explanation/the-perk-library.md) — the freshness-evidence model and the not-over-eager policy.
