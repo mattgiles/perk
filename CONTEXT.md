@@ -426,8 +426,9 @@ _Avoid_: manifest, crawl log
 
 **Adoption** (of a library directory):
 The orphan-only `perk librarian record --adopt` gesture that catalogs a pre-existing uncatalogued
-directory as a docs entry: a top-level one is moved into `documentation/<slug>/`, an orphan
-already under `documentation/` stays put. It never renames a catalogued entry
+directory as a docs entry at `documentation/<slug>/` (the slug defaults to the directory name): a
+top-level directory is moved there, and an orphan already under `documentation/` stays put only
+when its name is the slug — a different `--slug` renames it. It never renames a catalogued entry
 (`directory_catalogued`) and, unlike publish, validates no `index.md`. Distinct from the delivery
 glossary's **Adoption** (of a layer head).
 _Avoid_: import, migration
