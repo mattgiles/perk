@@ -180,7 +180,11 @@ prompt to type:
   → `published` with `published_path`, `pages_published`, `failures_accepted`, the bracket clean;
   then `perk librarian list --json` (a `prek` docs entry, `unknown`), `ls docs/library/.staging`
   (no `prek` left), `git status --porcelain --untracked-files=all` (unchanged). An `unclean-start`
-  result is recorded with the named door and the leg stops — no workaround.
+  result is recorded with the named door and the leg stops — no workaround. **Run note
+  (2026-09-28):** `/latest/` had become a mike version-alias redirect page, so the child stopped
+  before mutation (B.7 D1); L5 was reissued at `url: "https://prek.j178.dev/0.5.4/"`,
+  `scope_prefix: "/0.5.4/"` (B.6 V1). A rerun first resolves the alias (`curl -sS
+  https://prek.j178.dev/versions.json`) and uses the version path it names — here and in C2.
 - **L6** `perk librarian check prek --json` → `probed` (the first baseline) with its evidence tier
   and status.
 - **L7** The pointer. Shape (a), cold `perk plan`: ask S1 *"Which skill bindings apply in this
@@ -314,32 +318,32 @@ with an explicit count._
 
 | Actor | Store | Session file (header `cwd`, timestamp) |
 | --- | --- | --- |
-| S1 | _pending_ | _pending_ |
+| S1 | `<main>/.pi/agent/sessions/` | `--Users-mattgiles-dev-github-mattgiles-perk--/2026-09-28T14-54-04-711Z_01a0e882-3da6-7148-b9df-31f6ebe6a5ce.jsonl` (cwd `<main>`, 14:54:04Z); its `perk.librarian` children under the sibling directory: `42c543d8-…/run-0/session.jsonl` (L5 first attempt, 14:58:04Z) and `93027ef3-…/run-0/session.jsonl` (L5 reissue, 15:07:36Z), both cwd `<main>` |
 | S2 | _pending_ | _pending_ |
 | C2 | _pending_ | _pending_ |
 | C3 | _pending_ | _pending_ |
-| implement | _pending_ | _pending_ |
+| implement | `<main>/.pi/agent/sessions/` | `--Users-mattgiles-dev-github-mattgiles-perk-.worktrees-plan-2612--/2026-09-28T14-31-04-511Z_01a0e86d-2e3e-7111-ba1c-7844f41d4ec3.jsonl` (cwd `<main>/.worktrees/plan-2612`, 14:31:04Z; `PI_CODING_AGENT_DIR=<main>/.pi/agent`); the W2 child `660c70e3-…/run-0/session.jsonl` (cwd `<main>`, 15:25:01Z) |
 
 ### B.3 Criteria
 
 | Requirement | Leg(s) | Offline pin | State |
 | --- | --- | --- | --- |
-| `list` reports uncatalogued directories with executable hints | L1 | `tests/test_library_dogfood.py::test_flat_mirrors_adopt_by_the_printed_hints` | _pending_ |
-| The read-only gate's admission shape | L1b | `extension/substrate/toolGating.test.ts` ("perk librarian workers are admitted only in their --json-last forms") | _pending_ |
-| `record --adopt` catalogs the flat mirrors | L2 | `tests/test_library_dogfood.py::test_flat_mirrors_adopt_by_the_printed_hints` | _pending_ |
-| Reuse-first + pinned `add source` | P0.6, L3 | `tests/test_library_dogfood.py::test_source_pin_throttle_drift_and_refresh_sequence` | _pending_ |
+| `list` reports uncatalogued directories with executable hints | L1 | `tests/test_library_dogfood.py::test_flat_mirrors_adopt_by_the_printed_hints` | **observed-live** (2026-09-28) |
+| The read-only gate's admission shape | L1b | `extension/substrate/toolGating.test.ts` ("perk librarian workers are admitted only in their --json-last forms") | **observed-live** (2026-09-28) |
+| `record --adopt` catalogs the flat mirrors | L2 | `tests/test_library_dogfood.py::test_flat_mirrors_adopt_by_the_printed_hints` | **observed-live** (2026-09-28) |
+| Reuse-first + pinned `add source` | P0.6, L3 | `tests/test_library_dogfood.py::test_source_pin_throttle_drift_and_refresh_sequence` | **observed-live** (2026-09-28) |
 | `check`: throttle, `pinned`, source drift via `ls-remote` | L4, L8 (drift capture-if-fired) | `tests/test_library_dogfood.py::test_source_pin_throttle_drift_and_refresh_sequence` | _pending_ |
-| `check`: docs evidence tiers incl. `unverifiable` | L4, L6 | `tests/test_librarian_cmd.py::test_check_probes_over_the_transport_seam` (both cases), `tests/test_library_check.py::test_a_validator_less_site_is_unverifiable_never_fresh` | _pending_ |
-| `run_librarian` add-docs from a read-only main-checkout parent | L5 | `extension/pi/v1/librarian.test.ts` | _pending_ |
+| `check`: docs evidence tiers incl. `unverifiable` | L4, L6 | `tests/test_librarian_cmd.py::test_check_probes_over_the_transport_seam` (both cases), `tests/test_library_check.py::test_a_validator_less_site_is_unverifiable_never_fresh` | **observed-live** (2026-09-28) — all three tiers: `strong` (6 docs entries), `weak` (`linear`, `starlight`), `none` → `unverifiable` (`pi`) |
+| `run_librarian` add-docs from a read-only main-checkout parent | L5 | `extension/pi/v1/librarian.test.ts` | **observed-live** (2026-09-28) — at `/0.5.4/` after the `/latest/` stop (B.6 V1, B.7 D1) |
 | Consumer first use from its main checkout | C2 | `extension/pi/v1/librarian.test.ts` case (5) | _pending_ |
 | Consumer first use from a linked worktree | C3 | `extension/pi/v1/librarian.test.ts` case (6); `tests/test_library_dogfood.py::test_first_use_from_a_consumer_main_checkout_and_linked_worktree` (the CLI path) | _pending_ |
-| A worktree's README → the main library's absolute paths | W1 | `tests/test_library_dogfood.py::test_first_use_from_a_consumer_main_checkout_and_linked_worktree` | _pending_ |
+| A worktree's README → the main library's absolute paths | W1 | `tests/test_library_dogfood.py::test_first_use_from_a_consumer_main_checkout_and_linked_worktree` | **observed-live** (2026-09-28) |
 | `perk doctor --fix` converges the committed README | C2 | `tests/test_library_dogfood.py::test_first_use_from_a_consumer_main_checkout_and_linked_worktree`, `tests/test_doctor.py::test_library_readme_managed_check_and_fix` | _pending_ |
-| `run_librarian` refresh-docs from a linked worktree | W2 | `extension/pi/v1/librarian.test.ts` case (6) | _pending_ |
+| `run_librarian` refresh-docs from a linked worktree | W2 | `extension/pi/v1/librarian.test.ts` case (6) | **observed-live** (2026-09-28) |
 | `remove` deletes exactly the leaf | L8 | `tests/test_library_ops.py::test_remove_a_source_entry_deletes_only_its_leaf`; story 2 | _pending_ |
-| The pointer: cold `perk plan` (a), warm `/plan` in a cold session (b) | L7 | `tests/test_skill_semantic_contracts.py`; `extension/substrate/bindingDelivery.test.ts` | _pending_ |
+| The pointer: cold `perk plan` (a), warm `/plan` in a cold session (b) | L7 | `tests/test_skill_semantic_contracts.py`; `extension/substrate/bindingDelivery.test.ts` | **observed-live** (2026-09-28) |
 | The pointer: stage-less warm `/plan` (c) | S2 | `extension/substrate/bindingDelivery.test.ts` ("Mechanism A is a no-op when no stage is launched") | _pending_ |
-| The pointer: `perk objective plan` (d) | the authoring session; P0.4 | `tests/test_skill_semantic_contracts.py` | _pending_ |
+| The pointer: `perk objective plan` (d) | the authoring session; P0.4 | `tests/test_skill_semantic_contracts.py` | **observed-live** (2026-09-28): the authoring session delivered only `perk-objective-plan`; after P0.4 the skill is delivered |
 | The explanation page's `add source` sentence is true | — | `tests/test_explanation_boundary.py` (quadrant guard) | _pending_ |
 | Every gap routed | B.7 | — | _pending_ |
 
@@ -354,7 +358,7 @@ with an explicit count._
 
 ### B.5 Per-leg excerpts
 
-**P0 (human, 2026-09-28 10:48–10:50, logs `/tmp/perk-library-dogfood/p0.*.log`).**
+**P0 (human, 2026-09-28 10:48–10:50 local = 14:48–14:50Z, logs `/tmp/perk-library-dogfood/p0.*.log`).**
 
 - P0.1 — status empty; `--- HEAD` `33bf73cde10c8a315d583b99226a47a86bb64f62`.
 - P0.2 (the PyPI 3.7.0 build — see F3):
@@ -390,17 +394,139 @@ with an explicit count._
 - P0.6 — `0.71.0`; `.pi/npm/node_modules/pi-subagents/src` (15 directories) and `/docs` (10
   pages) installed; `prek` → `/Users/mattgiles/.local/bin/prek` (a binary, no local source).
 
+**S1 (cold `perk plan`, 14:54:04Z; excerpts are the tool results in the S1 JSONL).** The session
+confirmed `stage: plan`, `mode: read-only` (the first `perk:workflow-state` entry).
+
+- L1 (14:54:43Z) — `"library_root": "/Users/mattgiles/dev/github/mattgiles/perk/docs/library",
+  "catalog_present": false, "entries": []`, eight `uncatalogued` items (`dbt-duckdb`, `diffs`,
+  `divio-documentation`, `hunk`, `linear`, `pi`, `plannotator`, `starlight`), each with
+  `"hint": "perk librarian record --adopt /Users/mattgiles/dev/github/mattgiles/perk/docs/library/<name> --kind docs --source <url>"`,
+  `"staging": []`.
+- L1b — both refused by the gate, verbatim:
+
+  ```text
+  perk read-only mode: command blocked (not allowlisted).
+  Command: perk librarian list --json 2>&1 | head
+  Reason: not allowlisted: perk librarian list --json 2>&1
+  ```
+
+  ```text
+  perk read-only mode: command blocked (not allowlisted).
+  Command: perk librarian add docs https://prek.j178.dev/latest/ --dry-run
+  Reason: not allowlisted: perk librarian add docs https://prek.j178.dev/latest/ --dry-run
+  ```
+
+- L2 (14:55:04–14:55:45Z) — eight adoptions, each
+  `{"success": true, …, "action": "adopt", "entry": {"kind": "docs", "slug": "<name>", …, "path": "/Users/mattgiles/dev/github/mattgiles/perk/docs/library/documentation/<name>", "present": true, …, "status": "unknown"}, "replaced_previous": false, "warnings": []}`;
+  then `list --json` → eight entries, `"uncatalogued": [], "staging": []`; `ls
+  docs/library/documentation` → the eight names; the `plannotator` marker count → `48` (the
+  inventory seeded one marker per page; the others hold none).
+- L3 — `<V>` = `0.71.0`; `add source nicobailon/pi-subagents --ref v0.71.0 --json` (11 s) →
+  `"action": "cloned"`, `"source": "https://github.com/nicobailon/pi-subagents.git"`,
+  `"path": "…/docs/library/source-code/github.com/nicobailon/pi-subagents"`, `"ref": "v0.71.0"`,
+  `"stale_after": 86400`, `"status": "pinned"`; `git … describe --tags --exact-match` →
+  `v0.71.0`; the rerun → `"action": "reused"`, still `"ref": "v0.71.0"`, `"status": "pinned"`;
+  `add source j178/prek --slug prek-source --json` → `"action": "cloned"`,
+  `"path": "…/source-code/github.com/j178/prek"`, `"ref": null`, `"status": "unknown"`.
+- L4 — first `check --json` (wall clock `Mon Sep 28 14:56:59 UTC 2026` → result 14:57:17Z;
+  every `checked_at` `2026-09-28T14:57:07Z`), no `failed` results and `"warnings": []`:
+
+  | Entry | `action` | `evidence` | status |
+  | --- | --- | --- | --- |
+  | `dbt-duckdb`, `diffs`, `divio-documentation`, `hunk`, `plannotator` | `probed` | `strong` | `fresh` |
+  | `linear`, `starlight` | `probed` | `weak` | `fresh` |
+  | `pi` | `probed` | `none` | `unverifiable` |
+  | `pi-subagents` | `pinned` (`"detail": "pinned at v0.71.0 — never probed"`) | `none` | `pinned` |
+  | `prek-source` | `probed` | `strong` | `fresh` |
+
+  Second `check --json` (`Mon Sep 28 14:57:23 UTC 2026`) → every probed entry `recent`, e.g.
+  `"detail": "checked 23s ago, window 14d — pass --force to probe anyway"` (docs) and `"checked
+  23s ago, window 1d — pass --force to probe anyway"` (`prek-source`); `pi-subagents` still
+  `pinned`. `check plannotator --force --json` → `"action": "probed"`, `"checked_at":
+  "2026-09-28T14:57:38Z"`, `strong` / `fresh`.
+- L5, first attempt (14:57:57Z) — `ls docs/library/.staging` → `No such file or directory`;
+  `run_librarian {action: "add-docs", url: "https://prek.j178.dev/latest/", scope_prefix: "/latest/"}`
+  → `run_librarian failed: The perk.librarian child ended natively as failed; no record is
+  trusted. The staging directory /Users/mattgiles/dev/github/mattgiles/perk/docs/library/.staging/prek
+  is still in place for inspection. Nothing was reverted.` (`"error_type": "native-failed"`,
+  `"bracket": {"ok": true}`). Before ending, the child raised a supervisor request (14:58:52Z):
+
+  > Scope blocker before any write: https://prek.j178.dev/latest/ serves only a 382-byte
+  > JavaScript redirect to ../0.5.4/, outside the prepared /latest/ scope. The required dry run
+  > discovers exactly 1 page (the redirect), so the exact mandated crawl/publish would create a
+  > near-empty, unusable mirror. May I stop this task before mutation and request a reissued task
+  > with source URL https://prek.j178.dev/0.5.4/ and scope /0.5.4/, or do you prefer publishing
+  > the redirect-only mirror? I cannot change the prepared commands myself.
+
+  S1 replied "Stop before any mutation …" per its standing rule; the child's final record:
+  `"outcome": "stopped-before-mutation"`, `"pages_published": 0`. Post-state: `.staging/prek`
+  empty, `list --json` unchanged apart from `"staging": [{"name": "prek", …}]`, git status empty.
+  The human removed the empty directory (`rmdir`) and reissued L5 (B.6 V1).
+- L5, reissue (15:07:27Z) — `ls docs/library/.staging` → empty; `run_librarian {action:
+  "add-docs", url: "https://prek.j178.dev/0.5.4/", scope_prefix: "/0.5.4/"}` (12 min 24 s) →
+  `Published documentation entry `prek` → /Users/mattgiles/dev/github/mattgiles/perk/docs/library/documentation/prek
+  (status unknown; pages published 26, failures accepted 0, scope /0.5.4/).` Receipt:
+  `"cwd": "/Users/mattgiles/dev/github/mattgiles/perk"`, `"termination": "confirmed"`,
+  `"nativeStatus": "completed"`, `"exitCode": 0`, `"bracket": {"ok": true}`. The child's summary
+  (untrusted DATA): "Published 26 prek 0.5.4 documentation pages under /0.5.4/ with index.md as
+  the entrypoint. Pruned the changelog and homepage marketing sections; …". Then `list --json`
+  → a `prek` docs entry (`"source": "https://prek.j178.dev/0.5.4/"`, `"status": "unknown"`),
+  `"staging": []`; `ls docs/library/.staging` → empty; git status → empty.
+- L6 (15:20:15Z) — `check prek --json` → `"action": "probed"`, `"checked_at":
+  "2026-09-28T15:20:16Z"`, `"evidence": "strong"`, `"status": "fresh"`.
+- L7 (a) (15:20:47Z) — S1: "**Bindings delivered to this session:** exactly one — `perk-plan`
+  (…) No `perk-objective-plan`", the pointer sentence quoted verbatim from
+  `.agents/skills/perk-plan/SKILL.md:125–127` ("When a plan leans on an external dependency's docs
+  or source, the `librarian` skill (read `.agents/skills/librarian/SKILL.md`) knows what the repo
+  already keeps offline and when a check or an addition is worth it."), and `librarian` listed in
+  its available skills. (b) — the human toggled `/plan` (`perk:workflow-state` `{"mode":
+  "read-write"}` at 15:23:18Z, `{"mode": "read-only"}` at 15:23:21Z) and asked again (15:23:30Z):
+  "still exactly one — `perk-plan` … Nothing new was injected into my context on this turn after
+  the `/plan` toggle". Instrument: the S1 JSONL holds exactly **one** `perk:binding-context`
+  entry (14:54:18Z, content `The following skill binding(s) apply here:` / ``Follow the
+  `perk-plan` skill (read `.agents/skills/perk-plan/SKILL.md`).``).
+
+**Shape (d), the authoring session** (`2026-09-28T13-08-22-424Z_01a0e821-…jsonl`, cwd `<main>`,
+`"stage": "objective-plan"`, node claim 2551/3.3): its cold prompt carried `The following skill
+binding(s) apply here:` / ``Follow the `perk-objective-plan` skill (…)`` and no `perk-plan`; the
+missing `librarian` skill is that session's own report (the plan's pre-run findings — the
+system prompt's skill list is not persisted). After P0.4,
+`<main>/.agents/skills/librarian/SKILL.md` exists (8606 bytes, 10:50 local).
+
+**W1 (implement, 15:02:58Z, from `<main>/.worktrees/plan-2612`).** `ls -la docs/library` →
+`README.md` only (943 bytes, byte-equal to `LIBRARY_README`; `git ls-files docs/library` →
+`docs/library/README.md`); `perk librarian list --json` → `"library_root":
+"/Users/mattgiles/dev/github/mattgiles/perk/docs/library"`, `"catalog_present": true`, the `pi`
+entry `"path": "/Users/mattgiles/dev/github/mattgiles/perk/docs/library/documentation/pi"`,
+`"present": true`; reading `<that path>/index.md` by the absolute path → `# Pi Documentation
+Index` / `Source: https://pi.dev/docs/latest (Version: Latest)`.
+
+**W2 (implement, 15:24:51Z → 15:32:11Z).** Before: `<main>` status empty, HEAD `33bf73cd`,
+`.staging/` empty, the `prek` entry `strong` / `fresh`, its `sources.json` `scope_prefix`
+`/0.5.4/`. `run_librarian {action: "refresh-docs", slug: "prek"}` → `Published documentation
+entry `prek` → /Users/mattgiles/dev/github/mattgiles/perk/docs/library/documentation/prek (status
+unknown; pages published 26, failures accepted 0, scope /0.5.4/).` Receipt: `"action":
+"refresh-docs"`, `"cwd": "/Users/mattgiles/dev/github/mattgiles/perk"` (the child ran in the
+main checkout), `"parentSessionId": "01a0e86d-2e3e-7111-ba1c-7844f41d4ec3"` (this worktree
+session), `"termination": "confirmed"`, `"exitCode": 0`, `"bracket": {"ok": true}`. After:
+`<main>` status empty and HEAD unchanged, `.staging/` empty, `list --json` still exactly one
+`prek` docs entry (now `"checked_at": null`, `"evidence": "none"`, `"status": "unknown"` — a
+republish records the new revision with fresh markers), the worktree's `docs/library` still
+`README.md` only, the worktree status empty.
+
 ### B.6 Fixture deviations
 
-| Deviation | Why | Accepted? |
-| --- | --- | --- |
-| _pending_ | | |
+| Id | Deviation | Why | Accepted? |
+| --- | --- | --- | --- |
+| V1 | L5 reissued at `url: "https://prek.j178.dev/0.5.4/"`, `scope_prefix: "/0.5.4/"` instead of `/latest/`; the empty `.staging/prek` the stopped run left was removed by hand (`rmdir`) first. | `/latest/` is now a mike version-alias redirect page (`last-modified: Mon, 28 Sep 2026 04:57:06 GMT`; `<meta http-equiv="refresh" content="1; url=../0.5.4/" />` inside `<noscript>` plus a `window.location.replace("../0.5.4/" …)` script); `versions.json` lists `0.5.4` with `"aliases": ["latest"]`. The planning-time observation (a sitemap with 27 `<loc>` entries) decayed. | Yes — operator decision, 2026-09-28 (chosen over `/0.4.14/`, the locally installed `prek 0.4.14`, and over waiving L5/L6/W2/C2/C3). |
 
 ### B.7 Defect / gap log
 
 | Id | Leg | Observation | Disposition |
 | --- | --- | --- | --- |
-| _pending_ | | | |
+| D1 | L5 | A seed URL that is an HTML redirect page (a mike version alias: meta-refresh + script, served `200`) is not followed — the crawl follows HTTP redirects only (`curl --location --max-redirs 5`) — so the dry run discovers one page, the redirect stub. The judgment layer caught it (the child stopped before mutation and asked for a reissue), but the cost is a failed `run_librarian` run and a leftover empty staging claim the human removes by hand. | _pending_ |
+| O1 | L5 | A stopped or failed docs run leaves its (empty) staging claim; the door never deletes a staging directory, and `list` / doctor surface it. | Record-only (by design). |
+| O2 | W2 | A refresh republish resets the entry's `checked_at` / `evidence` (status back to `unknown`) — the new revision carries new markers. | Record-only (by design: markers are the mirror's revision). |
 
 ### B.8 Teardown proof
 
