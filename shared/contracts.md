@@ -13895,7 +13895,7 @@ paths).
 `entry_path_invalid`, `io_error`, `not_a_repo`, and for the network verbs (§8.75(i))
 `invalid_repo_ref`, `clone_failed`, `ref_not_found`, `checkout_invalid`, `checkout_dirty`,
 `fetch_failed`, `entry_pinned`, `entry_missing`, `needs_session`, and for the docs doors
-(§8.75(k)) `missing_converter`, `skill_missing`, `crawl_refused`. Every expected filesystem/git failure is
+(§8.75(k)) `missing_converter`, `skill_missing`, `crawl_refused`, `seed_redirect`. Every expected filesystem/git failure is
 translated at the library boundary (`translating_io`: the `OSError` family and `GitError` →
 `io_error`), so a worker never emits a traceback where an envelope is promised. Options are plain
 strings parsed inside the command (a bad value is a typed refusal, never a Click usage error).
@@ -14083,7 +14083,10 @@ customization recipe. The script (stdlib-only, Python ≥ 3.10,
 
 - *Arguments.* `URL OUTPUT_DIR [--scope-prefix P] [--max-pages N] [--dry-run]`: the seed is an
   absolute `http`/`https` URL with a netloc, its path and `--scope-prefix` must normalize (below),
-  `N ≥ 1` — refusals are argparse errors (exit 2). The tools are resolved before any network (a
+  `N ≥ 1`, and the seed must be admitted by the effective scope prefix (in-origin, its path beneath
+  the prefix, not an asset URL, mapping to a safe output path — not beneath a reserved artifact
+  name; an inadmissible seed would never be fetched, a vacuous crawl) —
+  refusals are argparse errors (exit 2, no network). The tools are resolved before any network (a
   missing one is exit 2 with the install hint; `--dry-run` needs only `curl`).
 - *Fetch once.* Breadth-first over in-origin, in-prefix, non-asset links, each page fetched once
   (`curl --no-progress-meter --fail --location --max-redirs 5`, `--write-out` appending the
@@ -14091,6 +14094,29 @@ customization recipe. The script (stdlib-only, Python ≥ 3.10,
   status ≥ 400 is a fetch failure, never mirrored content. A page keeps its requested URL as its
   identity and destination; its relative links resolve against the URL it was finally served from
   (after redirects), then face the same scope rules as any link.
+- *The seed redirect.* `curl --location` follows HTTP redirects only, so a seed served `200` as an
+  HTML redirect page (a mike `/latest/`-style version alias) would mirror the stub. The **seed
+  only** (the first fetched page) is checked: its candidate target is the first meta-refresh URL
+  (the WHATWG-shaped `content` parse; a `<meta>` inside `<noscript>` counts), else the first
+  inline-script string literal assigned to `location` / `location.href` (optionally prefixed
+  `window.`/`document.`/`top.`/`self.`/`parent.`; a single `=`) or passed to
+  `location.replace(`/`assign(`, resolved against the URL the seed was served from and
+  fragment-stripped. It is a seed redirect only when that target is **reissuable** — an absolute
+  `http`/`https` URL with a host and a path free of `.`/`..`/NUL segments (`urljoin` keeps an
+  absolute reference's dot segments), not an asset URL, ≤ 2,048 characters, no whitespace or
+  C0/DEL controls (anything else, a resolution error included, is not a seed redirect) — is not
+  the page itself (a self-refresh is ignored), every `<a href>` on the page (skipping `#`,
+  `mailto:`, `tel:`, `javascript:`, `data:`) resolves to it (zero anchors qualifies), and the
+  implied scope (below) admits it as a seed — a reissue that would fetch nothing is never
+  recommended. The
+  **implied scope** a reissue at the target needs: the target's head when the seed's path beneath
+  the effective scope reappears as a **whole-segment** suffix of the target's path (the scope
+  moved with the seed) → else a directory target itself (a version root) → else the default
+  rule over the target; the result always admits the redirect URL (else the default rule, else
+  `/`). The **blocker**: exit `3`; stdout exactly one JSON object `{blocker: "seed-redirect",
+  seed_url, fetched_url, redirect_url, scope_prefix}` (sorted keys, one line), stderr one
+  `ERROR:` naming the reissue; nothing written in either mode (discovery precedes every write,
+  so the staging directory stays empty and reusable). The values are page-derived: untrusted DATA.
 - *URL → path.* The path splits on `/`, empty segments collapse, a `.`, `..` or NUL-bearing
   segment is `UnsafePath`; segments are never percent-decoded (`%2e%2e` is an inert filename).
   After stripping the scope prefix: no segments → `docs-home.md`, else the segments with the last
@@ -14127,13 +14153,16 @@ customization recipe. The script (stdlib-only, Python ≥ 3.10,
 - *Exit codes.* `0` every discovered page copied; `1` the crawl completed with ≥ 1 failure or copied
   nothing (`--dry-run`: a discovery fetch failed); `2` refused or aborted without a usable crawl —
   arguments, a missing tool, the output directory, an artifact write refusal, or
-  `StagingUntrustworthy` (the staging directory must be deleted). Stdout summarises pages copied,
+  `StagingUntrustworthy` (the staging directory must be deleted); `3` the seed is only an HTML
+  redirect page (the blocker above; nothing written — reissue at `redirect_url`). Stdout
+  summarises pages copied,
   the scope prefix, the index, and the failed / rejected / skipped counts; each failure, rejection
   and collision is one stderr `WARNING:`.
 - *Accepted limits.* `OUTPUT_DIR`'s ancestors are not audited (publish's `require_real_roots` and
   staging symlink walk own that boundary); a symlink planted between the component walk and the
   rename is an accepted check-then-write window; a followed redirect can place off-scope content
-  under an in-scope path (what the site serves for that URL).
+  under an in-scope path (what the site serves for that URL); a non-seed redirect stub, or a seed
+  whose redirect target is not a reissuable http(s) URL, is mirrored as the page the site serves.
 
 **(k) The session-backed docs doors** (`perk/library/docs_session.py` — the deterministic half —
 and `perk/cli/commands/librarian/door.py`). `add docs <url> [--slug <slug>] [--scope-prefix
@@ -14147,7 +14176,8 @@ session-free add**: pruning and artifact fixes are judgment work.
 - *Pre-session order (add).* Input validation (the URL through `invalid_source`; `--slug` through
   the slug grammar; `--scope-prefix` normalized like the crawl script's — empty segments collapse,
   `.`/`..`/NUL/whitespace or a blank value is `invalid_input`, zero segments is the root `/`,
-  which is valid) → the **default slug** (the URL host lowercased, a leading `www.` then a leading
+  which is valid; a seed whose path lies outside an explicit prefix is `invalid_input` — the
+  defaulted scope always admits it) → the **default slug** (the URL host lowercased, a leading `www.` then a leading
   `docs.` label stripped, the first remaining label; a label outside the grammar is
   `invalid_slug` asking for `--slug`) → the preflight's roots and tracked sweep →
   `publish_eligibility`'s create-only arm (`slug_exists` for a catalogued slug of either kind or an
@@ -14158,8 +14188,18 @@ session-free add**: pruning and artifact fixes are judgment work.
   `missing_converter` unless `curl` **and** `html2markdown` resolve on `PATH` (one refusal naming
   each missing tool with its install hint — checked on `--dry-run` too) → the cache-only ignore
   probe over the first free staging name and the entry directory (§8.75(d); every `.staging/`
-  sibling is the same path class, and the free name is never beyond a symlink) → the **atomic
-  staging claim**: `.staging/` created as needed, then `mkdir` **without** `exist_ok` over
+  sibling is the same path class, and the free name is never beyond a symlink) → the **seed
+  probe** (launch and `prepare` only — never `--dry-run`): `crawl_argv + --max-pages 1
+  --dry-run` over the previewed staging name (`cwd` the main checkout, 180 s) — one fetch of an
+  admitted seed; exit `3` → `seed_redirect`, the blocker's last non-blank stdout line
+  re-validated (`SeedRedirectBlocker`: every field ≤ 2,048 characters without whitespace or
+  controls, the URLs absolute http(s) with a host, the redirect URL's path free of `.`/`..`
+  segments and not an asset URL (the script's extension set, mirrored and pinned by a cross-check
+  test), the scope prefix already normalized and admitting the redirect URL; an invalid line yields a fixed message carrying no page text and
+  never the script's stderr) and rendered as labelled untrusted DATA beside the copyable reissue
+  `perk librarian add docs <redirect_url> --slug <slug> --scope-prefix <scope>` (`shlex.join`);
+  any other exit, a spawn failure or a timeout is advisory — one `warnings[]` entry naming the
+  exit, and the crawl reports the seed's state → the **atomic staging claim**: `.staging/` created as needed, then `mkdir` **without** `exist_ok` over
   `<slug>`, `<slug>-2`, … — whatever occupies a name (directory, file, symlink) is skipped and
   never deleted, so two doors opened before either crawl never share a directory. The claim is the
   door's only write; an abandoned session leaves an empty staging directory that `list`/doctor
@@ -14170,7 +14210,11 @@ session-free add**: pruning and artifact fixes are judgment work.
   `--replace`. The prior crawl's `scope_prefix` (root `/` included) is recovered advisorily from
   the published mirror's `sources.json` — absent/malformed → the default scope; a recorded value
   the normalization refuses → the default scope **plus a warning** naming it, so a refresh never
-  changes scope silently. `refresh --json` stays the deterministic worker (`needs_session` for a
+  changes scope silently; a recorded value that excludes the entry's source URL is unusable the
+  same way (default scope + warning). The seed probe runs over the entry's source before the
+  claim; its `seed_redirect` (the recorded source moved behind an HTML redirect page — a refresh
+  cannot follow it) names `perk librarian remove <slug> --json`, then `add docs` at the redirect
+  URL. `refresh --json` stays the deterministic worker (`needs_session` for a
   docs entry); source entries are unchanged on both forms. No `--dry-run`, no pi-args.
 - *The seed* (`prompts/stages/librarian/add-docs.md` / `refresh-docs.md`) carries the flow only
   (§8.57 — the skill is the detail tier), the soft scope (write only under the gitignored library;
@@ -14179,9 +14223,12 @@ session-free add**: pruning and artifact fixes are judgment work.
   through `shlex.split`): the crawl through **perk's own interpreter** (`sys.executable` — a
   compatible `python3` on `PATH` is never assumed) — `<python> <script> <url> <staging>
   [--scope-prefix <prefix>]` — and the publish `perk librarian record --publish <staging> --slug
-  <slug> --source <url> [--replace] --json`.
+  <slug> --source <url> [--replace] --json`. Its exit legend names exit `3`: the seed is only an
+  HTML redirect page — nothing was written and the seeded commands cannot follow it; STOP and
+  report the blocker.
 - *`--dry-run` (add only).* Runs `crawl_argv + --dry-run` (the same argv; `cwd` the main checkout;
   a 600 s timeout), relays the script's stdout then stderr, and maps its exit: `0` / `1` relayed,
+  `3` → `seed_redirect` (the blocker line parsed and validated as by the seed probe),
   `2` → `crawl_refused` (the script's stderr), anything else (a signal's negative code included)
   → `io_error`; a spawn failure or timeout → `io_error`. No session; nothing written (the
   staging name is only previewed — the launch claims its own, which may differ).
@@ -14195,6 +14242,12 @@ session-free add**: pruning and artifact fixes are judgment work.
   script path travel only inside `crawl_command` — one construction of the commands) — the
   `run_librarian` tool's worker; launches nothing; the doors' error types and exits; not admitted
   to read-only sessions (the tool reaches it through the extension's own exec, `runColdDoor`).
+  The seed probe rides the same order (`seed_redirect` before the claim; a probe warning is a
+  `warnings[]` entry).
+- *Accepted residual.* The seed probe executes the delivered crawl script before any session,
+  as `--dry-run` already does — outside `run_librarian`'s bracket (l), which begins at dispatch;
+  the script is the `perk init`-synced skill file the child itself would run. One seed fetch per
+  launch/`prepare` (never under `init`/`doctor`; `check` stays the only catalog freshness probe).
 
 **(l) The `perk.librarian` writer child and `run_librarian`** (`extension/library/librarian.ts` —
 the Pi-free core — `extension/pi/v1/librarianEngine.ts`, `extension/pi/v1/librarian.ts`, the
@@ -14208,7 +14261,11 @@ shared transport `extension/pi/v1/foregroundDelegation.ts`, the snapshot policy
   stash, checkout, reset or run another mutating `git` command; never create or modify a path
   outside `docs/library/`; never create or edit `docs/library/README.md`; never hand-edit
   `catalog.json`; never delete a staging directory other than the named one; never spawn
-  subagents; stop and report on a missing prerequisite or a refusal — never work around it.
+  subagents; stop and report on a missing prerequisite or a refusal — never work around it. The
+  crawl's exit `3` (the seed is only an HTML redirect page, (j)) is a stop: never crawl the
+  redirect target (the prepared commands cannot change) — end `stopped-before-mutation`, the
+  summary leading with the blocker's `redirect_url` and `scope_prefix` as untrusted DATA so the
+  parent reissues.
 - *The tool.* `run_librarian` — parameters `{action: "add-docs", url, slug?, scope_prefix?}` |
   `{action: "refresh-docs", slug}` (closed; a strict decoder refuses control characters, fields
   over 2,048 characters, a non-http(s) URL, an off-grammar slug, a blank or spaced prefix and
@@ -14224,7 +14281,9 @@ shared transport `extension/pi/v1/foregroundDelegation.ts`, the snapshot policy
   the native `worktree` default (§8.3; `incompatible-worktree-default` with the fix) → the
   **clean-start policy** (`unclean-start`, naming the terminal door `perk librarian add docs
   '<url>' [--slug …] [--scope-prefix '…']` / `perk librarian refresh <slug>` as a follow-up step
-  for the human; nothing prepared) → `prepare` (a refusal passes its `error_type` through; an
+  for the human; nothing prepared) → `prepare` (a refusal passes its `error_type` through — the
+  seed probe's `seed_redirect` included, an ordinary pass-through carrying the Python message's
+  reissue: no new failure member, no tool-side recovery prose; an
   abort during or after it is `cancelled` naming the claimed staging directory — no dispatch, no
   bracket) → plane agreement (`realpath(main_root)` must equal the session's main checkout, else
   `checkout-mismatch`) → the code-built task (`null` on a NUL/CR/LF → `bad_output`) → ONE

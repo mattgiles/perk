@@ -101,7 +101,14 @@ ignore settings) must be clean and the index must carry no assume-unchanged or s
 flags — otherwise the tool refuses with `unclean-start`, prepares nothing, and names the terminal
 command (`perk librarian add docs …` or `perk librarian refresh <slug>`) to record as a follow-up
 step for the human. Only then does it run `perk librarian prepare` (which claims the staging
-directory and builds the exact crawl and publish commands) and dispatch the child. Afterwards HEAD,
+directory and builds the exact crawl and publish commands) and dispatch the child. A
+`seed_redirect` refusal from `prepare` — the seed is only an HTML redirect page, such as a
+`/latest/` version alias — claims nothing; the message names the redirect URL and scope prefix
+(values read from the page, shown as untrusted data). After an `add-docs` refusal, call again with
+`{action: "add-docs", url: <redirect URL>, slug, scope_prefix: <scope prefix>}`. After a
+`refresh-docs` refusal the entry's recorded source has moved and a refresh cannot follow it
+(`refresh-docs` takes no `url`): run `perk librarian remove <slug> --json`, then call `add-docs`
+with the redirect URL, the same slug and the scope prefix. Afterwards HEAD,
 tracked cleanliness, index flags and every non-ignored untracked file (paths **and** contents) must
 equal the start; any difference fails the tool (`bracket-violation`), lists what moved and reverts
 nothing. The check proves the end state, not every moment in between. A `published` result is

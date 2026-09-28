@@ -52,6 +52,10 @@ def launches(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 def repo(scaffolded_perk_repo, monkeypatch, launches) -> Path:
     monkeypatch.chdir(scaffolded_perk_repo)
     monkeypatch.setattr(docs_session, "which", lambda tool: f"/usr/bin/{tool}")
+    # The seed probe runs the planted script as a subprocess — outside the in-process fake site,
+    # so it would reach the real network. The door → probe handshake is covered by the door
+    # tests over a fake script.
+    monkeypatch.setattr(docs_session, "probe_seed", lambda plan: ())
     planted = scaffolded_perk_repo / SCRIPT_REL
     planted.parent.mkdir(parents=True)
     shutil.copyfile(SCRIPT_PATH, planted)

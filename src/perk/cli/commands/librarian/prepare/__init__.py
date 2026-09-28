@@ -1,10 +1,10 @@
 """``perk librarian prepare`` — the ``run_librarian`` tool's worker (contracts.md §8.75(k)/(l)).
 
 Runs the docs doors' pre-session half — input validation, eligibility, the skill/converter
-prerequisites, the cache-only preflight — then claims the empty staging directory and emits the
-crawl plan (the one construction of the crawl and publish commands). Launches nothing: the
-extension dispatches the ``perk.librarian`` writer child with the plan. Not admitted to
-read-only sessions — the tool reaches it through the extension's own exec.
+prerequisites, the cache-only preflight, the seed probe — then claims the empty staging directory
+and emits the crawl plan (the one construction of the crawl and publish commands). Launches
+nothing: the extension dispatches the ``perk.librarian`` writer child with the plan. Not admitted
+to read-only sessions — the tool reaches it through the extension's own exec.
 """
 
 import click

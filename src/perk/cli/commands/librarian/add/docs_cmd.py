@@ -11,8 +11,13 @@ dry-run instead — the URL → file map, no session, nothing written.
 No ``--json``: the door's success is an exec, its dry-run payload is the script's human map, and
 the read-only gate never admits it. Trailing arguments pass through to ``pi``.
 
+Before the claim the door probes the seed (the crawl script's dry run capped at one page): a seed
+that is only an HTML redirect page (a ``/latest/``-style version alias) is refused as
+``seed_redirect``, naming the resolved URL and the copyable reissue; any other probe outcome is a
+warning. ``--dry-run`` maps the script's exit 3 to the same ``seed_redirect``.
+
 Exit codes: 0 ok (dry-run: every page discoverable) · 1 typed refusal / op failure (dry-run: a
-discovery fetch failed) · 2 not-a-repo.
+discovery fetch failed; ``seed_redirect``) · 2 not-a-repo.
 """
 
 import click

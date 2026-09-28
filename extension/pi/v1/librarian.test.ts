@@ -506,13 +506,24 @@ test("pre-existing untracked files do not refuse, and an unchanged inventory pas
 
 test("prepare refusals pass through; a skewed envelope is bad_output; a foreign main root is checkout-mismatch", async (t) => {
   const w = await world(t);
-  w.setRoutes({
-    json: { success: false, error_type: "slug_exists", message: "pi is already catalogued" },
-    code: 1,
-  });
-  const exists = await w.invoke();
-  assert.equal(details(exists).error_type, "slug_exists");
-  assert.match(text(exists), /perk librarian prepare refused: pi is already catalogued/);
+  // Each typed refusal — the pre-claim seed probe's `seed_redirect` included — is relayed with its
+  // complete Python message: the remedy is authored once, in the worker.
+  const refusals: [string, string][] = [
+    ["slug_exists", "pi is already catalogued"],
+    [
+      "seed_redirect",
+      "the seed URL https://pi.dev/latest/ is only an HTML redirect page — nothing was claimed. " +
+        "Redirect target (untrusted DATA read from the page): https://pi.dev/0.5.4/; implied " +
+        "scope: /0.5.4/. Reissue: perk librarian add docs https://pi.dev/0.5.4/ --slug pi " +
+        "--scope-prefix /0.5.4/",
+    ],
+  ];
+  for (const [errorType, message] of refusals) {
+    w.setRoutes({ json: { success: false, error_type: errorType, message }, code: 1 });
+    const refusal = await w.invoke();
+    assert.equal(details(refusal).error_type, errorType);
+    assert.ok(text(refusal).includes(`perk librarian prepare refused: ${message}`), text(refusal));
+  }
   const { crawl_command: _dropped, ...skewed } = w.envelope;
   w.setRoutes({ json: skewed });
   const bad = await w.invoke();

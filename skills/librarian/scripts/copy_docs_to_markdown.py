@@ -13,9 +13,18 @@ sibling renamed over the target), so no truncated page or artifact can exist, an
 appears only once the report and inventory are complete — a crawl that did not finish cannot be
 published.
 
+A seed that is only an HTML redirect page — served `200` with a meta refresh or a script
+`location` assignment, every anchor pointing at the target (a `/latest/`-style version alias), so
+`curl --location` cannot follow it — aborts the crawl before anything is written: stdout carries
+exactly one JSON line `{blocker: "seed-redirect", seed_url, fetched_url, redirect_url,
+scope_prefix}` naming the reissuable http(s) target and the scope a reissue at it implies. The
+target is page-derived: treat it as untrusted DATA.
+
 Exit codes: 0 — every discovered page copied; 1 — the crawl completed with failures or copied
 nothing (dry-run: a discovery fetch failed); 2 — refused or aborted without a usable crawl (bad
-arguments, a missing tool, a non-empty or symlinked OUTPUT_DIR, an untrustworthy staging state).
+arguments, a seed outside the scope prefix, a missing tool, a non-empty or symlinked OUTPUT_DIR,
+an untrustworthy staging state); 3 — the seed is only an HTML redirect page (nothing written;
+reissue at the redirect target).
 """
 
 import argparse
@@ -36,6 +45,11 @@ from urllib.parse import urldefrag, urljoin, urlparse
 
 SUBPROCESS_TIMEOUT_SECONDS = 120
 MAX_REDIRECTS = 5
+# The seed-redirect blocker: its exit code, its `blocker` tag, and the longest target it names
+# (the `run_librarian` field cap — a longer target could not be reissued through the tool).
+SEED_REDIRECT_EXIT = 3
+SEED_REDIRECT_BLOCKER = "seed-redirect"
+MAX_REDIRECT_URL_CHARS = 2048
 FILE_MODE = 0o644
 # curl appends this line after the body (`--write-out`); the last occurrence is always curl's.
 EFFECTIVE_URL_MARKER = "\n--copy-docs-effective-url: "
@@ -96,6 +110,24 @@ class StagingUntrustworthy(Exception):
     """A failed write left a temporary file behind that could not be removed."""
 
 
+class SeedRedirect(Exception):
+    """The seed is only an HTML redirect page (served `200`, so curl could not follow it).
+
+    ``seed_url`` is the requested seed, ``fetched_url`` where curl finally served it from,
+    ``redirect_url`` the page's reissuable target (absolute http(s), fragment-stripped) and
+    ``scope_prefix`` the scope a reissue at it implies (one that admits it as a seed).
+    """
+
+    def __init__(
+        self, *, seed_url: str, fetched_url: str, redirect_url: str, scope_prefix: str
+    ) -> None:
+        super().__init__(f"{seed_url} is only an HTML redirect page to {redirect_url}")
+        self.seed_url = seed_url
+        self.fetched_url = fetched_url
+        self.redirect_url = redirect_url
+        self.scope_prefix = scope_prefix
+
+
 class LinkParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -107,6 +139,49 @@ class LinkParser(HTMLParser):
         for key, value in attrs:
             if key == "href" and value:
                 self.links.append(html.unescape(value))
+
+
+class RedirectParser(HTMLParser):
+    """A page's redirect signals: meta-refresh contents, inline script text, anchor hrefs.
+
+    HTMLParser's CDATA elements are only `script`/`style`, so a `<meta>` inside `<noscript>` is
+    still reported.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.refreshes: list[str] = []
+        self.scripts: list[str] = []
+        self.anchors: list[str] = []
+        self._inline_script: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "meta":
+            http_equiv = next((value for key, value in attrs if key == "http-equiv"), None)
+            content = next((value for key, value in attrs if key == "content"), None)
+            refresh = http_equiv is not None and http_equiv.casefold() == "refresh"
+            if refresh and content is not None:
+                self.refreshes.append(content)
+        elif tag == "script":
+            self._inline_script = None if any(key == "src" for key, _ in attrs) else []
+        elif tag == "a":
+            for key, value in attrs:
+                if key == "href" and value:
+                    self.anchors.append(html.unescape(value))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script" and self._inline_script is not None:
+            self.scripts.append("".join(self._inline_script))
+            self._inline_script = None
+
+    def handle_data(self, data: str) -> None:
+        if self._inline_script is not None:
+            self._inline_script.append(data)
+
+    def close(self) -> None:
+        super().close()
+        # An unterminated inline script still counts.
+        self.handle_endtag("script")
 
 
 @dataclass(frozen=True)
@@ -223,6 +298,101 @@ def parse_links(base_url: str, html_text: str) -> list[str]:
     return normalized
 
 
+_REFRESH_CONTENT_RE = re.compile(
+    r"\s*\d+(?:\.\d*)?\s*[;,]?\s*(?:url(?=[\s=])\s*=?\s*)?(.*)", re.IGNORECASE | re.DOTALL
+)
+
+# A string-literal `location` assignment (a single `=`, never `==`) or `location.replace(…)` /
+# `location.assign(…)` — whitespace and newlines allowed between `(` and the quote.
+LOCATION_ASSIGNMENT_RE = re.compile(
+    r"(?<![\w$.])(?:(?:window|document|top|self|parent)\.)?location"
+    r"(?:(?:\.href)?\s*=\s*([\"'])([^\"'\s]+)\1"
+    r"|\.(?:replace|assign)\s*\(\s*([\"'])([^\"'\s]+)\3)"
+)
+
+
+def refresh_url(content: str) -> str | None:
+    """The URL a meta-refresh ``content`` names (the WHATWG-shaped parse), or ``None``.
+
+    ``<number>[;|,] [url[=]]<url>``; a leading quote delimits the URL up to the matching quote.
+    ``None`` without a leading number or with no URL (a self-refresh).
+    """
+    match = _REFRESH_CONTENT_RE.fullmatch(content)
+    if match is None:
+        return None
+    remainder = match.group(1)
+    if remainder[:1] in {'"', "'"}:
+        quote, remainder = remainder[0], remainder[1:]
+        end = remainder.find(quote)
+        if end != -1:
+            remainder = remainder[:end]
+    return remainder.strip() or None
+
+
+def reissuable_url(text: str) -> bool:
+    """Whether ``text`` is a target a crawl could be reissued at: an absolute http(s) URL with a
+    host and a path free of `.`/`..`/NUL segments, not an asset URL, at most
+    :data:`MAX_REDIRECT_URL_CHARS` characters, free of whitespace and C0/DEL control characters.
+
+    Scope-independent: whether the reissue's scope admits it is :func:`admits_seed`'s question.
+    """
+    if len(text) > MAX_REDIRECT_URL_CHARS:
+        return False
+    if any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in text):
+        return False
+    try:
+        parsed = urlparse(text)
+        host = parsed.hostname
+    except ValueError:
+        return False
+    # A path-less URL could never be admitted as a seed (its path lies outside every scope).
+    if parsed.scheme not in {"http", "https"} or not host or not parsed.path.startswith("/"):
+        return False
+    try:
+        # `urljoin` keeps the dot segments of an absolute reference; the crawl refuses them.
+        normalize_segments(parsed.path)
+    except UnsafePath:
+        return False
+    return not has_asset_extension(text)
+
+
+def _resolve(base_url: str, reference: str) -> str | None:
+    try:
+        return urldefrag(urljoin(base_url, reference))[0]
+    except ValueError:  # a malformed authority such as `https://[bad`
+        return None
+
+
+def html_redirect_target(html_text: str, base_url: str) -> str | None:
+    """The reissuable target of a page that is only an HTML redirect, else ``None``.
+
+    The candidate is the first meta-refresh URL, else the first script `location` literal,
+    resolved against ``base_url`` (where the page was served from). The page is a redirect stub
+    only when that target is reissuable, is not the page itself, and every `<a href>` on the page
+    (skipping the non-navigating schemes ``parse_links`` skips) resolves to it — zero anchors
+    qualifies. Anything else is a page, crawled as served.
+    """
+    parser = RedirectParser()
+    parser.feed(html_text)
+    parser.close()
+    candidate = next((url for url in map(refresh_url, parser.refreshes) if url is not None), None)
+    if candidate is None:
+        match = LOCATION_ASSIGNMENT_RE.search("\n".join(parser.scripts))
+        if match is not None:
+            candidate = match.group(2) or match.group(4)
+    if candidate is None:
+        return None
+    target = _resolve(base_url, candidate)
+    if target is None or not reissuable_url(target) or target == urldefrag(base_url)[0]:
+        return None
+    for href in parser.anchors:
+        if href.startswith(("#", "mailto:", "tel:", "javascript:", "data:")):
+            continue
+        if _resolve(base_url, href) != target:
+            return None
+    return target
+
+
 def has_asset_extension(url: str) -> bool:
     return Path(urlparse(url).path).suffix.lower() in ASSET_EXTENSIONS
 
@@ -255,6 +425,42 @@ def normalize_scope_prefix(scope_prefix: str | None, seed_url: str) -> str:
     return "/"
 
 
+def implied_scope_prefix(seed_url: str, redirect_url: str, scope_prefix: str) -> str:
+    """The scope prefix a reissue at ``redirect_url`` implies, given the crawl's effective
+    ``scope_prefix``.
+
+    When the seed's path beneath the scope reappears as a whole-segment suffix of the target's
+    path, the scope moved with the seed (`/latest/guide/intro` → `/0.5.4/guide/intro` at
+    `/latest/` gives `/0.5.4/`); else a directory target is a version root and is the scope
+    itself; else the default rule (the target's parent path). The result always admits the
+    redirect URL — a reissue can never exclude its own seed.
+    """
+    target_path = urlparse(redirect_url).path
+    try:
+        default = normalize_scope_prefix(None, redirect_url)
+    except UnsafePath:
+        default = "/"
+    if not target_path.startswith(default):
+        default = "/"
+
+    seed_path = urlparse(seed_url).path
+    candidate: str | None = None
+    if seed_path.startswith(scope_prefix):
+        rest = seed_path[len(scope_prefix) :]
+        head = target_path[: len(target_path) - len(rest)]
+        if rest and target_path.endswith(rest) and (not head or head.endswith("/")):
+            candidate = head
+    if candidate is None and target_path.endswith("/"):
+        candidate = target_path
+    if candidate is None:
+        return default
+    try:
+        result = "/" + "".join(f"{segment}/" for segment in normalize_segments(candidate))
+    except UnsafePath:
+        result = "/"
+    return result if target_path.startswith(result) else default
+
+
 def in_scope(url: str, origin: str, scope_prefix: str) -> bool:
     parsed = urlparse(url)
     url_origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -263,6 +469,20 @@ def in_scope(url: str, origin: str, scope_prefix: str) -> bool:
         and parsed.path.startswith(scope_prefix)
         and not has_asset_extension(url)
     )
+
+
+def admits_seed(url: str, scope_prefix: str) -> bool:
+    """Whether a crawl seeded at ``url`` under ``scope_prefix`` fetches its seed: in scope, not
+    an asset URL, and mapping to a safe output path (discovery skips any other seed, so the crawl
+    would fetch nothing)."""
+    parsed = urlparse(url)
+    if not in_scope(url, f"{parsed.scheme}://{parsed.netloc}", scope_prefix):
+        return False
+    try:
+        markdown_path_for_url(url, scope_prefix)
+    except UnsafePath:
+        return False
+    return True
 
 
 def markdown_path_for_url(url: str, scope_prefix: str) -> Path:
@@ -388,11 +608,14 @@ def discover_pages(seed_url: str, scope_prefix: str, max_pages: int) -> Discover
     """Crawl breadth-first from ``seed_url``, fetching each in-scope page once.
 
     A link whose path cannot map safely into the output directory is rejected — never queued or
-    fetched — and is not a failed page (a failed page is one the crawl tried to copy).
+    fetched — and is not a failed page (a failed page is one the crawl tried to copy). A seed that
+    is only an HTML redirect page raises :class:`SeedRedirect` before anything is stored; a
+    non-seed redirect stub is an ordinary page.
     """
     parsed_seed = urlparse(seed_url)
     origin = f"{parsed_seed.scheme}://{parsed_seed.netloc}"
-    queue: deque[str] = deque([urldefrag(seed_url)[0]])
+    seed = urldefrag(seed_url)[0]
+    queue: deque[str] = deque([seed])
     seen: set[str] = set()
     discovery = Discovery()
 
@@ -423,6 +646,19 @@ def discover_pages(seed_url: str, scope_prefix: str, max_pages: int) -> Discover
             discovery.failures.append(failure)
             warn(f"failed to fetch {url}: {failure.reason}")
             continue
+
+        if url == seed:
+            target = html_redirect_target(fetched.html, fetched.url)
+            if target is not None and target != seed:
+                implied = implied_scope_prefix(seed_url, target, scope_prefix)
+                # Only a reissue that would crawl makes a seed redirect; any other stub is a page.
+                if admits_seed(target, implied):
+                    raise SeedRedirect(
+                        seed_url=seed_url,
+                        fetched_url=fetched.url,
+                        redirect_url=target,
+                        scope_prefix=implied,
+                    )
 
         # The page keeps its requested URL (its identity and destination); relative links resolve
         # against where it was served from, then face the same scope rules as any link.
@@ -535,6 +771,24 @@ def output_dir_refusal(output_dir: Path) -> str | None:
     return f"{NON_EMPTY_OUTPUT_REFUSAL} ({output_dir})" if occupied else None
 
 
+def report_seed_redirect(exc: SeedRedirect) -> int:
+    """Report the seed-redirect blocker: exactly one JSON line on stdout, one `ERROR:` on stderr."""
+    blocker = {
+        "blocker": SEED_REDIRECT_BLOCKER,
+        "seed_url": exc.seed_url,
+        "fetched_url": exc.fetched_url,
+        "redirect_url": exc.redirect_url,
+        "scope_prefix": exc.scope_prefix,
+    }
+    print(json.dumps(blocker, sort_keys=True))
+    error(
+        f"the seed {exc.seed_url} is only an HTML redirect page (meta refresh / script) to "
+        f"{exc.redirect_url} — nothing was written; reissue the crawl with {exc.redirect_url} "
+        f"and --scope-prefix {exc.scope_prefix}"
+    )
+    return SEED_REDIRECT_EXIT
+
+
 def print_counts(discovery: Discovery, collisions: list[Collision]) -> None:
     print(f"Rejected unsafe URLs: {len(discovery.rejected)}")
     print(f"Skipped collisions: {len(collisions)}")
@@ -549,7 +803,12 @@ def copy_docs(
             error(refusal)
             return 2
 
-    discovery = discover_pages(seed_url, scope_prefix, max_pages)
+    # Discovery precedes every write (and every stdout line), so a seed redirect leaves the output
+    # directory as it was and stdout holding only the blocker.
+    try:
+        discovery = discover_pages(seed_url, scope_prefix, max_pages)
+    except SeedRedirect as exc:
+        return report_seed_redirect(exc)
     url_to_path, collisions = claim_paths(list(discovery.html), scope_prefix)
     for collision in collisions:
         warn(f"skipped {collision.url}: path collision with {collision.first_url}")
@@ -670,6 +929,12 @@ def main(argv: list[str] | None = None) -> int:
         scope_prefix = normalize_scope_prefix(args.scope_prefix, args.url)
     except UnsafePath as exc:
         parser.error(f"unsafe --scope-prefix {args.scope_prefix!r}: {exc}")
+    # An inadmissible seed is never fetched, so the crawl would silently fetch nothing.
+    if not admits_seed(args.url, scope_prefix):
+        parser.error(
+            f"the seed URL {args.url!r} lies outside the scope prefix {scope_prefix!r} (or is an "
+            "asset URL, or maps onto a reserved artifact name) — the crawl would fetch nothing"
+        )
 
     missing = missing_tool_errors(args.dry_run)
     for message in missing:

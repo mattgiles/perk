@@ -1,9 +1,11 @@
 """``perk librarian prepare docs`` — the ``add docs`` door's pre-session half plus the staging
 claim, emitted as the crawl plan (contracts.md §8.75(k)).
 
-Exactly the door's order — URL validation, the slug rule, eligibility (``slug_exists``), the
-skill and converter prerequisites, the cache-only preflight — then the atomic claim of an empty
-``.staging/<slug>[-N]`` directory. Launches nothing.
+Exactly the door's order — URL validation (a seed outside an explicit ``--scope-prefix`` is
+``invalid_input``), the slug rule, eligibility (``slug_exists``), the skill and converter
+prerequisites, the cache-only preflight, the seed probe (``seed_redirect``; any other probe outcome
+is a ``warnings[]`` entry) — then the atomic claim of an empty ``.staging/<slug>[-N]`` directory.
+Launches nothing.
 
 Exit codes: 0 ok · 1 typed refusal / op failure · 2 not-a-repo.
 """

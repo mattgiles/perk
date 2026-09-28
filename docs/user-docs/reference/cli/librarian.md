@@ -226,11 +226,15 @@ details.
   refuses with `invalid_slug` and asks for `--slug`. The door always prints the slug it chose.
 - **`--scope-prefix <prefix>`** — the URL path prefix to keep in scope, such as `/docs/`; `/`
   keeps the whole site. Without it, the crawl keeps the seed URL's parent path. A prefix with a
-  `.` or `..` segment, whitespace, or a blank value is `invalid_input`.
+  `.` or `..` segment, whitespace, or a blank value is `invalid_input`, and so is a seed URL whose
+  path lies outside the prefix (`https://pi.dev/docs` with `--scope-prefix /docs/` — the crawl
+  would fetch nothing; pass `https://pi.dev/docs/` or widen the prefix).
 - **`--dry-run`** — runs the crawl script's own dry-run and prints the URL → file map, the scope
   prefix, and the counts. No session starts and nothing is written. Exit `0` means every
   discovered page was reachable; exit `1` means a discovery fetch failed (the `WARNING:` lines
-  say which); a script refusal is `crawl_refused`, and any other script exit is `io_error`.
+  say which); a script refusal is `crawl_refused`; `seed_redirect` means the seed is only an HTML
+  redirect page (a `/latest/`-style version alias) — the message names the resolved URL, the scope
+  it implies, and the copyable reissue; any other script exit is `io_error`.
 - **Trailing arguments** pass through to `pi`.
 
 **Before the session.** The command refuses, and starts nothing, when:
@@ -243,8 +247,18 @@ details.
   `perk init` (it syncs perk's skills), then rerun.
 - `missing_converter` — `curl` or `html2markdown` is not on `PATH` (install `html2markdown` with
   `brew install html2markdown`). This is checked on `--dry-run` too.
+- `invalid_input` — the seed URL lies outside an explicit `--scope-prefix` (see above).
 - a cache-only preflight refusal (`library_root_invalid`, `library_tracked_content`,
   `library_not_ignored`), or `catalog_malformed`.
+- `seed_redirect` — the seed is only an HTML redirect page, such as a documentation site's
+  `/latest/` alias that redirects in the browser (a meta refresh or a script) rather than over
+  HTTP. Before creating the staging directory, the command fetches the seed once (the crawl
+  script's dry-run capped at one page); a redirect page refuses with the resolved URL, the scope
+  it implies and a copyable
+  `perk librarian add docs <redirect_url> --slug <slug> --scope-prefix <scope>` — the URL and
+  scope are read from the page, so they are shown as untrusted data. Any other outcome of that
+  fetch (the site is unreachable, the fetch times out) prints a `warning:` and the launch
+  proceeds; the session's crawl reports the seed's state.
 
 **The staging directory.** On a real launch, the command creates an empty
 `docs/library/.staging/<slug>/` directory for the session — or `<slug>-2/`, `<slug>-3/`, … when
@@ -403,8 +417,13 @@ as [`add docs`](#perk-librarian-add-docs), with the same `skill_missing` and `mi
 refusals and the same staging directory rules. The session re-crawls the entry's source URL into
 the new staging directory with the prior crawl's scope (read from the published mirror's
 `sources.json`; when the recorded scope is unusable, the command prints a `warning:` and the crawl
-uses the default scope), curates, and publishes with `record --publish … --replace`. The prior
-revision stays published until that publish succeeds. `refresh --json` on a documentation entry
+uses the default scope; a recorded scope that excludes the entry's source URL counts as
+unusable), curates, and publishes with `record --publish … --replace`. The prior revision stays
+published until that publish succeeds. Before the staging directory is created, the command
+fetches the entry's source once, as `add docs` does: when the source is now only an HTML redirect
+page, it refuses with `seed_redirect` — a refresh cannot follow it — naming
+`perk librarian remove <slug> --json` followed by `perk librarian add docs` at the resolved URL
+(the mirror is gone between the two steps). `refresh --json` on a documentation entry
 refuses with `needs_session` and names the door. `refresh` of a documentation entry takes no
 `--dry-run` and no `pi` arguments.
 
@@ -440,10 +459,11 @@ a git repository.
 
 `perk librarian prepare docs <url> [--slug <slug>] [--scope-prefix <prefix>] [--json]` runs the
 same checks as [`add docs`](#perk-librarian-add-docs), in the same order — the URL
-(`invalid_source`), the slug (`invalid_slug`) and scope prefix (`invalid_input`), `slug_exists`,
-`skill_missing`, `missing_converter`, and the cache-only preflight — and then creates the empty
-`docs/library/.staging/<slug>/` directory (or `<slug>-2/`, … when taken). A refusal claims
-nothing. The plan's `publish_command` is
+(`invalid_source`), the slug (`invalid_slug`) and scope prefix (`invalid_input`, a seed outside
+it included), `slug_exists`, `skill_missing`, `missing_converter`, the cache-only preflight, and
+the one-page fetch of the seed (`seed_redirect`; any other outcome of that fetch is a
+`warnings[]` entry) — and then creates the empty `docs/library/.staging/<slug>/` directory (or
+`<slug>-2/`, … when taken). A refusal claims nothing. The plan's `publish_command` is
 `perk librarian record --publish <staging> --slug <slug> --source <url> --json`.
 
 ### `perk librarian prepare refresh`
@@ -451,8 +471,10 @@ nothing. The plan's `publish_command` is
 `perk librarian prepare refresh <slug> [--json]` prepares a re-crawl of an existing documentation
 entry, with the same checks as the human [`refresh`](#perk-librarian-refresh) of a documentation
 entry: the entry's source URL, the prior crawl's scope (a `warnings[]` entry when the recorded
-scope is unusable and the default scope is used), `current_dir` set to the published mirror, and
-a `publish_command` carrying `--replace`. An unknown slug or a source entry is `entry_not_found`.
+scope is unusable and the default scope is used), the one-page fetch of the source
+(`seed_redirect` naming the remove-then-add remedy; any other outcome is a `warnings[]` entry),
+`current_dir` set to the published mirror, and a `publish_command` carrying `--replace`. An
+unknown slug or a source entry is `entry_not_found`.
 
 ## Related
 

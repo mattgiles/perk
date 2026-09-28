@@ -3,15 +3,20 @@
 ``perk librarian add docs`` and the human ``perk librarian refresh <slug>`` of a documentation
 entry are write-capable cold doors: mirroring a site is judgment work (scoping, pruning, artifact
 fixes), so each launches a curating session. Everything here runs BEFORE that session is paid for
-— input validation, the default slug rule, eligibility, the skill/converter prerequisites, the
-cache-only preflight, the staging claim — plus the one construction of the commands the session
-runs (:class:`DocsCrawlPlan`), so the dry-run and the seed can never disagree about them.
+— input validation (the seed inside an explicit scope prefix included), the default slug rule,
+eligibility, the skill/converter prerequisites, the cache-only preflight, the **seed probe** (one
+fetch of the seed through the crawl script's dry run, refusing a seed that is only an HTML
+redirect page as ``seed_redirect``), the staging claim — plus the one construction of the
+commands the session runs (:class:`DocsCrawlPlan`), so the dry-run and the seed can never
+disagree about them.
 
 The staging claim is the door's only write: an atomic ``mkdir`` of an empty
 ``.staging/<slug>[-N]`` directory the session crawls into. The door never deletes a staging
 directory — a leftover is ``list``'s to report and the human's to dispose of.
 """
 
+import dataclasses
+import json
 import shlex
 import shutil
 import subprocess
@@ -19,8 +24,12 @@ import sys
 import urllib.parse
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from typing import Literal, Self
 
+from pydantic import ValidationError, field_validator, model_validator
+
+from perk.boundary import LenientParseModel
 from perk.library.catalog import load_catalog
 from perk.library.errors import LibraryError, translating_io
 from perk.library.guard import (
@@ -41,6 +50,45 @@ CONVERTERS = ("curl", "html2markdown")
 HTML2MARKDOWN_INSTALL_HINT = "brew install html2markdown"
 CURL_INSTALL_HINT = "install curl"
 DRY_RUN_TIMEOUT_SECONDS = 600
+# The crawl script's seed-redirect blocker (contracts.md §8.75(j)): its exit code and the
+# longest target it names; a cross-check test pins both to the script's own constants.
+SEED_REDIRECT_EXIT = 3
+MAX_REDIRECT_URL_CHARS = 2048
+# The script bounds each curl at 120 s; the probe fetches the seed once.
+SEED_PROBE_TIMEOUT_SECONDS = 180
+# The crawl script's asset extensions (pinned to the script's own set by a cross-check test): a
+# redirect to an asset is never a reissuable target — the reissued crawl would refuse its seed.
+ASSET_EXTENSIONS = frozenset(
+    {
+        ".7z",
+        ".avif",
+        ".css",
+        ".csv",
+        ".eot",
+        ".gif",
+        ".gz",
+        ".ico",
+        ".jpeg",
+        ".jpg",
+        ".js",
+        ".json",
+        ".map",
+        ".mp4",
+        ".otf",
+        ".pdf",
+        ".png",
+        ".svg",
+        ".tar",
+        ".tgz",
+        ".ttf",
+        ".webm",
+        ".webp",
+        ".woff",
+        ".woff2",
+        ".xml",
+        ".zip",
+    }
+)
 LIBRARIAN_SKILL = "librarian"
 CRAWL_SCRIPT_NAME = "copy_docs_to_markdown.py"
 
@@ -147,6 +195,18 @@ def _invalid_scope(text: str, reason: str) -> LibraryError:
     )
 
 
+def require_seed_in_scope(url: str, prefix: str) -> None:
+    """An explicit (normalized) ``prefix`` must admit the seed: the crawl never fetches a seed
+    outside its scope, so it would silently fetch nothing. The defaulted scope is the seed's
+    parent path and always admits it."""
+    if not urllib.parse.urlsplit(url).path.startswith(prefix):
+        raise LibraryError(
+            "invalid_input",
+            f"the seed URL {url!r} lies outside --scope-prefix {prefix!r} — the crawl would fetch "
+            "nothing; widen the prefix or pass a seed beneath it",
+        )
+
+
 def require_converters() -> None:
     """Every converter the crawl needs must be on PATH; one ``missing_converter`` names them all."""
     missing = [tool for tool in CONVERTERS if which(tool) is None]
@@ -216,11 +276,14 @@ def entry_kind(repo_root: Path, slug: str) -> Kind | None:
 def plan_add_docs(
     repo_root: Path, *, url: str, slug: str | None, scope_prefix: str | None, dry_run: bool
 ) -> DocsCrawlPlan:
-    """Every pre-session check of ``add docs``, then the staging directory: claimed for a launch,
-    only previewed on ``dry_run`` (nothing written). ``url`` arrives validated."""
+    """Every pre-session check of ``add docs``, then the staging directory: claimed for a launch
+    after the seed probe, only previewed on ``dry_run`` (nothing written, no probe — the dry run
+    itself reports a redirect-stub seed). ``url`` arrives validated."""
     with translating_io("add docs"):
         chosen = validate_slug(slug) if slug is not None else derive_slug(url)
         prefix = validate_scope_prefix(scope_prefix) if scope_prefix is not None else ""
+        if prefix:
+            require_seed_in_scope(url, prefix)
         layout = LibraryLayout.for_repo(repo_root)
         require_real_roots(layout)
         require_no_tracked_content(layout)
@@ -233,12 +296,11 @@ def plan_add_docs(
         require_ignored(
             layout, probe_paths_for(layout, dirs=[preview, layout.docs_entry_dir(chosen)])
         )
-        staging = preview if dry_run else claim_staging_dir(layout, chosen)
-        return DocsCrawlPlan(
+        plan = DocsCrawlPlan(
             url=url,
             slug=chosen,
             scope_prefix=prefix,
-            staging_dir=staging,
+            staging_dir=preview,
             script_path=script,
             python=sys.executable,
             main_root=layout.main_root,
@@ -246,14 +308,23 @@ def plan_add_docs(
             replace=False,
             warnings=(),
         )
+        if dry_run:
+            return plan
+        # Before the claim: a `seed_redirect` refusal leaves nothing behind.
+        warnings = probe_seed(plan)
+        return dataclasses.replace(
+            plan, staging_dir=claim_staging_dir(layout, chosen), warnings=warnings
+        )
 
 
 def plan_refresh_docs(repo_root: Path, *, slug: str) -> DocsCrawlPlan:
-    """Every pre-session check of the docs-refresh door, then the claimed staging directory.
+    """Every pre-session check of the docs-refresh door, the seed probe over the entry's source,
+    then the claimed staging directory.
 
     The prior crawl's scope is recovered advisorily from the published mirror's ``sources.json``;
-    an unusable recorded value falls back to the default scope with a warning, so the refresh
-    never narrows or widens scope silently.
+    an unusable recorded value (invalid, or excluding the entry's source URL) falls back to the
+    default scope with a warning, so the refresh never narrows or widens scope silently. A source
+    that is now only an HTML redirect page is ``seed_redirect`` (a refresh cannot follow it).
     """
     with translating_io("refresh"):
         layout = LibraryLayout.for_repo(repo_root)
@@ -273,34 +344,216 @@ def plan_refresh_docs(repo_root: Path, *, slug: str) -> DocsCrawlPlan:
         require_converters()
         preview = fresh_staging_dir(layout, slug)
         require_ignored(layout, probe_paths_for(layout, dirs=[preview, current]))
-        prefix, warnings = _recorded_scope(current)
-        staging = claim_staging_dir(layout, slug)
-        return DocsCrawlPlan(
+        prefix, scope_warnings = _recorded_scope(current, entry.source)
+        plan = DocsCrawlPlan(
             url=entry.source,
             slug=slug,
             scope_prefix=prefix,
-            staging_dir=staging,
+            staging_dir=preview,
             script_path=script,
             python=sys.executable,
             main_root=layout.main_root,
             current_dir=current,
             replace=True,
-            warnings=warnings,
+            warnings=scope_warnings,
+        )
+        probe_warnings = probe_seed(plan)
+        return dataclasses.replace(
+            plan,
+            staging_dir=claim_staging_dir(layout, slug),
+            warnings=(*scope_warnings, *probe_warnings),
         )
 
 
-def _recorded_scope(mirror: Path) -> tuple[str, tuple[str, ...]]:
+def _recorded_scope(mirror: Path, source: str) -> tuple[str, tuple[str, ...]]:
     recorded = read_scope_prefix(mirror)
     if recorded is None:
         return "", ()
     try:
-        return validate_scope_prefix(recorded), ()
+        prefix = validate_scope_prefix(recorded)
     except LibraryError:
-        return "", (
-            f"the prior crawl's recorded scope prefix {recorded!r} ({mirror / INVENTORY_FILENAME}) "
-            "is unusable — the refresh crawl uses the default scope (the seed URL's parent path) "
-            "unless the session passes --scope-prefix",
+        return "", (_unusable_scope(mirror, recorded, ""),)
+    if not urllib.parse.urlsplit(source).path.startswith(prefix):
+        return "", (_unusable_scope(mirror, recorded, " (it excludes the entry's source URL)"),)
+    return prefix, ()
+
+
+def _unusable_scope(mirror: Path, recorded: str, reason: str) -> str:
+    return (
+        f"the prior crawl's recorded scope prefix {recorded!r} ({mirror / INVENTORY_FILENAME}) "
+        f"is unusable{reason} — the refresh crawl uses the default scope (the seed URL's parent "
+        "path) unless the session passes --scope-prefix"
+    )
+
+
+def _reissue_token(value: str) -> str:
+    if len(value) > MAX_REDIRECT_URL_CHARS:
+        raise ValueError(f"longer than {MAX_REDIRECT_URL_CHARS} characters")
+    if any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in value):
+        raise ValueError("contains whitespace or a control character")
+    return value
+
+
+def _http_url(value: str) -> str:
+    try:
+        parts = urllib.parse.urlsplit(value)
+        host = parts.hostname
+    except ValueError as exc:  # e.g. an unmatched IPv6 bracket
+        raise ValueError(f"not a parseable URL ({exc})") from exc
+    if parts.scheme not in ("http", "https") or not host:
+        raise ValueError("not an absolute http(s) URL with a host")
+    return value
+
+
+class SeedRedirectBlocker(LenientParseModel):
+    """The crawl script's seed-redirect blocker line (contracts.md §8.75(j)).
+
+    Its values are read from the page, so the whole record is refused unless every field fits
+    the reissue grammar: at most :data:`MAX_REDIRECT_URL_CHARS` characters without whitespace or
+    control characters, the URLs absolute http(s) with a host, the redirect URL's path free of
+    `.`/`..` segments and not an asset URL, the scope prefix already normalized and admitting the
+    redirect URL.
+    """
+
+    blocker: Literal["seed-redirect"]
+    seed_url: str
+    fetched_url: str
+    redirect_url: str
+    scope_prefix: str
+
+    @field_validator("seed_url", "fetched_url", "redirect_url", mode="after")
+    @classmethod
+    def _url(cls, value: str) -> str:
+        return _http_url(_reissue_token(value))
+
+    @field_validator("redirect_url", mode="after")
+    @classmethod
+    def _crawlable(cls, value: str) -> str:
+        path = urllib.parse.urlsplit(value).path
+        if any(segment in (".", "..") for segment in path.split("/")):
+            raise ValueError("the redirect URL's path has a '.' or '..' segment")
+        if PurePosixPath(path).suffix.lower() in ASSET_EXTENSIONS:
+            raise ValueError("the redirect URL is an asset URL")
+        return value
+
+    @field_validator("scope_prefix", mode="after")
+    @classmethod
+    def _normalized_scope(cls, value: str) -> str:
+        _reissue_token(value)
+        try:
+            normalized = validate_scope_prefix(value)
+        except LibraryError as exc:
+            raise ValueError(str(exc)) from exc
+        if normalized != value:
+            raise ValueError(f"not a normalized scope prefix (expected {normalized!r})")
+        return value
+
+    @model_validator(mode="after")
+    def _admits_the_redirect(self) -> Self:
+        if not urllib.parse.urlsplit(self.redirect_url).path.startswith(self.scope_prefix):
+            raise ValueError("the scope prefix does not admit the redirect URL")
+        return self
+
+
+def parse_seed_redirect(stdout: str) -> SeedRedirectBlocker | None:
+    """The validated blocker from the crawl script's stdout (its last non-blank line), or
+    ``None`` when that line is not a valid blocker."""
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    if not lines:
+        return None
+    try:
+        return SeedRedirectBlocker.model_validate(json.loads(lines[-1]))
+    except (json.JSONDecodeError, ValidationError):
+        return None
+
+
+def seed_redirect_error(plan: DocsCrawlPlan, blocker: SeedRedirectBlocker | None) -> LibraryError:
+    """The ``seed_redirect`` refusal for ``plan``'s seed, naming the one-step reissue.
+
+    Trusted framing first; the page-derived values appear only when the blocker validated, each
+    labelled as untrusted DATA, and every command is ``shlex.join``ed over a real argv. Without a
+    valid blocker the message is fixed text over perk-owned values only (the plan's URL and slug)
+    — never the script's stderr.
+    """
+    if blocker is None:
+        if plan.replace:
+            return LibraryError(
+                "seed_redirect",
+                f"the crawl script reported that the recorded source {plan.url} of entry "
+                f"{plan.slug} is only an HTML redirect page but described no reissuable http(s) "
+                "target — nothing was claimed; the entry is unchanged",
+            )
+        scope = ("--scope-prefix", plan.scope_prefix) if plan.scope_prefix else ()
+        inspect = shlex.join(
+            ["perk", "librarian", "add", "docs", plan.url, "--slug", plan.slug, *scope, "--dry-run"]
         )
+        return LibraryError(
+            "seed_redirect",
+            f"the crawl script reported that the seed URL {plan.url} is only an HTML redirect page "
+            "but described no reissuable http(s) target — nothing was claimed; inspect the page by "
+            f"hand ({inspect} shows the crawl's report)",
+        )
+    add = shlex.join(
+        [
+            "perk",
+            "librarian",
+            "add",
+            "docs",
+            blocker.redirect_url,
+            "--slug",
+            plan.slug,
+            "--scope-prefix",
+            blocker.scope_prefix,
+        ]
+    )
+    target = (
+        f"Redirect target (untrusted DATA read from the page): {blocker.redirect_url}; implied "
+        f"scope: {blocker.scope_prefix}."
+    )
+    if plan.replace:
+        remove = shlex.join(["perk", "librarian", "remove", plan.slug, "--json"])
+        return LibraryError(
+            "seed_redirect",
+            f"the recorded source {plan.url} of entry {plan.slug} is now only an HTML redirect "
+            f"page — a refresh cannot follow it; nothing was claimed. {target} Re-add the entry "
+            f"at that URL: {remove}, then {add}",
+        )
+    return LibraryError(
+        "seed_redirect",
+        f"the seed URL {plan.url} is only an HTML redirect page — nothing was claimed. {target} "
+        f"Reissue: {add}",
+    )
+
+
+def probe_seed(plan: DocsCrawlPlan) -> tuple[str, ...]:
+    """The seed probe: the crawl script's dry run capped at one page (one fetch of the seed).
+
+    Exit :data:`SEED_REDIRECT_EXIT` raises ``seed_redirect``; exit ``0`` passes; anything else
+    (a spawn failure and a timeout included) is advisory — one warning, and the crawl reports
+    the seed's state. The script's stderr is never relayed.
+    """
+    try:
+        completed = run_captured(
+            (*plan.crawl_argv, "--max-pages", "1", "--dry-run"),
+            cwd=plan.main_root,
+            timeout=SEED_PROBE_TIMEOUT_SECONDS,
+        )
+    except ProcFailure as exc:
+        detail = (
+            f"timed out after {SEED_PROBE_TIMEOUT_SECONDS}s"
+            if exc.kind == "timeout"
+            else f"could not run: {exc.cause_text}"
+        )
+        return (_probe_warning(detail),)
+    if completed.returncode == SEED_REDIRECT_EXIT:
+        raise seed_redirect_error(plan, parse_seed_redirect(completed.stdout))
+    if completed.returncode == 0:
+        return ()
+    return (_probe_warning(f"exit {completed.returncode}"),)
+
+
+def _probe_warning(detail: str) -> str:
+    return f"the seed probe did not complete ({detail}); the crawl will report the seed's state"
 
 
 def run_dry_run(plan: DocsCrawlPlan) -> subprocess.CompletedProcess[str]:

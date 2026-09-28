@@ -33,12 +33,15 @@ from perk.library.catalog import (
 )
 from perk.library.check import CheckOutcome, CheckResult, check_entries
 from perk.library.docs_session import (
+    SEED_REDIRECT_EXIT,
     DocsCrawlPlan,
     derive_slug,
     entry_kind,
+    parse_seed_redirect,
     plan_add_docs,
     plan_refresh_docs,
     run_dry_run,
+    seed_redirect_error,
 )
 from perk.library.errors import LibraryError, LibraryLockBusy, translating_io
 from perk.library.layout import Kind, LibraryLayout, entry_path_shape, library_root, validate_slug
@@ -61,6 +64,7 @@ from perk.library.source import AddSourceOutcome, RefreshOutcome, add_source, re
 __all__ = [
     "CATALOG_VERSION",
     "DEFAULT_STALE_AFTER",
+    "SEED_REDIRECT_EXIT",
     "AddSourceOutcome",
     "Catalog",
     "CheckOutcome",
@@ -97,6 +101,7 @@ __all__ = [
     "load_catalog",
     "lock_path",
     "parse_repo_ref",
+    "parse_seed_redirect",
     "parse_ts",
     "plan_add_docs",
     "plan_refresh_docs",
@@ -106,6 +111,7 @@ __all__ = [
     "remove",
     "render_catalog",
     "run_dry_run",
+    "seed_redirect_error",
     "translating_io",
     "utc_now",
     "validate_slug",
