@@ -368,6 +368,12 @@ adding library entries, plus the documentation crawl workflow — paired with th
 CLI group, the deterministic workers it drives. The skill decides; the workers act.
 _Avoid_: library skill, docs skill
 
+**Awareness carrier**:
+A §8.57 pointer surface that makes a session aware of the `librarian` skill without restating
+its rules or mandating its use — the `perk-plan` grounding sentence, the skill's ambient
+`description`, the operator pages. The skill decides; carriers only point.
+_Avoid_: second carrier, summary, mandatory step
+
 **Docs door**:
 `perk librarian add docs <url>` and the human `perk librarian refresh <slug>` on a documentation
 entry: the write-capable cold doors (the `save`-descriptor borrow) that claim a staging directory

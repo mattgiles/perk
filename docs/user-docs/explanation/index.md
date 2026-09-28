@@ -38,3 +38,6 @@ the keyboard, widening the picture rather than helping with a task in progress.
   stopping where judgment begins.
 - [perk in Zed: Terminal Threads and registry Pi](./perk-in-zed.md) — what each of Zed's two
   hosting paths gives a perk workflow, what each costs, and the limitation the two share.
+- [The perk library](./the-perk-library.md) — why perk keeps a catalogued, gitignored offline
+  reference of external docs and source, what `fresh` and `unverifiable` actually promise, and
+  why it never checks or refreshes eagerly.

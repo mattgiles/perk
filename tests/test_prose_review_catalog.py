@@ -209,7 +209,10 @@ def test_concern_queries_resolve_memberships_and_other_members(snapshot: Catalog
     assert concern.members[0].canonical is True
     assert concern.members[0].relation is None
     assert concern.members[1].relation == "Detailed authoring and fallback policy."
-    assert snapshot.concerns_for_unit(_PLAN_SKILL) == (concern,)
+    library = snapshot.get_concern("library-awareness")
+    assert library is not None
+    # A unit in several concerns reports them in authored concern order.
+    assert snapshot.concerns_for_unit(_PLAN_SKILL) == (concern, library)
 
     canonical_relatives = snapshot.concern_relatives(_PLAN_CONTEXT)
     assert [relative.member.unit.candidate.id for relative in canonical_relatives] == [
@@ -218,12 +221,24 @@ def test_concern_queries_resolve_memberships_and_other_members(snapshot: Catalog
         "typescript-tool:plan_save",
     ]
     skill_relatives = snapshot.concern_relatives(_PLAN_SKILL)
-    assert [relative.member.unit.candidate.id for relative in skill_relatives] == [
-        _PLAN_CONTEXT,
-        _PLAN_REVIEW_TOOL,
-        "typescript-tool:plan_save",
+    assert [
+        (relative.concern.id, relative.member.unit.candidate.id) for relative in skill_relatives
+    ] == [
+        ("review-first-save", _PLAN_CONTEXT),
+        ("review-first-save", _PLAN_REVIEW_TOOL),
+        ("review-first-save", "typescript-tool:plan_save"),
+        ("library-awareness", "markdown:skills/librarian/SKILL.md"),
+        ("library-awareness", "typescript-tool:run_librarian"),
+        ("library-awareness", "markdown:agents/librarian.md"),
+        ("library-awareness", "markdown:prompts/stages/librarian/add-docs.md"),
+        ("library-awareness", "markdown:prompts/stages/librarian/refresh-docs.md"),
+        ("library-awareness", "markdown:skills/perk-expert/references/customization-recipes.md"),
     ]
-    assert all(relative.concern is concern.concern for relative in skill_relatives)
+    assert all(
+        relative.concern is concern.concern
+        for relative in skill_relatives
+        if relative.concern.id == "review-first-save"
+    )
     assert snapshot.concerns_for_unit("unknown") == ()
     assert snapshot.concern_relatives("unknown") == ()
 

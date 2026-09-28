@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **246** canonical source units
-- **1285** logical fragments
+- **1286** logical fragments
 - **16** session shapes and **12** assemblies
 - **14** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -2213,6 +2213,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-customization-recipes/keep-pi-subagents-out-of-user-scope-settings-subagent-package-scope` — Keep pi-subagents out of user-scope settings (`subagent-package-scope`) (`heading:perk-customization-recipes/keep-pi-subagents-out-of-user-scope-settings-subagent-package-scope`)
   - `section:perk-customization-recipes/cheaper-prompt-caching-for-review-children-pi-subagent-cache-retention` — Cheaper prompt caching for review children (`PI_SUBAGENT_CACHE_RETENTION`) (`heading:perk-customization-recipes/cheaper-prompt-caching-for-review-children-pi-subagent-cache-retention`)
   - `section:perk-customization-recipes/write-a-custom-subagent-pi-agents-name-md` — Write a custom subagent (`.pi/agents/<name>.md`) (`heading:perk-customization-recipes/write-a-custom-subagent-pi-agents-name-md`)
+  - `section:perk-customization-recipes/keep-an-offline-reference-of-a-dependency-perk-librarian` — Keep an offline reference of a dependency (`perk librarian`) (`heading:perk-customization-recipes/keep-an-offline-reference-of-a-dependency-perk-librarian`)
   - `section:perk-customization-recipes/prefer-pi-s-regular-tui-mode-tuimode` — Prefer pi's regular TUI mode (`tuiMode`) (`heading:perk-customization-recipes/prefer-pi-s-regular-tui-mode-tuimode`)
   - `section:perk-customization-recipes/read-the-footer-s-cache-hit-rate-diagnose-misses-showcachemissnotices` — Read the footer's cache-hit rate; diagnose misses (`showCacheMissNotices`) (`heading:perk-customization-recipes/read-the-footer-s-cache-hit-rate-diagnose-misses-showcachemissnotices`)
 - `markdown:skills/perk-expert/references/mental-model.md`
@@ -2317,6 +2318,19 @@ Canonical carrier: `markdown:skills/perk-learn/SKILL.md`
 - `typescript-tool:run_learn_wave` — Code-owned analyst wave.
 - `typescript-tool:run_pr_review_wave` — Code-owned reviewer wave.
 - `markdown:agents/learn-analyst.md` — Bounded child contract.
+
+### Library awareness
+
+External-dependency work can reach the `librarian` skill; every other carrier points at it as needed and never restates its rules.
+
+Canonical carrier: `markdown:skills/librarian/SKILL.md`
+
+- `markdown:skills/perk-plan/SKILL.md` — Plan-grounding awareness sentence; the external-dependency trigger.
+- `typescript-tool:run_librarian` — Writer-child launcher named by the skill.
+- `markdown:agents/librarian.md` — Writer child following the skill.
+- `markdown:prompts/stages/librarian/add-docs.md` — Door seed carrying flow only.
+- `markdown:prompts/stages/librarian/refresh-docs.md` — Door seed carrying flow only.
+- `markdown:skills/perk-expert/references/customization-recipes.md` — Operator recipe mirror.
 
 ## Generated and materialized lineage
 

@@ -83,6 +83,18 @@ measurement: **78** files by the §1 corpus selector (**82** total sources count
 entries (Home, the four section landings, and the 76 enumerated in §3 — counted from
 `docs/site/src/sidebar.mjs`).
 
+*Amendment (2026-09-28, node 3.2, objective #2551):* the corpus has grown by two files —
+`how-to/keep-an-offline-reference-of-a-dependency.md` (the operator recipe for the perk library:
+mirror or clone, check only on task dependence, refresh on evidence; Core workflow, after
+`simplify-a-baroque-draft`) and `explanation/the-perk-library.md` (why the library exists, what
+its freshness statuses promise, and the not-over-eager policy; Explanation, after `perk-in-zed`)
+— now recorded in the §2 route tables, the §3 sidebar map, and the §4 inventory. This amendment
+records only its own two pages. Corpus-wide totals re-derived fresh from the tree at this
+amendment's commit, as its own measurement: **80** files by the §1 corpus selector (**84** total
+sources counting the four `.mdx` pages; `_authoring.md` stays the one excluded source), **83**
+routed pages, **83** sidebar entries (Home, the four section landings, and the 78 enumerated in
+§3 — counted from `docs/site/src/sidebar.mjs`).
+
 ## §1 Purpose & binding scope
 
 ### What this blueprint binds
@@ -193,6 +205,7 @@ node that creates them.
 | `docs/user-docs/how-to/send-feedback-from-hunk-watch.md` *(added 2026-08-12)* | `/how-to/send-feedback-from-hunk-watch/` | How-to › Core workflow |
 | `docs/user-docs/how-to/delegate-an-investigation-to-perk-scout.md` *(added 2026-09-10)* | `/how-to/delegate-an-investigation-to-perk-scout/` | How-to › Core workflow |
 | `docs/user-docs/how-to/simplify-a-baroque-draft.md` *(added 2026-09-26)* | `/how-to/simplify-a-baroque-draft/` | How-to › Core workflow |
+| `docs/user-docs/how-to/keep-an-offline-reference-of-a-dependency.md` *(added 2026-09-28)* | `/how-to/keep-an-offline-reference-of-a-dependency/` | How-to › Core workflow |
 | `docs/user-docs/how-to/author-a-roadmap.md` | `/how-to/author-a-roadmap/` | How-to › Objectives & learnings |
 | `docs/user-docs/how-to/refine-future-nodes.md` *(added 2026-09-10)* | `/how-to/refine-future-nodes/` | How-to › Objectives & learnings |
 | `docs/user-docs/how-to/replan-an-objective.md` | `/how-to/replan-an-objective/` | How-to › Objectives & learnings |
@@ -258,6 +271,7 @@ node that creates them.
 | `docs/user-docs/explanation/human-gates-and-trust.md` *(new — node 4.5)* | `/explanation/human-gates-and-trust/` | Explanation |
 | `docs/user-docs/explanation/headless-and-remote.md` | `/explanation/headless-and-remote/` | Explanation |
 | `docs/user-docs/explanation/perk-in-zed.md` | `/explanation/perk-in-zed/` | Explanation |
+| `docs/user-docs/explanation/the-perk-library.md` *(added 2026-09-28)* | `/explanation/the-perk-library/` | Explanation |
 
 ### New pages
 
@@ -326,7 +340,8 @@ index order.
    *configure-and-verify-ci-checks* (new), recover-a-dirty-worktree,
    *diagnose-a-perk-repo* (new), run-a-worktree-setup-hook, track-implement-progress,
    *send-feedback-from-hunk-watch* (added 2026-08-12), *delegate-an-investigation-to-perk-scout*
-   (added 2026-09-10), *simplify-a-baroque-draft* (added 2026-09-26).
+   (added 2026-09-10), *simplify-a-baroque-draft* (added 2026-09-26),
+   *keep-an-offline-reference-of-a-dependency* (added 2026-09-28).
 2. **Objectives & learnings** — author-a-roadmap, *refine-future-nodes* (added 2026-09-10),
    replan-an-objective, advance-or-skip-nodes,
    reconcile-an-objective, check-an-objective-for-drift,
@@ -361,6 +376,7 @@ index order.
 3. Human gates and trust
 4. Headless and remote
 5. perk in Zed
+6. The perk library
 
 ## §4 Page-by-page migration inventory
 
@@ -453,6 +469,7 @@ batch node.
 | `docs/user-docs/how-to/send-feedback-from-hunk-watch.md` *(added 2026-08-12)* | How-to | keep-and-polish | `/how-to/send-feedback-from-hunk-watch/` | checklist | 3.4 |
 | `docs/user-docs/how-to/delegate-an-investigation-to-perk-scout.md` *(added 2026-09-10)* | How-to | keep-and-polish | `/how-to/delegate-an-investigation-to-perk-scout/` | checklist (satisfied at creation) | 3.1 (obj. #2353) |
 | `docs/user-docs/how-to/simplify-a-baroque-draft.md` *(added 2026-09-26)* | How-to | keep-and-polish | `/how-to/simplify-a-baroque-draft/` | checklist (satisfied at creation) | 1.2 (obj. #2552) |
+| `docs/user-docs/how-to/keep-an-offline-reference-of-a-dependency.md` *(added 2026-09-28)* | How-to | keep-and-polish | `/how-to/keep-an-offline-reference-of-a-dependency/` | checklist (satisfied at creation) | 3.2 (obj. #2551) |
 | `docs/user-docs/how-to/author-a-roadmap.md` | How-to | keep-and-polish | `/how-to/author-a-roadmap/` | checklist | 3.5 |
 | `docs/user-docs/how-to/refine-future-nodes.md` *(added 2026-09-10)* | How-to | keep-and-polish | `/how-to/refine-future-nodes/` | checklist (satisfied at creation) | 1.3 (obj. #2332) |
 | `docs/user-docs/how-to/replan-an-objective.md` | How-to | keep-and-polish | `/how-to/replan-an-objective/` | checklist | 3.5 |
@@ -478,6 +495,7 @@ batch node.
 | `docs/user-docs/explanation/how-perk-thinks.md` | Explanation | keep-and-polish | `/explanation/how-perk-thinks/` | checklist + explanation's no-steps/no-reference boundary enforced at 4.5 | 4.5 |
 | `docs/user-docs/explanation/headless-and-remote.md` | Explanation | keep-and-polish | `/explanation/headless-and-remote/` | checklist + explanation's no-steps/no-reference boundary enforced at 4.5 | 4.5 |
 | `docs/user-docs/explanation/perk-in-zed.md` | Explanation | keep-and-polish | `/explanation/perk-in-zed/` | checklist + explanation's no-steps/no-reference boundary enforced at 4.5 | 4.5 |
+| `docs/user-docs/explanation/the-perk-library.md` *(added 2026-09-28)* | Explanation | keep-and-polish | `/explanation/the-perk-library/` | checklist (satisfied at creation) | 3.2 (obj. #2551) |
 | `docs/user-docs/reference/objectives.md` | Reference | keep-and-polish | `/reference/objectives/` | checklist + keep as a focused single page — the inventory explicitly records **no** split | 4.4 |
 | `docs/user-docs/reference/json-schemas.md` | Reference | keep-and-polish | `/reference/json-schemas/` | checklist + keep as a focused single page — the inventory explicitly records **no** split | 4.4 |
 

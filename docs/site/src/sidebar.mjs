@@ -54,6 +54,7 @@ export const sidebar = [
           "how-to/send-feedback-from-hunk-watch",
           "how-to/delegate-an-investigation-to-perk-scout",
           "how-to/simplify-a-baroque-draft",
+          "how-to/keep-an-offline-reference-of-a-dependency",
         ],
       },
       {
@@ -145,6 +146,7 @@ export const sidebar = [
       "explanation/human-gates-and-trust",
       "explanation/headless-and-remote",
       "explanation/perk-in-zed",
+      "explanation/the-perk-library",
     ],
   },
 ];

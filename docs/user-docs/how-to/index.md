@@ -72,6 +72,9 @@ for exactly one goal.
   session, then verify the reports before the plan relies on them.
 - [How to simplify a baroque draft](./simplify-a-baroque-draft.md) — run a Ponytail-mandated cut
   pass over the working plan or objective draft with `/simplify-plan` or `/simplify-objective`.
+- [How to keep an offline reference of a dependency](./keep-an-offline-reference-of-a-dependency.md) —
+  mirror a dependency's docs or clone its source into the perk library, check freshness only
+  when a task depends on it, and refresh on evidence.
 
 ## Objectives & learnings
 

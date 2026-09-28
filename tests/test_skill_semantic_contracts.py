@@ -16,6 +16,8 @@ full snapshots. `perk-learn-harvest` stays covered by its existing dedicated tes
 import re
 from pathlib import Path
 
+from perk.convergence.init.skills import PERK_SKILLS
+from perk.substrate.bindings import load_bindings
 from perk.substrate.skill_exposure import parse_skill_frontmatter
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +52,13 @@ SCOUT_TOOL_OWNED_MECHANICS: tuple[str, ...] = (
 def _norm(skill: str) -> str:
     text = (REPO_ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
     return " ".join(text.split())
+
+
+def _section(norm: str, heading: str) -> str:
+    """The whitespace-normalized span from `heading` up to the next `## ` heading."""
+    start = norm.index(heading)
+    end = norm.find(" ## ", start + len(heading))
+    return norm[start:] if end == -1 else norm[start:end]
 
 
 def test_perk_learn_sole_carried_detail():
@@ -207,6 +216,48 @@ def test_perk_plan_sole_carried_detail():
     assert "The `run_scout_wave` tool's guidelines carry the mechanics" in norm
     # The plan-stage record rule: verified claims + failed/unanswered briefs land in Assumptions.
     assert "record in `## Assumptions` which claims you verified" in norm
+    # The library awareness pointer: placement is the contract, so the pin is scoped to the
+    # grounding section — the external-dependency trigger plus the skill and its read path.
+    grounding = _section(norm, "## Ground the plan in evidence")
+    assert "the `librarian` skill (read `.agents/skills/librarian/SKILL.md`)" in grounding
+    assert "external dependency" in grounding
+    # The skill, never a verb, is what `perk-plan` names — the `librarian` skill stays the single
+    # carrier of the library rules.
+    assert "perk librarian" not in norm
+
+
+def test_perk_plan_library_pointer_targets_a_skill_exposed_where_perk_plan_is_delivered():
+    """Data agreement behind the `perk-plan` library pointer.
+
+    Proves the delivery manifest (`shared/bindings.yaml`), the `librarian` skill's `stages:`
+    exposure frontmatter and the `perk init` sync roster agree: every binding that delivers
+    `perk-plan` is a `stage:<id>` trigger whose stage also exposes `librarian`, and one sync path
+    (`PERK_SKILLS`) delivers both read paths. It does NOT prove actual delivery per session shape
+    — that is a human-verified enumeration, including the warm `/plan` launched without a stage,
+    which receives no `stage:plan` nudge at all (pinned by
+    `extension/substrate/bindingDelivery.test.ts`, "Mechanism A is a no-op when no stage is
+    launched").
+    """
+    bindings = load_bindings(REPO_ROOT / "shared" / "bindings.yaml")
+    perk_plan_triggers = [b.trigger for b in bindings.bindings if b.skill == "perk-plan"]
+    assert perk_plan_triggers, "no binding delivers `perk-plan`"
+    frontmatter, reason = parse_skill_frontmatter(
+        (REPO_ROOT / "skills" / "librarian" / "SKILL.md").read_text(encoding="utf-8")
+    )
+    assert reason is None
+    librarian_stages = frontmatter.get("stages") or []
+    for trigger in perk_plan_triggers:
+        kind, _, stage = trigger.partition(":")
+        assert kind == "stage", (
+            f"`perk-plan` is delivered by {trigger!r}: a `command:` trigger borrows a stage in "
+            "code, so the library pointer's reachability must be re-verified for that shape"
+        )
+        assert stage in librarian_stages, (
+            f"`perk-plan` is delivered at stage {stage!r}, but the `librarian` skill it points to "
+            f"is exposed only at {librarian_stages!r}"
+        )
+    assert "librarian" in PERK_SKILLS
+    assert "perk-plan" in PERK_SKILLS
 
 
 def test_perk_objective_author_sole_carried_detail():

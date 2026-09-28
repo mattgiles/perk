@@ -14030,9 +14030,20 @@ repositories). The skill states that the `--json` workers run in read-only sessi
 crawl script does not (interpreters are never admitted, §8.3) — a documentation mirror is added or
 refreshed from a read-only session through `run_librarian` (l); the doors (k) (`perk librarian
 add docs <url> …`, the human `perk librarian refresh <slug>`) are the terminal alternative the
-`unclean-start` refusal names (recorded as a follow-up step for the human). The script
-(stdlib-only, Python ≥ 3.10, `python3 <skill-dir>/scripts/copy_docs_to_markdown.py`; `curl` and
-`html2markdown` on `PATH`):
+`unclean-start` refusal names (recorded as a follow-up step for the human). Awareness carriers
+(§8.57): the stage carriers only point — the `perk-plan` skill's "Ground the plan in evidence"
+section carries a one-sentence pointer naming the skill and its
+`.agents/skills/librarian/SKILL.md` read path (the external-dependency trigger, phrased as
+awareness rather than a step; never a `perk librarian` verb or `run_librarian`), pinned by
+`tests/test_skill_semantic_contracts.py`; it is live wherever `perk-plan` is delivered (a cold
+`perk plan` / `plan from` session and a warm `/plan` inside one — never a warm `/plan` outside a
+plan-stage session, which records no stage and so receives no `stage:plan` nudge). Shapes that do
+not receive `perk-plan` reach the skill only ambiently — by its `description` and its `stages:`
+exposure (`plan`, `objective-plan`) — or through a skill that cross-references `perk-plan`;
+operator prose is `docs/user-docs/explanation/the-perk-library.md` and
+`how-to/keep-an-offline-reference-of-a-dependency.md`, mirrored by the `perk-expert`
+customization recipe. The script (stdlib-only, Python ≥ 3.10,
+`python3 <skill-dir>/scripts/copy_docs_to_markdown.py`; `curl` and `html2markdown` on `PATH`):
 
 - *Arguments.* `URL OUTPUT_DIR [--scope-prefix P] [--max-pages N] [--dry-run]`: the seed is an
   absolute `http`/`https` URL with a netloc, its path and `--scope-prefix` must normalize (below),
