@@ -42,6 +42,12 @@ consumer fixture's seeded config leaves `agent_dir` commented out, so its sessio
 under `~/.pi/agent/sessions/`. The directory encoding is lossy — match a file by its header `cwd`
 and timestamp, never by the directory name alone; the grammar is `src/perk/learn/session_jsonl.py`.
 
+**Record settled (2026-09-28).** Every live leg ran; every criteria row is **observed-live** (no
+waivers). One leg needed an operator decision — L5's `/latest/` seed had become a redirect alias
+page, so it was reissued at `/0.5.4/` (B.6 V1). Routed: the crawl's HTML-redirect gap as objective
+node 2551/3.4, the stage-less warm `/plan` binding gap as plan-scoped gist #2613; everything else
+record-only (B.7). The teardown is attested (B.8).
+
 **Evidence pins.** The run's `main` SHA (P0.1) plus `git rev-parse <sha>:<path>` blob hashes for
 every file a finding cites. Values that decay (the pi-subagents version `<V>`, the prek sitemap
 size, counts, SHAs) are re-measured at run time; Part B carries measured values only.
@@ -314,6 +320,22 @@ with an explicit count._
 | `pi --version` | `0.87.1` |
 | pi-subagents `<V>` | `0.71.0` (P0.6) |
 | Child model (`[models.subagents] librarian`) | `openai/gpt-6-sol` (`<main>/.perk/config.toml`) |
+
+Blob pins at the run SHA for every file a finding cites (`git rev-parse 33bf73cd:<path>`; each
+also equals this branch's blob — the gate changed no runtime code):
+
+| Path | Blob | Cited by |
+| --- | --- | --- |
+| `skills/librarian/scripts/copy_docs_to_markdown.py` | `db98a2095cf148f3d48e05cc1eb0d3123dfc9e31` | D1 |
+| `skills/perk-plan/SKILL.md` | `2291718297699df06445d138e02ba83a2a5952f1` | L7, S2 |
+| `extension/substrate/bindingDelivery.ts` | `fb010f818ef8daae2dc4b8bee2bbed8ab0bd0d5f` | G1 |
+| `extension/substrate/toolGating.ts` | `aeaf89394d566d9d7f220b3dd9f2115ff40514a1` | L1b, G1 |
+| `extension/pi/v1/contextInjection.ts` | `6ddb5f9a759e90dec57ac545b594adb742db380d` | G1 |
+| `src/perk/convergence/init/settings.py` | `a35d8e92609005820d1326ae9dd2eb7bb713ac81` | V2, V4, O5 |
+| `src/perk/convergence/doctor/checks.py` | `adaed77ba8568d32de043753c8287c487902eb89` | F3 |
+| `src/perk/library/ops.py` | `314a8cfa41d5008bb8a88f0d1361da11094ed85f` | O3, O4 |
+| `src/perk/library/check.py` | `710b709f1efb300b8e422fb45d5e41584f9b5d87` | L4, L8 |
+| `src/perk/library/docs_session.py` | `a1fe6320c90792cc87d1b044cd3c4be46445231c` | O1 |
 
 ### B.2 Session stores
 
