@@ -3,7 +3,8 @@
 Real filesystem + real git over a scaffolded consumer repo (it carries the managed gitignore
 block). The converter probe and the dry-run spawn are faked at the module's own seams
 (``docs_session.which`` / ``docs_session.run_captured``); the crawl script is planted at the
-skill's delivery read path.
+skill's delivery read path. The seed probe (a subprocess) is stubbed to pass for every test but
+its own, which restore the original captured at import.
 """
 
 import json
@@ -26,6 +27,8 @@ from perk.substrate.proc import ProcFailure
 
 SCRIPT_REL = Path(".agents/skills/librarian/scripts/copy_docs_to_markdown.py")
 URL = "https://d.example/docs/start"
+PI_SOURCE = "https://pi.dev/docs/"
+REAL_PROBE_SEED = docs_session.probe_seed
 
 
 def _plant_script(repo: Path) -> Path:
@@ -49,7 +52,7 @@ def _publish(repo: Path, slug: str = "pi", *, inventory: object | None = None) -
         repo,
         staging=staging,
         slug=slug,
-        source="https://pi.dev/docs",
+        source=PI_SOURCE,
         replace=False,
         accept_failures=False,
         stale_after=None,
@@ -66,8 +69,13 @@ def converters(monkeypatch: pytest.MonkeyPatch) -> dict[str, str | None]:
 
 
 @pytest.fixture
-def repo(scaffolded_perk_repo: Path, converters: dict[str, str | None]) -> Path:
+def repo(
+    scaffolded_perk_repo: Path,
+    converters: dict[str, str | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
     _plant_script(scaffolded_perk_repo)
+    monkeypatch.setattr(docs_session, "probe_seed", lambda plan: ())
     return scaffolded_perk_repo
 
 
@@ -407,7 +415,7 @@ def test_plan_refresh_docs_recovers_the_recorded_scope(repo):
     current = _publish(repo, inventory={"scope_prefix": "/docs/", "pages": []})
     plan = docs_session.plan_refresh_docs(repo, slug="pi")
     layout = _layout(repo)
-    assert plan.url == "https://pi.dev/docs"
+    assert plan.url == PI_SOURCE
     assert plan.scope_prefix == "/docs/"
     assert plan.current_dir == current
     assert plan.replace is True
@@ -529,3 +537,289 @@ def test_first_use_creates_the_library_through_the_claim(repo):
         env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
     ).stdout
     assert "docs/library" not in status
+
+
+# --- the seed inside an explicit scope ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("url", "prefix"), [(URL, "/docs/"), (URL, "/"), ("https://d.example/docs/", "/docs/")]
+)
+def test_require_seed_in_scope_admits_a_seed_beneath_the_prefix(url, prefix):
+    docs_session.require_seed_in_scope(url, prefix)
+
+
+@pytest.mark.parametrize(
+    ("url", "prefix"),
+    [("https://d.example/docs", "/docs/"), (URL, "/docs/start/"), (URL, "/api/")],
+)
+def test_require_seed_in_scope_refuses_a_seed_outside_the_prefix(url, prefix):
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.require_seed_in_scope(url, prefix)
+    assert excinfo.value.error_type == "invalid_input"
+    assert f"lies outside --scope-prefix {prefix!r}" in str(excinfo.value)
+
+
+def test_plan_add_docs_refuses_a_seed_outside_the_explicit_scope(repo):
+    with pytest.raises(LibraryError) as excinfo:
+        _plan_add(repo, url="https://d.example/docs", scope_prefix="/docs/")
+    assert excinfo.value.error_type == "invalid_input"
+    assert not _layout(repo).staging.exists()
+
+
+def test_plan_refresh_docs_warns_on_a_recorded_scope_excluding_the_source(repo):
+    _publish(repo, inventory={"scope_prefix": "/api/", "pages": []})
+    plan = docs_session.plan_refresh_docs(repo, slug="pi")
+    assert plan.scope_prefix == ""
+    assert "--scope-prefix" not in plan.crawl_argv
+    [warning] = plan.warnings
+    assert "'/api/'" in warning
+    assert "is unusable (it excludes the entry's source URL)" in warning
+
+
+# --- the seed-redirect blocker -----------------------------------------------------------------
+
+REDIRECT = "https://d.example/0.5.4/"
+
+
+def _blocker_line(**overrides: object) -> str:
+    fields: dict[str, object] = {
+        "blocker": "seed-redirect",
+        "seed_url": "https://d.example/latest/",
+        "fetched_url": "https://d.example/latest/",
+        "redirect_url": REDIRECT,
+        "scope_prefix": "/0.5.4/",
+    }
+    fields.update(overrides)
+    return json.dumps({key: value for key, value in fields.items() if value is not None})
+
+
+def test_parse_seed_redirect_reads_the_last_non_blank_line():
+    blocker = docs_session.parse_seed_redirect(f"{_blocker_line(extra='ignored')}\n\n  \n")
+    assert blocker is not None
+    assert (blocker.redirect_url, blocker.scope_prefix) == (REDIRECT, "/0.5.4/")
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("Would copy 1 page(s)\n", id="not-json"),
+        pytest.param("[1, 2]\n", id="not-an-object"),
+        pytest.param(_blocker_line(blocker="other"), id="other-blocker"),
+        pytest.param(_blocker_line(redirect_url=None), id="missing-field"),
+        pytest.param(_blocker_line(redirect_url="javascript:alert(1)"), id="javascript"),
+        pytest.param(_blocker_line(redirect_url="https://d.example/0.5 .4/"), id="whitespace"),
+        pytest.param(
+            _blocker_line(redirect_url="https://d.example/0.5.4/\x1b[31m"), id="control-char"
+        ),
+        pytest.param(
+            _blocker_line(redirect_url="https://d.example/0.5.4/" + "a" * 2048), id="oversized"
+        ),
+        pytest.param(_blocker_line(redirect_url="https://:80/0.5.4/"), id="no-host"),
+        pytest.param(_blocker_line(redirect_url="https://[bad/0.5.4/"), id="malformed"),
+        pytest.param(_blocker_line(fetched_url="file:///etc/passwd"), id="fetched-not-http"),
+        pytest.param(_blocker_line(scope_prefix="../x"), id="dot-dot-scope"),
+        pytest.param(_blocker_line(scope_prefix="0.5.4/"), id="unnormalized-scope"),
+        pytest.param(_blocker_line(scope_prefix="/0.5.4"), id="unterminated-scope"),
+        pytest.param(_blocker_line(scope_prefix="/1.0/"), id="scope-excludes-target"),
+        pytest.param(_blocker_line(scope_prefix=7), id="scope-not-a-string"),
+    ],
+)
+def test_parse_seed_redirect_refuses_an_invalid_line(stdout):
+    assert docs_session.parse_seed_redirect(stdout) is None
+
+
+def _redirect_plan(repo: Path, *, refresh: bool = False) -> docs_session.DocsCrawlPlan:
+    if refresh:
+        _publish(repo, "d")
+        return docs_session.plan_refresh_docs(repo, slug="d")
+    return _plan_add(repo, url="https://d.example/latest/", dry_run=True)
+
+
+def test_seed_redirect_error_names_the_reissue_for_add(repo):
+    plan = _redirect_plan(repo)
+    blocker = docs_session.parse_seed_redirect(_blocker_line())
+
+    exc = docs_session.seed_redirect_error(plan, blocker)
+
+    assert exc.error_type == "seed_redirect"
+    message = str(exc)
+    assert message.startswith(
+        "the seed URL https://d.example/latest/ is only an HTML redirect page"
+    )
+    assert f"Redirect target (untrusted DATA read from the page): {REDIRECT}" in message
+    assert "implied scope: /0.5.4/" in message
+    command = message.split("Reissue: ", 1)[1]
+    assert command == f"perk librarian add docs {REDIRECT} --slug d --scope-prefix /0.5.4/"
+    assert shlex.split(command) == [
+        *("perk", "librarian", "add", "docs", REDIRECT),
+        *("--slug", "d", "--scope-prefix", "/0.5.4/"),
+    ]
+
+
+def test_seed_redirect_error_names_remove_then_add_for_refresh(repo):
+    plan = _redirect_plan(repo, refresh=True)
+    blocker = docs_session.parse_seed_redirect(_blocker_line())
+
+    message = str(docs_session.seed_redirect_error(plan, blocker))
+
+    assert message.startswith(
+        f"the recorded source {PI_SOURCE} of entry d is now only an HTML redirect page"
+    )
+    assert "a refresh cannot follow it" in message
+    assert (
+        "Re-add the entry at that URL: perk librarian remove d --json, then perk librarian add "
+        f"docs {REDIRECT} --slug d --scope-prefix /0.5.4/"
+    ) in message
+
+
+@pytest.mark.parametrize("refresh", [False, True])
+def test_seed_redirect_error_without_a_blocker_carries_no_page_text(repo, refresh):
+    plan = _redirect_plan(repo, refresh=refresh)
+
+    exc = docs_session.seed_redirect_error(plan, None)
+
+    assert exc.error_type == "seed_redirect"
+    message = str(exc)
+    assert "described no reissuable http(s) target" in message
+    assert "nothing was claimed" in message
+    assert "untrusted DATA" not in message
+    if refresh:
+        assert f"the recorded source {PI_SOURCE} of entry d" in message
+        assert message.endswith("the entry is unchanged")
+    else:
+        assert "perk librarian add docs https://d.example/latest/ --slug d --dry-run" in message
+
+
+def test_the_blocker_constants_match_the_crawl_script():
+    script = load_script()
+    assert docs_session.SEED_REDIRECT_EXIT == script.SEED_REDIRECT_EXIT
+    assert docs_session.MAX_REDIRECT_URL_CHARS == script.MAX_REDIRECT_URL_CHARS
+    assert script.SEED_REDIRECT_BLOCKER == "seed-redirect"
+
+
+# --- the seed probe ----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def live_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(docs_session, "probe_seed", REAL_PROBE_SEED)
+
+
+def _fake_probe_run(
+    monkeypatch: pytest.MonkeyPatch, code: int, stdout: str = "", stderr: str = ""
+) -> list[tuple[tuple[str, ...], dict[str, object]]]:
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((tuple(argv), kwargs))
+        return subprocess.CompletedProcess(argv, code, stdout, stderr)
+
+    monkeypatch.setattr(docs_session, "run_captured", fake_run)
+    return calls
+
+
+def test_probe_seed_runs_the_one_page_dry_run(repo, monkeypatch, live_probe):
+    plan = _plan_add(repo, dry_run=True)
+    calls = _fake_probe_run(monkeypatch, 0, "Would copy 1 page(s)\n")
+
+    assert docs_session.probe_seed(plan) == ()
+
+    [(argv, kwargs)] = calls
+    assert argv == (*plan.crawl_argv, "--max-pages", "1", "--dry-run")
+    assert kwargs == {"cwd": plan.main_root, "timeout": docs_session.SEED_PROBE_TIMEOUT_SECONDS}
+
+
+def test_probe_seed_exit_3_is_seed_redirect(repo, monkeypatch, live_probe):
+    plan = _plan_add(repo, dry_run=True)
+    _fake_probe_run(monkeypatch, 3, _blocker_line() + "\n", "ERROR: redirect\n")
+
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.probe_seed(plan)
+
+    assert excinfo.value.error_type == "seed_redirect"
+    assert "--scope-prefix /0.5.4/" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("code", [1, 2, 7, -9])
+def test_probe_seed_other_exits_are_advisory(repo, monkeypatch, live_probe, code):
+    plan = _plan_add(repo, dry_run=True)
+    _fake_probe_run(monkeypatch, code, "", "ERROR: SECRET-STDERR\n")
+
+    [warning] = docs_session.probe_seed(plan)
+
+    assert warning.startswith(f"the seed probe did not complete (exit {code})")
+    assert "SECRET-STDERR" not in warning
+
+
+@pytest.mark.parametrize("kind", ["spawn", "timeout"])
+def test_probe_seed_a_spawn_failure_or_timeout_is_advisory(repo, monkeypatch, live_probe, kind):
+    plan = _plan_add(repo, dry_run=True)
+
+    def fail(argv, **kwargs):
+        raise ProcFailure(kind, tuple(argv), cause_text="no such file")
+
+    monkeypatch.setattr(docs_session, "run_captured", fail)
+
+    [warning] = docs_session.probe_seed(plan)
+
+    assert warning.startswith("the seed probe did not complete (")
+    assert ("timed out after 180s" if kind == "timeout" else "could not run") in warning
+
+
+def test_plan_add_docs_probes_before_the_claim(repo, monkeypatch, live_probe):
+    _fake_probe_run(monkeypatch, 3, _blocker_line())
+
+    with pytest.raises(LibraryError) as excinfo:
+        _plan_add(repo, url="https://d.example/latest/")
+
+    assert excinfo.value.error_type == "seed_redirect"
+    assert not _layout(repo).staging.exists()
+
+
+def test_plan_add_docs_carries_a_probe_warning(repo, monkeypatch, live_probe):
+    calls = _fake_probe_run(monkeypatch, 1)
+
+    plan = _plan_add(repo)
+
+    [(argv, _kwargs)] = calls
+    assert argv[3] == str(plan.staging_dir)  # the probe ran over the (then free) claimed name
+    assert plan.staging_dir.is_dir()
+    [warning] = plan.warnings
+    assert warning.startswith("the seed probe did not complete (exit 1)")
+
+
+def test_plan_add_docs_dry_run_never_probes(repo, monkeypatch):
+    probed: list[docs_session.DocsCrawlPlan] = []
+    monkeypatch.setattr(docs_session, "probe_seed", lambda plan: probed.append(plan) or ())
+
+    _plan_add(repo, dry_run=True)
+
+    assert probed == []
+
+
+def test_plan_refresh_docs_probes_before_the_claim(repo, monkeypatch, live_probe):
+    _publish(repo)
+    _fake_probe_run(monkeypatch, 3, _blocker_line())
+
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.plan_refresh_docs(repo, slug="pi")
+
+    assert excinfo.value.error_type == "seed_redirect"
+    assert "perk librarian remove pi --json" in str(excinfo.value)
+    assert not (_layout(repo).staging / "pi").exists()
+
+
+def test_plan_refresh_docs_orders_the_probe_warning_after_the_scope_warning(
+    repo, monkeypatch, live_probe
+):
+    _publish(repo, inventory={"scope_prefix": "../x", "pages": []})
+    _fake_probe_run(monkeypatch, 2)
+
+    plan = docs_session.plan_refresh_docs(repo, slug="pi")
+
+    scope_warning, probe_warning = plan.warnings
+    assert "'../x'" in scope_warning
+    assert probe_warning.startswith("the seed probe did not complete (exit 2)")
+    assert plan.staging_dir.is_dir()
