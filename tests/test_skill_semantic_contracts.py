@@ -234,8 +234,9 @@ def test_perk_plan_library_pointer_targets_a_skill_exposed_where_perk_plan_is_de
     `perk-plan` is a `stage:<id>` trigger whose stage also exposes `librarian`, and one sync path
     (`PERK_SKILLS`) delivers both read paths. It does NOT prove actual delivery per session shape
     — that is a human-verified enumeration, including the warm `/plan` launched without a stage,
-    which receives no `stage:plan` nudge at all (pinned by `extension/substrate/
-    bindingDelivery.test.ts`, "Mechanism A is a no-op when no stage is launched").
+    which receives no `stage:plan` nudge at all (pinned by
+    `extension/substrate/bindingDelivery.test.ts`, "Mechanism A is a no-op when no stage is
+    launched").
     """
     bindings = load_bindings(REPO_ROOT / "shared" / "bindings.yaml")
     perk_plan_triggers = [b.trigger for b in bindings.bindings if b.skill == "perk-plan"]
