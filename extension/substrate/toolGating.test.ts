@@ -273,6 +273,9 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     // The scout-wave carve-in (the authoring sessions' launcher; read-only perk.scout lanes over
     // the delegation family, no worktree writes).
     "run_scout_wave",
+    // The library-writer carve-in (the parent stays gated; only the perk.librarian child writes,
+    // only the gitignored library, proven by the end-state bracket).
+    "run_librarian",
     // The child-side carve-in (gated adopt-children keep the engine's injected tools — perk's
     // own waves spawn bridge-off so `contact_supervisor` is absent there, but an ad-hoc gated
     // child with an active bridge must keep its supervisor door).
@@ -612,6 +615,9 @@ test("perk librarian workers are admitted only in their --json-last forms", () =
     "perk librarian addsource foo/bar --json",
     "perk librarian checkx --json",
     "perk librarianx list --json",
+    // The `run_librarian` tool's worker is the extension's own exec, never a gated bash command.
+    "perk librarian prepare docs https://pi.dev/docs --json",
+    "perk librarian prepare refresh pi --json",
   ])
     assert.equal(isReadOnlyBashCommand(command), false, command);
 });
@@ -1898,6 +1904,7 @@ test("REFINEMENT_READ_ONLY_TOOLS: the exact refinement gate-ON selection (no cla
     "gist_save",
     "explore_objective_node",
     "run_scout_wave",
+    "run_librarian",
     "subagent",
     "subagents_enable",
     "edit",

@@ -79,7 +79,10 @@ when missing) and the documentation workflow: its bundled crawl script writes a 
 Documentation mirrors are added with `perk librarian add docs <url>` and refreshed with
 `perk librarian refresh <slug>`, each launching a curating session from a terminal (no
 session-free add; `add docs --dry-run` previews the URL → file map; both need the `librarian`
-skill synced by `perk init` and `curl` + `html2markdown` on `PATH`).
+skill synced by `perk init` and `curl` + `html2markdown` on `PATH`). From a session — read-only
+included — `run_librarian` adds or refreshes a documentation mirror through the `perk.librarian`
+writer child (bracketed by a fail-closed check on the main checkout);
+`[models.subagents] librarian` overrides its model.
 
 **One perk-owned path lives *outside* the repo.** `~/.perk/last-seen-version` is the user-level,
 machine-local store behind the one-line post-upgrade notice (the `perk release-notes` pointer):
@@ -355,6 +358,7 @@ default.
 | `dream-reducer` | string (model id) | _(frontmatter default)_ — consumed by the `run_dream_wave` tool at execute time |
 | `scout` | string (model id) | _(frontmatter default)_ — the general-purpose read-only analysis lane `perk.scout` (task-defined scope) — consumed by the `run_scout_wave` tool at execute time |
 | `simplifier` | string (model id) | _(frontmatter default)_ — `perk.simplifier`, the Ponytail-mandated draft-simplification lane the `/simplify-plan` / `/simplify-objective` doors spawn |
+| `librarian` | string (model id) | _(frontmatter default)_ — `perk.librarian`, the writer child `run_librarian` dispatches |
 | `session-auditor` | string (model id) | _(frontmatter default)_ — **dev-only** (perk's own repo's session-audit judgment wave; dormant in consumer repos) |
 
 A value may carry a **`:thinking` suffix** setting that agent's thinking level

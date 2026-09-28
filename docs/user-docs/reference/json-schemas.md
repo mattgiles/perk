@@ -82,6 +82,7 @@ category directory.
 | `librarian-add-source.schema.json` | `LibrarianAddSourceOut` | `serialization` | Cloned, reused, or re-pinned source checkout entry. |
 | `librarian-check.schema.json` | `LibrarianCheckOut` | `serialization` | Per-entry freshness probe results with notes, plus warnings. |
 | `librarian-refresh.schema.json` | `LibrarianRefreshOut` | `serialization` | Source checkout fast-forward (or skip) outcome and the recorded entry. |
+| `librarian-prepare.schema.json` | `LibrarianPrepareOut` | `serialization` | The `run_librarian` tool's crawl plan: the claimed staging directory and the exact crawl and publish commands. |
 <!-- perk:reference-facts:schemas-outputs:end -->
 
 The `validation` mode records what a parser accepts. The `serialization` mode records what a JSON

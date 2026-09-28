@@ -1,6 +1,6 @@
 ---
 title: "Librarian commands"
-description: "Exact reference for the perk librarian group — list, record, remove, add source, add docs, check, and refresh entries in the catalogued, gitignored perk library."
+description: "Exact reference for the perk librarian group — list, record, remove, add source, add docs, check, refresh, and prepare entries in the catalogued, gitignored perk library."
 sidebar:
   order: 3017
 ---
@@ -8,8 +8,8 @@ sidebar:
 # Librarian commands
 
 This page holds the exact reference for the `perk librarian` group: the deterministic workers
-that tend the **perk library**, and the two doors that open a curating session for a
-documentation mirror. For the full command map and shared conventions, start at the
+that tend the **perk library**, the two doors that open a curating session for a documentation
+mirror, and the `prepare` worker behind the in-session `run_librarian` tool. For the full command map and shared conventions, start at the
 [CLI commands hub](../cli.md).
 
 ## The librarian group
@@ -17,14 +17,16 @@ documentation mirror. For the full command map and shared conventions, start at 
 ### `perk librarian`
 
 Tend the perk library — the catalogued, gitignored offline reference of external documentation
-mirrors and source checkouts under `docs/library/`. The group has six verbs: `list`
-(offline, lock-free), `record` (records documentation mirrors), `remove`, `add` (`add source`
-clones or re-pins a source checkout), `check` (the **only** command that probes upstreams for
-changes), and `refresh` (fast-forwards a source checkout). `add source` and `refresh` reach the
-network only for their own checkout. Two forms also open a session instead of running a worker:
-`add docs` and the human `refresh` of a documentation entry launch a curating session that
-mirrors a documentation site (see [`perk librarian add docs`](#perk-librarian-add-docs)). There
-are no verb aliases.
+mirrors and source checkouts under `docs/library/`. The group has seven verbs — six workers and
+doors plus `prepare`, the `run_librarian` tool's worker: `list` (offline, lock-free), `record`
+(records documentation mirrors), `remove`, `add` (`add source` clones or re-pins a source
+checkout), `check` (the **only** command that probes upstreams for changes), `refresh`
+(fast-forwards a source checkout), and `prepare` (claims a staging directory and prints a crawl
+plan; see [`perk librarian prepare`](#perk-librarian-prepare)). `add source` and `refresh` reach
+the network only for their own checkout. Two forms also open a session instead of running a
+worker: `add docs` and the human `refresh` of a documentation entry launch a curating session
+that mirrors a documentation site (see [`perk librarian add docs`](#perk-librarian-add-docs)).
+There are no verb aliases.
 
 **Where the library lives.** The library lives in the repository's **main checkout**, even when
 you run a command from a linked worktree: every worker resolves the main checkout and reports
@@ -79,8 +81,9 @@ checked before the lock). `refresh` likewise probes its checkout after taking th
 
 Because of that preflight, the `--json` forms of `list`, `record`, `remove`, `add source`,
 `check`, and `refresh` are admitted in read-only perk sessions (with `--json` as the last
-argument); `add docs` is not. The network verbs run the same preflight and write only the
-gitignored cache.
+argument); `add docs` is not. `prepare` is not admitted either — it is the extension's own
+worker; in a read-only session the `run_librarian` tool is the route to a documentation mirror.
+The network verbs run the same preflight and write only the gitignored cache.
 
 **Concurrency.** Every catalog write and entry-directory change holds an exclusive, non-blocking,
 machine-local lock (`.perk/workflow/library.lock` in the main checkout). A second writer is
@@ -259,7 +262,7 @@ to write only under the gitignored library — never a commit, never `docs/libra
 never `catalog.json` by hand — but no sandbox enforces that.
 
 `add docs` has no `--json` form and is not admitted in read-only perk sessions; run it from a
-terminal.
+terminal, or let a session call `run_librarian`.
 
 ### `perk librarian add source`
 
@@ -414,6 +417,42 @@ rerunning `refresh` records it.
 The human render prints `fast-forwarded <slug> <old>..<new>`, `up to date <slug> (<sha>)`, or
 `skipped (dirty|non-ff) <slug>: <detail>`. `--json` emits the `LibrarianRefreshOut` envelope:
 `action`, `detail`, `previous_head`, and `entry`.
+
+### `perk librarian prepare`
+
+`perk librarian prepare <docs|refresh>` is the worker behind the in-session `run_librarian` tool
+(see [Model tools](../in-session/model-tools.md)). It runs the documentation doors' checks, claims
+an empty staging directory, and prints the crawl plan — the exact crawl and publish commands the
+tool's `perk.librarian` writer child runs. It launches nothing: no session, no crawl. It is not
+admitted in read-only perk sessions; the tool runs it through the extension itself. You rarely
+run it by hand — a claimed staging directory you do not use stays behind until you delete it
+(`perk librarian list` reports it under `staging:`).
+
+Both forms print the same plan. `--json` emits the `LibrarianPrepareOut` envelope: `action`
+(`add-docs` or `refresh-docs`), `url`, `slug`, `scope_prefix` (`""` when defaulted), `staging_dir`
+(the claimed directory, absolute), `main_root` (the main checkout), `current_dir` (the published
+revision a refresh replaces, else `null`), `replace`, `crawl_command`, `publish_command`, and
+`warnings[]`. The human render prints one `key=value` line per field, then one `warning:` line per
+warning. Refusals use the doors' error types and exit codes: `1` for a typed refusal, `2` outside
+a git repository.
+
+### `perk librarian prepare docs`
+
+`perk librarian prepare docs <url> [--slug <slug>] [--scope-prefix <prefix>] [--json]` runs the
+same checks as [`add docs`](#perk-librarian-add-docs), in the same order — the URL
+(`invalid_source`), the slug (`invalid_slug`) and scope prefix (`invalid_input`), `slug_exists`,
+`skill_missing`, `missing_converter`, and the cache-only preflight — and then creates the empty
+`docs/library/.staging/<slug>/` directory (or `<slug>-2/`, … when taken). A refusal claims
+nothing. The plan's `publish_command` is
+`perk librarian record --publish <staging> --slug <slug> --source <url> --json`.
+
+### `perk librarian prepare refresh`
+
+`perk librarian prepare refresh <slug> [--json]` prepares a re-crawl of an existing documentation
+entry, with the same checks as the human [`refresh`](#perk-librarian-refresh) of a documentation
+entry: the entry's source URL, the prior crawl's scope (a `warnings[]` entry when the recorded
+scope is unusable and the default scope is used), `current_dir` set to the published mirror, and
+a `publish_command` carrying `--replace`. An unknown slug or a source entry is `entry_not_found`.
 
 ## Related
 

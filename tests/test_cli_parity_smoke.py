@@ -144,6 +144,7 @@ EXPECTED_SURFACE: dict[str, object] = {
             ("add", ()),
             ("check", ()),
             ("list", ()),
+            ("prepare", ()),
             ("record", ()),
             ("refresh", ()),
             ("remove", ()),

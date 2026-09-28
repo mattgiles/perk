@@ -281,6 +281,33 @@ def test_scout_launcher_guidance_rides_exactly_the_three_authoring_skills():
         )
 
 
+def test_run_librarian_guidance_rides_the_librarian_skill():
+    """The library writer launcher's guidance carrier: among `skills/*/SKILL.md`, exactly the
+    `librarian` skill names `run_librarian`, and it is bound to exactly the stages whose
+    `STAGE_TOOLS` lists carry the tool (the TS pin in `extension/substrate/stageTools.test.ts`
+    owns the stage-list side; submit/land carry the tool by the worktree family's shared list
+    but bind no librarian guidance).
+    """
+    carriers = sorted(
+        path.parent.name
+        for path in (REPO_ROOT / "skills").glob("*/SKILL.md")
+        if "run_librarian" in path.read_text(encoding="utf-8")
+    )
+    assert carriers == ["librarian"]
+    frontmatter, reason = parse_skill_frontmatter(
+        (REPO_ROOT / "skills" / "librarian" / "SKILL.md").read_text(encoding="utf-8")
+    )
+    assert reason is None
+    assert frontmatter.get("stages") == [
+        "plan",
+        "objective-plan",
+        "objective-author",
+        "implement",
+        "address",
+        "learn",
+    ]
+
+
 def test_review_skills_require_and_do_not_duplicate_ponytail_coverage():
     automated = _norm("perk-pr-review")
     assert "`ponytail` lane is **required automatic coverage**" in automated

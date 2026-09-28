@@ -130,6 +130,7 @@ extension package as pi-subagents package agents, plus the repo-local dev-only a
 | `dream-reducer` | string (model id) | _(agent frontmatter default)_ | Model for the three fixed reducer lanes in `perk learn dream`'s reducer wave, consumed by `run_dream_wave` at execute time. |
 | `scout` | string (model id) | _(agent frontmatter default)_ | Model for `perk.scout`, the general-purpose read-only analysis lane (the task defines its scope), consumed by `run_scout_wave` at execute time; a direct `subagent` spawn uses the frontmatter default. |
 | `simplifier` | string (model id) | _(agent frontmatter default)_ | Model for `perk.simplifier`, the draft-simplification lane `/simplify-plan` and `/simplify-objective` spawn (one fresh read-only lane per run). |
+| `librarian` | string (model id) | _(agent frontmatter default)_ | Model for `perk.librarian`, the writer child `run_librarian` dispatches (foreground, in the main checkout) to add or refresh a documentation mirror, read at execute time. |
 | `session-auditor` | string (model id) | _(agent frontmatter default)_ | **Dev-only** — model for perk's own repository's session-audit judgment wave. The agent definition is repo-local, never shipped in the extension package, so the key is dormant in consumer repos. |
 
 An absent key falls back to the agent's frontmatter default. The table is **fixed-key**: it

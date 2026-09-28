@@ -1,9 +1,9 @@
-// Sole carrier of the public delegation event literals: one foreground request per authorized
-// dispatch with no restriction packet and no fallback transport.
+// The conflict writer's engine: authorization, task/worktree validation, engine presence, the
+// native worktree default and the resolver lock around ONE foreground dispatch through the shared
+// transport (`../foregroundDelegation.ts`), then classification of the untrusted record.
 import { randomUUID } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import {
   type ConflictResolutionFailure,
   type ConflictResolutionReceipt,
@@ -16,147 +16,24 @@ import {
   retainedConflictResolutionTask,
 } from "../../../delivery/conflictResolution.ts";
 import { acquireWorktreeResolverLock } from "../../../substrate/worktreeResolverLock.ts";
+import {
+  type DelegationEvents,
+  dispatchForeground,
+  nativeWorktreeConfigPath,
+  readNativeWorktreeDefault,
+} from "../foregroundDelegation.ts";
 
-export const DELEGATION_EVENTS = {
-  request: "prompt-template:subagent:request",
-  started: "prompt-template:subagent:started",
-  update: "prompt-template:subagent:update",
-  response: "prompt-template:subagent:response",
-  cancel: "prompt-template:subagent:cancel",
-} as const;
+// Re-exported so existing importers (the engine test, the fake engine) keep one import site.
+export {
+  CANCEL_GRACE_MS,
+  DELEGATION_EVENTS,
+  type DelegationEvents,
+  nativeWorktreeConfigPath,
+  REQUEST_TIMEOUT_MS,
+  START_ACK_MS,
+} from "../foregroundDelegation.ts";
+
 export const RESOLVER_AGENT = "perk.conflict-resolver";
-const STATUSES = new Set([
-  "completed",
-  "failed",
-  "timed_out",
-  "cancelled",
-  "interrupted",
-  "tool_budget_exhausted",
-  "structured_output_failed",
-  "acceptance_failed",
-  "invalid_request",
-  "unavailable_context",
-  "duplicate_node",
-]);
-const PRELAUNCH = new Set(["invalid_request", "unavailable_context", "duplicate_node"]);
-export const REQUEST_TIMEOUT_MS = 1_800_000;
-export const START_ACK_MS = 5_000;
-export const CANCEL_GRACE_MS = 5_000;
-
-export interface DelegationEvents {
-  on(event: string, handler: (data: unknown) => void): () => void;
-  emit(event: string, data: unknown): void;
-}
-function object(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-function identifier(value: unknown): value is string {
-  return (
-    typeof value === "string" && value.length > 0 && value.length <= 256 && !/[\0\r\n]/.test(value)
-  );
-}
-
-export function nativeWorktreeConfigPath(): string {
-  return join(getAgentDir(), "extensions/subagent/config.json");
-}
-
-type NativeWorktreeVerdict = { compatible: true } | { compatible: false; observed: string };
-
-/**
- * pi-subagents applies its global `worktree` default to every delegation that omits the field
- * and reads that file once at ITS activation, so perk reads it once at engine activation too.
- * Deliberately stricter than the engine's own fallback: only a missing file, an absent key or
- * an explicit `false` lets a writer launch; any other state is refused with what was observed,
- * because perk will not infer from pi-subagents' private fallback rules what a broken config
- * file will do — and perk never rewrites the file. The observation reaches the receipt and the
- * model-facing diagnostics, so it is bounded and never content-bearing: only JSON scalars that
- * cannot carry text (booleans, numbers, null) are rendered; a string, array or object is named
- * by type alone.
- */
-function readNativeWorktreeDefault(path: string): NativeWorktreeVerdict {
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch (error) {
-    const code = object(error)?.code;
-    if (code === "ENOENT") return { compatible: true };
-    const errno = typeof code === "string" && /^[A-Z0-9_]{1,32}$/.test(code) ? code : "unknown";
-    return { compatible: false, observed: `unreadable (${errno})` };
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { compatible: false, observed: "unparseable JSON" };
-  }
-  const config = object(parsed);
-  if (config === null) return { compatible: false, observed: "not a JSON object" };
-  if (!("worktree" in config) || config.worktree === false) return { compatible: true };
-  const value = config.worktree;
-  const observed =
-    value === null || typeof value === "boolean" || typeof value === "number"
-      ? `worktree=${JSON.stringify(value)}`
-      : `worktree is ${Array.isArray(value) ? "an array" : typeof value === "object" ? "an object" : `a ${typeof value}`}`;
-  return { compatible: false, observed };
-}
-
-interface Terminal {
-  status: string;
-  value?: unknown;
-  runId?: string;
-  agent?: string;
-  exitCode?: number;
-}
-function terminal(value: Record<string, unknown>): Terminal | null {
-  if (typeof value.status !== "string" || !STATUSES.has(value.status)) return null;
-  for (const key of ["runId", "agent"]) {
-    if (value[key] !== undefined && !identifier(value[key])) return null;
-  }
-  if (
-    value.exitCode !== undefined &&
-    (typeof value.exitCode !== "number" || !Number.isInteger(value.exitCode))
-  )
-    return null;
-  for (const key of ["error", "model", "thinking"]) {
-    if (value[key] !== undefined && typeof value[key] !== "string") return null;
-  }
-  const result = object(value.result);
-  if (
-    value.result !== undefined &&
-    (!result ||
-      (result.kind !== "structured" && result.kind !== "text") ||
-      (result.kind === "structured" && !("value" in result)) ||
-      (result.kind === "text" && typeof result.text !== "string"))
-  )
-    return null;
-  if (value.usage !== undefined) {
-    const usage = object(value.usage);
-    if (
-      !usage ||
-      [
-        "input",
-        "output",
-        "cacheRead",
-        "cacheWrite",
-        "cost",
-        "turns",
-        "toolCalls",
-        "durationMs",
-      ].some((key) => typeof usage[key] !== "number" || !Number.isFinite(usage[key]))
-    )
-      return null;
-  }
-  // Native completion is quiescence evidence even if the separate structured record is bad.
-  return {
-    status: value.status,
-    ...(result?.kind === "structured" ? { value: result.value } : {}),
-    ...(typeof value.runId === "string" ? { runId: value.runId } : {}),
-    ...(typeof value.agent === "string" ? { agent: value.agent } : {}),
-    ...(typeof value.exitCode === "number" ? { exitCode: value.exitCode } : {}),
-  };
-}
 
 export interface ConflictResolverEngineOptions {
   events: DelegationEvents;
@@ -254,7 +131,27 @@ export function createConflictResolverEngine(
           ? "lock-io"
           : null;
     }
-    const result = await waitForTerminal(options.events, request, task, receipt, signal);
+    const result = await dispatchForeground(
+      options.events,
+      {
+        agent: RESOLVER_AGENT,
+        task,
+        cwd: request.worktree,
+        schema: conflictResolutionSchema(request.mode),
+        ...(request.model !== undefined ? { model: request.model } : {}),
+      },
+      { requestId: receipt.requestId, ownerRunId: receipt.ownerRunId, nodeId: receipt.nodeId },
+      signal,
+    );
+    // Construct each whitelisted receipt field explicitly, never spread native data.
+    receipt.termination = result.termination;
+    if (result.observedRunId !== undefined) receipt.runId = result.observedRunId;
+    if (result.terminal) {
+      receipt.nativeStatus = result.terminal.status;
+      if (result.terminal.runId !== undefined) receipt.runId = result.terminal.runId;
+      if (result.terminal.agent !== undefined) receipt.agent = result.terminal.agent;
+      if (result.terminal.exitCode !== undefined) receipt.exitCode = result.terminal.exitCode;
+    }
     const lockFailure = finishLock(result.release);
     if (lockFailure) return failed(lockFailure);
     if (result.failure) return failed(result.failure);
@@ -281,145 +178,4 @@ export function createConflictResolverEngine(
       await Promise.all(active.values());
     },
   };
-}
-
-interface WaitResult {
-  terminal?: Terminal;
-  failure?: ConflictResolutionFailure;
-  release: boolean;
-}
-function waitForTerminal(
-  events: DelegationEvents,
-  request: ConflictResolutionRequest,
-  task: string,
-  receipt: ConflictResolutionReceipt,
-  signal: AbortSignal,
-): Promise<WaitResult> {
-  return new Promise((resolveResult) => {
-    const tuple = {
-      requestId: receipt.requestId,
-      ownerRunId: receipt.ownerRunId,
-      nodeId: receipt.nodeId,
-    };
-    const subscriptions: (() => void)[] = [];
-    let started = false;
-    let emitted = false;
-    let settled = false;
-    let emitting = false;
-    let pendingTerminal: Terminal | undefined;
-    let cancellation: ConflictResolutionFailure | undefined;
-    let ack: ReturnType<typeof setTimeout> | undefined;
-    let deadline: ReturnType<typeof setTimeout> | undefined;
-    let grace: ReturnType<typeof setTimeout> | undefined;
-    function settle(result: WaitResult) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(ack);
-      clearTimeout(deadline);
-      clearTimeout(grace);
-      signal.removeEventListener("abort", abort);
-      for (const unsubscribe of subscriptions) unsubscribe();
-      resolveResult(result);
-    }
-    function cancel(reason: ConflictResolutionFailure) {
-      if (settled || cancellation) return;
-      cancellation = reason;
-      clearTimeout(ack);
-      clearTimeout(deadline);
-      if (!emitted) {
-        settle({ failure: reason, release: true });
-        return;
-      }
-      grace = setTimeout(
-        () => settle({ failure: "termination-unconfirmed", release: false }),
-        CANCEL_GRACE_MS,
-      );
-      try {
-        events.emit(DELEGATION_EVENTS.cancel, tuple);
-      } catch {
-        /* Ambiguous cancellation retains the lock at grace expiry. */
-      }
-    }
-    function abort() {
-      cancel("cancelled");
-    }
-    function correlated(data: unknown): Record<string, unknown> | null {
-      const r = object(data);
-      return r !== null &&
-        r.requestId === tuple.requestId &&
-        r.ownerRunId === tuple.ownerRunId &&
-        r.nodeId === tuple.nodeId
-        ? r
-        : null;
-    }
-    function completed(t: Terminal) {
-      const release = t.status === "completed" || (PRELAUNCH.has(t.status) && !started);
-      receipt.nativeStatus = t.status;
-      receipt.termination = release ? "confirmed" : "unconfirmed";
-      for (const key of ["runId", "agent", "exitCode"] as const) {
-        // Construct each whitelisted field explicitly, never spread native data.
-        if (key === "runId" && t.runId !== undefined) receipt.runId = t.runId;
-        if (key === "agent" && t.agent !== undefined) receipt.agent = t.agent;
-        if (key === "exitCode" && t.exitCode !== undefined) receipt.exitCode = t.exitCode;
-      }
-      settle({ terminal: t, ...(cancellation ? { failure: cancellation } : {}), release });
-    }
-    try {
-      subscriptions.push(
-        events.on(DELEGATION_EVENTS.started, (data) => {
-          if (!emitted || !correlated(data) || settled) return;
-          started = true;
-          clearTimeout(ack);
-        }),
-      );
-      subscriptions.push(
-        events.on(DELEGATION_EVENTS.update, (data) => {
-          const r = correlated(data);
-          if (!emitted || !r || settled) return;
-          started = true;
-          if (identifier(r.runId)) receipt.runId = r.runId;
-        }),
-      );
-      subscriptions.push(
-        events.on(DELEGATION_EVENTS.response, (data) => {
-          const r = correlated(data);
-          if (!emitted || !r || settled || pendingTerminal) return;
-          const t = terminal(r);
-          if (!t) {
-            settle({ failure: "malformed-result", release: false });
-            return;
-          }
-          clearTimeout(ack);
-          if (emitting) pendingTerminal = t;
-          else completed(t);
-        }),
-      );
-      signal.addEventListener("abort", abort, { once: true });
-      ack = setTimeout(() => cancel("termination-unconfirmed"), START_ACK_MS);
-      deadline = setTimeout(() => cancel("termination-unconfirmed"), REQUEST_TIMEOUT_MS);
-      emitted = true;
-      emitting = true;
-      receipt.termination = "unconfirmed";
-      try {
-        events.emit(DELEGATION_EVENTS.request, {
-          ...tuple,
-          agent: RESOLVER_AGENT,
-          task,
-          cwd: request.worktree,
-          context: "fresh",
-          timeoutMs: REQUEST_TIMEOUT_MS,
-          result: { kind: "structured", schema: conflictResolutionSchema(request.mode) },
-          ...(request.model !== undefined ? { model: request.model } : {}),
-        });
-        emitting = false;
-        if (pendingTerminal) completed(pendingTerminal);
-      } catch {
-        emitting = false;
-        pendingTerminal = undefined;
-        cancel("transport-failed");
-      }
-    } catch {
-      settle({ failure: "transport-failed", release: !emitted });
-    }
-  });
 }

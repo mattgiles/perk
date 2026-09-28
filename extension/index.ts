@@ -49,6 +49,8 @@ import { installDreamBindings } from "./pi/v1/learning/dream.ts";
 import { installLearnFactoryBindings } from "./pi/v1/learning/factory.ts";
 import { installHarvestBindings } from "./pi/v1/learning/harvest.ts";
 import { installLearnBindings } from "./pi/v1/learning/learn.ts";
+import { installLibrarianBindings } from "./pi/v1/librarian.ts";
+import { createLibrarianEngine, type LibrarianEngineOptions } from "./pi/v1/librarianEngine.ts";
 import { registerLifecycleGates } from "./pi/v1/lifecycleGates.ts";
 import { installObjectiveBindings } from "./pi/v1/objective.ts";
 import { installObjectiveAuthoringBindings } from "./pi/v1/objectiveAuthoring.ts";
@@ -180,6 +182,8 @@ export default function perk(
   pi: ExtensionAPI,
   options: {
     resolverEngine?: Pick<ConflictResolverEngineOptions, "configPath" | "acquire">;
+    /** Construction-only fake native-config input for the librarian writer's engine. */
+    librarianEngine?: Pick<LibrarianEngineOptions, "configPath">;
     stackResolutionDelivery?: StackResolutionDelivery;
     /**
      * Construction-only: the hunk feedback receiver factory (default `createHunkFeedbackReceiver`).
@@ -274,6 +278,13 @@ export default function perk(
     gating.isActive(),
   );
   const stackConflict = createStackConflictResolver(conflictResolver, () => gating.isActive());
+  // The library writer's engine (contracts.md §8.75(l)): the same presence census, no lock and no
+  // read-only refusal — the parent may stay gated; the tool's end-state bracket proves the child.
+  const librarianEngine = createLibrarianEngine({
+    events: pi.events,
+    enginePresent: () => pi.getAllTools().some((tool) => tool.name === "subagent"),
+    ...options.librarianEngine,
+  });
 
   // The v1 plan installer: perk-owned plan mode (the `/plan` + Ctrl+Alt+P + `--plan` toggle
   // surface over the read-only gate, plus the plan-authoring context injection — this call
@@ -391,6 +402,7 @@ export default function perk(
     submitConflict.shutdown();
     stackConflict.shutdown();
     await conflictResolver.shutdown();
+    await librarianEngine.shutdown();
     feedbackReceiver.close();
     // A browser-wait activity cannot outlive the session.
     perkStatus.clearActivity(ctx);
@@ -741,6 +753,11 @@ export default function perk(
   // fan-out of self-contained read-only briefs onto fresh `perk.scout` lanes — one attempt,
   // no retry, reachable in every gated stage except refinement.
   installScoutWaveBindings(pi, reportWave);
+
+  // The library writer launcher (`run_librarian`, contracts.md §8.75(l)): prepare → the
+  // foreground `perk.librarian` child in the main checkout → the fail-closed end-state bracket →
+  // corroboration against the catalog. Reachable gated (only the child writes, only the library).
+  installLibrarianBindings(pi, librarianEngine);
 
   // The flow-scoped draft-review-wave pair (`start_draft_review_wave`/
   // `collect_draft_review_wave`) the draft-review door drives: non-blocking draft-review

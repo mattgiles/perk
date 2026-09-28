@@ -339,6 +339,10 @@ export const READ_ONLY_TOOLS = [
   // nothing to the worktree; reachable in every gated stage except `objective-refine` on the
   // `explore_objective_node` precedent (contracts.md §8.70).
   "run_scout_wave",
+  // The library-writer carve-in: `run_librarian` leaves the PARENT gated — only the dispatched
+  // `perk.librarian` child writes, and only the gitignored library in the main checkout, proven
+  // after the fact by the fail-closed end-state bracket (contracts.md §8.75(l)).
+  "run_librarian",
   // The child-side carve-in: gated adopt-children must keep the engine's injected tools — see
   // SUBAGENT_CHILD_TOOLS.
   ...SUBAGENT_CHILD_TOOLS,
@@ -453,6 +457,7 @@ export const PERK_TOOLS: readonly string[] = [
   "finalize_address",
   "explore_objective_node",
   "run_scout_wave",
+  "run_librarian",
   "run_pr_review_wave",
   "submit_pr_review",
   "start_review_wave",
@@ -537,6 +542,9 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "objective_stack_adopt",
   "objective_stack_recover",
   "objective_stack_land",
+  // The library writer launcher: the worktree family shares ONE list (see above), so every
+  // worktree stage carries it — submit/land by that rule.
+  "run_librarian",
   ...RESEARCH_TOOLS,
   ...SUBAGENT_TOOLS,
   "todo",
@@ -584,9 +592,12 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "add_objective_node",
     "objective_node",
     // The scout launcher rides the three AUTHORING stages (plan / objective-plan /
-    // objective-author) and no other — the one name by which this list and objective-save
-    // now differ (contracts.md §8.70).
+    // objective-author) and no other (contracts.md §8.70).
     "run_scout_wave",
+    // The library writer launcher rides the three authoring stages and the worktree family
+    // (contracts.md §8.75(l)) — with the scout launcher, the two names by which this list and
+    // objective-save differ.
+    "run_librarian",
     // The /objective-review-browser companions (gate-OFF coverage: after objectiveApprovalSave
     // exits the gate mid-flow, late collects/pushes must not dead-end) + plan_review (the door
     // guidance names it; it routes to the objective review arm here).
@@ -617,8 +628,9 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "plan_save",
     "objective_node",
     "explore_objective_node",
-    // The scout launcher (see the objective-author note).
+    // The scout launcher and the library writer launcher (see the objective-author note).
     "run_scout_wave",
+    "run_librarian",
     "reconcile_objective",
     "add_objective_node",
     // The /plan-review-browser companions (gate-OFF coverage: after approvalSave exits the gate
@@ -634,8 +646,9 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "plan_draft",
     "plan_review",
     "plan_save",
-    // The scout launcher (see the objective-author note).
+    // The scout launcher and the library writer launcher (see the objective-author note).
     "run_scout_wave",
+    "run_librarian",
     // The /plan-review-browser companions (see the objective-plan note).
     "start_draft_review_wave",
     "collect_draft_review_wave",

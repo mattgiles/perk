@@ -220,6 +220,8 @@ class SubagentsTable(LenientParseModel):
     scout: StrippedStr = None
     # The simplify doors' lane (resolved at invocation).
     simplifier: StrippedStr = None
+    # The run_librarian tool's writer child.
+    librarian: StrippedStr = None
     # Dev-only: the perk-dev session-audit judgment wave's auditor (the repo-local
     # `.pi/agents/perk-dev/session-auditor.md` def) — dormant in consumer repos.
     session_auditor: StrippedStr = Field(default=None, alias="session-auditor")
@@ -469,6 +471,7 @@ class ConfigFileModel(LenientParseModel):
                 ("dream-reducer", self.models.subagents.dream_reducer),
                 ("scout", self.models.subagents.scout),
                 ("simplifier", self.models.subagents.simplifier),
+                ("librarian", self.models.subagents.librarian),
                 ("session-auditor", self.models.subagents.session_auditor),
             )
             if value is not None

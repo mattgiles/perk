@@ -577,6 +577,8 @@ export async function loadPerkSession(opts: {
   extraExtensions?: ((pi: Parameters<typeof perk>[0]) => void | Promise<void>)[];
   /** Construction-only fake lock/config inputs for foreground resolver tests. */
   resolverEngine?: NonNullable<Parameters<typeof perk>[1]>["resolverEngine"];
+  /** Construction-only fake native-config input for the librarian writer's engine. */
+  librarianEngine?: NonNullable<Parameters<typeof perk>[1]>["librarianEngine"];
   stackResolutionDelivery?: NonNullable<Parameters<typeof perk>[1]>["stackResolutionDelivery"];
   /** Construction-only recording receiver for the startup/navigation sync-order pins. */
   feedbackReceiverFactory?: NonNullable<Parameters<typeof perk>[1]>["feedbackReceiverFactory"];
@@ -621,6 +623,7 @@ export async function loadPerkSession(opts: {
         factory: (pi) =>
           perk(pi, {
             resolverEngine: opts.resolverEngine,
+            librarianEngine: opts.librarianEngine,
             stackResolutionDelivery: opts.stackResolutionDelivery,
             feedbackReceiverFactory: opts.feedbackReceiverFactory,
             nativeSdkBridge: opts.nativeSdkBridge,

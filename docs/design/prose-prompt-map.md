@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **242** canonical source units
-- **1269** logical fragments
+- **246** canonical source units
+- **1285** logical fragments
 - **16** session shapes and **12** assemblies
 - **14** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -577,7 +577,9 @@ Supersede plans or objectives while preserving their durable relationships.
 | --- | --- | --- | --- | --- |
 | `markdown:prompts/stages/objective-replan.md` | `launch` | `shipped` | [`prompts/stages/objective-replan.md`](../../prompts/stages/objective-replan.md) · `file` | — |
 | `markdown:prompts/stages/replan.md` | `launch` | `shipped` | [`prompts/stages/replan.md`](../../prompts/stages/replan.md) · `file` | — |
+| `python-symbol:src/perk/cli/commands/objective/replan_cmd.py:_refuse_subject_alias` | `context` | `shipped` | [`src/perk/cli/commands/objective/replan_cmd.py`](../../src/perk/cli/commands/objective/replan_cmd.py) · `symbol:_refuse_subject_alias` | — |
 | `python-symbol:src/perk/cli/commands/objective/replan_cmd.py:_render_existing_objective` | `context` | `shipped` | [`src/perk/cli/commands/objective/replan_cmd.py`](../../src/perk/cli/commands/objective/replan_cmd.py) · `symbol:_render_existing_objective` | — |
+| `python-symbol:src/perk/cli/commands/objective/replan_cmd.py:_render_guidance` | `context` | `shipped` | [`src/perk/cli/commands/objective/replan_cmd.py`](../../src/perk/cli/commands/objective/replan_cmd.py) · `symbol:_render_guidance` | — |
 | `python-symbol:src/perk/cli/commands/plan/replan_cmd.py:_render_existing_plan` | `context` | `shipped` | [`src/perk/cli/commands/plan/replan_cmd.py`](../../src/perk/cli/commands/plan/replan_cmd.py) · `symbol:_render_existing_plan` | — |
 
 <details>
@@ -587,8 +589,12 @@ Supersede plans or objectives while preserving their durable relationships.
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/replan.md`
   - `body` — Document body (`file-body`)
+- `python-symbol:src/perk/cli/commands/objective/replan_cmd.py:_refuse_subject_alias`
+  - `symbol:_refuse_subject_alias` — Refuse subject alias (`symbol:_refuse_subject_alias`)
 - `python-symbol:src/perk/cli/commands/objective/replan_cmd.py:_render_existing_objective`
   - `symbol:_render_existing_objective` — Render existing objective (`symbol:_render_existing_objective`)
+- `python-symbol:src/perk/cli/commands/objective/replan_cmd.py:_render_guidance`
+  - `symbol:_render_guidance` — Render guidance (`symbol:_render_guidance`)
 - `python-symbol:src/perk/cli/commands/plan/replan_cmd.py:_render_existing_plan`
   - `symbol:_render_existing_plan` — Render existing plan (`symbol:_render_existing_plan`)
 
@@ -1547,6 +1553,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
+| `markdown:agents/librarian.md` | `subagent-instruction` | `shipped` | [`agents/librarian.md`](../../agents/librarian.md) · `file` | — |
 | `markdown:prompts/stages/librarian/add-docs.md` | `launch` | `shipped` | [`prompts/stages/librarian/add-docs.md`](../../prompts/stages/librarian/add-docs.md) · `file` | — |
 | `markdown:prompts/stages/librarian/refresh-docs.md` | `launch` | `shipped` | [`prompts/stages/librarian/refresh-docs.md`](../../prompts/stages/librarian/refresh-docs.md) · `file` | — |
 | `markdown:skills/ast-grep/SKILL.md` | `skill-detail` | `both` | [`skills/ast-grep/SKILL.md`](../../skills/ast-grep/SKILL.md) · `file` | — |
@@ -1573,10 +1580,16 @@ Expert configuration guidance, structural search, and ancillary model utilities.
 | `markdown:skills/perk-expert/references/mental-model.md` | `skill-detail` | `both` | [`skills/perk-expert/references/mental-model.md`](../../skills/perk-expert/references/mental-model.md) · `file` | — |
 | `markdown:skills/perk-expert/references/providers-and-backends.md` | `skill-detail` | `both` | [`skills/perk-expert/references/providers-and-backends.md`](../../skills/perk-expert/references/providers-and-backends.md) · `file` | — |
 | `markdown:skills/perk-expert/references/stacked-delivery.md` | `skill-detail` | `both` | [`skills/perk-expert/references/stacked-delivery.md`](../../skills/perk-expert/references/stacked-delivery.md) · `file` | — |
+| `typescript-tool:run_librarian` | `tool-contract` | `shipped` | [`extension/pi/v1/librarian.ts`](../../extension/pi/v1/librarian.ts) · `tool:run_librarian` | — |
 
 <details>
 <summary>Logical fragments</summary>
 
+- `markdown:agents/librarian.md`
+  - `frontmatter:description` — Discovery description (`frontmatter.description`)
+  - `section:scope-rules-categorical` — Scope rules (categorical) (`heading:scope-rules-categorical`)
+  - `section:procedure` — Procedure (`heading:procedure`)
+  - `section:report` — Report (`heading:report`)
 - `markdown:prompts/stages/librarian/add-docs.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/librarian/refresh-docs.md`
@@ -2244,6 +2257,17 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-stacked-delivery-the-atomic-pr-train/recovery-routing` — Recovery routing (`heading:perk-stacked-delivery-the-atomic-pr-train/recovery-routing`)
   - `section:perk-stacked-delivery-the-atomic-pr-train/current-limitations` — Current limitations (`heading:perk-stacked-delivery-the-atomic-pr-train/current-limitations`)
   - `section:perk-stacked-delivery-the-atomic-pr-train/discover-the-live-surface` — Discover the live surface (`heading:perk-stacked-delivery-the-atomic-pr-train/discover-the-live-surface`)
+- `typescript-tool:run_librarian`
+  - `description` — description (`tool:run_librarian.description`)
+  - `promptSnippet` — promptSnippet (`tool:run_librarian.promptSnippet`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:run_librarian.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:run_librarian.promptGuidelines.1`)
+  - `promptGuidelines.2` — promptGuidelines item 3 (`tool:run_librarian.promptGuidelines.2`)
+  - `promptGuidelines.3` — promptGuidelines item 4 (`tool:run_librarian.promptGuidelines.3`)
+  - `parameters.properties.action.description` — parameters.properties.action.description (`tool:run_librarian.parameters.properties.action.description`)
+  - `parameters.properties.url.description` — parameters.properties.url.description (`tool:run_librarian.parameters.properties.url.description`)
+  - `parameters.properties.slug.description` — parameters.properties.slug.description (`tool:run_librarian.parameters.properties.slug.description`)
+  - `parameters.properties.scope_prefix.description` — parameters.properties.scope_prefix.description (`tool:run_librarian.parameters.properties.scope_prefix.description`)
 
 </details>
 
