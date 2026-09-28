@@ -2,6 +2,12 @@
 // `@tombell/pi-plan` as a REAL, selectable plan provider: it bridges that package's free-form prose
 // `/plan` surface to perk's canonical produced contract (`plan_save` → `cache.plan-ref`).
 //
+// DEPRECATED. Kept selectable and inert-by-default; `plannotator-plan` is the first-class foreign
+// plan provider. New plan-surface behavior is specified against `perk-plan`/`plannotator-plan`
+// and is NOT extended to tombell's self-enforced ad-hoc `/plan` arm (perk's gate off,
+// `plan-mode-state.enabled` only) — the `stage:plan` skill-binding rule included (a stage-less
+// session resolves to `stage:plan` only from perk's persisted read-only `mode`).
+//
 // INERT BY DEFAULT. This shim is ALWAYS registered in index.ts but does nothing unless the resolved
 // `[providers] plan` selection is `tombell-plan` (read fresh per-event, same shape as the plan
 // installer). On any non-tombell selection it injects nothing and only strips its own stale

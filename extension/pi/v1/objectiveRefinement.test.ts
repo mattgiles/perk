@@ -24,6 +24,7 @@ import {
 } from "../../authoring/refinement/draft.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { soundPointer } from "../../session/workflowSession.ts";
+import { BINDING_CONTEXT_TYPE } from "../../substrate/bindingDelivery.ts";
 import { runScratchDir, sessionDataDir } from "../../substrate/cache.ts";
 import { digestSessionData } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
@@ -1762,7 +1763,8 @@ test("warm /objective-refine (harness): plan-mode contexts ALREADY injected befo
   // plannotator PLAN adapter flavor are live in context when /objective-refine enters. The
   // transition must not leave those instructions (the now-refused plan draft/save flow) beside
   // the refinement ones — the plan context's liveness is stage-aware, and the adapter's shared
-  // customType strips the non-selected flavor.
+  // customType strips the non-selected flavor. The stage-less plan-mode turn also carried the
+  // `stage:plan` binding copy; once the stage is recorded that render is superseded and retires.
   const cwd = scaffoldRepo({ handoff: { runId: GOLDEN_RUN, mode: "read-write" } });
   const { fakePerkRouter } = await import("../../testing/harness.ts");
   mkdirSync(join(cwd, ".perk"), { recursive: true });
@@ -1778,13 +1780,17 @@ test("warm /objective-refine (harness): plan-mode contexts ALREADY injected befo
     const adapterCopy = before.find((m) => m.customType === "perk:plan-adapter-plannotator");
     assert.ok(planCopy && String(planCopy.content).includes("[PLAN AUTHORING]"));
     assert.ok(adapterCopy && String(adapterCopy.content).includes("[PLAN ADAPTER: PLANNOTATOR]"));
-    // The context window as Pi would carry it into the next turn: both copies live.
+    const planPointer = "Follow the `perk-plan` skill (read `.agents/skills/perk-plan/SKILL.md`).";
+    const bindingCopy = before.find((m) => m.customType === BINDING_CONTEXT_TYPE);
+    assert.ok(bindingCopy && String(bindingCopy.content).includes(planPointer));
+    // The context window as Pi would carry it into the next turn: every copy live.
     const carried = [
       { customType: "perk:plan-context", content: String(planCopy.content) },
       { customType: "perk:plan-adapter-plannotator", content: String(adapterCopy.content) },
+      { customType: BINDING_CONTEXT_TYPE, content: String(bindingCopy.content) },
       { role: "user", content: "author me a plan" },
     ];
-    assert.equal((await h.emitContext(carried)).length, 3, "everything live before the transition");
+    assert.equal((await h.emitContext(carried)).length, 4, "everything live before the transition");
 
     // The warm transition into refinement.
     await h.invokeCommand("objective-refine", "proj-1 --node 2.3");
@@ -1795,12 +1801,19 @@ test("warm /objective-refine (harness): plan-mode contexts ALREADY injected befo
     assert.deepEqual(
       after.map((m) => m.customType ?? m.role),
       ["user"],
-      "the plan context and the PLAN adapter flavor are stale in a refinement session",
+      "the plan context, the PLAN adapter flavor and the stage:plan binding copy are stale in a refinement session",
     );
-    // The next turn injects only the refinement-flavored contexts.
+    // The next turn injects only the refinement-flavored contexts (any binding copy it carries is
+    // the stage:objective-refine render, never the stage:plan one).
     const injected = await h.emitBeforeAgentStart();
     const types = injected.map((m) => m.customType);
     assert.equal(types.includes("perk:plan-context"), false);
+    assert.equal(
+      injected.some(
+        (m) => m.customType === BINDING_CONTEXT_TYPE && String(m.content).includes(planPointer),
+      ),
+      false,
+    );
     assert.ok(types.includes("perk:objective-refinement-context"), types.join(","));
     const bridge = injected.filter((m) => m.customType === "perk:plan-adapter-plannotator");
     assert.equal(bridge.length, 1);

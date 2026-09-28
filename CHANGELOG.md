@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keep stacked PR bodies under GitHub's 65,536-character cap: a stacked layer's plan embed now yields to a one-line pointer when it would not fit, as the incremental route already did. (573e25c)
 - Show each check's wall-clock duration in the `run_ci` report: every executed row renders as `✓ name (12s)` / `✗ name (exit N, 12s)`, and the structured result carries it as `durationMs` (skipped rows carry none). Warm `/ci` still surfaces only the one-line summary. (50cedb2)
 - Restructure perk's own in-session CI rows: `docs-check` now carries only the docs-scoped guards plus every Astro invocation (site sync + typecheck, then build + post-build checks) serially — the single row that runs Astro, which removes a concurrent content-sync race — while site lint and the site unit tests ride the `lint-js`/`test-js` rows' `docs/site/**` globs, and the non-Astro TypeScript typecheck splits into independently globbed `typecheck-js` and `typecheck-prose-review` rows. `just typecheck` and `just test` are unchanged. (ba1b4ed)
+- Retire a hidden skill-binding message rendered for a superseded trigger or `[[bindings]]` overlay from context and re-deliver the current render (your own prompts are still never removed). (ef6126e)
+
+### Deprecated
+
+- Deprecate `[providers] plan = "tombell-plan"`: it stays selectable with no behavior change, but `plannotator-plan` is the supported foreign plan provider. (ef6126e)
+
+### Fixed
+
+- Deliver the `stage:plan` skill bindings (perk's `perk-plan` nudge or your override) to a plain session with `/plan` on, as a hidden context message re-delivered after compaction and never in perk's read-only subagent lanes; other read-only sessions without a stage resolve to the same trigger once no seeded binding pointer is in context. (ef6126e)
 
 ## [3.7.0] - 2026-09-23
 

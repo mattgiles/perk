@@ -62,6 +62,13 @@ _Avoid_: child mode, inherited mode
 
 ### Tool gating
 
+**Plan mode**:
+The toggleable read-only authoring mode a session enters through `/plan`, `--plan` or a warm plan
+factory; a `mode`, never a recorded `stage`. A stage-less session in plan mode resolves to the
+`plan` stage for plan guidance and skill-binding delivery (`stage:plan`); a runner child never
+counts.
+_Avoid_: plan stage (for the toggle), warm plan session, stage-less plan
+
 **Lazy loader**:
 A borrowed package's tool that activates that package's other tools on demand — `subagents_enable`,
 `web_enable`; perk gives it the eligibility of the tools it enables and refuses a call to it

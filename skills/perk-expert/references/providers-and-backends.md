@@ -19,7 +19,7 @@ declaration order. Exactly one entry per seam is the no-selection default.
 | Provider id | Seam | Default | Posture | Package |
 | --- | --- | --- | --- | --- |
 | `perk-plan` | `plan` | yes | reference (native) | — |
-| `tombell-plan` | `plan` | — | REPLACE | `npm:@tombell/pi-plan` |
+| `tombell-plan` | `plan` | — | REPLACE (deprecated) | `npm:@tombell/pi-plan` |
 | `plannotator-plan` | `plan` | — | AUGMENT | `npm:@plannotator/pi-extension` |
 | `perk-footer` | `footer` | yes | reference (native) | — |
 | `powerline-footer` | `footer` | — | REPLACE (vacate-only) | `npm:pi-powerline-footer` |
@@ -43,7 +43,9 @@ The plan seam must always produce perk's reviewed, canonical plan artifact.
 - **`tombell-plan` — REPLACE.** perk does not register `/plan`, `--plan`, or `Ctrl+Alt+P`, avoiding
   collisions with `@tombell/pi-plan`. The `planAdapterTombell` prompt bridge directs foreign prose
   through perk's own review/save contract. It does not drive the foreign tool and does not bypass
-  perk's read-only gate.
+  perk's read-only gate. Deprecated: kept selectable; `plannotator-plan` is the first-class foreign
+  plan provider, and new plan-surface behavior (including `stage:plan` binding delivery) is not
+  extended to tombell's self-enforced `/plan` arm.
 - **`plannotator-plan` — AUGMENT.** perk retains `/plan`, authoring context, and the read-only gate,
   but vacates `--plan`, `Ctrl+Alt+P`, and the colliding startup handler. `planAdapterPlannotator`
   sends the draft through `plan_review` to the browser. On an eligible call (the Plannotator

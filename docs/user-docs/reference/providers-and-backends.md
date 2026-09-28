@@ -38,7 +38,7 @@ surface relates to perk; the guarded columns are id, seam, default, and package.
 | Provider id | Seam | Default | Posture | Package |
 | --- | --- | --- | --- | --- |
 | `perk-plan` | `plan` | yes | reference (native) | — |
-| `tombell-plan` | `plan` | — | REPLACE | `npm:@tombell/pi-plan` |
+| `tombell-plan` | `plan` | — | REPLACE (deprecated) | `npm:@tombell/pi-plan` |
 | `plannotator-plan` | `plan` | — | AUGMENT | `npm:@plannotator/pi-extension` |
 | `perk-footer` | `footer` | yes | reference (native) | — |
 | `powerline-footer` | `footer` | — | REPLACE (vacate-only) | `npm:pi-powerline-footer` |

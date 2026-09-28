@@ -619,7 +619,13 @@ decision — perk asks Pi's own context projection whether the header is live as
 as perk's hidden message. A compaction that drops the render re-delivers it next turn; a summary
 quoting the header is not delivery. User prompts are never stripped, even after the stage stops
 binding — only perk's stale hidden binding message is. Delivery, not enforcement: bindings grant no
-tools.
+tools. A plain session with `/plan` on records no stage; for delivery it counts as the `plan` stage,
+so `stage:plan` bindings (perk's `perk-plan` nudge, or the user's override) arrive there too — never
+in perk's read-only subagent lanes. Any other read-only session without a stage (a warm
+`/objective-plan`) resolves to the same trigger but receives it only once no binding render is
+already in context — a warm command's own seeded pointer takes precedence while it is live. A hidden
+binding message left over from an earlier trigger or an edited `[[bindings]]` overlay is retired and
+the current render re-delivered.
 
 ```toml
 [[bindings]]

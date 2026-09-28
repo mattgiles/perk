@@ -108,7 +108,13 @@ as its own hidden message. A compaction that drops the render from context re-de
 next turn; a summary that merely quotes the header does not count as delivery. Your own prompt
 turns are never removed, even after the stage stops binding; only perk's hidden binding message is
 stripped when it goes stale. This is delivery, not enforcement: bindings nudge or inline guidance
-and grant no tools.
+and grant no tools. A plain session with `/plan` on records no stage; for delivery it counts as the
+`plan` stage, so `stage:plan` bindings (perk's `perk-plan` nudge, or your override) arrive there too
+— never in perk's read-only subagent lanes. Any other read-only session without a stage (a warm
+`/objective-plan`) resolves to the same trigger but receives it only once no binding render is
+already in context — a warm command's own seeded pointer takes precedence while it is live. A hidden
+binding message left over from an earlier trigger or an edited `[[bindings]]` overlay is retired and
+the current render re-delivered.
 
 ```toml
 [[bindings]]
