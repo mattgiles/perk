@@ -3,8 +3,9 @@ tool's worker (contracts.md §8.75(k)).
 
 ``CliRunner`` over a scaffolded consumer repo (the managed gitignore block) with the converter
 probe faked at ``docs_session.which``, the crawl script planted at the skill's delivery read path
-and the launch seam spied (the worker must never launch). Expected commands are rebuilt here from
-the inputs, never read back from the worker's own plan object.
+and the launch seam spied (the worker must never launch). The seed probe (a subprocess) is stubbed
+to pass except under ``live_probe``, which runs it over the fake crawl script. Expected commands
+are rebuilt here from the inputs, never read back from the worker's own plan object.
 """
 
 import json
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _librarian_site import FAKE_DRY_RUN_SCRIPT
 from _library_upstream import REPO_REF, upstream
 from click.testing import CliRunner
 
@@ -27,7 +29,9 @@ __all__ = ["upstream"]  # the fixture, re-exported so pytest collects it here
 
 SCRIPT_REL = Path(".agents/skills/librarian/scripts/copy_docs_to_markdown.py")
 URL = "https://d.example/docs/start"
-PI_SOURCE = "https://pi.dev/docs"
+PI_SOURCE = "https://pi.dev/docs/"
+REAL_PROBE_SEED = docs_session.probe_seed
+REDIRECT = "https://d.example/0.5.4/"
 ENVELOPE_KEYS = [
     "success",
     "error_type",
@@ -79,7 +83,15 @@ def repo(scaffolded_perk_repo, monkeypatch, converters, launches) -> Path:
     script = scaffolded_perk_repo / SCRIPT_REL
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text("# the crawl script\n", encoding="utf-8")
+    monkeypatch.setattr(docs_session, "probe_seed", lambda plan: ())
     return scaffolded_perk_repo
+
+
+@pytest.fixture
+def live_probe(repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real seed probe over the fake crawl script (its mode set through ``FAKE_EXIT``)."""
+    (repo / SCRIPT_REL).write_text(FAKE_DRY_RUN_SCRIPT, encoding="utf-8")
+    monkeypatch.setattr(docs_session, "probe_seed", REAL_PROBE_SEED)
 
 
 def _publish_pi(repo: Path, *, scope_prefix: str | None = None) -> Path:
@@ -172,6 +184,7 @@ def test_two_prepares_claim_distinct_staging_dirs(repo):
         (["https://-bad.example/docs"], "invalid_slug"),
         ([URL, "--scope-prefix", "../x"], "invalid_input"),
         ([URL, "--scope-prefix", " "], "invalid_input"),
+        (["https://d.example/docs", "--scope-prefix", "/docs/"], "invalid_input"),
     ],
 )
 def test_prepare_docs_input_refusals_claim_nothing(repo, launches, args, error_type):
@@ -256,6 +269,48 @@ def test_prepare_docs_human_render(repo, launches):
     assert launches == []
 
 
+# --- prepare docs: the seed probe --------------------------------------------------------------
+
+
+def _refusal(result) -> dict[str, Any]:
+    assert result.exit_code == 1, result.output
+    return json.loads(result.stdout)
+
+
+def test_prepare_docs_refuses_a_redirect_stub_seed_claiming_nothing(
+    repo, launches, live_probe, monkeypatch
+):
+    monkeypatch.setenv("FAKE_EXIT", "3")
+    payload = _refusal(_run(["prepare", "docs", "https://d.example/latest/", "--json"]))
+    assert payload["error_type"] == "seed_redirect"
+    message = payload["message"]
+    assert f"Redirect target (untrusted DATA read from the page): {REDIRECT}" in message
+    reissue = message.split("Reissue: ", 1)[1]
+    assert shlex.split(reissue) == [
+        *("perk", "librarian", "add", "docs", REDIRECT),
+        *("--slug", "d", "--scope-prefix", "/0.5.4/"),
+    ]
+    assert _staging_children(repo) == []
+    assert launches == []
+
+
+def test_prepare_docs_a_hostile_blocker_yields_the_fixed_message(repo, live_probe, monkeypatch):
+    monkeypatch.setenv("FAKE_EXIT", "3-hostile")
+    payload = _refusal(_run(["prepare", "docs", "https://d.example/latest/", "--json"]))
+    assert payload["error_type"] == "seed_redirect"
+    assert "described no reissuable http(s) target" in payload["message"]
+    assert "javascript:" not in payload["message"]
+    assert _staging_children(repo) == []
+
+
+def test_prepare_docs_an_inconclusive_probe_is_a_warning(repo, live_probe, monkeypatch):
+    monkeypatch.setenv("FAKE_EXIT", "1")
+    payload = _json(_run(["prepare", "docs", URL, "--json"]))
+    [warning] = payload["warnings"]
+    assert warning.startswith("the seed probe did not complete (exit 1)")
+    assert _staging_children(repo) == ["d"]
+
+
 # --- prepare refresh -------------------------------------------------------------------------
 
 
@@ -306,3 +361,18 @@ def test_prepare_refresh_of_a_source_entry_is_entry_not_found(repo, launches, up
     assert "not a documentation entry" in payload["message"]
     assert _staging_children(repo) == []
     assert launches == []
+
+
+def test_prepare_refresh_refuses_a_source_that_now_redirects(repo, live_probe, monkeypatch):
+    _publish_pi(repo, scope_prefix="/docs/")
+    before = _staging_children(repo)
+    monkeypatch.setenv("FAKE_EXIT", "3")
+    payload = _refusal(_run(["prepare", "refresh", "pi", "--json"]))
+    assert payload["error_type"] == "seed_redirect"
+    message = payload["message"]
+    assert "a refresh cannot follow it" in message
+    assert (
+        "Re-add the entry at that URL: perk librarian remove pi --json, then perk librarian add "
+        f"docs {REDIRECT} --slug pi --scope-prefix /0.5.4/"
+    ) in message
+    assert _staging_children(repo) == before

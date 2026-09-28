@@ -21,6 +21,45 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "skills" / "librarian" / "scripts" / "copy_docs_to_markdown.py"
 
 
+# A stand-in crawl script for the docs doors' and the `prepare` worker's dry-run and seed probe.
+# Modes (FAKE_EXIT): an exit code, `signal`, `3` (the seed-redirect blocker) or `3-hostile` (a
+# blocker naming a `javascript:` target). A trailing `--dry-run` is required; the seed probe's
+# `--max-pages 1` before it is tolerated.
+FAKE_DRY_RUN_SCRIPT = """\
+import json
+import os
+import signal
+import sys
+
+url, out = sys.argv[1], sys.argv[2]
+assert sys.argv[-1] == "--dry-run", sys.argv
+mode = os.environ.get("FAKE_EXIT", "0")
+if mode.startswith("3"):
+    target = "javascript:alert(1)" if mode == "3-hostile" else "https://d.example/0.5.4/"
+    blocker = {
+        "blocker": "seed-redirect",
+        "seed_url": url,
+        "fetched_url": url,
+        "redirect_url": target,
+        "scope_prefix": "/0.5.4/",
+    }
+    print(json.dumps(blocker, sort_keys=True))
+    print(f"ERROR: the seed {url} is only an HTML redirect page to {target}", file=sys.stderr)
+    sys.exit(3)
+print(f"Would copy 2 page(s) into {out}")
+print(f"{url} -> docs-home.md")
+print(f"{url}/guide -> guide.md")
+print("WARNING: skipped https://d.example/x: path collision", file=sys.stderr)
+if mode == "2":
+    print("ERROR: refusing to crawl (fake)", file=sys.stderr)
+sys.stdout.flush()
+sys.stderr.flush()
+if mode == "signal":
+    os.kill(os.getpid(), signal.SIGTERM)
+sys.exit(int(mode))
+"""
+
+
 @dataclass(frozen=True)
 class Redirect:
     """A page served from another URL after curl followed a redirect."""

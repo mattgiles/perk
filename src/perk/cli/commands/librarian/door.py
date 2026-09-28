@@ -16,9 +16,16 @@ from collections.abc import Sequence
 
 import click
 
+from perk.cli.commands.librarian.shared import fail_library_error
 from perk.cli.context import require_config
 from perk.cli.emit import fail
-from perk.library import DocsCrawlPlan, run_dry_run
+from perk.library import (
+    SEED_REDIRECT_EXIT,
+    DocsCrawlPlan,
+    parse_seed_redirect,
+    run_dry_run,
+    seed_redirect_error,
+)
 from perk.prompts import render
 from perk.run import launch
 from perk.substrate.output import user_output
@@ -81,9 +88,11 @@ def launch_docs_session(
 def relay_dry_run(ctx: click.Context, plan: DocsCrawlPlan) -> None:
     """Run the crawl script's dry-run, relay its URL → file map, and map its exit code.
 
-    ``0`` / ``1`` (a discovery fetch failed) are relayed; ``2`` is ``crawl_refused``; any other
-    code (a signal's negative code included) is ``io_error`` — nothing falls through as success.
-    A ``LibraryError`` from the run propagates to the command's failure boundary.
+    ``0`` / ``1`` (a discovery fetch failed) are relayed; ``3`` (the seed is only an HTML redirect
+    page) is ``seed_redirect``, its blocker line re-validated before the reissue is named; ``2``
+    is ``crawl_refused``; any other code (a signal's negative code included) is ``io_error`` —
+    nothing falls through as success. A ``LibraryError`` from the run propagates to the command's
+    failure boundary.
     """
     user_output(click.style("librarian add docs --dry-run (no session)", dim=True))
     scope = plan.scope_prefix or "(default)"
@@ -94,6 +103,10 @@ def relay_dry_run(ctx: click.Context, plan: DocsCrawlPlan) -> None:
     code = completed.returncode
     if code in (0, 1):
         ctx.exit(code)
+    if code == SEED_REDIRECT_EXIT:
+        blocker = parse_seed_redirect(completed.stdout)
+        fail_library_error(ctx, seed_redirect_error(plan, blocker), as_json=False)
+        return
     stderr = completed.stderr.strip()
     if code == 2:
         fail(

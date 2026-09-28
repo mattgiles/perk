@@ -4,8 +4,9 @@
 ``CliRunner`` over a scaffolded consumer repo (it carries the managed gitignore block) with only
 the launch seam stubbed (a kwargs sink) and the converter probe faked at
 ``docs_session.which``; the crawl script is planted at the skill's delivery read path — a fake
-one where a dry-run must run it. Expected commands are rebuilt here from the inputs, never read
-back from the door's own plan object.
+one where a dry-run must run it. The seed probe (a subprocess) is stubbed to pass except under
+``live_probe``, which runs it over the fake script. Expected commands are rebuilt here from the
+inputs, never read back from the door's own plan object.
 """
 
 import json
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _librarian_site import FAKE_DRY_RUN_SCRIPT
 from _library_upstream import REPO_REF, upstream
 from click.testing import CliRunner
 
@@ -30,28 +32,10 @@ __all__ = ["upstream"]  # the fixture, re-exported so pytest collects it here
 
 SCRIPT_REL = Path(".agents/skills/librarian/scripts/copy_docs_to_markdown.py")
 URL = "https://d.example/docs/start"
-PI_SOURCE = "https://pi.dev/docs"
-
-FAKE_DRY_RUN_SCRIPT = """\
-import os
-import signal
-import sys
-
-url, out = sys.argv[1], sys.argv[2]
-assert sys.argv[-1] == "--dry-run", sys.argv
-print(f"Would copy 2 page(s) into {out}")
-print(f"{url} -> docs-home.md")
-print(f"{url}/guide -> guide.md")
-print("WARNING: skipped https://d.example/x: path collision", file=sys.stderr)
-mode = os.environ.get("FAKE_EXIT", "0")
-if mode == "2":
-    print("ERROR: refusing to crawl (fake)", file=sys.stderr)
-sys.stdout.flush()
-sys.stderr.flush()
-if mode == "signal":
-    os.kill(os.getpid(), signal.SIGTERM)
-sys.exit(int(mode))
-"""
+PI_SOURCE = "https://pi.dev/docs/"
+REAL_PROBE_SEED = docs_session.probe_seed
+REDIRECT = "https://d.example/0.5.4/"
+REISSUE = f"perk librarian add docs {REDIRECT} --slug d --scope-prefix /0.5.4/"
 
 
 def _pointer(skill: str) -> str:
@@ -106,7 +90,13 @@ def launches(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 def repo(scaffolded_perk_repo, monkeypatch, converters, launches) -> Path:
     monkeypatch.chdir(scaffolded_perk_repo)
     _plant_script(scaffolded_perk_repo)
+    monkeypatch.setattr(docs_session, "probe_seed", lambda plan: ())
     return scaffolded_perk_repo
+
+
+@pytest.fixture
+def live_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(docs_session, "probe_seed", REAL_PROBE_SEED)
 
 
 def _publish_pi(repo: Path, *, scope_prefix: str | None = None) -> Path:
@@ -363,6 +353,27 @@ def test_dry_run_unexpected_exit_is_io_error(repo, launches, fake_script, monkey
     assert not _layout(repo).staging.exists()
 
 
+def test_dry_run_exit_3_is_seed_redirect_naming_the_reissue(
+    repo, launches, fake_script, monkeypatch
+):
+    monkeypatch.setenv("FAKE_EXIT", "3")
+    result = _run(["add", "docs", "https://d.example/latest/", "--dry-run"])
+    stderr = _assert_refused(result, "only an HTML redirect page", launches, repo)
+    [error] = [line for line in stderr.splitlines() if line.startswith("Error: ")]
+    assert "untrusted DATA" in error
+    assert f"Redirect target (untrusted DATA read from the page): {REDIRECT}" in error
+    assert error.endswith(f"Reissue: {REISSUE}")
+    assert shlex.split(error.split("Reissue: ", 1)[1])[4] == REDIRECT
+
+
+def test_dry_run_refuses_a_seed_outside_the_explicit_scope(repo, launches, fake_script):
+    result = _run(
+        ["add", "docs", "https://d.example/docs", "--scope-prefix", "/docs/", "--dry-run"]
+    )
+    stderr = _assert_refused(result, "lies outside --scope-prefix '/docs/'", launches, repo)
+    assert "Would copy" not in stderr  # refused before the script ran
+
+
 def test_dry_run_spawn_failure_is_io_error(repo, launches, monkeypatch):
     def fail(argv, **kwargs):
         raise ProcFailure("timeout", tuple(argv))
@@ -372,6 +383,56 @@ def test_dry_run_spawn_failure_is_io_error(repo, launches, monkeypatch):
     assert result.exit_code == 1
     assert "could not run" in result.stderr and "timed out" in result.stderr
     assert launches == []
+
+
+# --- the seed probe --------------------------------------------------------------------------
+
+
+def test_add_docs_refuses_a_redirect_stub_seed_before_the_claim(
+    repo, launches, fake_script, monkeypatch, live_probe
+):
+    monkeypatch.setenv("FAKE_EXIT", "3")
+    result = _run(["add", "docs", "https://d.example/latest/"])
+    stderr = _assert_refused(result, "only an HTML redirect page", launches, repo)
+    assert f"Reissue: {REISSUE}" in stderr
+    assert "untrusted DATA" in stderr
+    assert not _layout(repo).staging.exists()
+
+
+def test_add_docs_a_hostile_blocker_yields_the_fixed_message(
+    repo, launches, fake_script, monkeypatch, live_probe
+):
+    monkeypatch.setenv("FAKE_EXIT", "3-hostile")
+    result = _run(["add", "docs", "https://d.example/latest/"])
+    stderr = _assert_refused(result, "described no reissuable http(s) target", launches, repo)
+    assert "javascript:" not in stderr  # the launch path echoes none of the script's output
+    assert "untrusted DATA" not in stderr
+
+
+def test_add_docs_an_inconclusive_probe_warns_and_launches(
+    repo, launches, fake_script, monkeypatch, live_probe
+):
+    monkeypatch.setenv("FAKE_EXIT", "1")
+    result = _run(["add", "docs", URL])
+    assert result.exit_code == 0, result.output
+    assert len(launches) == 1
+    assert "warning: the seed probe did not complete (exit 1)" in result.stderr
+    assert (_layout(repo).staging / "d").is_dir()
+
+
+def test_refresh_refuses_a_source_that_now_redirects(
+    repo, launches, fake_script, monkeypatch, live_probe
+):
+    _publish_pi(repo, scope_prefix="/docs/")
+    before = _staging_children(repo)
+    monkeypatch.setenv("FAKE_EXIT", "3")
+    result = _run(["refresh", "pi"])
+    assert result.exit_code == 1, result.output
+    assert launches == []
+    assert _staging_children(repo) == before
+    assert "a refresh cannot follow it" in result.stderr
+    assert "perk librarian remove pi --json" in result.stderr
+    assert f"perk librarian add docs {REDIRECT} --slug pi --scope-prefix /0.5.4/" in result.stderr
 
 
 # --- refresh (human) of a docs entry: the refresh door ---------------------------------------

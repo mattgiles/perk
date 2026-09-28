@@ -5,7 +5,8 @@ Fetches an unpinned source checkout (config-pinned) and fast-forwards it to its 
 under the library lock; a dirty tree or a HEAD off that branch is skipped, and a pinned entry is
 refused with the re-pin hint. Refreshing a documentation mirror is session judgment work
 (re-crawl, curate, ``record --publish --replace``): the human form of a docs entry is the
-docs-refresh door — it claims a staging directory and launches the refresh session — while the
+docs-refresh door — it probes the entry's source (``seed_redirect`` when it is now only an HTML
+redirect page), claims a staging directory and launches the refresh session — while the
 ``--json`` worker refuses it with the typed ``needs_session``.
 
 Exit codes: 0 ok (including the ``skipped_*`` outcomes) · 1 typed refusal / op failure · 2
