@@ -7,6 +7,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import { PLAN_CONTEXT_TYPE } from "../authoring/plan/prose.ts";
 import {
   loadPerkSession,
   plantRawSession,
@@ -14,6 +15,7 @@ import {
   scaffoldRepo,
 } from "../testing/harness.ts";
 import {
+  activeBindingTrigger,
   BINDING_CONTEXT_TYPE,
   BINDING_HEADER,
   bindingSuffix,
@@ -21,6 +23,7 @@ import {
   renderBindings,
   resolvedBindings,
 } from "./bindingDelivery.ts";
+import type { WorkflowState } from "./workflowState.ts";
 
 /** Write a `.perk/config.toml` with the given `[[bindings]]` rows. */
 function writeBindings(
@@ -39,6 +42,19 @@ function writeBindings(
 /** The path-carrying nudge pointer line the renderer emits for `skill`. */
 function pointer(skill: string): string {
   return `Follow the \`${skill}\` skill (read \`.agents/skills/${skill}/SKILL.md\`).`;
+}
+
+/** Whether a message is an owned binding-context copy (the Mechanism-A customType). */
+function isBindingCopy(message: { customType?: unknown }): boolean {
+  return message.customType === BINDING_CONTEXT_TYPE;
+}
+
+/** Whether `messages` carries an owned binding-context copy containing `skill`'s pointer. */
+function carriesBindingPointer(
+  messages: readonly { customType?: unknown; content?: unknown }[],
+  skill: string,
+): boolean {
+  return messages.some((m) => isBindingCopy(m) && String(m.content).includes(pointer(skill)));
 }
 
 /** Write `.agents/skills/<skill>/SKILL.md`. */
@@ -205,7 +221,7 @@ test("Mechanism A injects the stage:plan DEFAULT pointer with no user overlay (D
   }
 });
 
-test("Mechanism A is a no-op when no stage is launched", async () => {
+test("Mechanism A is a no-op when no stage is launched and the gate is off", async () => {
   const cwd = scaffoldRepo();
   writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
   // A run_id keep-session but NO stage recorded → no stage trigger.
@@ -224,6 +240,238 @@ test("Mechanism A is a no-op when no stage is launched", async () => {
     );
   } finally {
     h.dispose();
+  }
+});
+
+// --- The mode→trigger rule: plan mode (a stage-less read-only session) resolves to stage:plan ---
+
+test("activeBindingTrigger: a recorded stage wins; a stage-less read-only session is plan mode", () => {
+  const cases: [WorkflowState, string | null][] = [
+    [{ stage: "save", mode: "read-only" }, "stage:save"],
+    [{ stage: "save" }, "stage:save"],
+    [{ stage: "implement", mode: "read-only" }, "stage:implement"],
+    [{ mode: "read-only" }, "stage:plan"],
+    [{ mode: "read-write" }, null],
+    [{}, null],
+  ];
+  for (const [state, expected] of cases) {
+    assert.equal(activeBindingTrigger(state), expected, JSON.stringify(state));
+  }
+});
+
+test("Mechanism A renders `stage:plan` for a stage-less read-only session (the warm `/plan`) — and agrees with plan guidance", async () => {
+  const cwd = scaffoldRepo(); // no user overlay → the shipped stage:plan default
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-only" }]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    assert.equal(h.workflowState().stage, undefined);
+    const injected = await h.emitBeforeAgentStart();
+    assert.ok(carriesBindingPointer(injected, "perk-plan"), "the stage:plan default is delivered");
+    assert.ok(
+      injected.some((m) => m.customType === PLAN_CONTEXT_TYPE),
+      "the same turn carries the plan-authoring context (the two selections agree)",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("Mechanism A delivers a user `stage:plan` override to a stage-less read-only session", async () => {
+  const cwd = scaffoldRepo();
+  writeBindings(cwd, [{ trigger: "stage:plan", skill: "house-style", mode: "nudge" }]);
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-only" }]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    assert.ok(carriesBindingPointer(injected, "house-style"), "the override is delivered");
+    assert.equal(carriesBindingPointer(injected, "perk-plan"), false, "the override replaces it");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("the `/plan` toggle round-trip delivers once, retires the copy when off, and never double-delivers when back on", async () => {
+  const cwd = scaffoldRepo();
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.inMemory(cwd) });
+  const user = { role: "user", content: "a normal message" };
+  try {
+    await h.invokeCommand("plan");
+    assert.equal(h.workflowState().mode, "read-only");
+    assert.equal(h.workflowState().stage, undefined, "the toggle never records a stage");
+    const copy = (await h.emitBeforeAgentStart()).find(isBindingCopy);
+    assert.ok(copy !== undefined && String(copy.content).includes(pointer("perk-plan")));
+    const content = String(copy.content);
+    // Persist the injected copy as Pi would (the harness does not persist returned messages).
+    h.session.sessionManager.appendCustomMessageEntry(BINDING_CONTEXT_TYPE, content, false);
+    assert.equal(
+      (await h.emitBeforeAgentStart()).some(isBindingCopy),
+      false,
+      "a live owned copy of the current render dedups the next turn",
+    );
+
+    await h.invokeCommand("plan"); // OFF
+    assert.equal(h.workflowState().mode, "read-write");
+    const off = await h.emitContext([{ customType: BINDING_CONTEXT_TYPE, content }, { ...user }]);
+    assert.equal(off.some(isBindingCopy), false, "gate off → the owned copy is retired");
+    assert.ok(off.some((m) => m.role === "user" && m.content === user.content));
+
+    await h.invokeCommand("plan"); // ON again
+    assert.equal(
+      (await h.emitBeforeAgentStart()).some(isBindingCopy),
+      false,
+      "the persisted copy is live again in Pi's projection and carries the current render",
+    );
+    const on = await h.emitContext([{ customType: BINDING_CONTEXT_TYPE, content }, { ...user }]);
+    assert.ok(on.some(isBindingCopy), "gate back on → the current-render copy is retained");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("Mechanism A re-delivers `stage:plan` to a stage-less read-only session after compaction drops the copy", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantRawSession(cwd, [
+    { custom: { type: "perk:workflow-state", data: { run_id: "01RID", mode: "read-only" } } },
+    {
+      customMessage: {
+        type: BINDING_CONTEXT_TYPE,
+        content: `${BINDING_HEADER}\n\n${pointer("perk-plan")}`,
+      },
+    },
+    { assistant: "recent work that survives compaction" },
+  ]);
+  const sessionManager = SessionManager.open(file);
+  const keptId = sessionManager.getEntries().at(-1)?.id;
+  assert.ok(keptId !== undefined);
+  sessionManager.appendCompaction("summary without the binding marker", keptId, 100);
+  const h = await loadPerkSession({ cwd, sessionManager, env: { PERK_RUN_ID: undefined } });
+  try {
+    assert.ok(carriesBindingPointer(await h.emitBeforeAgentStart(), "perk-plan"));
+  } finally {
+    h.dispose();
+  }
+});
+
+test("an owned copy of a superseded render is stale: not evidence, and stripped (user turns kept)", async () => {
+  const cwd = scaffoldRepo();
+  writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
+  const staleContent = `${BINDING_HEADER}\n\n${pointer("other-skill")}`;
+  const file = plantRawSession(cwd, [
+    {
+      custom: {
+        type: "perk:workflow-state",
+        data: { run_id: "01RID", mode: "read-only", stage: "save" },
+      },
+    },
+    { customMessage: { type: BINDING_CONTEXT_TYPE, content: staleContent } },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    assert.ok(carriesBindingPointer(injected, "my-skill"), "the current render is re-delivered");
+    const current = injected.find(isBindingCopy);
+    assert.ok(current !== undefined);
+    const staleOwned = { customType: BINDING_CONTEXT_TYPE, content: staleContent };
+    const currentOwned = { customType: BINDING_CONTEXT_TYPE, content: String(current.content) };
+    // A superset of the current render (a trailing binding since removed) is stale too.
+    const supersetOwned = {
+      customType: BINDING_CONTEXT_TYPE,
+      content: `${String(current.content)}\n\n${pointer("other-skill")}`,
+    };
+    const coldPrompt = { role: "user", content: `${BINDING_HEADER}\n\ncold` };
+    const surviving = await h.emitContext([
+      staleOwned,
+      supersetOwned,
+      currentOwned,
+      { ...coldPrompt },
+    ]);
+    assert.deepEqual(surviving, [currentOwned, coldPrompt]);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("a USER turn carrying the header with a different render (a warm seed) still suppresses Mechanism A", async () => {
+  const cwd = scaffoldRepo();
+  writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
+  // A staged session, and the stage-less read-only shape a warm `/objective-plan` leaves: both
+  // resolve to a trigger whose render differs from the seed's, and the seed is the door's own
+  // delivery while it is live.
+  for (const data of [
+    { run_id: "01RID", mode: "read-only", stage: "save" },
+    { run_id: "01RID", mode: "read-only" },
+  ]) {
+    const file = plantRawSession(cwd, [
+      { custom: { type: "perk:workflow-state", data } },
+      { user: `Author the node's plan.\n\n${BINDING_HEADER}\n\n${pointer("other-skill")}` },
+    ]);
+    const h = await loadPerkSession({
+      cwd,
+      sessionManager: SessionManager.open(file),
+      env: { PERK_RUN_ID: undefined },
+    });
+    try {
+      assert.equal(
+        (await h.emitBeforeAgentStart()).some(isBindingCopy),
+        false,
+        `a live seeded user turn is delivery evidence (${JSON.stringify(data)})`,
+      );
+    } finally {
+      h.dispose();
+    }
+  }
+});
+
+test("the runner fence: a floored runner child (the same stage-less read-only shape) receives no binding delivery", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write" }]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: {
+      PERK_RUN_ID: undefined,
+      PI_SUBAGENT_CHILD: "1",
+      PI_SUBAGENT_EXTENSION_BINDINGS: '{"perk.parent-restrictions/1":{"readOnly":true}}',
+    },
+  });
+  try {
+    // The floor reflected exactly the stage-less gated shape a warm `/plan` leaves.
+    assert.equal(h.workflowState().mode, "read-only");
+    assert.equal(h.workflowState().stage, undefined);
+    assert.equal((await h.emitBeforeAgentStart()).some(isBindingCopy), false);
+    const surviving = await h.emitContext([
+      { customType: BINDING_CONTEXT_TYPE, content: BINDING_HEADER },
+    ]);
+    assert.equal(surviving.some(isBindingCopy), false, "a runner child retains no owned copy");
+  } finally {
+    h.dispose();
+  }
+
+  // The control: a parent over the same persisted shape receives the stage:plan default.
+  const parentFile = plantSession(cwd, [{ run_id: "02RID", mode: "read-only" }], {
+    fileName: "planted-parent-control.jsonl",
+  });
+  const parent = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(parentFile),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    assert.ok(carriesBindingPointer(await parent.emitBeforeAgentStart(), "perk-plan"));
+  } finally {
+    parent.dispose();
   }
 });
 
@@ -498,24 +746,34 @@ test("Mechanism A: a failed projection read escapes the hook (no guessed copy); 
     event: { prompt: string },
     ctx: unknown,
   ) => Promise<{ message?: { customType?: string } } | undefined>;
-  const hooks = new Map<string, Hook>();
-  registerBindingDelivery({
-    on: (name: string, hook: Hook) => {
-      hooks.set(name, hook);
-    },
-  } as unknown as ExtensionAPI);
-  const inject = hooks.get("before_agent_start");
+  const hooksFor = (runnerChild: boolean): Map<string, Hook> => {
+    const hooks = new Map<string, Hook>();
+    registerBindingDelivery(
+      {
+        on: (name: string, hook: Hook) => {
+          hooks.set(name, hook);
+        },
+      } as unknown as ExtensionAPI,
+      () => runnerChild,
+    );
+    return hooks;
+  };
+  const inject = hooksFor(false).get("before_agent_start");
   assert.ok(inject !== undefined);
 
   const cwd = scaffoldRepo();
   writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
   writeSkill(cwd, "my-skill", "# my-skill\n");
   const reads: string[] = [];
-  const ctxFor = (stage: string | undefined) => ({
+  const ctxFor = (stage: string | undefined, mode?: string) => ({
     cwd,
     sessionManager: {
       getBranch: () => [
-        { type: "custom", customType: "perk:workflow-state", data: { run_id: "01RID", stage } },
+        {
+          type: "custom",
+          customType: "perk:workflow-state",
+          data: { run_id: "01RID", stage, mode },
+        },
       ],
       buildSessionProjection: () => {
         reads.push("projection");
@@ -527,6 +785,15 @@ test("Mechanism A: a failed projection read escapes the hook (no guessed copy); 
   // A binding stage: the render succeeds, the prompt carries no header, the projection throws —
   // the exception reaches the hook boundary (Pi's hook-error reporter), nothing is injected.
   await assert.rejects(inject({ prompt: "" }, ctxFor("save")), /adversarial projection read/);
+  assert.deepEqual(reads, ["projection"]);
+
+  // The stage-less read-only arm (plan mode → stage:plan) renders too, so a header-less prompt
+  // reaches the same throwing projection read.
+  reads.length = 0;
+  await assert.rejects(
+    inject({ prompt: "" }, ctxFor(undefined, "read-only")),
+    /adversarial projection read/,
+  );
   assert.deepEqual(reads, ["projection"]);
 
   // The prompt check settles a cold launch turn BEFORE any projection read.
@@ -541,4 +808,17 @@ test("Mechanism A: a failed projection read escapes the hook (no guessed copy); 
   assert.equal(await inject({ prompt: "" }, ctxFor(undefined)), undefined);
   assert.equal(await inject({ prompt: "" }, ctxFor("implement-nothing-binds")), undefined);
   assert.deepEqual(reads, [], "an inert stage never reads the projection");
+
+  // A runner child reads nothing at all — not even the branch.
+  const fenced = hooksFor(true).get("before_agent_start");
+  assert.ok(fenced !== undefined);
+  const unreadable = {
+    cwd,
+    sessionManager: {
+      getBranch: () => {
+        throw new Error("a runner child must not read the branch");
+      },
+    },
+  };
+  assert.equal(await fenced({ prompt: "" }, unreadable), undefined);
 });

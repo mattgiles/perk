@@ -803,13 +803,23 @@ function installPlanMode(pi: ExtensionAPI, gating: ToolGating, runnerChild: () =
     });
   }
 
-  // Inject the plan-authoring context while the read-only gate is active (display:false) for
+  // Inject the plan-authoring context while the session is in read-only mode (display:false) for
   // every stage no other authoring context owns (`isPlanGuidanceStage` over the FULL-branch
   // stage): the stage-less warm `/plan`, the cold `plan`/`objective-plan` claims, a worktree stage
   // with `/plan` toggled on. The objective/gist/refinement installers own their stages, so a
   // plan-mode turn followed by a warm `/objective-refine` retires the plan context there
   // (selection is also the retention decision — the shared helper strips the owned custom once
   // selection turns null). The runner fence lives in the shared helper.
+  //
+  // Plan guidance rides the PERSISTED read-only gate (`perk:workflow-state.mode`, the gate's state
+  // twin — the selection signal every injected context and the binding delivery read; never the
+  // gate object). In the one divergence window — a read-write sync/restore that throws leaves the
+  // in-memory gate closed (fail-closed) while the persisted mode is already `read-write` —
+  // enforcement stays closed and the gate's own `[READ-ONLY MODE]` context stays retained (both
+  // follow the enforcement gate), while plan guidance follows the human's declared intent and is
+  // retired; the next rebuild point (`session_start`/`session_tree` — `resources_discover` only
+  // re-applies the in-memory gate) re-syncs the gate from the persisted mode. `gating` stays for
+  // the toggle/announce surface.
   installInjectedContext(
     pi,
     {
@@ -817,10 +827,10 @@ function installPlanMode(pi: ExtensionAPI, gating: ToolGating, runnerChild: () =
       flavors: {
         [PLAN_MARKER]: (ctx) => planAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
       },
-      select: (_ctx, branch) =>
-        gating.isActive() && isPlanGuidanceStage(rebuildWorkflowState(branch).stage)
-          ? PLAN_MARKER
-          : null,
+      select: (_ctx, branch) => {
+        const state = rebuildWorkflowState(branch);
+        return state.mode === "read-only" && isPlanGuidanceStage(state.stage) ? PLAN_MARKER : null;
+      },
     },
     runnerChild,
   );

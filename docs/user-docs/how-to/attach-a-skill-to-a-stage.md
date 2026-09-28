@@ -18,7 +18,8 @@ repository, commit, push, and sync it before binding it.
 ## Steps
 
 1. **Choose the trigger kind.** Use `stage:<id>` when the target is a registry stage; that one
-   binding covers the stage's cold launcher and warm command. Use `command:<id>` only for a
+   binding covers the stage's cold launcher and warm command (and, for `stage:plan`, `/plan`
+   toggled on in a plain session). Use `command:<id>` only for a
    deliverable command that is not itself a registry stage. Look up the accepted ids instead of
    guessing: a syntactically valid command trigger with no delivery surface cannot fire.
 2. **Choose the delivery mode.** Use `nudge` to add a short instruction that points the model to the

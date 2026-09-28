@@ -844,11 +844,12 @@ export default function perk(
   // toward a code-routing plan. Guidance-injection only (no model tool).
   installLearnFactoryBindings(pi);
 
-  // Warm-door skill-binding delivery: Mechanism A's `before_agent_start` injection of
-  // the launched stage's user-originated bindings (+ the stale-context strip). Mechanism B (the
-  // `command:<id>` suffix) is wired into the `/objective-reconcile` + `/learn-docs` +
-  // `/learn-code` guidance.
-  registerBindingDelivery(pi);
+  // Warm-door skill-binding delivery: Mechanism A's `before_agent_start` injection of the
+  // session's resolved trigger's bindings — the recorded stage's, or plan mode's `stage:plan` for a
+  // stage-less read-only session (+ the render-exact stale-copy strip). Fenced by the REAL runner
+  // closure: a floored lane persists the same stage-less read-only shape. Mechanism B (the
+  // `stage:<id>` / `command:<id>` suffix) is wired into the warm commands' own guidance.
+  registerBindingDelivery(pi, () => runnerChild);
 
   // `/perk-selfcheck` — the session-wiring verifier (turned from a liveness ping into a real check
   // that the converged ambient index reached `appendSystemPrompt` and the managed `AGENTS.md` block

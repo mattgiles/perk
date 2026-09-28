@@ -851,8 +851,10 @@ removed). The allowlist is restored on both `session_start` and `session_tree` (
 from the rebuilt `mode`) and re-applied once at `resources_discover` from the in-memory
 mode/stage (§8.40). **Fail-closed:** a failed state-rebuild never opens the gate, and
 `tool_call` blocks on any internal error. The `enter(ctx?)`/`exit(ctx?)` surface is the API the
-interior consumers (plan mode, the authoring installers, the CI executor) compose — the gate is
-the single read-only authority. Beside the gate, the same rebuild points apply **stage-scoped active tools** keyed off the
+interior consumers compose — the gate-**entry** consumers are plan mode (`/plan`, `--plan`,
+`Ctrl+Alt+P`), the warm `/objective-plan` factory and the warm `/objective-refine` entry; `exit`
+rides the plan-mode toggle and the save/exit doors (the CI executor never touches the gate) —
+and the gate is the single read-only authority. Beside the gate, the same rebuild points apply **stage-scoped active tools** keyed off the
 `stage` field (§8.40) — fail-open where the gate is fail-closed.
 
 **Authoring guidance selection.** Plan guidance rides the read-only gate for every stage
@@ -861,7 +863,16 @@ reasons: the stages another context OWNS (the dedicated objective/gist/refinemen
 `objective-save` via `plan_review`'s objective-arm routing), and the read-only `audit` door,
 which authors nothing. Admitted: a stage-less warm `/plan`, the cold `plan`/`objective-plan`
 claims, a worktree stage with `/plan` on. The objective/gist/refinement contexts key on (gate AND
-their exact stage). NO injected authoring or adapter context reaches a runner child: the fence is
+their exact stage). The selection signal is the **persisted** `mode` (`perk:workflow-state.mode`,
+the gate's state twin — never the gate object): every injected context and the binding delivery
+read it from the rebuilt branch. The two agree whenever a gate sync succeeds; in the one
+divergence window — a read-write sync/restore that throws keeps the in-memory gate closed
+(fail-closed) while the persisted mode is already `read-write` — enforcement and the
+`[READ-ONLY MODE]` context (which follow the enforcement gate) stay, plan guidance is retired
+(it follows the human's declared intent), and the next rebuild point (`session_start` /
+`session_tree`) re-syncs the gate from the persisted mode. The `stage:plan` skill bindings follow
+the same stage-less rule (§8.9: a stage-less session in plan mode resolves to `stage:plan`). NO
+injected authoring or adapter context reaches a runner child: the fence is
 `installInjectedContext`'s third argument, fed the composition root's `runnerChild` closure (the
 `isRunnerChild` bit of the runner restriction floor below, re-read every `session_start`) —
 suppression only, never a grant; the `[READ-ONLY MODE]` guidance and the engine's child tools
@@ -3043,30 +3054,45 @@ twin of the cold door. `resolvedBindings(cwd)` is the TS mirror of cold's `resol
 .bindings` — the **full resolved** overlay (defaults ⊕ user, no subtraction), and
 `renderBindings(cwd, trigger)` / `bindingSuffix(cwd, trigger)` render exactly as the cold door does.
 It delivers at two **warm surfaces**: **Mechanism A** — a `before_agent_start` handler injects the
-launched **`stage:<id>`** bindings as a hidden (`display:false`) `perk:binding-context` message
-(mirroring the plan-mode injection in `pi/v1/plan.ts` / `pi/v1/objectiveAuthoring.ts`). This is the delivery path for **`stage:plan`**'s
-`perk-plan` pointer: a cold `perk plan` launches **idle** (no prompt to augment), so the `plan`
-skill pointer is delivered explicitly here. **Mechanism B** — `bindingSuffix` is
+session's **resolved trigger**'s bindings as a hidden (`display:false`) `perk:binding-context`
+message (mirroring the plan-mode injection in `pi/v1/plan.ts` / `pi/v1/objectiveAuthoring.ts`).
+The resolved trigger (`activeBindingTrigger`, a pure function of the rebuilt workflow state) is the
+recorded **`stage:<id>`** whenever a stage is recorded (whatever the gate — a `/plan` toggle inside
+a stage-recorded session keeps the run's own bindings); for a **stage-less** session it is
+**`stage:plan`** iff the persisted `perk:workflow-state.mode` is `read-only` — **plan mode**, the
+same session `isPlanGuidanceStage` admits for plan guidance (§8.3): the warm `/plan` toggle and
+every other stage-less gated session; nothing otherwise. Plan mode is a *mode*, never a recorded
+*stage*. This is the delivery path for **`stage:plan`**'s `perk-plan` pointer: a cold `perk plan`
+launches **idle** (no prompt to augment) and a warm `/plan` records no stage, so the `plan` skill
+pointer is delivered explicitly here. **Mechanism B** — `bindingSuffix` is
 appended into the guidance of **every** perk warm slash-command so each **self-delivers** its
 pointer: `/address`→`stage:address`, `/learn`→`stage:learn`, `/objective-plan`→`stage:objective-plan`
-(a warm `/objective-plan` run *outside* a `stage:objective-plan` session would otherwise get none
-from Mechanism A), `/objective-reconcile`→`command:objective-reconcile`, `/learn-docs`→
-`command:learn-docs`. Delivery is the **single path** for perk's own nudges
+(a warm `/objective-plan` records no stage, so Mechanism A resolves it to `stage:plan`, never
+`stage:objective-plan`; its seeded render is user-turn evidence, so `stage:plan` is delivered there
+only once no seeded header is live — eligibility, not a guarantee: a factory session that saves
+before compaction may never see it), `/objective-reconcile`→`command:objective-reconcile`,
+`/learn-docs`→`command:learn-docs`. Delivery is the **single path** for perk's own nudges
 and **never double-delivers**.
 
 The **cross-plane dedup marker is the render header itself** — `BINDING_HEADER` (TS) is pinned
 byte-for-byte to the cold `_HEADER` (Python) by a literal test in **both** planes. The cold door
 already puts `stage:<id>` bindings in a cold-launched session's **initial prompt**, and
-`before_agent_start` fires for that same session, so Mechanism A injects **iff** a launched `stage`
-exists (read from the **full branch** — eligibility survives compaction), the resolved render is
-non-empty (render-before-dedup: an inert stage reads no projection), the submitting turn's prompt
-(`event.prompt`) does not carry `BINDING_HEADER`, **and** Pi's **live context projection** does
-not already deliver it. Live evidence is Pi-owned and typed (`extension/pi/v1/contextEvidence.ts`):
+`before_agent_start` fires for that same session, so Mechanism A injects **iff** the session
+is not a runner child, it resolves a trigger (read from the **full branch** — eligibility survives
+compaction), the resolved render is non-empty (render-before-dedup: an inert session reads no
+projection), the submitting turn's prompt (`event.prompt`) does not carry `BINDING_HEADER`,
+**and** Pi's **live context projection** does not already carry a live delivery. Live evidence
+is Pi-owned and typed (`extension/pi/v1/contextEvidence.ts`):
 `sessionManager.buildSessionProjection().messages` — Pi's canonical projection of the current
-leaf with compaction selection AND `context_edit` omission/replacement applied — asked whether
-the header rides **user content** (the persisted cold prompt) or a **`perk:binding-context`
-custom** (a prior warm inject); an omitted owned copy re-injects, a replaced copy counts only if
-the replacement still carries the header. Perk reconstructs no compaction cutoff, replays no
+leaf with compaction selection AND `context_edit` omission/replacement applied — and it is
+**two-kinded**: a **user** turn carrying `BINDING_HEADER` (a door's own delivery — the persisted
+cold prompt or a warm command's Mechanism B seed — whatever it rendered; the cross-plane dedup
+marker is still the header), **or** an owned **`perk:binding-context` custom** whose content IS
+the **current render** byte-exactly (a prior warm inject). An owned copy of a **superseded**
+render (the session's trigger changed — a stage-less `/plan` followed by `/objective-refine` — or
+the overlay was edited) is **stale**: not evidence, and retired by the `context` strip below. An
+omitted owned copy re-injects; a replaced copy counts only if the replacement is still the current
+render. Perk reconstructs no compaction cutoff, replays no
 edits, and inspects no storage fields; assistant/
 tool/bash output, other customs, plain `custom` state, and compaction/branch summaries quoting the
 header are never evidence. This distinction is load-bearing because Pi's branch is append-only:
@@ -3080,10 +3106,16 @@ ongoing value — later prompts don't carry the header, so the prompt scan stays
 projection read failure **escapes the hook** to Pi's hook-error reporting — no guessed copy is
 injected, and no retry/warning-dedup state exists. Mechanism B is a one-shot `sendUserMessage`
 suffix at an invocation distinct from any cold launch, so it cannot auto-double. A
-narrower-than-plan-mode `context` strip (which never reads the projection) removes a **stale**
-`perk:binding-context` custom (stage changed / overlay removed) while **never** stripping a user
-message that carries the header (a cold prompt legitimately does — even after the stage stops
-binding). Resolver shape `issues` are **not** surfaced warm (the cold launch + doctor
+narrower-than-plan-mode, **render-exact** `context` strip (which never reads the projection)
+retains an owned `perk:binding-context` custom only while it IS the current render and removes
+every other owned copy (a superseded trigger, an edited overlay, or every copy when nothing
+renders) while **never** stripping a user message that carries the header (a cold prompt or a warm
+seed legitimately does — even after the trigger stops binding). **Runner fence:** Mechanism A never
+fires in a runner child (`PI_SUBAGENT_CHILD === "1"`, the composition root's runner closure — the
+fence every injected authoring context takes; §8.3), and its strip treats a runner child as
+"nothing renders": a floored wave lane persists the identical stage-less `{mode: "read-only"}`
+shape a warm `/plan` leaves, so without the fence every lane would receive `stage:plan`.
+Suppression only, never a grant. Resolver shape `issues` are **not** surfaced warm (the cold launch + doctor
 own them); only the delivery `warnings` are loud-but-non-fatal: Mechanism A and
 `bindingSuffix` (Mechanism B) both `console.error` them.
 The injection-time mirror is **skill-presence only** (the trigger is fixed at
@@ -3234,7 +3266,8 @@ reader cannot.
 
 **Shipped set:** the reference entry `perk-plan` (seam `plan`, `package: null` / `adapter: null` /
 `default: true`), plus **real** foreign plan entries. On the **plan** seam, `tombell-plan`
-(→ `npm:@tombell/pi-plan`, `adapter: planAdapterTombell`) REPLACEs perk's plan surface (perk
+(→ `npm:@tombell/pi-plan`, `adapter: planAdapterTombell`; deprecated — kept selectable;
+`plannotator-plan` is the first-class foreign plan provider) REPLACEs perk's plan surface (perk
 vacates at registration time + the adapter bridges the foreign one) and `plannotator-plan`
 AUGMENTs it (`shared/providers.yaml`, `extension/pi/v1/plan.ts` +
 `extension/pi/v1/providers/selection.ts`). There is **no askuser
@@ -4925,7 +4958,7 @@ emitted remains unrecoverable — the human re-runs the door.
   |---|---|---|---|
   | `perk-plan` | `PLAN_AUTHORING_CONTEXT` | first-party in-TUI review | present + `/plan-save` |
   | `plannotator-plan` | `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` | browser bridge | present + `/plan-save` |
-  | `tombell-plan` | `PLAN_ADAPTER_TOMBELL_CONTEXT` (conditioned injection) | first-party in-TUI review | present + `/plan-save` (incl. tombell's own interactive `/plan` `setActiveTools` restriction arm) |
+  | `tombell-plan` (deprecated — kept selectable; `plannotator-plan` is the first-class foreign plan provider) | `PLAN_ADAPTER_TOMBELL_CONTEXT` (conditioned injection) | first-party in-TUI review | present + `/plan-save` (incl. tombell's own interactive `/plan` `setActiveTools` restriction arm) |
 
   `PLAN_AUTHORING_CONTEXT` and the plannotator/tombell plan flavors follow §8.3's authoring
   guidance selection (the gate, in every stage `isPlanGuidanceStage` admits). Under the
@@ -7142,10 +7175,12 @@ asymmetry). Selection precedence + the two roots are §8.1. The rest of the post
    rendered bindings as a prompt suffix (`render_cold_bindings`); warm sessions and the remote
    worker receive the same render via §8.9 Mechanism A (in-session injection), dedup'd by
    `BINDING_HEADER` — on the launch turn via the submitting prompt, thereafter via Pi's own
-   live context projection (the persisted cold prompt as user content or the owned
-   `perk:binding-context` custom; §8.9), so neither path double-delivers and a compaction that
+   live context projection (the persisted cold prompt as user content or an owned
+   `perk:binding-context` custom of the current render; §8.9), so neither path double-delivers and a compaction that
    drops the delivery from Pi's projection re-delivers on either path. Content byte-parity is
-   enforced (`tests/test_binding_render_parity.py`).
+   enforced (`tests/test_binding_render_parity.py`). The stage-less warm `/plan` has **no cold
+   twin** (every cold launch records a stage); Mechanism A resolves it to `stage:plan` (§8.9) —
+   the same render, the same header dedup against door-seeded user turns.
    Skill *installation* also differs by path: cold-local mirrors `repo_root/.agents/skills/`
    into the worktree (`materialize_skills`, loud-but-non-fatal); the remote worker populates the
    checkout's `.agents/skills/` via the skills-CLI sync during positioning (**fatal**,
@@ -14035,10 +14070,11 @@ add docs <url> …`, the human `perk librarian refresh <slug>`) are the terminal
 section carries a one-sentence pointer naming the skill and its
 `.agents/skills/librarian/SKILL.md` read path (the external-dependency trigger, phrased as
 awareness rather than a step; never a `perk librarian` verb or `run_librarian`), pinned by
-`tests/test_skill_semantic_contracts.py`; it is live wherever `perk-plan` is delivered (a cold
-`perk plan` / `plan from` session and a warm `/plan` inside one — never a warm `/plan` outside a
-plan-stage session, which records no stage and so receives no `stage:plan` nudge). Shapes that do
-not receive `perk-plan` reach the skill only ambiently — by its `description` and its `stages:`
+`tests/test_skill_semantic_contracts.py`; it is live wherever `perk-plan` is delivered — a cold
+`perk plan` / `plan from` session, a warm `/plan` inside one, **and** a stage-less warm `/plan`
+(plan mode resolves to `stage:plan`, §8.9). Shapes that do not receive `perk-plan` (a runner
+child; a session whose recorded stage binds another skill; a stage-less warm factory while its own
+seeded header is live) reach the skill only ambiently — by its `description` and its `stages:`
 exposure (`plan`, `objective-plan`) — or through a skill that cross-references `perk-plan`;
 operator prose is `docs/user-docs/explanation/the-perk-library.md` and
 `how-to/keep-an-offline-reference-of-a-dependency.md`, mirrored by the `perk-expert`

@@ -69,6 +69,20 @@ export function contextCarriesMarker(
   });
 }
 
+/**
+ * Whether a USER message in `messages` carries `marker` — the same string-or-text-part scan as
+ * {@link contextCarriesMarker}, with no owned-custom arm (a door's seeded or persisted prompt,
+ * never a hidden injection).
+ */
+export function userContentCarriesMarker(
+  messages: readonly ContextMessage[],
+  marker: string,
+): boolean {
+  return messages.some(
+    (message) => message.role === "user" && contentCarries(message.content, marker),
+  );
+}
+
 /** Narrow runtime content check (session files are parsed unvalidated — trust shapes, not types). */
 function contentCarries(content: unknown, marker: string): boolean {
   if (typeof content === "string") return content.includes(marker);

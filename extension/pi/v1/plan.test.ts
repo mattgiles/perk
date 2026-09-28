@@ -34,7 +34,7 @@ import { sessionDataDir } from "../../substrate/cache.ts";
 import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import { digestSessionData } from "../../substrate/sessionData.ts";
 import { readSessionPointers } from "../../substrate/sessionPointers.ts";
-import type { ToolGating } from "../../substrate/toolGating.ts";
+import { READ_ONLY_CONTEXT, type ToolGating } from "../../substrate/toolGating.ts";
 import type { BranchEntry, EntrySink } from "../../substrate/workflowState.ts";
 import { rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
@@ -200,6 +200,51 @@ test("/plan round-trip: on -> read-only + write blocked + plan-context injected;
       preserved,
       "the owned plan-context copy is removed when off; user input survives byte-for-byte",
     );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("plan guidance follows the persisted mode: a stuck gate (failed read-write restore) keeps enforcement and the mode context, retires plan guidance until the next rebuild point", async () => {
+  const cwd = scaffoldRepo();
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.inMemory(cwd) });
+  try {
+    await h.invokeCommand("plan");
+    assert.ok(
+      (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
+      "plan guidance while the gate and the persisted mode agree",
+    );
+
+    // The divergence window a throwing read-write `apply` leaves: `exit()` already appended
+    // `read-write`, but the in-memory gate never opened (fail-closed). Appended directly — no sync.
+    h.session.sessionManager.appendCustomEntry(WORKFLOW_STATE_TYPE, { mode: "read-write" });
+    assert.equal(h.workflowState().mode, "read-write");
+    assert.equal(
+      (await h.emitToolCall("write", { path: "x", content: "y" }))?.block,
+      true,
+      "enforcement follows the in-memory gate and stays closed",
+    );
+    assert.equal(
+      (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
+      false,
+      "plan guidance follows the persisted mode (the human's declared intent)",
+    );
+    const modeContext = { customType: "perk:mode-context", content: READ_ONLY_CONTEXT };
+    const user = { role: "user", content: "a normal message" };
+    const surviving = await h.emitContext([
+      { customType: PLAN_CONTEXT_TYPE, content: "[PLAN AUTHORING] stale" },
+      { ...modeContext },
+      { ...user },
+    ]);
+    assert.deepEqual(
+      surviving,
+      [modeContext, user],
+      "the plan copy retires; the gate's own mode context and the user turn stay",
+    );
+
+    // A rebuild point re-syncs the gate from the persisted mode.
+    await h.emitSessionStart();
+    assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, undefined);
   } finally {
     h.dispose();
   }

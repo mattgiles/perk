@@ -107,7 +107,9 @@ providers:
     default: true            # the behavior-preserving no-config pick for the plan seam
 
   # --- foreign entries ---
-  - id: tombell-plan         # REAL plan provider (Node 2.3) — planAdapterTombell bridges it
+  - id: tombell-plan         # REAL plan provider, DEPRECATED (kept selectable) — planAdapterTombell bridges it
+    # Deprecated: `plannotator-plan` is the first-class foreign plan provider; tombell stays
+    # selectable with no behavior change, and new plan-surface behavior is not extended to it.
     seam: plan
     package: "npm:@tombell/pi-plan"   # the foreign Pi package to add to `packages`
     adapter: "planAdapterTombell"     # the perk-owned shim bridging surface → cache.plan-ref

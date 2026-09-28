@@ -26,7 +26,9 @@ owns only an interface, so perk yields that interface without bridging an artifa
   register `/plan`, `--plan`, or `Ctrl+Alt+P`, avoiding duplicate names with
   `@tombell/pi-plan`. The `planAdapterTombell` prompt bridge remains available and directs the
   foreign prose result through perk's review/save flow. It lands the same plan contract; it does
-  not drive the foreign tool or replace perk's read-only gate.
+  not drive the foreign tool or replace perk's read-only gate. Deprecated: kept selectable;
+  `plannotator-plan` is the first-class foreign plan provider, and new plan-surface behavior
+  (including `stage:plan` binding delivery) is not extended to tombell's self-enforced `/plan` arm.
 - **`plannotator-plan` — AUGMENT.** perk keeps `/plan`, its authoring context, and the read-only
   gate. It vacates only `--plan`, `Ctrl+Alt+P`, and the matching startup handler because
   plannotator registers those surfaces. `planAdapterPlannotator` sends the draft to the browser
@@ -56,7 +58,9 @@ objective stages, gist flavor in `gist-author`, refinement flavor in `objective-
 flavor otherwise); under `tombell-plan` the bridge additionally honors tombell's own persisted
 plan-mode state when perk's gate is off. Reviewer and other subagent children never receive perk's
 authoring or adapter guidance, even when their session history carries it; their read-only
-restrictions and engine tools are unaffected.
+restrictions and engine tools are unaffected. The `stage:plan` skill bindings follow the same rule:
+a gated session with no recorded stage receives them too (see the `[[bindings]]`
+[delivery semantics](../configuration/skills-and-bindings.md#bindings)).
 
 Consequences worth knowing:
 

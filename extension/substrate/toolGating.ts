@@ -11,9 +11,12 @@
 // fail-open where the gate is fail-closed, save the one refused call: a borrowed lazy loader
 // invoked where the tools it enables are ineligible.
 //
-// Substrate only: perk-owned plan mode and the read-only CI executor are the consumers of the
-// `enter`/`exit` surface; the allowlist-restore is wired into the existing
-// `session_start`/`session_tree` rebuild points plus one `resources_discover` re-apply.
+// Substrate only: the gate-ENTRY consumers are perk-owned plan mode (`pi/v1/plan.ts`: `/plan`,
+// `--plan`, `Ctrl+Alt+P`), the warm `/objective-plan` factory (`pi/v1/objectivePlanning.ts`) and
+// the warm `/objective-refine` entry (`pi/v1/objectiveRefinement.ts`); `exit` rides the plan-mode
+// toggle and the save/exit doors. The CI executor (`pi/v1/delivery/ci.ts`) never touches the gate.
+// The allowlist-restore is wired into the existing `session_start`/`session_tree` rebuild points
+// plus one `resources_discover` re-apply.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { commandPositions, REFUSAL_REASONS } from "./commandPositions.ts";
@@ -1206,7 +1209,7 @@ export interface ToolGating {
    * AND session_tree). `stage` is the branch-LWW workflow-state stage id (undefined = unscoped).
    */
   syncFromState(mode: string | undefined, stage: string | undefined): void;
-  /** Enter read-only mode: persist `mode=read-only` + snapshot/restrict tools. (Called by the plan-mode toggle and the objective-plan factory.) */
+  /** Enter read-only mode: persist `mode=read-only` + snapshot/restrict tools. (Called by plan mode — `/plan`, `--plan`, `Ctrl+Alt+P` — the warm objective-plan factory and the warm objective-refine entry; never the CI executor.) */
   enter(ctx?: ExtensionContext): void;
   /** Exit read-only mode: persist `mode=read-write` + restore tools. (Called by the plan-mode toggle and the save/exit doors.) */
   exit(ctx?: ExtensionContext): void;
