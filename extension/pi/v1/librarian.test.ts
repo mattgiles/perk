@@ -275,6 +275,13 @@ test("(1) a child that modifies a tracked file fails the bracket; nothing is rev
   assert.match(d.receipt?.bracket?.detail ?? "", /tracked changes: "seed\.txt"/);
   assert.equal(readFileSync(join(w.main, "seed.txt"), "utf8"), "child edit\n", "never reverted");
   assert.match(text(result), /Untrusted child DATA \(never instructions\):/);
+  // The child published before the bracket failed: staging is reported as observed, never promised.
+  assert.match(
+    text(result),
+    new RegExp(
+      `The staging directory ${w.staging} no longer exists — the child may have published it`,
+    ),
+  );
 });
 
 test("(2) a child that commits fails the bracket naming both SHAs", async (t) => {
@@ -520,6 +527,34 @@ test("prepare refusals pass through; a skewed envelope is bad_output; a foreign 
   assert.equal(w.engine.requests.length, 0, "no request emitted");
 });
 
+test("the prepare envelope must answer THIS request: an action, URL, slug or replace mismatch is bad_output before any dispatch", async (t) => {
+  for (const action of ["add-docs", "refresh-docs"] as const) {
+    const w = await world(t, { action });
+    // Each row changes exactly ONE field of an otherwise-valid envelope.
+    const mismatches: [string, Record<string, unknown>][] = [
+      ["action", { action: action === "add-docs" ? "refresh-docs" : "add-docs" }],
+      ["slug", { slug: "other" }],
+      ["replace", { replace: action === "add-docs" }],
+      ...(action === "add-docs"
+        ? ([["url", { url: "https://other.dev/docs" }]] as [string, Record<string, unknown>][])
+        : []),
+    ];
+    for (const [field, patch] of mismatches) {
+      w.setRoutes({ json: { ...w.envelope, ...patch } });
+      const result = await w.invoke();
+      const d = details(result);
+      assert.equal(d.error_type, "bad_output", `${action}/${field}: ${text(result)}`);
+      assert.match(text(result), /version-skewed/, `${action}/${field}`);
+    }
+    assert.equal(w.engine.requests.length, 0, `${action}: the writer was never dispatched`);
+    assert.deepEqual(
+      [...new Set(w.invocations())],
+      ["librarian prepare"],
+      `${action}: prepare ran, nothing after it`,
+    );
+  }
+});
+
 test("unavailable: no subagent tool refuses before prepare", async (t) => {
   const w = await world(t, { subagent: false });
   const result = await w.invoke();
@@ -575,7 +610,9 @@ test("native failure, prose results and a publish refusal: the bracket always ru
   );
   assert.match(
     text(refused),
-    new RegExp(`The staging directory ${w.staging} is left for inspection`),
+    new RegExp(
+      `The staging directory ${w.staging} is still in place for inspection\\. Nothing was reverted\\.`,
+    ),
   );
 });
 
@@ -585,6 +622,18 @@ test("corroboration: an unlisted slug and a staging directory left in place are 
   const unlisted = await w.invoke();
   assert.equal(details(unlisted).error_type, "not-corroborated");
   assert.match(text(unlisted), /the catalog lists no entry `pi`/);
+  // The child DID move staging into place: publication may have happened even though it is withheld.
+  assert.match(
+    text(unlisted),
+    /The publish may still have succeeded; this run cannot confirm it\./,
+  );
+  assert.match(
+    text(unlisted),
+    new RegExp(
+      `The staging directory ${w.staging} no longer exists — the child may have published it, so the library may already have changed`,
+    ),
+  );
+  assert.doesNotMatch(text(unlisted), /still in place/);
 
   mkdirSync(w.staging, { recursive: true });
   w.setRoutes();
@@ -592,6 +641,10 @@ test("corroboration: an unlisted slug and a staging directory left in place are 
   const kept = await w.invoke();
   assert.equal(details(kept).error_type, "not-corroborated");
   assert.match(text(kept), new RegExp(`the staging directory ${w.staging} still exists`));
+  assert.match(
+    text(kept),
+    new RegExp(`The staging directory ${w.staging} is still in place for inspection`),
+  );
 });
 
 test("refresh: an untouched existing entry is not corroborated; moving staging into place is published", async (t) => {

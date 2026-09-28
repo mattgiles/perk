@@ -160,6 +160,22 @@ function stagingState(path: string): StagingState {
   }
 }
 
+/**
+ * The staging directory's OBSERVED state once a request was emitted — never a promise that it
+ * was retained: a successful `record --publish` moves it into place, so its absence means the
+ * library may already have changed even when this run fails or withholds.
+ */
+function stagingNote(stagingDir: string, state: StagingState = stagingState(stagingDir)): string {
+  switch (state) {
+    case "present":
+      return `The staging directory ${stagingDir} is still in place for inspection.`;
+    case "absent":
+      return `The staging directory ${stagingDir} no longer exists — the child may have published it, so the library may already have changed; check \`perk librarian list --json\`.`;
+    case "unknown":
+      return `The staging directory ${stagingDir}'s state could not be checked, so the library may already have changed; check \`perk librarian list --json\`.`;
+  }
+}
+
 function withRecord(message: string, record: LibrarianRecord | null | undefined): string {
   return record ? `${message}\n\n${DATA_PREFACE}\n${fencedJson(record)}` : message;
 }
@@ -330,7 +346,7 @@ async function runLibrarian(
     return failed(
       "bracket-violation",
       withRecord(
-        `The main checkout ${main} moved while the perk.librarian child ran: ${bracket.detail}. Nothing was reverted — inspect \`git status\` there and recover by hand (the staging directory ${plan.stagingDir} may hold the crawl). Native status: ${nativeStatus}.`,
+        `The main checkout ${main} moved while the perk.librarian child ran: ${bracket.detail}. Nothing was reverted — inspect \`git status\` there and recover by hand. ${stagingNote(plan.stagingDir)} Native status: ${nativeStatus}.`,
         record,
       ),
       record ?? undefined,
@@ -344,7 +360,7 @@ async function runLibrarian(
     return failed(
       outcome.failure,
       withRecord(
-        `The perk.librarian child did not complete cleanly (${outcome.failure}; native status ${nativeStatus}).${unconfirmed} The staging directory ${plan.stagingDir} is left for inspection; nothing was reverted.`,
+        `The perk.librarian child did not complete cleanly (${outcome.failure}; native status ${nativeStatus}).${unconfirmed} ${stagingNote(plan.stagingDir)} Nothing was reverted.`,
         record,
       ),
       record ?? undefined,
@@ -353,7 +369,7 @@ async function runLibrarian(
   if (!outcome.terminal)
     return failed(
       "termination-unconfirmed",
-      `The perk.librarian child produced no terminal. The staging directory ${plan.stagingDir} is left for inspection; nothing was reverted.`,
+      `The perk.librarian child produced no terminal. ${stagingNote(plan.stagingDir)} Nothing was reverted.`,
     );
 
   const verdict = classifyLibrarianRecord(
@@ -366,17 +382,18 @@ async function runLibrarian(
     return failed(
       verdict.reason,
       verdict.reason === "native-failed"
-        ? `The perk.librarian child ended natively as ${nativeStatus}; no record is trusted. The staging directory ${plan.stagingDir} is left for inspection; nothing was reverted.`
-        : `The perk.librarian child completed without a schema-valid record. The staging directory ${plan.stagingDir} is left for inspection; nothing was reverted.`,
+        ? `The perk.librarian child ended natively as ${nativeStatus}; no record is trusted. ${stagingNote(plan.stagingDir)} Nothing was reverted.`
+        : `The perk.librarian child completed without a schema-valid record. ${stagingNote(plan.stagingDir)} Nothing was reverted.`,
     );
   const withheld = (
     reason: "not-published" | "invalid-outcome" | "not-corroborated",
     report: LibrarianRecord,
     detail: string,
+    staging?: StagingState,
   ) =>
     fail(
       withRecord(
-        `Librarian withheld: ${reason} — ${detail}. The staging directory ${plan.stagingDir} is left for inspection; nothing was reverted.`,
+        `Librarian withheld: ${reason} — ${detail}.${reason === "not-corroborated" ? " The publish may still have succeeded; this run cannot confirm it." : ""} ${stagingNote(plan.stagingDir, staging)} Nothing was reverted.`,
         report,
       ),
       reason,
@@ -402,8 +419,10 @@ async function runLibrarian(
       verdict.report,
       `the catalog could not be read to corroborate the claim (${listing.errorType}: ${boundedDetail(listing.message)})`,
     );
-  const corroborated = corroboratePublication(plan, listing.data, stagingState(plan.stagingDir));
-  if (!corroborated.ok) return withheld("not-corroborated", verdict.report, corroborated.detail);
+  const staging = stagingState(plan.stagingDir);
+  const corroborated = corroboratePublication(plan, listing.data, staging);
+  if (!corroborated.ok)
+    return withheld("not-corroborated", verdict.report, corroborated.detail, staging);
   const result: LibrarianResult = {
     kind: "published",
     report: verdict.report,

@@ -309,12 +309,23 @@ function listing(cwd: string, args: string[]): string | null {
 /**
  * The tracked paths with uncommitted changes (staged or not) — `[]` = the tracked tree is clean;
  * untracked and ignored paths never appear. Parses `status --porcelain=v1 -z
- * --untracked-files=no`: a record whose X or Y status is a rename/copy is followed by its
- * original path as the next NUL token, which is consumed (the new path is reported). **Fails
- * closed to null** on any failure — never conflate null with clean.
+ * --untracked-files=no --ignore-submodules=none`: a record whose X or Y status is a rename/copy
+ * is followed by its original path as the next NUL token, which is consumed (the new path is
+ * reported). `--ignore-submodules=none` overrides every `submodule.<name>.ignore` /
+ * `diff.ignoreSubmodules` setting (`.gitmodules` included), so a submodule whose HEAD moved or
+ * whose content is dirty — untracked files inside it included — is a changed path, never
+ * hidden by configuration (a submodule's own untracked content is therefore an unclean start:
+ * the superproject inventory cannot see inside it). **Fails closed to null** on any failure —
+ * never conflate null with clean.
  */
 export function trackedChanges(cwd: string): string[] | null {
-  const out = listing(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=no"]);
+  const out = listing(cwd, [
+    "status",
+    "--porcelain=v1",
+    "-z",
+    "--untracked-files=no",
+    "--ignore-submodules=none",
+  ]);
   if (out === null) return null;
   const tokens = out.split("\0");
   const paths: string[] = [];

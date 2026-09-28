@@ -391,3 +391,48 @@ test("checkoutBracket / checkoutCleanStart: the probes seam's null arms fail clo
     assert.equal(outcome.moved.probeFailures?.length, 1, `end ${label}`);
   }
 });
+
+test("trackedChanges / the bracket: submodule ignore settings never hide a dirty, untracked-bearing or moved submodule", () => {
+  // `.gitmodules` asks git to ignore the submodule entirely (`ignore = all`); the probe must
+  // override it, or a child could edit files outside the library inside a submodule unseen.
+  const { cwd } = scratchRepo();
+  const sub = join(cwd, "sub");
+  mkdirSync(sub);
+  run(sub, "init", "-q");
+  run(sub, "config", "user.email", "t@example.com");
+  run(sub, "config", "user.name", "perk tests");
+  writeFileSync(join(sub, "a.txt"), "a\n", "utf8");
+  run(sub, "add", "-A");
+  run(sub, "commit", "-qm", "sub");
+  writeFileSync(
+    join(cwd, ".gitmodules"),
+    '[submodule "sub"]\n\tpath = sub\n\turl = ./sub\n\tignore = all\n',
+    "utf8",
+  );
+  run(cwd, "add", ".gitmodules", "sub");
+  run(cwd, "commit", "-qm", "add sub");
+  run(cwd, "config", "diff.ignoreSubmodules", "all");
+  assert.deepEqual(trackedChanges(cwd), [], "a clean submodule is clean");
+  const start = checkoutCleanStart(cwd);
+  assert.ok(start.ok);
+
+  writeFileSync(join(sub, "a.txt"), "edited inside the submodule\n", "utf8");
+  assert.deepEqual(trackedChanges(cwd), ["sub"], "dirty submodule content");
+  assert.equal(checkoutCleanStart(cwd).ok, false, "a dirty submodule is an unclean start");
+  const dirty = checkoutBracket(cwd, start.snapshot);
+  assert.ok(!dirty.ok);
+  assert.match(dirty.detail, /tracked changes: "sub"/);
+  run(sub, "checkout", "--", "a.txt");
+
+  writeFileSync(join(sub, "untracked.txt"), "u\n", "utf8");
+  assert.deepEqual(trackedChanges(cwd), ["sub"], "untracked content inside the submodule");
+  rmSync(join(sub, "untracked.txt"));
+
+  writeFileSync(join(sub, "b.txt"), "b\n", "utf8");
+  run(sub, "add", "-A");
+  run(sub, "commit", "-qm", "moved");
+  assert.deepEqual(trackedChanges(cwd), ["sub"], "a moved submodule HEAD");
+  const moved = checkoutBracket(cwd, start.snapshot);
+  assert.ok(!moved.ok);
+  assert.match(moved.detail, /tracked changes: "sub"/);
+});

@@ -14201,7 +14201,11 @@ shared transport `extension/pi/v1/foregroundDelegation.ts`, the snapshot policy
   `record --publish` moves it into place, the only sanctioned removal); an entry alone cannot
   tell a refresh from the untouched prior mirror. Presence, an unreadable state or a failed
   listing withholds `not-corroborated`. A `published` result renders the **catalog's** absolute
-  path and status, never the child's `published_path`.
+  path and status, never the child's `published_path`. Every post-dispatch failure or withholding
+  reports the staging directory's **observed** state, never promised retention: present → left
+  for inspection; absent → the child may have published, so the library may already have changed;
+  unreadable → unknown. A `not-corroborated` withholding says the publish may still have
+  succeeded.
 - *The receipt* (whitelist): parent session/run ids, request id, `nodeId`, action, slug, `cwd`,
   staging directory, `termination`, native status/run id/agent/exit code, the native config
   observation, the bracket outcome — no task, report text, raw error or output.
@@ -14212,7 +14216,10 @@ shared transport `extension/pi/v1/foregroundDelegation.ts`, the snapshot policy
   `bad_input`, the envelope arm `bad_output`; withholdings are `not-published`, `invalid-outcome`,
   `not-corroborated`.
 - *The bracket's claim.* **Clean start** = HEAD resolvable + tracked tree clean (`status
-  --porcelain -z --untracked-files=no` empty) + no assume-unchanged/skip-worktree index flags +
+  --porcelain -z --untracked-files=no --ignore-submodules=none` empty — every
+  `submodule.<name>.ignore` / `diff.ignoreSubmodules` setting is overridden, so a moved or dirty
+  submodule, untracked content inside it included, is a tracked change) + no
+  assume-unchanged/skip-worktree index flags +
   the non-ignored untracked inventory recorded as `{path, kind, digest}` (`ls-files --others
   --exclude-standard -z`; sha256 per file, the target per symlink) — untracked paths are allowed
   at start, never forbidden. **End state** = HEAD, tracked cleanliness, flags and the untracked
