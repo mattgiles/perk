@@ -54,6 +54,8 @@ in the library, checks it only when a task depends on it, and refreshes it on ev
    - `skill_missing` — the crawl script is not installed; run `perk init`, then rerun.
    - `missing_converter` — `curl` or `html2markdown` is missing; install `html2markdown`
      (`brew install html2markdown`), then rerun.
+   - `seed_redirect` — the URL is only a redirect page, such as a version alias like `/latest/`;
+     the message names the real URL and scope prefix — rerun with those.
    - `unclean-start` (from `run_librarian`) — the main checkout has uncommitted tracked changes or
      index flags; commit or stash them, or run the `perk librarian add docs …` command the tool
      names from a terminal.

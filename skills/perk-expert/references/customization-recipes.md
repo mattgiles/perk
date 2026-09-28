@@ -322,7 +322,9 @@ points to it when a plan leans on an external dependency. The operator recipe:
 4. Docs: `perk librarian add docs <url> --dry-run` first (the URL → file map), then
    `perk librarian add docs <url> [--slug <slug>] [--scope-prefix <prefix>]` — it launches the
    curating session. From inside a session (read-only included) the agent calls `run_librarian`
-   `{action: "add-docs", url, slug?, scope_prefix?}` instead. Needs `curl` + `html2markdown`.
+   `{action: "add-docs", url, slug?, scope_prefix?}` instead. Needs `curl` + `html2markdown`. A
+   version-alias seed such as `/latest/` refuses `seed_redirect` naming the real URL and scope
+   prefix — reissue with those.
 5. **First use only:** the workers never write `docs/library/README.md`; once `docs/library/`
    exists, `perk doctor --fix` (or `perk init`) creates it — commit it (it is the route a linked
    worktree follows to the main checkout's library).

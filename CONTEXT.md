@@ -385,6 +385,20 @@ The docs door's atomic `mkdir` of the session's empty `.staging/<slug>[-N]` dire
 never deletes a staging directory.
 _Avoid_: staging lock (there is none — the library lock covers publish, not crawling)
 
+**Redirect stub**:
+A page that is only an HTML redirect — a meta refresh or a script `location` assignment, every
+anchor pointing at the target — served `200`, so `curl --location` cannot follow it (a mike
+`/latest/` version alias). The crawl refuses one as a seed with the typed `seed-redirect` blocker
+(exit 3) when its target is a reissuable http(s) URL; a non-seed stub is mirrored as served.
+_Avoid_: HTTP redirect (curl follows those), alias page (the mike term for the same thing)
+
+**Seed probe**:
+The docs doors' and the prepare worker's one-page dry run of the seed (`--max-pages 1
+--dry-run`) before the staging claim; it refuses `seed_redirect` and is otherwise advisory (a
+`warning:` / `warnings[]` entry).
+_Avoid_: dry-run (the human `--dry-run` is the full discovery), check (the catalog freshness
+probe)
+
 **Prepare worker**:
 `perk librarian prepare docs|refresh … --json`: the docs doors' pre-session half plus the staging
 claim, emitted as the crawl plan the `run_librarian` tool dispatches its child with; launches
