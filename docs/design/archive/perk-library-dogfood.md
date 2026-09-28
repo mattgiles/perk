@@ -271,7 +271,8 @@ pinned by `tests/test_skill_semantic_contracts.py`; no further live launch is re
   { ls docs/library; echo "--- readme"; cat docs/library/README.md; echo "--- list"; perk librarian list; } 2>&1 | tee /tmp/perk-library-dogfood/c3-worktree.log
   ```
 
-  Expect `README.md` only, and absolute paths under `/tmp/perk-library-fixture/docs/library/`.
+  Expect `README.md` only, and absolute paths under `/tmp/perk-library-fixture/docs/library/`
+  (macOS prints `/private/tmp/…` — git reports the resolved path).
   Launch `perk` (a plain session in the worktree — its first launch installs the borrowed packages
   into the worktree's own `.pi/npm`) and ask it to call
   `run_librarian {action: "refresh-docs", slug: "prek"}` → `published` (the child ran in the
@@ -307,7 +308,7 @@ with an explicit count._
 
 | Field | Value |
 | --- | --- |
-| Date | 2026-09-28 (P0 at 10:48–10:50 local) |
+| Date | 2026-09-28, 14:48Z (P0) → 17:55Z (L8); local time is UTC−4 |
 | Run SHA (`<main>` HEAD at P0.1) | `33bf73cde10c8a315d583b99226a47a86bb64f62` (`main`, one local commit "Check in planning doc" ahead of `origin/main` `dc00eb2e`) |
 | `perk --version` + interpreter | before P0.3: `perk 3.7.0`, `#!/Users/mattgiles/.local/share/uv/tools/perk/bin/python3` (PyPI build); after: `perk 3.7.0`, `#!/Users/mattgiles/.local/share/uv/tools/perk/bin/python` (editable, `perk==3.7.0 (from file:///Users/mattgiles/dev/github/mattgiles/perk)`, CPython 3.13.9) |
 | `pi --version` | `0.87.1` |
@@ -319,9 +320,9 @@ with an explicit count._
 | Actor | Store | Session file (header `cwd`, timestamp) |
 | --- | --- | --- |
 | S1 | `<main>/.pi/agent/sessions/` | `--Users-mattgiles-dev-github-mattgiles-perk--/2026-09-28T14-54-04-711Z_01a0e882-3da6-7148-b9df-31f6ebe6a5ce.jsonl` (cwd `<main>`, 14:54:04Z); its `perk.librarian` children under the sibling directory: `42c543d8-…/run-0/session.jsonl` (L5 first attempt, 14:58:04Z) and `93027ef3-…/run-0/session.jsonl` (L5 reissue, 15:07:36Z), both cwd `<main>` |
-| S2 | _pending_ | _pending_ |
-| C2 | _pending_ | _pending_ |
-| C3 | _pending_ | _pending_ |
+| S2 | `<main>/.pi/agent/sessions/` | `--Users-mattgiles-dev-github-mattgiles-perk--/2026-09-28T15-41-03-527Z_01a0e8ad-40a6-729c-bbc4-67f9ddfaf66e.jsonl` (cwd `<main>`, 15:41:03Z) |
+| C2 | `~/.pi/agent/sessions/` | `--private-tmp-perk-library-fixture--/2026-09-28T15-53-56-809Z_01a0e8b9-0d48-76e9-aa37-31d1cf5bab61.jsonl` (cwd `/private/tmp/perk-library-fixture`, 15:53:56Z); child `cc04161c-…/run-0/session.jsonl` (cwd the fixture's main checkout, 15:55:21Z) |
+| C3 | `~/.pi/agent/sessions/` | `--private-tmp-perk-library-fixture-wt--/2026-09-28T17-31-06-510Z_01a0e912-018e-74a3-9094-4cdf86ed08ce.jsonl` (cwd `/private/tmp/perk-library-fixture-wt`, 17:31:06Z); child `d7564d13-…/run-0/session.jsonl` (cwd `/private/tmp/perk-library-fixture` — the fixture's main checkout, 17:32:09Z) |
 | implement | `<main>/.pi/agent/sessions/` | `--Users-mattgiles-dev-github-mattgiles-perk-.worktrees-plan-2612--/2026-09-28T14-31-04-511Z_01a0e86d-2e3e-7111-ba1c-7844f41d4ec3.jsonl` (cwd `<main>/.worktrees/plan-2612`, 14:31:04Z; `PI_CODING_AGENT_DIR=<main>/.pi/agent`); the W2 child `660c70e3-…/run-0/session.jsonl` (cwd `<main>`, 15:25:01Z) |
 
 ### B.3 Criteria
@@ -332,20 +333,20 @@ with an explicit count._
 | The read-only gate's admission shape | L1b | `extension/substrate/toolGating.test.ts` ("perk librarian workers are admitted only in their --json-last forms") | **observed-live** (2026-09-28) |
 | `record --adopt` catalogs the flat mirrors | L2 | `tests/test_library_dogfood.py::test_flat_mirrors_adopt_by_the_printed_hints` | **observed-live** (2026-09-28) |
 | Reuse-first + pinned `add source` | P0.6, L3 | `tests/test_library_dogfood.py::test_source_pin_throttle_drift_and_refresh_sequence` | **observed-live** (2026-09-28) |
-| `check`: throttle, `pinned`, source drift via `ls-remote` | L4, L8 (drift capture-if-fired) | `tests/test_library_dogfood.py::test_source_pin_throttle_drift_and_refresh_sequence` | _pending_ |
+| `check`: throttle, `pinned`, source drift via `ls-remote` | L4, L8 (drift capture-if-fired) | `tests/test_library_dogfood.py::test_source_pin_throttle_drift_and_refresh_sequence` | **observed-live** (2026-09-28) — throttle and `pinned` at L4; drift **fired** at L8 (`j178/prek` `master` moved to `bb2d545f` at 15:09:23Z, after the 14:56:48Z clone) |
 | `check`: docs evidence tiers incl. `unverifiable` | L4, L6 | `tests/test_librarian_cmd.py::test_check_probes_over_the_transport_seam` (both cases), `tests/test_library_check.py::test_a_validator_less_site_is_unverifiable_never_fresh` | **observed-live** (2026-09-28) — all three tiers: `strong` (6 docs entries), `weak` (`linear`, `starlight`), `none` → `unverifiable` (`pi`) |
 | `run_librarian` add-docs from a read-only main-checkout parent | L5 | `extension/pi/v1/librarian.test.ts` | **observed-live** (2026-09-28) — at `/0.5.4/` after the `/latest/` stop (B.6 V1, B.7 D1) |
-| Consumer first use from its main checkout | C2 | `extension/pi/v1/librarian.test.ts` case (5) | _pending_ |
-| Consumer first use from a linked worktree | C3 | `extension/pi/v1/librarian.test.ts` case (6); `tests/test_library_dogfood.py::test_first_use_from_a_consumer_main_checkout_and_linked_worktree` (the CLI path) | _pending_ |
+| Consumer first use from its main checkout | C2 | `extension/pi/v1/librarian.test.ts` case (5) | **observed-live** (2026-09-28) |
+| Consumer first use from a linked worktree | C3 | `extension/pi/v1/librarian.test.ts` case (6); `tests/test_library_dogfood.py::test_first_use_from_a_consumer_main_checkout_and_linked_worktree` (the CLI path) | **observed-live** (2026-09-28) |
 | A worktree's README → the main library's absolute paths | W1 | `tests/test_library_dogfood.py::test_first_use_from_a_consumer_main_checkout_and_linked_worktree` | **observed-live** (2026-09-28) |
-| `perk doctor --fix` converges the committed README | C2 | `tests/test_library_dogfood.py::test_first_use_from_a_consumer_main_checkout_and_linked_worktree`, `tests/test_doctor.py::test_library_readme_managed_check_and_fix` | _pending_ |
+| `perk doctor --fix` converges the committed README | C2 | `tests/test_library_dogfood.py::test_first_use_from_a_consumer_main_checkout_and_linked_worktree`, `tests/test_doctor.py::test_library_readme_managed_check_and_fix` | **observed-live** (2026-09-28) |
 | `run_librarian` refresh-docs from a linked worktree | W2 | `extension/pi/v1/librarian.test.ts` case (6) | **observed-live** (2026-09-28) |
-| `remove` deletes exactly the leaf | L8 | `tests/test_library_ops.py::test_remove_a_source_entry_deletes_only_its_leaf`; story 2 | _pending_ |
+| `remove` deletes exactly the leaf | L8 | `tests/test_library_ops.py::test_remove_a_source_entry_deletes_only_its_leaf`; story 2 | **observed-live** (2026-09-28) |
 | The pointer: cold `perk plan` (a), warm `/plan` in a cold session (b) | L7 | `tests/test_skill_semantic_contracts.py`; `extension/substrate/bindingDelivery.test.ts` | **observed-live** (2026-09-28) |
-| The pointer: stage-less warm `/plan` (c) | S2 | `extension/substrate/bindingDelivery.test.ts` ("Mechanism A is a no-op when no stage is launched") | _pending_ |
+| The pointer: stage-less warm `/plan` (c) | S2 | `extension/substrate/bindingDelivery.test.ts` ("Mechanism A is a no-op when no stage is launched") | **observed-live** (2026-09-28) — the gap confirmed (no delivery) and routed (B.7 G1) |
 | The pointer: `perk objective plan` (d) | the authoring session; P0.4 | `tests/test_skill_semantic_contracts.py` | **observed-live** (2026-09-28): the authoring session delivered only `perk-objective-plan`; after P0.4 the skill is delivered |
-| The explanation page's `add source` sentence is true | — | `tests/test_explanation_boundary.py` (quadrant guard) | _pending_ |
-| Every gap routed | B.7 | — | _pending_ |
+| The explanation page's `add source` sentence is true | — | `tests/test_explanation_boundary.py` (quadrant guard) | n/a (a docs change, not a live leg) — corrected in this branch; the truth-sweep grep (`rg -n "pins it to\|pinned to the version\|pin to the version" docs skills shared CONTEXT.md`) re-run: the remaining hits are the instructions to pass `--ref` and the explanation page's example of something worth curating, all true |
+| Every gap routed | B.7 | — | done — gist #2613, objective node 2551/3.4; the rest record-only |
 
 ### B.4 Pre-run findings
 
@@ -493,6 +494,17 @@ missing `librarian` skill is that session's own report (the plan's pre-run findi
 system prompt's skill list is not persisted). After P0.4,
 `<main>/.agents/skills/librarian/SKILL.md` exists (8606 bytes, 10:50 local).
 
+**S2 (plain `perk` + `/plan`, 15:41:03Z).** The workflow state: `{"run_id": "01M3MATVTW5FDVDFNFY5S6GZNC", …, "perk_version": "3.7.0"}` (no
+`stage`), then `{"mode": "read-only"}` at 15:41:27Z (the `/plan` toggle); `perk:mode-context`,
+`perk:plan-context` and `perk:plan-adapter-plannotator` injected; **no** `perk:binding-context`
+entry. Asked the three-part question, S2 read `skills/perk-plan/SKILL.md` and
+`shared/bindings.yaml` itself and answered "(1) … This is a `plan`-stage session, so the one
+binding that fires at session entry is **`stage:plan` → `perk-plan` (mode: nudge)**" — an
+inference from the bindings file, not a delivery (the JSONL has none; the session is
+stage-less); "(2) Yes — listed at `/Users/mattgiles/dev/github/mattgiles/perk/.agents/skills/librarian/SKILL.md`";
+"(3) The command was **allowed** by the read-only bash gate." (`perk librarian list --json` →
+`"success": true`, 10 entries).
+
 **W1 (implement, 15:02:58Z, from `<main>/.worktrees/plan-2612`).** `ls -la docs/library` →
 `README.md` only (943 bytes, byte-equal to `LIBRARY_README`; `git ls-files docs/library` →
 `docs/library/README.md`); `perk librarian list --json` → `"library_root":
@@ -514,20 +526,105 @@ session), `"termination": "confirmed"`, `"exitCode": 0`, `"bracket": {"ok": true
 republish records the new revision with fresh markers), the worktree's `docs/library` still
 `README.md` only, the worktree status empty.
 
+**C1 (human, `/tmp/perk-library-fixture`, logs `c1-*.log`).** `perk init --no-interactive` →
+`✓ perk init (consumer)` with `Converged:` including `.pi/settings.json: added
+npm:@mgiles/perk@3.7.0, …`, `.agents/skills/: synchronized via skills update --sync` and
+`.pi/npm/node_modules/@mgiles/perk: installed @mgiles/perk@3.7.0 (perk-owned)` (no remote-related
+warning in the init output; doctor later reports `⚠ github-repo: no GitHub repo — no git remotes
+found`). After the in-place `jq` swap and the commit (`8667ee1 perk init wiring (local perk
+extension)`): status empty; `.agents/skills/librarian/scripts/copy_docs_to_markdown.py` present;
+`absent`; `.packages` = `["/Users/mattgiles/dev/github/mattgiles/perk", "npm:@tombell/pi-diff",
+"npm:pi-subagents", "npm:@ff-labs/pi-fff", "npm:@juicesharp/rpiv-ask-user-question",
+"npm:@juicesharp/rpiv-todo", {"source": "npm:@dietrichgebert/ponytail", …}, {"source":
+"npm:pi-web-access"}]` (exactly one perk entry); doctor `✗ settings-wiring: settings-wiring drift
+— .pi/settings.json: added npm:@mgiles/perk@3.7.0; moved npm:@mgiles/perk@3.7.0 before
+npm:pi-subagents` (V2), `✓ library (2 checks)`, `✗ 1 check(s) failed`.
+
+**C2 (plain `perk` in the fixture, 15:53:56Z).** `run_librarian {action: "add-docs", url:
+"https://prek.j178.dev/0.5.4/", scope_prefix: "/0.5.4/"}` (5 min 31 s) → `Published
+documentation entry `prek` → /private/tmp/perk-library-fixture/docs/library/documentation/prek
+(status unknown; pages published 25, failures accepted 0, scope /0.5.4/).` Receipt: `"cwd":
+"/private/tmp/perk-library-fixture"`, `"termination": "confirmed"`, `"exitCode": 0`, `"bracket":
+{"ok": true}`; the child model `openai/gpt-6-sol` (the fixture configures none — the default).
+The tool exists only in the checkout's extension (`git grep run_librarian v3.7.0 -- extension` is
+empty), so the local-path package entry is what loaded (V3). Terminal:
+
+- `ls docs/library` → `documentation` / `catalog.json` (no README); status empty; doctor
+  `✗ library-readme: library-readme drift — docs/library/README.md: created` with remediation
+  `perk doctor --fix`.
+- `perk doctor --fix` → `Fixed` / `- .pi/settings.json: added npm:@mgiles/perk@3.7.0; moved
+  npm:@mgiles/perk@3.7.0 before npm:pi-subagents` / `- docs/library/README.md: created`, and
+  `⚠ library: docs/library/README.md is not committed — readme: docs/library/README.md is
+  untracked`.
+- After deleting the re-added npm entry (V4): `.packages` again has exactly one perk entry (the
+  local path); status `?? docs/library/README.md` only (the re-edited settings are byte-equal to
+  the committed ones); doctor `⚠ library: docs/library/README.md is not committed`.
+- `git commit` (`e0d4b4b library README`, `docs/library/README.md | 18 ++++`) → doctor
+  `✓ library (2 checks)`, `settings-wiring` still the accepted deviation.
+
+**C3 (the fixture's linked worktree `/tmp/perk-library-fixture-wt`).** Before: `ls -la
+docs/library` → `README.md` (943 bytes) only; `cat` → the managed README; `perk librarian list`
+→ `library: /private/tmp/perk-library-fixture/docs/library` / `unknown docs prek
+/private/tmp/perk-library-fixture/docs/library/documentation/prek never checked`; the committed
+single-perk-entry `.packages`. The plain `perk` session (17:31:06Z; its first launch populated the
+worktree's own `.pi/npm/node_modules`) → `run_librarian {action: "refresh-docs", slug: "prek"}`
+(7 min 43 s) → `Published documentation entry `prek` →
+/private/tmp/perk-library-fixture/docs/library/documentation/prek (status unknown; pages published
+25, failures accepted 0, scope /0.5.4/).` Receipt: `"cwd": "/private/tmp/perk-library-fixture"`
+(the child ran in the fixture's main checkout), `"parentSessionId":
+"01a0e912-018e-74a3-9094-4cdf86ed08ce"` (the worktree session), `"bracket": {"ok": true}`.
+After: the worktree's `docs/library` still `README.md` only; worktree and main status both empty.
+
+**C4 (teardown).** `"/tmp/perk-library-fixture": No such file or directory (os error 2)` /
+`"/tmp/perk-library-fixture-wt": No such file or directory (os error 2)`; `<main>` status empty.
+
+**L8 (S1, 17:55:18Z).**
+
+- `check prek-source --force --json` → `"action": "probed"`, `"checked_at":
+  "2026-09-28T17:55:24Z"`, `"evidence": "strong"`, `"drifted": true`, `"status": "drifted"` —
+  capture-if-fired: `j178/prek` `master` had moved (`gh api repos/j178/prek/commits/master` →
+  `bb2d545f2c475d6cf731affb9351af0c8e835efa 2026-09-28T15:09:23Z`, after the L3 clone).
+- `refresh prek-source --json` → `"action": "fast_forwarded"`, `"previous_head":
+  "77c4056ce76b600de77d5d425e52844a76652a58"`, `"drifted": false`, `"status": "fresh"`.
+- `remove prek-source --json` → `{"success": true, …, "slug": "prek-source", "kind": "source",
+  "path": "/Users/mattgiles/dev/github/mattgiles/perk/docs/library/source-code/github.com/j178/prek",
+  "content_removed": true}`; `ls docs/library/source-code/github.com/j178` → empty (the empty
+  `j178` parent remains, O4); `list --json` → no `prek-source` entry (slugs `dbt-duckdb`,
+  `diffs`, `divio-documentation`, `hunk`, `linear`, `pi`, `pi-subagents`, `plannotator`, `prek`,
+  `starlight`), `"uncatalogued": []`, `"staging": []`.
+
 ### B.6 Fixture deviations
 
 | Id | Deviation | Why | Accepted? |
 | --- | --- | --- | --- |
-| V1 | L5 reissued at `url: "https://prek.j178.dev/0.5.4/"`, `scope_prefix: "/0.5.4/"` instead of `/latest/`; the empty `.staging/prek` the stopped run left was removed by hand (`rmdir`) first. | `/latest/` is now a mike version-alias redirect page (`last-modified: Mon, 28 Sep 2026 04:57:06 GMT`; `<meta http-equiv="refresh" content="1; url=../0.5.4/" />` inside `<noscript>` plus a `window.location.replace("../0.5.4/" …)` script); `versions.json` lists `0.5.4` with `"aliases": ["latest"]`. The planning-time observation (a sitemap with 27 `<loc>` entries) decayed. | Yes — operator decision, 2026-09-28 (chosen over `/0.4.14/`, the locally installed `prek 0.4.14`, and over waiving L5/L6/W2/C2/C3). |
+| V1 | L5 reissued at `url: "https://prek.j178.dev/0.5.4/"`, `scope_prefix: "/0.5.4/"` instead of `/latest/`; the empty `.staging/prek` the stopped run left was removed by hand (`rmdir`) first. | `/latest/` is now a mike version-alias redirect page (`last-modified: Mon, 28 Sep 2026 04:57:06 GMT`; `<meta http-equiv="refresh" content="1; url=../0.5.4/" />` inside `<noscript>` plus a `window.location.replace("../0.5.4/" …)` script); `versions.json` lists `0.5.4` with `"aliases": ["latest"]`. The planning-time sitemap count still holds (the root `sitemap.xml` lists 27 `<loc>` entries, all under `/0.5.4/`); what the plan missed is that `/latest/` is an alias page, not a copy of the docs. | Yes — operator decision, 2026-09-28 (chosen over `/0.4.14/`, the locally installed `prek 0.4.14`, and over waiving L5/L6/W2/C2/C3). |
+| V2 | The fixture's doctor fails `settings-wiring` throughout. | The consumer convergence requires `npm:@mgiles/perk@3.7.0`, and the fixture replaced it with the checkout's absolute path because the published package predates the library. | Yes — planned, fixture-only. |
+| V3 | `perk init` installed the published `@mgiles/perk@3.7.0` into the fixture's `.pi/npm`, so `extension-install` passed, but the session loaded the local-path package. | pi loads the packages `settings.json` lists; the npm copy is unused. Proof the checkout's extension loaded: `run_librarian` does not exist at `v3.7.0` yet both fixture sessions called it. | Yes — fixture-only. |
+| V4 | After `perk doctor --fix` the npm perk entry was deleted again before any further launch. | `--fix` re-converges every drifted managed piece, `settings-wiring` included, and `_merge_static_packages` treats the local path as a different identity. | Yes — planned (Part A C2). |
+| V5 | The fixture's paths print as `/private/tmp/…`, not `/tmp/…`. | macOS `/tmp` is a symlink; git reports the resolved main-worktree path. | Yes — cosmetic; Part A's C3 expectation now says so. |
 
 ### B.7 Defect / gap log
 
 | Id | Leg | Observation | Disposition |
 | --- | --- | --- | --- |
-| D1 | L5 | A seed URL that is an HTML redirect page (a mike version alias: meta-refresh + script, served `200`) is not followed — the crawl follows HTTP redirects only (`curl --location --max-redirs 5`) — so the dry run discovers one page, the redirect stub. The judgment layer caught it (the child stopped before mutation and asked for a reissue), but the cost is a failed `run_librarian` run and a leftover empty staging claim the human removes by hand. | _pending_ |
+| D1 | L5 | A seed URL that is an HTML redirect page (a mike version alias: meta-refresh + script, served `200`) is not followed — the crawl follows HTTP redirects only (`curl --location --max-redirs 5`) — so the dry run discovers one page, the redirect stub. The judgment layer caught it (the child stopped before mutation and asked for a reissue), but the cost is a failed `run_librarian` run and a leftover empty staging claim the human removes by hand. | Objective node **2551/3.4** (`crawl-seed-html-redirects`, pending, depends on 3.3) — `perk objective node-add 2551 --phase 3 --depends-on 3.3 --slug crawl-seed-html-redirects …` → `"node": "3.4"`. |
+| G1 | S2 | The stage-less warm `/plan` receives no `stage:plan` binding — no `perk-plan`, so no `librarian` pointer — while it does receive the plan-authoring context (the S2 excerpt). A bindings-subsystem gap, outside the library. | Plan-scoped gist **#2613** "Deliver the stage:plan skill bindings to a stage-less warm /plan" (`perk gist create … --scope plan --run-id 01M3MJR8CGEPRNV7DK0E2BJGWZ` → `"id": "2613"`). |
 | O1 | L5 | A stopped or failed docs run leaves its (empty) staging claim; the door never deletes a staging directory, and `list` / doctor surface it. | Record-only (by design). |
 | O2 | W2 | A refresh republish resets the entry's `checked_at` / `evidence` (status back to `unknown`) — the new revision carries new markers. | Record-only (by design: markers are the mirror's revision). |
+| O3 | L2 | Adoption accepted `dbt-duckdb`, a mirror with no `index.md` (one `README.md` file); publish would refuse it. | Record-only (by design; pinned by story 1). |
+| O4 | L8 | `remove` left the empty `source-code/github.com/j178/` parent. | Record-only (leaf-only deletion is the design). |
+| O5 | C2 | The consumer convergence re-adds the npm perk entry beside a local-path override (V4). | Record-only (a fixture-only shape — consumers run the published package). |
+| O6 | P0.2 | Doctor run by a pre-library `perk` reports version-skew drift and cannot see the missing `librarian` skill (F3). | Record-only (operator environment; Part A's P0.2 now says so). |
 
 ### B.8 Teardown proof
 
-_pending_
+- The fixture is gone (C4: both paths `No such file or directory`; its worktree was registered to
+  the fixture repository only, so `<main>`'s `git worktree list` never carried it).
+- `<main>` after L8: `git status --porcelain --untracked-files=all` empty, HEAD still
+  `33bf73cde10c8a315d583b99226a47a86bb64f62` — identical to P0.1.
+- What the run deliberately leaves in `<main>`'s gitignored library: the eight adopted mirrors now
+  under `documentation/`, the `prek` docs entry (`/0.5.4/`, refreshed by W2) and the pinned
+  `pi-subagents` checkout (`v0.71.0`); `prek-source` removed; `.staging/` empty. Outside the
+  repository: `~/.local/bin/perk` is now the editable install of `<main>` (P0.3), and the fixture's
+  sessions remain under `~/.pi/agent/sessions/--private-tmp-perk-library-fixture{,-wt}--/` as
+  evidence.
