@@ -81,7 +81,8 @@ Documentation mirrors are added with `perk librarian add docs <url>` and refresh
 session-free add; `add docs --dry-run` previews the URL → file map; both need the `librarian`
 skill synced by `perk init` and `curl` + `html2markdown` on `PATH`; both fetch the seed once
 before claiming a staging directory and refuse `seed_redirect` when it is only an HTML redirect
-page — a `/latest/`-style alias — naming the real URL and scope prefix to reissue with). From a session — read-only
+page — a `/latest/`-style alias — naming the real URL and scope prefix: an add is reissued
+with them, a refresh cannot follow the move, so `remove` the entry, then add it at that URL). From a session — read-only
 included — `run_librarian` adds or refreshes a documentation mirror through the `perk.librarian`
 writer child (bracketed by a fail-closed check on the main checkout);
 `[models.subagents] librarian` overrides its model.

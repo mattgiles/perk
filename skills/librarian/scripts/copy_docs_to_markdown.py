@@ -113,15 +113,19 @@ class StagingUntrustworthy(Exception):
 class SeedRedirect(Exception):
     """The seed is only an HTML redirect page (served `200`, so curl could not follow it).
 
-    ``seed_url`` is the requested seed, ``fetched_url`` where curl finally served it from, and
-    ``redirect_url`` the page's reissuable target (absolute http(s), fragment-stripped).
+    ``seed_url`` is the requested seed, ``fetched_url`` where curl finally served it from,
+    ``redirect_url`` the page's reissuable target (absolute http(s), fragment-stripped) and
+    ``scope_prefix`` the scope a reissue at it implies (one that admits it as a seed).
     """
 
-    def __init__(self, *, seed_url: str, fetched_url: str, redirect_url: str) -> None:
+    def __init__(
+        self, *, seed_url: str, fetched_url: str, redirect_url: str, scope_prefix: str
+    ) -> None:
         super().__init__(f"{seed_url} is only an HTML redirect page to {redirect_url}")
         self.seed_url = seed_url
         self.fetched_url = fetched_url
         self.redirect_url = redirect_url
+        self.scope_prefix = scope_prefix
 
 
 class LinkParser(HTMLParser):
@@ -327,8 +331,11 @@ def refresh_url(content: str) -> str | None:
 
 def reissuable_url(text: str) -> bool:
     """Whether ``text`` is a target a crawl could be reissued at: an absolute http(s) URL with a
-    host and a path, at most :data:`MAX_REDIRECT_URL_CHARS` characters, free of whitespace and
-    C0/DEL control characters."""
+    host and a path free of `.`/`..`/NUL segments, not an asset URL, at most
+    :data:`MAX_REDIRECT_URL_CHARS` characters, free of whitespace and C0/DEL control characters.
+
+    Scope-independent: whether the reissue's scope admits it is :func:`admits_seed`'s question.
+    """
     if len(text) > MAX_REDIRECT_URL_CHARS:
         return False
     if any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in text):
@@ -339,7 +346,14 @@ def reissuable_url(text: str) -> bool:
     except ValueError:
         return False
     # A path-less URL could never be admitted as a seed (its path lies outside every scope).
-    return parsed.scheme in {"http", "https"} and bool(host) and parsed.path.startswith("/")
+    if parsed.scheme not in {"http", "https"} or not host or not parsed.path.startswith("/"):
+        return False
+    try:
+        # `urljoin` keeps the dot segments of an absolute reference; the crawl refuses them.
+        normalize_segments(parsed.path)
+    except UnsafePath:
+        return False
+    return not has_asset_extension(text)
 
 
 def _resolve(base_url: str, reference: str) -> str | None:
@@ -455,6 +469,20 @@ def in_scope(url: str, origin: str, scope_prefix: str) -> bool:
         and parsed.path.startswith(scope_prefix)
         and not has_asset_extension(url)
     )
+
+
+def admits_seed(url: str, scope_prefix: str) -> bool:
+    """Whether a crawl seeded at ``url`` under ``scope_prefix`` fetches its seed: in scope, not
+    an asset URL, and mapping to a safe output path (discovery skips any other seed, so the crawl
+    would fetch nothing)."""
+    parsed = urlparse(url)
+    if not in_scope(url, f"{parsed.scheme}://{parsed.netloc}", scope_prefix):
+        return False
+    try:
+        markdown_path_for_url(url, scope_prefix)
+    except UnsafePath:
+        return False
+    return True
 
 
 def markdown_path_for_url(url: str, scope_prefix: str) -> Path:
@@ -622,7 +650,15 @@ def discover_pages(seed_url: str, scope_prefix: str, max_pages: int) -> Discover
         if url == seed:
             target = html_redirect_target(fetched.html, fetched.url)
             if target is not None and target != seed:
-                raise SeedRedirect(seed_url=seed_url, fetched_url=fetched.url, redirect_url=target)
+                implied = implied_scope_prefix(seed_url, target, scope_prefix)
+                # Only a reissue that would crawl makes a seed redirect; any other stub is a page.
+                if admits_seed(target, implied):
+                    raise SeedRedirect(
+                        seed_url=seed_url,
+                        fetched_url=fetched.url,
+                        redirect_url=target,
+                        scope_prefix=implied,
+                    )
 
         # The page keeps its requested URL (its identity and destination); relative links resolve
         # against where it was served from, then face the same scope rules as any link.
@@ -735,21 +771,20 @@ def output_dir_refusal(output_dir: Path) -> str | None:
     return f"{NON_EMPTY_OUTPUT_REFUSAL} ({output_dir})" if occupied else None
 
 
-def report_seed_redirect(exc: SeedRedirect, scope_prefix: str) -> int:
+def report_seed_redirect(exc: SeedRedirect) -> int:
     """Report the seed-redirect blocker: exactly one JSON line on stdout, one `ERROR:` on stderr."""
-    implied = implied_scope_prefix(exc.seed_url, exc.redirect_url, scope_prefix)
     blocker = {
         "blocker": SEED_REDIRECT_BLOCKER,
         "seed_url": exc.seed_url,
         "fetched_url": exc.fetched_url,
         "redirect_url": exc.redirect_url,
-        "scope_prefix": implied,
+        "scope_prefix": exc.scope_prefix,
     }
     print(json.dumps(blocker, sort_keys=True))
     error(
         f"the seed {exc.seed_url} is only an HTML redirect page (meta refresh / script) to "
         f"{exc.redirect_url} — nothing was written; reissue the crawl with {exc.redirect_url} "
-        f"and --scope-prefix {implied}"
+        f"and --scope-prefix {exc.scope_prefix}"
     )
     return SEED_REDIRECT_EXIT
 
@@ -773,7 +808,7 @@ def copy_docs(
     try:
         discovery = discover_pages(seed_url, scope_prefix, max_pages)
     except SeedRedirect as exc:
-        return report_seed_redirect(exc, scope_prefix)
+        return report_seed_redirect(exc)
     url_to_path, collisions = claim_paths(list(discovery.html), scope_prefix)
     for collision in collisions:
         warn(f"skipped {collision.url}: path collision with {collision.first_url}")
@@ -895,10 +930,10 @@ def main(argv: list[str] | None = None) -> int:
     except UnsafePath as exc:
         parser.error(f"unsafe --scope-prefix {args.scope_prefix!r}: {exc}")
     # An inadmissible seed is never fetched, so the crawl would silently fetch nothing.
-    if not in_scope(args.url, f"{seed.scheme}://{seed.netloc}", scope_prefix):
+    if not admits_seed(args.url, scope_prefix):
         parser.error(
             f"the seed URL {args.url!r} lies outside the scope prefix {scope_prefix!r} (or is an "
-            "asset URL) — the crawl would fetch nothing"
+            "asset URL, or maps onto a reserved artifact name) — the crawl would fetch nothing"
         )
 
     missing = missing_tool_errors(args.dry_run)

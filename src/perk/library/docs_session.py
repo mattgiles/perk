@@ -24,7 +24,7 @@ import sys
 import urllib.parse
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal, Self
 
 from pydantic import ValidationError, field_validator, model_validator
@@ -56,6 +56,39 @@ SEED_REDIRECT_EXIT = 3
 MAX_REDIRECT_URL_CHARS = 2048
 # The script bounds each curl at 120 s; the probe fetches the seed once.
 SEED_PROBE_TIMEOUT_SECONDS = 180
+# The crawl script's asset extensions (pinned to the script's own set by a cross-check test): a
+# redirect to an asset is never a reissuable target — the reissued crawl would refuse its seed.
+ASSET_EXTENSIONS = frozenset(
+    {
+        ".7z",
+        ".avif",
+        ".css",
+        ".csv",
+        ".eot",
+        ".gif",
+        ".gz",
+        ".ico",
+        ".jpeg",
+        ".jpg",
+        ".js",
+        ".json",
+        ".map",
+        ".mp4",
+        ".otf",
+        ".pdf",
+        ".png",
+        ".svg",
+        ".tar",
+        ".tgz",
+        ".ttf",
+        ".webm",
+        ".webp",
+        ".woff",
+        ".woff2",
+        ".xml",
+        ".zip",
+    }
+)
 LIBRARIAN_SKILL = "librarian"
 CRAWL_SCRIPT_NAME = "copy_docs_to_markdown.py"
 
@@ -377,8 +410,9 @@ class SeedRedirectBlocker(LenientParseModel):
 
     Its values are read from the page, so the whole record is refused unless every field fits
     the reissue grammar: at most :data:`MAX_REDIRECT_URL_CHARS` characters without whitespace or
-    control characters, the URLs absolute http(s) with a host, the scope prefix already
-    normalized and admitting the redirect URL.
+    control characters, the URLs absolute http(s) with a host, the redirect URL's path free of
+    `.`/`..` segments and not an asset URL, the scope prefix already normalized and admitting the
+    redirect URL.
     """
 
     blocker: Literal["seed-redirect"]
@@ -391,6 +425,16 @@ class SeedRedirectBlocker(LenientParseModel):
     @classmethod
     def _url(cls, value: str) -> str:
         return _http_url(_reissue_token(value))
+
+    @field_validator("redirect_url", mode="after")
+    @classmethod
+    def _crawlable(cls, value: str) -> str:
+        path = urllib.parse.urlsplit(value).path
+        if any(segment in (".", "..") for segment in path.split("/")):
+            raise ValueError("the redirect URL's path has a '.' or '..' segment")
+        if PurePosixPath(path).suffix.lower() in ASSET_EXTENSIONS:
+            raise ValueError("the redirect URL is an asset URL")
+        return value
 
     @field_validator("scope_prefix", mode="after")
     @classmethod

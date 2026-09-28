@@ -14048,7 +14048,8 @@ customization recipe. The script (stdlib-only, Python ≥ 3.10,
 - *Arguments.* `URL OUTPUT_DIR [--scope-prefix P] [--max-pages N] [--dry-run]`: the seed is an
   absolute `http`/`https` URL with a netloc, its path and `--scope-prefix` must normalize (below),
   `N ≥ 1`, and the seed must be admitted by the effective scope prefix (in-origin, its path beneath
-  the prefix, not an asset URL — an inadmissible seed would never be fetched, a vacuous crawl) —
+  the prefix, not an asset URL, mapping to a safe output path — not beneath a reserved artifact
+  name; an inadmissible seed would never be fetched, a vacuous crawl) —
   refusals are argparse errors (exit 2, no network). The tools are resolved before any network (a
   missing one is exit 2 with the install hint; `--dry-run` needs only `curl`).
 - *Fetch once.* Breadth-first over in-origin, in-prefix, non-asset links, each page fetched once
@@ -14065,10 +14066,13 @@ customization recipe. The script (stdlib-only, Python ≥ 3.10,
   `window.`/`document.`/`top.`/`self.`/`parent.`; a single `=`) or passed to
   `location.replace(`/`assign(`, resolved against the URL the seed was served from and
   fragment-stripped. It is a seed redirect only when that target is **reissuable** — an absolute
-  `http`/`https` URL with a host and a path, ≤ 2,048 characters, no whitespace or C0/DEL
-  controls (anything else, a resolution error included, is not a seed redirect) — is not the
-  page itself (a self-refresh is ignored), and every `<a href>` on the page (skipping `#`,
-  `mailto:`, `tel:`, `javascript:`, `data:`) resolves to it (zero anchors qualifies). The
+  `http`/`https` URL with a host and a path free of `.`/`..`/NUL segments (`urljoin` keeps an
+  absolute reference's dot segments), not an asset URL, ≤ 2,048 characters, no whitespace or
+  C0/DEL controls (anything else, a resolution error included, is not a seed redirect) — is not
+  the page itself (a self-refresh is ignored), every `<a href>` on the page (skipping `#`,
+  `mailto:`, `tel:`, `javascript:`, `data:`) resolves to it (zero anchors qualifies), and the
+  implied scope (below) admits it as a seed — a reissue that would fetch nothing is never
+  recommended. The
   **implied scope** a reissue at the target needs: the target's head when the seed's path beneath
   the effective scope reappears as a **whole-segment** suffix of the target's path (the scope
   moved with the seed) → else a directory target itself (a version root) → else the default
@@ -14153,8 +14157,9 @@ session-free add**: pruning and artifact fixes are judgment work.
   --dry-run` over the previewed staging name (`cwd` the main checkout, 180 s) — one fetch of an
   admitted seed; exit `3` → `seed_redirect`, the blocker's last non-blank stdout line
   re-validated (`SeedRedirectBlocker`: every field ≤ 2,048 characters without whitespace or
-  controls, the URLs absolute http(s) with a host, the scope prefix already normalized and
-  admitting the redirect URL; an invalid line yields a fixed message carrying no page text and
+  controls, the URLs absolute http(s) with a host, the redirect URL's path free of `.`/`..`
+  segments and not an asset URL (the script's extension set, mirrored and pinned by a cross-check
+  test), the scope prefix already normalized and admitting the redirect URL; an invalid line yields a fixed message carrying no page text and
   never the script's stderr) and rendered as labelled untrusted DATA beside the copyable reissue
   `perk librarian add docs <redirect_url> --slug <slug> --scope-prefix <scope>` (`shlex.join`);
   any other exit, a spawn failure or a timeout is advisory — one `warnings[]` entry naming the

@@ -145,6 +145,7 @@ def test_a_link_beneath_a_reserved_name_is_rejected(script, monkeypatch, tmp_pat
         # A seed the crawl would never fetch: outside the scope prefix, or an asset URL.
         [f"{SITE}/docs", "--scope-prefix", "/docs/"],
         [f"{SITE}/docs/logo.png"],
+        [f"{SITE}/docs/sources.json/topic", "--scope-prefix", "/docs/"],
     ],
 )
 def test_bad_arguments_exit_2_and_create_nothing(script, monkeypatch, tmp_path, argv):
@@ -711,6 +712,8 @@ def test_html_redirect_target_resolves_against_the_fetched_url(script):
         pytest.param("/" + "a" * 2048, id="oversized"),
         pytest.param("../0.5 .4/", id="whitespace"),
         pytest.param("../0.5\x01.4/", id="control-character"),
+        pytest.param("../manual.pdf", id="asset"),
+        pytest.param(f"{SITE}/v2/../guide/", id="absolute-dot-segments"),
     ],
 )
 def test_an_unusable_redirect_target_is_not_a_seed_redirect(script, to):
@@ -738,6 +741,9 @@ def test_an_unusable_redirect_target_is_not_a_seed_redirect(script, to):
         ("https://d.example/a b", False),
         ("https://d.example/a\x7f", False),
         ("https://d.example/a\x00", False),
+        ("https://d.example/v2/../guide/", False),
+        ("https://d.example/a/./b/", False),
+        ("https://d.example/0.5.4/manual.pdf", False),
         ("", False),
     ],
 )
@@ -841,14 +847,44 @@ def test_the_seed_probe_fetches_exactly_the_seed(script, monkeypatch, tmp_path, 
     assert not (tmp_path / "out").exists()
 
 
-def test_a_stub_without_a_reissuable_target_is_mirrored_as_served(script, monkeypatch, tmp_path):
-    fetched = _fake_site(monkeypatch, script, {ALIAS: _redirect_stub("data:text/html,stub")})
+@pytest.mark.parametrize("to", ["data:text/html,stub", "../manual.pdf", f"{SITE}/v2/../guide/"])
+def test_a_stub_without_a_reissuable_target_is_mirrored_as_served(
+    script, monkeypatch, tmp_path, to
+):
+    fetched = _fake_site(monkeypatch, script, {ALIAS: _redirect_stub(to)})
     out = tmp_path / "out"
 
     assert _run(script, [ALIAS, str(out)]) == 0
 
     assert fetched == [ALIAS]
     assert _inventory_paths(out) == [(ALIAS, "latest.md")]
+
+
+def test_a_stub_whose_reissue_would_not_crawl_is_mirrored_as_served(script, monkeypatch, tmp_path):
+    # The discovery-side guard: a target the implied scope would not admit as a seed is no seed
+    # redirect (the reissue would fetch nothing).
+    fetched = _fake_site(monkeypatch, script, {ALIAS: _redirect_stub("../0.5.4/")})
+    monkeypatch.setattr(script, "implied_scope_prefix", lambda seed, redirect, scope: "/other/")
+
+    probe = [ALIAS, str(tmp_path / "out"), "--max-pages", "1", "--dry-run"]
+    assert _run(script, probe) == 0
+
+    assert fetched == [ALIAS]
+
+
+@pytest.mark.parametrize(
+    ("url", "scope", "expected"),
+    [
+        (VERSION, "/0.5.4/", True),
+        (f"{SITE}/0.5.4/guide/intro", "/0.5.4/", True),
+        (VERSION, "/1.0/", False),
+        (f"{SITE}/0.5.4/logo.png", "/0.5.4/", False),
+        (f"{SITE}/0.5.4/sources.json/topic", "/0.5.4/", False),
+        (f"{SITE}/0.5.4/../x/", "/", False),
+    ],
+)
+def test_admits_seed(script, url, scope, expected):
+    assert script.admits_seed(url, scope) is expected
 
 
 def test_a_non_seed_redirect_stub_is_an_ordinary_page(script, monkeypatch, tmp_path):

@@ -619,6 +619,13 @@ def test_parse_seed_redirect_reads_the_last_non_blank_line():
         pytest.param(_blocker_line(redirect_url="https://:80/0.5.4/"), id="no-host"),
         pytest.param(_blocker_line(redirect_url="https://[bad/0.5.4/"), id="malformed"),
         pytest.param(_blocker_line(fetched_url="file:///etc/passwd"), id="fetched-not-http"),
+        pytest.param(
+            _blocker_line(redirect_url="https://d.example/0.5.4/../x/"), id="dot-dot-target"
+        ),
+        pytest.param(_blocker_line(redirect_url="https://d.example/0.5.4/./x/"), id="dot-target"),
+        pytest.param(
+            _blocker_line(redirect_url="https://d.example/0.5.4/manual.PDF"), id="asset-target"
+        ),
         pytest.param(_blocker_line(scope_prefix="../x"), id="dot-dot-scope"),
         pytest.param(_blocker_line(scope_prefix="0.5.4/"), id="unnormalized-scope"),
         pytest.param(_blocker_line(scope_prefix="/0.5.4"), id="unterminated-scope"),
@@ -696,7 +703,36 @@ def test_the_blocker_constants_match_the_crawl_script():
     script = load_script()
     assert docs_session.SEED_REDIRECT_EXIT == script.SEED_REDIRECT_EXIT
     assert docs_session.MAX_REDIRECT_URL_CHARS == script.MAX_REDIRECT_URL_CHARS
+    assert frozenset(script.ASSET_EXTENSIONS) == docs_session.ASSET_EXTENSIONS
     assert script.SEED_REDIRECT_BLOCKER == "seed-redirect"
+
+
+# A page-controlled target the validators admit but a shell would split or expand unquoted.
+QUOTE_SENSITIVE = "https://d.example/0.5.4/o'reilly/?x=1&y=$HOME"
+QUOTE_SENSITIVE_SCOPE = "/0.5.4/o'reilly/"
+
+
+@pytest.mark.parametrize("refresh", [False, True])
+def test_the_reissue_shell_quotes_page_derived_values(repo, refresh):
+    plan = _redirect_plan(repo, refresh=refresh)
+    line = _blocker_line(redirect_url=QUOTE_SENSITIVE, scope_prefix=QUOTE_SENSITIVE_SCOPE)
+    blocker = docs_session.parse_seed_redirect(line)
+    assert blocker is not None
+
+    message = str(docs_session.seed_redirect_error(plan, blocker))
+
+    add_argv = [
+        *("perk", "librarian", "add", "docs", QUOTE_SENSITIVE),
+        *("--slug", "d", "--scope-prefix", QUOTE_SENSITIVE_SCOPE),
+    ]
+    if refresh:
+        remove, add = message.split("Re-add the entry at that URL: ", 1)[1].split(", then ", 1)
+        assert shlex.split(remove) == ["perk", "librarian", "remove", "d", "--json"]
+    else:
+        add = message.split("Reissue: ", 1)[1]
+    assert shlex.split(add) == add_argv
+    assert add == shlex.join(add_argv)
+    assert QUOTE_SENSITIVE not in add  # quoted, never pasted raw into the command
 
 
 # --- the seed probe ----------------------------------------------------------------------------
