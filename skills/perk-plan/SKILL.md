@@ -122,6 +122,10 @@ full per-doc cues), read the docs whose cues touch the change, and stop at dimin
 Misses are common and fine: a plan need not cite or be grounded in learned docs — the attempt is
 what matters, not the yield.
 
+When a plan leans on an external dependency's docs or source, the `librarian` skill (read
+`.agents/skills/librarian/SKILL.md`) knows what the repo already keeps offline and when a check or
+an addition is worth it.
+
 **Consult the language house-style skill (code plans).** When the plan is code-heavy in one
 language, read the repo's house-style skill(s) for that language (check your available skills)
 before drafting — reviewers hold plans to those standards, and a denial-and-redraft costs far more
