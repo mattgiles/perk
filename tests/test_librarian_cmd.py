@@ -361,21 +361,37 @@ def test_check_json_envelope_exits_0_with_a_failed_result(repo, monkeypatch):
     assert payload["warnings"] == []
 
 
-def test_check_probes_over_the_transport_seam(repo, monkeypatch):
+# The docs probe's inventory requests (sitemap, its index fallback, llms.txt) at the site root.
+INVENTORY_URLS = frozenset(
+    f"https://pi.dev/{name}" for name in ("sitemap.xml", "sitemap-index.xml", "llms.txt")
+)
+
+
+@pytest.mark.parametrize(
+    ("seed_headers", "evidence", "status"),
+    [
+        pytest.param({"ETag": '"v1"'}, "strong", "fresh", id="etag-is-strong"),
+        pytest.param({}, "none", "unverifiable", id="no-validators-is-unverifiable"),
+    ],
+)
+def test_check_probes_over_the_transport_seam(repo, monkeypatch, seed_headers, evidence, status):
     _publish_pi(repo)
+    requested: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
         if str(request.url) == SOURCE:
-            return httpx.Response(200, headers={"ETag": '"v1"'})
+            return httpx.Response(200, headers=seed_headers)
         return httpx.Response(404)
 
     monkeypatch.setattr(check_cmd, "http_transport", lambda: httpx.MockTransport(handler))
     result = _run(["check"])
     assert result.exit_code == 0, result.stderr
     [line] = result.stderr.splitlines()
-    assert line.split() == ["probed", "fresh", "docs", "pi"]
+    assert line.split() == ["probed", status, "docs", "pi"]
+    assert set(requested) == {SOURCE, *INVENTORY_URLS}
     entry = cat.load_catalog(LibraryLayout.for_repo(repo)).get("pi")
-    assert entry is not None and entry.evidence == "strong"
+    assert entry is not None and entry.evidence == evidence
 
 
 def test_check_human_render_lists_notes_and_details(repo, monkeypatch):
