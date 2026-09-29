@@ -20,8 +20,9 @@ knowledge below is what an agent can't derive from reading any single file.
 - Delivery renders the **full resolved** overlay — shipped defaults ⊕ user bindings — for the
   matching trigger (the shipped defaults carry no hardcoded nudges; both doors deliver through
   the same path) — "Historical: 'user-originated' was the delivery filter".
-- Two delivery doors (cold + warm) share a dedup marker so a skill never lands twice — "The two
-  doors and the cold↔warm dedup marker".
+- Two delivery doors (cold + warm) share a dedup marker resolved from a trigger that treats plan
+  mode as a mode, not a stage, so a skill never lands twice — "The two doors and the cold↔warm
+  dedup marker".
 - Linked-worktree delivery works only because the cold door mirrors `.agents/skills/` during
   launch positioning (a dangling-binding warning in a worktree is the symptom; the mirror itself
   is `cold-door-launch.md`'s) — "Linked-worktree delivery depends on the cold door mirroring
@@ -96,18 +97,34 @@ Anyone changing the pointer format again reaches for the helper, not a re-inline
 Cold and warm renderers are **independent code paths** that must not double-deliver when both fire
 for one session (a cold launch *and* `before_agent_start`). They dedup through one **byte-identical
 header literal**: `BINDING_HEADER` (TS, `extension/substrate/bindingDelivery.ts`) ≡ `_HEADER` (Python,
-`src/perk/substrate/binding_delivery.py`). The warm injector asks Pi's **own projection** whether
-the header is live — `extension/pi/v1/contextEvidence.ts::activeContextMessages` flattens the
-current leaf's compaction-aware entries through Pi's converter and `contextCarriesMarker` accepts
-the header only as user content or as the owned custom content; a compaction summary quoting the
-header is not live delivery — **or in the submitting `event.prompt`**: at `before_agent_start` the
-just-submitted prompt is not yet on the branch, so the projection alone cannot cover the launch
-turn (the `event.prompt.includes(BINDING_HEADER)` guard is what stops a cold-delivered launch
-prompt from double-delivering). Pi compaction appends history; it does not delete the original
-delivery entry, so a full-branch scan would suppress re-delivery forever even after the marker left
-model context — hence the projection, never branch history, decides liveness. The cross-plane
-header equality is pinned by literal tests in both planes; changing one must update the other in
-the same turn.
+`src/perk/substrate/binding_delivery.py`). The cross-plane header equality is pinned by literal
+tests in both planes; changing one must update the other in the same turn. The warm model lives in
+`extension/substrate/bindingDelivery.ts`:
+
+- **Resolved trigger.** Mechanism A's trigger comes from `activeBindingTrigger(state)`: a recorded
+  stage → `stage:<id>` whatever the gate; no stage plus persisted `mode: "read-only"` →
+  `stage:plan`; else `null`. **Plan mode is a mode, not a stage**: recording `stage: plan` on the
+  toggle would shrink the session's tools, rename it and overwrite a worktree's stage.
+- **Two kinds of live evidence.** A **user** turn carrying `BINDING_HEADER` (a cold prompt or a
+  Mechanism B seed) suppresses delivery whatever it rendered — so a door that borrows a stage does
+  not also receive that stage's bindings warm. An **owned** `perk:binding-context` copy counts only
+  if its content equals the current render exactly (`isOwnedCopyOf`), and the `context` strip
+  removes every owned copy that is not the current render. Liveness is Pi's own projection
+  (`extension/pi/v1/contextEvidence.ts::activeContextMessages`, compaction-aware; a summary
+  quoting the header is not live delivery) **plus the submitting `event.prompt`** — at
+  `before_agent_start` the just-submitted prompt is not yet on the branch, so the projection alone
+  would miss a cold launch prompt and double-deliver. Pi compaction appends history rather than
+  deleting the original delivery entry, so a full-branch scan would suppress re-delivery forever —
+  the branch is read only for the trigger.
+- **Why exact, not substring.** When an overlay drops its trailing binding, the old render
+  *contains* the new one; a substring test would keep the stale copy and block re-delivery (pinned
+  by a test whose longer stale copy contains the current render, in `bindingDelivery.test.ts`).
+- **Runner fence.** A floored subagent lane persists exactly the stage-less `{mode: "read-only"}`
+  shape `/plan` leaves; `registerBindingDelivery(pi, runnerChild)` must take the composition
+  root's real `runnerChild` closure or every lane receives `stage:plan`.
+- **Warm `/objective-plan`** also resolves to `stage:plan`, but its seeded user turn carries the
+  header, so `stage:plan` can arrive only after that seed leaves context (compaction) — with no
+  guarantee it ever does.
 
 The cold/warm injection+strip and compaction mechanics are captured in
 `pi/context-injection.md`; contracts §8.38 names their externally relevant behavior.
@@ -193,6 +210,19 @@ delivery is whole-directory sync, and the launch prompt naming the variant (e.g.
 (e.g. `.agents/skills/ast-grep/references/rule_reference.md`) travel into worktrees **for free** — no manifest or
 force-include entry. And **no skill is added to the wheel**: skills ship via the skills CLI, not a
 `pyproject` force-include. The `references:` zero-wiring property is not perk-skill-specific.
+
+### Bundled `scripts/` travel with the skill, but Python under `skills/` widens the toolchain
+
+A skill's `scripts/` directory ships with the skill directory with no wiring (`skills/librarian/`
+is the first shipped skill with one). Adding Python under `skills/` does widen perk's own
+toolchain: `[tool.ruff] include`, `[tool.ty.src] include` and the `justfile` `fmt` / `lint-py`
+targets all had to name `skills`. Tests load the standalone script by path
+(`importlib.util.spec_from_file_location`, registered in `sys.modules` before `exec_module` —
+`tests/_librarian_site.py`) and fake the script's own seams (`fetch_html`, `convert_html`, a
+module-level `which`). A script consumers run with their own `python3` targets the **consumer's**
+interpreter floor (kept 3.10-compatible), not the repo's 3.13. Ruff's PTH rewrite of
+`os.replace` to `Path.replace` still delegates to `os.replace`, so an `os.replace` monkeypatch in
+the tests keeps working.
 
 ## doctor validation + the injection-time presence mirror (Node 3.1)
 

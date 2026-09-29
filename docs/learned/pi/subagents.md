@@ -32,9 +32,9 @@ never an `> **Update**` blockquote, a `(historical)` `##` section, or WAS-tensed
 - Model knob: `[models.subagents] <agent>` applied as the workflow-level `model` at spawn time (wins
   over the def's frontmatter however set); builtins are OFF in every perk repo, re-enable only at
   PROJECT scope; `agentOverrides` is never perk's mechanism — "Models, overrides and builtins".
-- Children are read-only reporters and the PARENT mutates once after reconciling; a report lane
-  completes on its validated report (0.70.1 removed `completionGuard`), `context: "fresh"` per
-  spawn is the only isolation guarantee — "Read-only children, parent mutates".
+- Report children are read-only reporters and the PARENT mutates once after reconciling; the two
+  foreground writers are the exception — a report lane completes on its validated report; per-spawn
+  `context: "fresh"` is the only isolation guarantee — "Read-only children, parent mutates".
 - `outputSchema` injects the engine-required `structured_output` call; covered lane ⟺ `ok: true`
   AND a schema-valid report (a valid report alone is evidence — since 0.71.0 it survives a later
   provider error/abort); every wave spawn disables acceptance auto-inference explicitly; `runs.all`
@@ -105,13 +105,19 @@ one fence protects many call sites, prove the composition-root wiring end-to-end
 **Execution profile.** Execution mode is orthogonal to scheduling: an omitted child `async` under
 the engine's `workflowAwaitAsync: true` selects *background*; explicit `async: true` is *detached*.
 All report roles run background (def `async: true`, child calls OMIT `async`,
-`inheritGlobalContext: false`, `extensions`/`subagentOnlyExtensions` omitted). The writer
-(`conflict-resolver`) runs foreground through the delegation bridge
-(`extension/pi/v1/delivery/conflictResolverEngine.ts`: a `DELEGATION_EVENTS.request` with NO
-`async` key — the bridge defaults foreground — typed `cwd` = the worktree, `context: "fresh"`, a
-structured result schema, no packet ⇒ floor-less, no perk activation),
-mode-discriminated between `pr-rebase` (`/submit`) and the retained stack-sync drive
-(`workflow/mergeability-and-conflict-resolution.md`). Tests assert a **closed census independent of
+`inheritGlobalContext: false`, `extensions`/`subagentOnlyExtensions` omitted). The **two
+write-capable foreground writers** — `perk.conflict-resolver` and `perk.librarian` — share one
+profile: fresh-context, no read-only floor, def `async` absent, `inheritProjectContext` and
+`inheritSkills` true, writer tools `read, grep, find, ls, bash, edit, write`. Both ride the shared
+transport `extension/pi/v1/foregroundDelegation.ts` (a `DELEGATION_EVENTS.request` with NO `async`
+key — the bridge defaults foreground — typed `cwd`, `context: "fresh"`, a structured result
+schema, no packet ⇒ floor-less, no perk activation; ownership is
+`workflow/mergeability-and-conflict-resolution.md` § "The transport"). The conflict-resolver is
+mode-discriminated between `pr-rebase` (`/submit`) and the retained stack-sync drive; the
+librarian (`extension/pi/v1/librarianEngine.ts`, reached by `run_librarian`) writes only under
+the gitignored library of the main checkout. `tests/test_subagent_agents.py::test_native_child_profile`
+asserts the writer profile for the writer set and the report profile for every other def; the
+closed-census test owns the number. Tests assert a **closed census independent of
 the shipped def census** (the repo-local `perk-dev.session-auditor` separately). SDK-identity
 boundary: a blocking `subagent` call shares the host SDK in-process, while the detached runner
 and wave lanes run under pi-subagents' own peer-alias identity (`pi/native-sdk-bridge.md` §
@@ -129,9 +135,9 @@ The defs are top-level `agents/*.md` shipped IN the `@mgiles/perk` npm package: 
 declares `"pi-subagents": {"agents": ["./agents"]}`, and pi-subagents discovers them as
 `source: "package"`. There is no second copy and no reconverge — edit `agents/<name>.md` and ship
 a release. The listing (`adversarial-reviewer`, `conflict-resolver`, `draft-reviewer`,
-`dream-analyst`, `dream-reducer`, `harvest-analyst`, `learn-analyst`, `objective-explorer`,
-`pr-reviewer`, `review-classifier`, `scout`, `simplifier`) is the shipped `agents/*.md` census — never restate a
-count (`workflow/doc-reconciliation.md`).
+`dream-analyst`, `dream-reducer`, `harvest-analyst`, `learn-analyst`, `librarian`,
+`objective-explorer`, `pr-reviewer`, `review-classifier`, `scout`, `simplifier`) is the shipped
+`agents/*.md` census — never restate a count (`workflow/doc-reconciliation.md`).
 
 ### How pi-subagents discovers agents
 
@@ -268,6 +274,14 @@ Precedence (`src/shared/fork-context.ts::resolveSubagentLaunchContext`): explici
 configured `defaultSubagentContext` > def `defaultContext` > `fresh` (an implicit fork also needs a
 persisted parent — `canPreferFork`). An isolation-requiring fan-out passes `context: "fresh"` **per
 spawn** — a def-level default cannot guarantee isolation.
+
+**Writer-flow craft — report the observed state, never a promise.** Once a writer child has been
+dispatched, every failure and withheld message must report the **observed** state of artifacts it
+may have moved: a successful publish can move a staging directory into place before the parent's
+corroboration fails. "Present" means left for inspection, "absent" means it may have published
+(the library may have changed), "unknown" means unknown. The first `run_librarian` messages
+promised the staging directory was still there; review caught it
+(`extension/pi/v1/librarian.ts::stagingNote`).
 
 ## Execution surfaces and structured output
 
@@ -548,6 +562,9 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
 - **`conflict-resolver`** — began as a guidance-instructed one-child `runs.run` with a compact
   `{key, ok, error, output}` projection; now code-dispatched through the delegation bridge with a
   structured result schema.
+- **2026-09 — `librarian`** — `perk.librarian` joins as the second foreground writer (dispatched by
+  `run_librarian`); the delegation transport was extracted from the conflict-resolver engine into
+  `extension/pi/v1/foregroundDelegation.ts`, shared by both writers.
 - **Review-context sweep** — `perk pr review-context` once wrote `formatted_context.json` /
   `pr_diff.diff` into the worktree CWD, where `git add -A` swept them into commits; it now writes
   under the run scratch dir (`src/perk/cli/commands/pr/review_context_cmd.py`).
@@ -587,8 +604,12 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   `extension/testing/memoryAdapter.ts`) — the report-wave module over the v1 RPC seam
 - `extension/substrate/childRestrictions.ts`, `extension/substrate/toolGating.ts`,
   `extension/pi/v1/contextInjection.ts` — the two booleans' consumer, the gate, the guidance fence
-- `extension/pi/v1/delivery/conflictResolverEngine.ts`; `extension/waves/scoutWave.ts` /
-  `extension/pi/v1/scoutWave.ts`
+- `extension/pi/v1/foregroundDelegation.ts` (the shared writer transport),
+  `extension/pi/v1/delivery/conflictResolverEngine.ts`, `extension/pi/v1/librarianEngine.ts`;
+  `extension/waves/scoutWave.ts` / `extension/pi/v1/scoutWave.ts`
+- The lazy-owned borrowed-tool policy (how `subagent` follows its owner's live loader
+  registration) lives in `workflow/borrowed-packages.md` § "Borrowed-tool stage scoping" — do not
+  restate it here.
 - `perk/convergence/init/extension_install.py::shipped_agent_defs_dir`,
   `perk/convergence/doctor/legacy_agent_defs.py`, `perk/convergence/doctor/checks.py`, `agents/*.md`
 - `docs/design/pi-subagents-child-execution-policy.md`; `docs/developers/pi-subagents-reverify.md`;

@@ -35,9 +35,9 @@ after all edits and stamped with the measured HEAD SHA) — is
 - Sweep steps may no-op; neighbor Status prose stales — "Sweep-step craft".
 - Pi's `edit` fuzzy fallback rewrites touched lines to ASCII dashes/quotes; after a glyph failure
   use an asserting Python script — "Pi's edit tool on em-dash-heavy prose".
-- Post-submit choreography fails on every observed instance: front-load; artifact-anchored
-  forward references only; evidence on a pre-`/submit` carrier — "Validation-record
-  reconciliation".
+- Post-submit choreography fails on every observed instance: front-load; live legs the human
+  can run now are a submit gate; artifact-anchored forward refs; pre-`/submit` carriers —
+  "Validation-record reconciliation".
 - Ship the derivation command; re-check the prior node's narrative; append one landing-log entry
   — "Objective-roadmap reconciliation craft".
 
@@ -318,6 +318,9 @@ Scanner-aware citation craft (#2158, #2157, #2167):
   examples, declared-shape docstrings and tutorials (runnable top-to-bottom) when behavior grows
   (#2029); a numbered step sequence is scoped to one mode with an up-front callout carrying the
   other mode's complete path (#2024).
+- **A `just` recipe's scope change greps its restatements** — every README and developer doc that
+  restates the recipe's coverage (`docs/site/README.md`, `docs/developers/*.md`); a recipe rewrite
+  otherwise leaves a mirror asserting the old coverage.
 
 ## Pi's edit tool on em-dash-heavy prose — fuzzy fallback rewrites the lines it touches
 
@@ -332,13 +335,20 @@ an `oldText` with a stray trailing space+tab matched after the trim and rewrote 
 **Literal vs decoded escapes.** A correctly JSON-encoded `\u2014` in the tool argument is decoded to
 the em dash by pi-ai's JSON parse before `edit` sees it, and matches normally. The observed failures
 (#2541, #2543, #2561) were one slip: it fails outright on a *double-escaped* literal backslash-u
-sequence left in `oldText` — never because a correctly encoded escape fails.
+sequence left in `oldText` — never because a correctly encoded escape fails. The same slip in
+`newText` does **not** fail: the double-escaped sequence lands in the file as literal
+backslash-u-plus-four-hex-digits text instead of the glyph, and nothing reports it.
 
 - Never use `edit` as a probe or with placeholder text — a mid-edit `PLACEHOLDER_*` token left in a
   doc becomes junk on a crash.
 - After one glyph-related failure, switch to a small Python script applying each Before→After with
   `assert text.count(before) == 1` (the same exact-and-unique check the edit tool gives).
-- Check `git diff` for unintended `—`→`-` changes before committing.
+- For bulk or multi-file rewrites use a small Python script with normal (non-raw) string
+  literals from the start — the glyphs are typed literally and the `count == 1` assert replaces
+  the edit tool's matcher.
+- After any prose edit, `grep -n` the touched files for the four-hex-digit backslash-u escape
+  pattern (expect only the corpus's deliberate data-format examples) and read the diff for
+  unintended `—`→`-` changes before committing.
 
 ## Validation-record reconciliation — sequencing, forward references, evidence classification
 
@@ -377,10 +387,19 @@ instance, "ALWAYS" labels included; prose awareness does not enforce itself:
 - **Recurrence tally: prose is not stopping it.** Plans put evidence in the PR body a FOURTH time
   (#2549, #2541, #2543, after #2504/#2506) even with this section in the planner's scope; the lint
   lead is routed (#2578).
-- **A dogfood gate that needs an interactive session is a human-owned step between `/submit` and
-  `/ready`/`/land`.** The implement session cannot run live model + subagent sessions; plans say so
-  explicitly, and the reviewer/lander confirms the Dogfood record exists before merge (#2561 merged
-  with none).
+- **Live dogfood legs the human can run during the implement session are a submit gate.** Commit
+  the offline part first, hand the human one phase at a time, fill the record from logs and
+  session JSONL commit by commit, and call `/submit` only once every criteria row is observed-live
+  or offline-pinned with a dated verbatim waiver. The implement session **can** dispatch live
+  writer subagents from its worktree (`run_librarian`). Keep the between-`/submit`-and-`/land`
+  slot only for checks that genuinely depend on post-submit state (review, a ready stamp); there
+  the reviewer/lander confirms the Dogfood record exists before merge (#2561 merged with none).
+  - **Phased hand-off.** One phase per message: where to run it (terminal/tab), a paste-ready
+    command block that tees output to a named log or the exact prompt to type, which failures are
+    expected ("don't fix anything"), and a named reply ("reply 'P0 done'"); the agent checks that
+    phase's logs/JSONL before sending the next dependent phase. Put edits the human would make by
+    hand into commands (a `jq` rewrite of `.pi/settings.json`, not "edit the file"). Batching
+    every phase into one hand-off drew the operator's "be much less ambiguous".
 
 **Re-verify passes sweep the CHANGELOG against the claims, not only the claims against source.**
 Checking each doc claim against source misses a source change no claim mentions — the 0.70.1

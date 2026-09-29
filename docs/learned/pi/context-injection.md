@@ -27,9 +27,10 @@ withheld from the `context` event (`emitContext`'s role filter); the strip logic
 - The census of injections is source-owned: the `installInjectedContext` call sites and the
   `PLAN_GUIDANCE_EXCLUDED_STAGES` set (pinned by the registry guard test) — never a count in
   prose — "Dedup against Pi's own live projection", "Stage-field disambiguation".
-- Persist the stage id and key each authoring injection on `(gate AND stage)`, never the mode
-  alone; a warm stage transition must strip the deselected flavor — "Stage-field
-  disambiguation", "Warm stage transitions must strip the deselected flavor".
+- Persist the stage id and key each authoring injection on the persisted mode plus the stage id
+  (`isPlanGuidanceStage`), never the in-memory gate object; a warm stage transition must strip
+  the deselected flavor — "Stage-field disambiguation", "Warm stage transitions must strip the
+  deselected flavor".
 - `Compaction failed: … token cap` is Pi's summary budget (`[compaction] reserve_tokens`), not
   perk context code — "Compaction callback lifecycle and data-shape discipline".
 
@@ -182,15 +183,16 @@ about the copies the previous stage already delivered, not only about what it wi
 read-only stage coexisted (`plan` vs `objective-author`), the interior had to know *which one* —
 the gate alone is ambiguous. The fix: a `stage` field on `perk:workflow-state`, persisted at
 **cold claim** from the handoff blob (the handoff already carried `stage` for plan-ref
-reconciliation, but it was never written into workflow-state). Context injection keys on
-`(gate AND stage)`.
+reconciliation, but it was never written into workflow-state). Context injection keys on the
+**persisted** mode plus the stage id.
 
 The current shape: every stage-owning authoring installer — an `installInjectedContext` caller
-whose `select` is keyed `(gate AND stage === <its own stage>)` over the full branch — selects only
-in its own stage, and plan mode (`extension/pi/v1/plan.ts::installPlanBindings`) is the default
-arm: it selects the plan marker only where `isPlanGuidanceStage(stage)` holds — the stage is
-`undefined` (the stage-less warm `/plan`) or not in `PLAN_GUIDANCE_EXCLUDED_STAGES`
-(`extension/pi/v1/contextInjection.ts`), the stages plan guidance is withheld from because another
+whose `select` is keyed on its own stage over the full branch — selects only in its own stage,
+and plan mode (`extension/pi/v1/plan.ts`, `installPlanMode` under `installPlanBindings`) is the
+default arm: it selects the plan marker only where the **persisted** `state.mode === "read-only"`
+and `isPlanGuidanceStage(state.stage)` both hold — the same signal binding delivery reads, not
+`gating.isActive()`. The stage is `undefined` (the stage-less warm `/plan`) or not in
+`PLAN_GUIDANCE_EXCLUDED_STAGES` (`extension/pi/v1/contextInjection.ts`), the stages plan guidance is withheld from because another
 authoring context owns them or because they are read-only but author nothing. Derive that set from
 the source, never from prose: the registry guard test in `contextInjection.test.ts` pins it against
 `loadRegistry().stages` (every read-only stage outside the plan claims is excluded), so a new
@@ -198,8 +200,19 @@ read-only authoring stage fails the guard until it is added. The plan-adapter sh
 same predicate for their plan flavor. Exactly one authoring context is present, however many
 stages share the mode.
 
+Two facts about keying on the persisted mode rather than the in-memory gate:
+
+- **Where they disagree.** A read-write sync or restore that throws leaves the in-memory gate
+  closed (fail-closed) while the persisted mode is already `read-write`. In that window enforcement
+  and the gate's own `[READ-ONLY MODE]` context stay closed (both follow the in-memory gate) while
+  plan guidance follows the declared intent and retires.
+- **Rebuild points.** Only `session_start` and `session_tree` rebuild the gate from the persisted
+  mode; `resources_discover` only re-applies the in-memory gate. The divergence window closes at
+  the next rebuild point.
+
 **Pattern:** when stages share a `mode`, persist the stage id so context injection can be keyed on
-`(gate AND stage)` rather than the mode alone.
+the persisted mode plus the stage id (`isPlanGuidanceStage`) rather than the mode alone, and never
+on the in-memory gate object.
 
 ## Cross-references
 

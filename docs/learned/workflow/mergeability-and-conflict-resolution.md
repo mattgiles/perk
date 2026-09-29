@@ -206,9 +206,18 @@ Both obvious "call the engine synchronously" routes are dead ends: Pi's `getAllT
 tool *metadata*, not callables, and the engine's RPC `spawn` rejects `async: false`. The working
 path is the engine's structured foreground delegation interface, driven by the
 `prompt-template:subagent:{request,started,update,response,cancel}` event family with exact
-`(requestId, ownerRunId, nodeId)` correlation
-(`extension/pi/v1/delivery/conflictResolverEngine.ts::DELEGATION_EVENTS`) — public event names,
-no import of the engine.
+`(requestId, ownerRunId, nodeId)` correlation — public event names, no import of the engine.
+
+**Transport ownership.** The public delegation event literals (`DELEGATION_EVENTS`),
+`REQUEST_TIMEOUT_MS` / `START_ACK_MS` / `CANCEL_GRACE_MS`, the terminal validator and the native
+`worktree`-default read live in `extension/pi/v1/foregroundDelegation.ts`, shared by both
+foreground writers (`perk.conflict-resolver`, `perk.librarian`).
+`extension/pi/v1/delivery/conflictResolverEngine.ts` keeps only the conflict-specific concerns
+(authorization, the lock, classification) and re-exports the moved constants for its existing
+importers. Two pins hold the split: `dispatchForeground` refuses an already-aborted signal
+**before** subscribing, because abort events are never replayed to a later listener
+(`foregroundDelegation.test.ts`); and Rule I in `extension/importDirectionGuard.test.ts` requires
+the `prompt-template:subagent:` census to be exactly the transport file.
 
 **The landed dispatch is synchronous from entry to `events.emit(request)`**: abort sample →
 authorization (`allowed`: not disposed, not read-only, the caller's `authorized(request)`) →
