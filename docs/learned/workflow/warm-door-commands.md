@@ -137,6 +137,13 @@ concluding it never fired.
   detail follows `cold-door-client.md`'s fail-arm narrowing or is dropped.
 - **Tests capture severity, not just text** (`notifyEvents` beside `notifies`,
   `extension/testing/harness.ts`); a fallback path asserts the stderr line itself.
+- **Advisory envelope fields can co-occur.** A stacked cascade returns fresh `change_stats`
+  together with a `change_stats_note` about a failed PR-body refresh. Both the TS
+  `renderChangeStatsLine` (`extension/pi/v1/delivery/submit.ts`) and the Python human renderer
+  (`src/perk/cli/commands/pr/submit_cmd.py`) first used an if-stats-else-note shape that dropped the
+  warning — render both. And split a multi-line message helper into headline + trailing-line helpers
+  when a caller (`finalize_address`, `extension/pi/v1/delivery/address.ts`) embeds the headline
+  mid-sentence.
 
 ## Law 4 — guidance-named tools in every stage scope
 

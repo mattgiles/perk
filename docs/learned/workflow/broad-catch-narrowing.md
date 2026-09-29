@@ -30,8 +30,9 @@ derive each typed set.
   boundary reopens exception posture".
 - Broad catches are sanctioned only for cleanup-and-reraise and named degrade boundaries —
   "Sanctioned broad catches are policy boundaries".
-- A URL-derived path's whole containment chain sits in one refusal boundary — "Whole-chain
-  containment for URL-derived paths".
+- A URL-derived path's whole containment chain sits in one refusal boundary and must follow the
+  host filesystem's rules (case folding, reserved names as directory prefixes, the post-redirect
+  URL) — "Whole-chain containment for URL-derived paths".
 - A malformed external payload is a backend error — "Payload-parse failures are backend errors".
 - A foreign-file reader classifies every read outcome, decode included — "A convergence reading a
   file perk does not own classifies EVERY read outcome".
@@ -155,6 +156,18 @@ The right width is taxonomy-driven: neither reflexively `Exception` nor the narr
 one fixture. Pair malformed-input cases with the new endpoint so the widened boundary cannot regress
 back to raw tracebacks.
 
+**Untrusted-input exceptions beyond the obvious class** (both verified empirically,
+`src/perk/library/probe.py`):
+
+- `xml.etree.ElementTree.fromstring` raises `LookupError` for an unknown or non-text declared
+  encoding and `ValueError("multi-byte encodings are not supported")` for `utf-16` without a BOM,
+  `utf-32` or `utf-7` — not only `ParseError`.
+- httpx ASCII-encodes `str` header values, so echoing a legal obs-text ETag raises
+  `UnicodeEncodeError` while *building* the request; and it decodes response headers as UTF-8 when
+  possible, so the value does not round-trip. Read validators from `response.headers.raw` decoded
+  latin-1, send them back as latin-1 `bytes` keyed by `bytes` names (`dict[bytes, bytes]` for ty),
+  and treat a stored value outside latin-1 as a noted probe error.
+
 ## Sanctioned broad catches are policy boundaries
 
 ### Atomic-write cleanup
@@ -184,6 +197,29 @@ and allowed root, check relativity/containment, confirm a file, and read it. Wra
 read leaves earlier adversarial-path failures as raw exceptions. `perk_dev/prose_review/web.py` is
 the reference boundary. Degrade every failure in that chain to the same contained-read refusal;
 never continue with a partially checked path.
+
+**Paths built from URLs must follow the real filesystem's rules, not just be lexically safe.**
+Three defects survived lexical containment, each reproduced on APFS
+(`skills/librarian/scripts/copy_docs_to_markdown.py`):
+
+- **Case-insensitive collisions.** `/docs/Index.html` → `Index.md` is the same file as the
+  generated `index.md` entrypoint, and publish gates on `index.md` existing — so an interrupted
+  crawl became publishable. Compare reserved names and collision keys case-folded.
+- **Reserved names as directory prefixes.** `/docs/sources.json/topic` creates a `sources.json/`
+  directory, so the artifact write fails "Is a directory". Refuse any destination whose first
+  segment is reserved.
+- **Redirects.** With `curl --location`, relative links were resolved against the requested URL,
+  not the post-redirect one. Capture `%{url_effective}` via `--write-out`, resolve links against
+  it, and keep the requested URL as the page's identity and destination.
+
+Related write-path facts: `NamedTemporaryFile` creates `0600` files, so atomic temp+replace silently
+makes published files private — `chmod` before replacing; write a completion entrypoint **after**
+its handshake files, so its existence proves they are complete; and test every artifact-write
+failure against the real consumer predicate (publish refuses `staging_invalid`). The question to
+ask: what does *this host's* filesystem consider the same path, and can a page path become a
+directory where an artifact must go? The accepted trade-off — case-folded collision keys drop
+genuinely distinct `API` vs `api` pages on case-sensitive hosts, with a warning — is recorded in
+contracts §8.75(j).
 
 ## Payload-parse failures are backend errors
 

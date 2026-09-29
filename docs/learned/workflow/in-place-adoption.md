@@ -17,7 +17,8 @@ the plan-adoption (`plan from`) and objective-adoption (`objective author --from
   preserving the human's title/body verbatim; per-tier preservation rules differ — "The
   in-place-writer family" + "Verbatim preservation differs by tier".
 - Seed-from-file is a SIBLING mode (authoring seeded from a local artifact), NOT an in-place
-  writer — "Seed-from-file mode".
+  writer — "Seed-from-file mode"; guidance-only (`objective replan --from`) is the third —
+  "Three source-input modes — adopt, seed, guide".
 - If a write must preserve a foreign field verbatim, compose from lower-level primitives — never
   borrow a higher mutator that touches the field (`update_plan_issue` PATCHes the title) —
   "Don't borrow a mutator that touches the preserved field".
@@ -107,6 +108,23 @@ a **URL sub-mode** and confirms the per-artifact adoption asymmetry once more:
   the seed text references the URL + fetch instruction must invoke TWICE (once `--json` for payload
   shape, once non-`--json` for the printed seed). `CliRunner().isolated_filesystem()` already chdirs,
   so relative `--from` paths resolve there (see the chdir gotcha above).
+
+## Three source-input modes — adopt, seed, guide
+
+A door that takes a "source" reads it in exactly one of three modes:
+
+| Mode | Doors | What happens to the source |
+| --- | --- | --- |
+| **Adopt in place** | `perk plan from <id>` (§8.29), `perk objective author --from <id>` (§8.30) | perk metadata is stamped into the same backend object |
+| **Seed from source** | the file/URL seeding doors (§8.33) | a fresh artifact is authored; the source is untouched |
+| **Guidance only** | `perk objective replan --from` (§8.32) | untrusted steering DATA in the replan scratch; no `adopt_from`, `supersedes` unchanged; reuses only `detect_seed_file` / `read_seed_file` |
+
+Scope any non-mutation promise to **how the input is read**. Reading guidance never mutates the
+source, but the replan's own save effects still apply to their targets — a stacked §8.53 transfer
+re-owns every carried plan, including one that also served as guidance. Scope the wording rather
+than refusing plan-issue guidance; refuse only resources every run mutates (the subject objective,
+its scratch file). The alias guard that refuses the subject objective compares backend-canonical
+ids — `objective-store.md` § "Alias guards compare backend-canonical ids, never user spellings".
 
 ## Surface shape is decided per-node, asymmetrically (#711)
 
