@@ -65,6 +65,15 @@ bodies, and the door-suite tests (e.g. `extension/pi/v1/codeReview/terminal.test
   objective-plan control arm pinning the exception set at exactly
   `{objective-author, gist-author}`. One generic shape test beats per-door lookalike fixtures
   when the shapes are adapter-indistinguishable.
+- **A §8.57 awareness pointer** is one conditional sentence — no bold lead-in, no imperative —
+  naming only the skill and its read path (never a CLI verb, tool name or status word), so the
+  skill stays the single carrier. Pin it section-scoped plus a negative pin (the pointing skill
+  never names the CLI). A data-agreement test (every binding delivering the pointing skill is a
+  `stage:<id>` trigger; the target skill's `stages:` exposes that stage; both skills in
+  `PERK_SKILLS`) is necessary but not sufficient — enumerate the session shapes by hand against
+  `extension/substrate/bindingDelivery.ts` / `toolGating.ts`. The warm `/plan` outside a
+  plan-stage session was the shape that had no delivery until the resolved trigger landed
+  (`workflow/skill-bindings.md` § "The two doors and the cold↔warm dedup marker").
 
 ## Migration craft
 

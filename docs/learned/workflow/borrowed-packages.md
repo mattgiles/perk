@@ -34,11 +34,11 @@ a capability is a borrow at all.
   package-skill name lives — "Partial retirement — an upstream drops a bundled skill".
 - Lazy install/restart, filter security limits, and attempted-vs-covered bookkeeping remain explicit
   residuals — "Residuals".
-- A parser needed by the bare-clone extension would be vendored as a byte-pinned module *closure*,
-  not borrowed as a runtime dependency — the one instance (smol-toml) retired with the draft-review
-  protocol — "Vendor a parser closure, not a runtime dependency".
+- A bare-clone parser would be vendored as a byte-pinned module *closure*, not a runtime dependency
+  (smol-toml, retired with the draft-review protocol) — "Vendor a parser closure".
 - Late-registering borrowed tools are ADMITTED (sticky `snapshot ∪ admitted` baseline + the
-  `resources_discover` re-apply), not leaked — "Borrowed-tool stage scoping".
+  `resources_discover` re-apply), not leaked; lazy-owned tools follow the owner's live loader
+  registration — "Borrowed-tool stage scoping".
 - Read a borrowed engine's config once at activation (fix = quit and resume), refuse-don't-converge
   its private config, and expect builtin-shadowing packages to break other packages' host
   intersections (the since-retired `PI_FFF_MODE=tools-and-ui` injection) — "Borrowed-engine
@@ -211,7 +211,7 @@ when the package is absent, `pi.setActiveTools` simply has nothing to enable (th
 precedent). Prefer static allowlisting over package-presence gating. The injected read-only notice
 interpolates `READ_ONLY_TOOLS`, so it self-updates.
 
-## Borrowed-tool stage scoping (the census, placement, and two invariants)
+## Borrowed-tool stage scoping (the census, placement, and the invariants)
 
 Stage scoping filters the scoped universe `PERK_TOOLS ∪ BORROWED_TOOLS`
 (`extension/substrate/toolGating.ts`): an enumerated static-name census with the same
@@ -221,7 +221,7 @@ inert-when-absent posture as `READ_ONLY_TOOLS`; un-enumerated foreign names pass
 Placement matrix: research/web tools are universal; delegation + `todo` are worktree-family only;
 Linear-mutating + plannotator **phase** tools (`PLANNOTATOR_PHASE_TOOLS`) sit in no stage list.
 
-Two invariants worth knowing before touching the census:
+The invariants worth knowing before touching the census:
 
 - **Single-governance**: a name is governed ONCE — it lives in exactly one census.
   `ask_user_question` now **IS** in the borrowed census (`BORROWED_TOOLS`): the foreign
@@ -252,6 +252,38 @@ Two invariants worth knowing before touching the census:
   `docs/user-docs/reference/in-session/model-tools.md`, asserted set-equal by
   `docs/site/src/in-session-reference.test.mjs`, + contracts §8.40. Coverage is closed over the
   enumerated names only (a drift guard is a filed follow-up).
+- **Lazy-owned tools follow their owner's live registration.** An owner's tools are lazy-owned
+  only while its loader is **registered** — `lazyOwnedBy(getAllTools())` in
+  `extension/substrate/toolGating.ts` (over `LAZY_TOOL_LOADERS`), re-read at every
+  reconciliation — never a static name list. The plan's name-only classification regressed eager
+  owners: an older pi-subagents and the current host-probe fallback lost `subagent` across `/plan`
+  off→on with no loader to recover it. The resulting policy (contracts §8.40):
+  - **Membership follows the owner.** Loader registered ⇒ the tool's membership is the owner's
+    live selection at every reconciliation, gate ON or OFF; the gate-ON allowlist is a ceiling.
+  - **The gate-OFF baseline** applies owner selection to the whole `snapshot ∪ admitted` union,
+    then adds the currently-active lazy tools, so admission history cannot bypass an owner's
+    hiding.
+  - **Eligibility stays perk's** — the stage filter still strips an owner-enabled tool in an
+    excluding stage.
+  - **Loader refusal.** A loader rides its tools' family constant (pinned structurally); a loader
+    call outside its tools' eligibility is refused with a stage-naming reason — the one `tool_call`
+    backstop, because owners re-advertise in `before_agent_start` after perk's handler.
+  - **Pruning only.** Owner selection prunes the installed set; the `tool_call` allowlist stays the
+    full set, so lazy hiding is not an authorization boundary.
+
+**Composition facts to model from source, not assume** (the owner-rules comment above
+`BORROWED_TOOLS` in `toolGating.ts` carries the per-owner detail):
+
+- Both owners replay recorded `toolsAdded`/`toolsRemoved` and hide on a message-less branch, but on
+  a non-empty branch without declarations pi-subagents keeps the current state while
+  pi-web-access enables all its tools.
+- pi-subagents' `before_agent_start` edits `selectedTools` and the active set; pi-web-access's
+  only re-adds its loader.
+- Pi's `navigateTree` restores tools from the transcript before emitting `session_tree`.
+- Extension handlers run in package order, so perk (first) can refuse a loader but never pre-empt
+  an owner's hide/replay/re-advertise.
+- A cold-door session looks message-less to owners — perk's workflow-state claims are `custom`
+  entries.
 
 ## The read-only bar is repo non-mutation, not zero side effects
 

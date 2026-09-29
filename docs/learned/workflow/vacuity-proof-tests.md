@@ -13,8 +13,8 @@ condition that would make an incorrect implementation fail, then assert the full
 
 ## Distillation
 
-- Wire every fake target with a distinguishable value; fakes never pick the safety posture —
-  "Default-miss fakes hide targeting errors" / "Fakes must not pick the safety posture".
+- Wire every fake target distinguishably; fakes never pick the safety posture and keep registered
+  ≠ active — "Default-miss fakes hide targeting errors" / "Fakes must not pick the safety posture".
 - Seam conversions re-home every observer via an assertion-ownership ledger; ONE engine story owns
   registration (`is not None`, fault-inject by deleting it) — "Seam conversions must re-home
   every observer".
@@ -71,6 +71,15 @@ test. `workflow/issue-backend.md` records the backend form; delivery routing exa
   each fake by whether its branch is origin-bearing, repair with closure-held stateful methods (a
   spread-copied fake must observe the same slot), and pin the healthy path ONCE per suite — the
   composed result AND the absence of the layer's warning text.
+- **Model "registered" and "active" as independent fixture state.** The gate fixture reported only
+  active names as registered, so a lazy tool its owner hid before perk's first engagement looked
+  like a late admission, and the "keep currently-active lazy tools" baseline branch was never under
+  test — removing it stayed green. Give the fake an independent registered list (census ≠ active),
+  add a no-loader (eager owner) case and a hidden-then-enabled case, then mutation-check: removing
+  the branch failed 3 tests; name-only classification failed 8. A fake owner must mirror each
+  real owner's replay rules — a single shared fake was corrected at plan review
+  (`extension/substrate/stageTools.test.ts`; the owner rules are `workflow/borrowed-packages.md`
+  § "Borrowed-tool stage scoping").
 
 ## Seam conversions must re-home every observer
 

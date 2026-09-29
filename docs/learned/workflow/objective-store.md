@@ -29,6 +29,8 @@ as such — point, never restate.
 - Replan is supersede (close-old/create-new, fresh `run_id`, bidirectional lineage), never an
   upsert; its fail-open close composes from primitives, not public store methods — "Objective
   replan is supersede".
+- Alias guards compare the store's returned canonical id, never a cleaned user spelling — "Alias
+  guards compare backend-canonical ids, never user spellings".
 - Scripted node-linked saves mint a fresh run id per node — "The same-run-id upsert trap".
 - `find_open_objective_by_origin` never silently under-scans; the dormant store **raises** instead
   of joining the `→ None` family — "The origin lookup".
@@ -154,6 +156,20 @@ reach for close-old/create-new rather than inventing an in-place rewrite.
   header-update LBYL rejects any post-create merge; and because supersede is create-new both live
   stores auto-carry the validated predecessor `origin` — otherwise the guard's population silently
   loses members across replans.
+
+## Alias guards compare backend-canonical ids, never user spellings
+
+The GitHub store resolves ids with an integer parse of the `#`-stripped text, so a cleaned-string
+equality check let `replan 42 --from 042` (or `+42`) read the subject issue as guidance and reach
+launch (reproduced: the stubbed launch was reached). The rule: **the backend is the identity
+authority**. A cleaned-string match is only the instant fast path before the banner; the
+authoritative guard compares the store's returned `src.id` against the prepared
+`ReplanContext.objective_id`, after the read-only Prepare snapshot and before any engagement read,
+scratch write or launch (`src/perk/cli/commands/objective/replan_cmd.py`;
+`tests/test_objective_replan_cmd.py` pins both spellings on both arguments with a fake store that
+resolves ids like the real backend). Don't copy a backend's parsing rule into the door. Known gap:
+`LinearProjectObjectiveStore.read_objective_source` / `get_objective` echo the input spelling as
+`id`, so on Linear the guard falls back to spelling comparison (a filed follow-up).
 
 ## The same-run-id upsert trap (scripted node-linked saves)
 

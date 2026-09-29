@@ -1,6 +1,6 @@
 ---
 title: Parallelizing the two test suites
-read_when: You are speeding up `just test`/`just ci`, touching pytest xdist or the `slow`-marker tiers (`strict_markers`, `test-py-fast`/`-slow`, run_ci rows), or splitting a `node:test` file.
+read_when: You are speeding up just test/just ci, touching pytest xdist or the slow tiers (strict_markers, test-py-fast/-slow, run_ci rows), splitting a node:test file, or timing tests under host load.
 cluster: toolchain-gotchas
 ---
 
@@ -66,6 +66,14 @@ tiers over ONE registered marker: `fast ∪ slow = full`, `fast ∩ slow = ∅`,
   runner writing to a scratch log), then read the log; a foreground timing series stalls the session
   and contends with it.
 
+### A contended timing series is invalid, not caveated
+
+A series run at host load ≈13 with a mid-series worktree edit marked 57 slow cases; the clean
+re-run marked 26, and every valid mark was also inside the contended set — contention
+systematically inflates durations near the threshold. Wait until the 1-minute load is under the
+core count, sample `sysctl -n vm.loadavg` every 15 s, make no worktree edits at all, and use a fresh
+`/tmp` root (the protocol: `docs/developers/testing.md` § "Timing a tier").
+
 ### The build-once-under-parallelism idiom
 
 A session-scoped build fixture only builds **once** IF its consumers can't scatter across workers.
@@ -90,6 +98,17 @@ the lever is **splitting the largest harness-heavy files** into siblings.
   Add it to **both** the `test-js` and `test` justfile recipes.
 - **`node --test` (Node 22+) defaults to the spec reporter** (`✔`/`✖`, `ℹ pass N`), not TAP
   `ok`/`# pass` — filter output on those glyphs or trust the exit status (#2475).
+
+### Measuring per-file durations
+
+No built-in reporter (`spec` / `dot` / `tap`) prints a per-file duration for successful files. The
+working method is a throwaway reporter module (an async generator over the event stream) yielding
+`<file>\t<duration_ms>` per `test:summary` event whose `data.file` is defined — validate once that
+it yields exactly one line per glob-matched file (compare with `fs.globSync` and `find`). Under the
+recipe's `2 × cores` concurrency, per-file durations are stable within a few percent. A 30 s
+threshold qualified far more files than the plan expected (recorded in
+`docs/design/archive/run-ci-gate-restructure.md`) — measure the qualifying set before turning a
+threshold into a refactor, and ask the operator when the scope balloons.
 
 ### The file-split recipe + gotchas
 

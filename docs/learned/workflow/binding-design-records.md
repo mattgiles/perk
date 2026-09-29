@@ -1,6 +1,6 @@
 ---
 title: Binding design records & disposable-scaffold spikes
-read_when: You are authoring or reconciling a binding design record, spike, or dogfood/characterization record — evidence, teardown, measured-vs-source-derived claims, FAIL verdicts, waivers, stale claims.
+read_when: You are authoring or reconciling a binding design record, spike, or dogfood/characterization record — session-event evidence vs self-report, teardown, FAIL verdicts, waivers, stale claims.
 cluster: knowledge-stewardship
 ---
 
@@ -120,6 +120,16 @@ bounded re-verification) added the record disciplines below. The binding record 
   live check *unobserved — NOT PASSED*, uses the same wording across the design record, contracts,
   and CHANGELOG, and leaves the live run as an explicit named residual. Never let "the tests pass"
   read as "the live behaviour was observed".
+- **Instrument claims from session events, never from model self-report.** Asked which bindings
+  applied, a stage-less warm `/plan` session said `perk-plan` "fires" — inferred from reading
+  `shared/bindings.yaml`; its JSONL held no `perk:binding-context` entry and its workflow state no
+  stage. The persisted entry count is the instrument (exactly one in the cold session, zero warm).
+- **Know which `perk` the doctor is.** A `perk doctor` run before `just install-cli` was the PyPI
+  build: version-skew drifts plus a green `skills-delivery` while a skill was missing looked like a
+  doctor blind spot, but the checkout's own doctor (`uv run perk doctor`) fails `skills-delivery`
+  naming it. When dogfooding unreleased features: check `perk --version` and its interpreter,
+  install the checkout CLI, re-sync skills with `perk init` — and a linked worktree created before
+  the re-sync keeps stale skill links.
 - **Measurement honesty** (the Python test-suite speed-up records under
   `docs/design/archive/python-test-suite-speedup-*`): classify the change (safety / ownership /
   selection vs speed) **before** measuring, so a non-speed change is never judged by a speed
