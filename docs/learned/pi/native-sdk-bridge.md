@@ -112,6 +112,23 @@ summary line). Hermetic live smoke: `pi --approve` (writes no `trust.json`), the
 scrub every behaviour-changing env var (`PERK_DISABLE_NATIVE_SDK_BRIDGE`, `PI_SUBAGENT_CHILD*`,
 `PERK_SELFCHECK`, `PERK_RUN_ID`, `PERK_PROFILE_HANDOFF`).
 
+## Widening the census is package-wide
+
+An import used only by a consumer's binary-runner bootstrap still belongs in the census
+(`typebox/value` in pi-subagents 0.72.x's `binary-bootstrap`). Widening touches `NATIVE_SDK_CENSUS`
++ a `BRIDGE_SCHEMA` bump, the `hostSdk.ts` namespace, the `bareImportGuard` allow-list, the decoy
+and the fixture consumer's static import, and every hard-coded `specifiers=N` / `schema N` test
+value — interpolate the constants instead. Drift-guard proof: observe it red once with the
+stale-entry arm before installing, then install the exact version into the worktree's gitignored
+`.pi/npm` the way Pi does (`npm install <pkg>@<ver> --prefix .pi/npm --legacy-peer-deps`); never
+`pi update` (it spans user/project scopes and picks latest). The root checkout's `.pi/npm` stays
+stale after landing until re-installed there, and canonical CI has no `.pi/npm` and skips the
+guard. The compiled/Bun path that loads `binary-bootstrap` is `unsupported:bun` by design and was
+not exercised.
+
+**A local drift-guard red is first a stale-install suspect**, not census drift — see
+`toolchain/worktree-node-modules.md` § "The `.pi/npm` world in perk's own checkout".
+
 ## Residual risks (dated, at landing)
 
 - A consumer evaluated before the bridge whose first post-install activity is a fresh module from
@@ -119,9 +136,10 @@ scrub every behaviour-changing env var (`PERK_DISABLE_NATIVE_SDK_BRIDGE`, `PI_SU
 - CJS `require()` of a census specifier is unobserved.
 - Bun/compiled-SEA Pi, embedded SDK hosts, user-scope `packages`, and agent-dir/`-e` extensions
   stay unbridged by design.
-- Census widening = extend `NATIVE_SDK_CENSUS` + bump `BRIDGE_SCHEMA`. The drift guard scans only a
-  live `.pi/npm/node_modules` install and `t.skip`s elsewhere (a CI network-install census arm was
-  struck at review — immutable pinned files can never observe a newer version).
+- Census widening = extend `NATIVE_SDK_CENSUS` + bump `BRIDGE_SCHEMA` (the full lockstep is
+  "Widening the census is package-wide"). The drift guard scans only a live `.pi/npm/node_modules`
+  install and `t.skip`s elsewhere (a CI network-install census arm was struck at review —
+  immutable pinned files can never observe a newer version).
 
 ## Cross-references
 

@@ -36,8 +36,8 @@ surfaces beside them evolve.
 - Assembly, CheckRunner, Git observation, search, and compare: server-owned argv/refs, request
   paths admitted only by catalog membership, closed reason vocabularies mirrored per endpoint —
   "Shipped surfaces beyond the edit loop".
-- JSX/component-render coverage remains a named browser-dogfood gap, not an implied unit-test pass —
-  "Standing proof gap".
+- JSX/component-render coverage remains a named browser-dogfood gap; the opt-in suites inherit
+  sibling drift, so run them at base first — "Standing proof gap".
 - The workbench constrains extension topology: registration prose stays inline (the TS adapter
   cannot follow identifier indirection), inlining changes fragment counts, and the prose suites
   are an opt-in carve-out run explicitly — "The workbench is a topology constraint on extension
@@ -108,7 +108,8 @@ count in `tests/test_prose_map.py`, the fragment total in `tests/test_prose_revi
 the discovery-candidate count in `tools/prose-map/selector.test.ts`. They live under
 `just prose-review-test` + `just prose-review-check`, which `run_ci` / `just ci` do **NOT** run — the
 default gate reports green while all three are stale. Run the carve-out suites explicitly in any PR
-that touches a governed tool's prose. `typescript-symbol` is a valid catalog kind (`ProseKind` in
+that touches a governed tool's prose, the prose map, or adds a `python-symbol` wrapper — and run
+them once at base first ("Standing proof gap"). `typescript-symbol` is a valid catalog kind (`ProseKind` in
 `tools/prose-map/catalog.ts`) that no adapter currently produces — do not "fix" its absence.
 
 ## Source-adapter contract craft
@@ -374,6 +375,19 @@ harness in `toolchain/jsdom-react-component-harness.md` narrows that gap for mou
 keyboard, and focus contracts, while `workflow/binding-design-records.md` defines the evidence-record
 bar. Keep any remaining browser-only geometry or integration leg named as a residual; do not infer
 it from controller tests.
+
+**The opt-in suites inherit sibling drift — run them at base first.** A later PR touching the map
+but no governed tool still inherits red pins left by sibling PRs that never ran the carve-out: the
+governed-tool count and the TS fragment and selector-candidate counts from a new governed tool;
+the Python-symbol unit count in `tests/test_prose_review_source.py` and the exact wrapper set in
+`tests/test_prose_map.py::test_python_owned_prompt_wrappers_are_ast_selected` from new
+`python-symbol` wrappers. To isolate inherited drift: `git stash` covers only uncommitted edits, so
+also `git checkout <base> -- <files you already committed>`, rerun, then restore; what remains red
+is pre-existing — re-measure it from the synced catalog, never by delta. And adding a concern that
+includes a unit already in another concern changes `concerns_for_unit` / `concern_relatives`:
+`tests/test_prose_review_catalog.py` and `tests/test_prose_review_comparison.py` use
+`markdown:skills/perk-plan/SKILL.md` as their fixture, so a new concern touching perk-plan breaks
+both — list the concerns in authored order in both.
 
 ## Cross-references
 

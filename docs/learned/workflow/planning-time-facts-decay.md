@@ -1,6 +1,6 @@
 ---
 title: Planning-time facts decay — plan currency, budgets, baselines, count pins
-read_when: You are authoring or implementing a plan with numeric budgets/line caps, measured baselines, count pins, or field lists — or a sibling PR landed after the plan was saved.
+read_when: You are authoring or implementing a plan with numeric budgets, measured baselines, count pins, field lists, or a live external subject (URL, site) — or a sibling PR landed after the plan was saved.
 cluster: plan-lifecycle
 ---
 
@@ -74,6 +74,16 @@ neither reads the plan's caps. Only the plan-fidelity review lane will notice, a
 - **Pre-decided lever rules over measurements must define the measured population** (#2501) —
   wrapper frames vs distinct roots in a nested `-X importtime` tree (`startup-profiling.md` §
   "Measurement discipline").
+
+## Live external subjects are planning-time facts
+
+A live URL and what it serves — real content vs a version-alias redirect page, the sitemap's
+shape — decays like any other planning-time fact. The chosen docs subject of a library dogfood was
+a mike version-alias redirect on run day (HTTP 200, a `<noscript>` meta-refresh plus a script
+redirect, a `last-modified` of that morning), and the live leg stopped. Re-probe right before the
+live leg (`curl -sSD -` plus `versions.json` or the sitemap), record an approved substitution as a
+dated deviation, and write the alias resolution into the repeatable procedure. The crawler follows
+HTTP redirects only, so a 200 meta-refresh seed dry-runs to one stub page.
 
 ## Line count is a poor proxy for duplication
 

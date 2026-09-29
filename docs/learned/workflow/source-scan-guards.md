@@ -91,6 +91,12 @@ routes through the atomic seam (see `workflow/session-data.md`). Notable mechani
 - **Patterns require `(` after the name** so `writeFileSync(` never double-matches `writeFile(`.
 - Both guards carry **stale-allowlist self-checks** (an allowlist entry that no longer matches
   fails the guard).
+- **The subprocess sibling.** `tests/test_tooling.py` pins every `subprocess.run` literal to the
+  sanctioned-wrapper allowlist, and `proc.run_captured` is text-only — binary output (blob contents,
+  raw `-z` paths) goes through the sanctioned `proc.run_captured_bytes` (`src/perk/substrate/proc.py`),
+  with the allowlist updated deliberately in the same change. For writes the rule is the same shape:
+  route through `fs.atomic_write_text` (`src/perk/substrate/fs.py`) or add a justified
+  `tests/test_write_guard.py` entry — a private `TemporaryDirectory` writer is a legitimate one.
 
 ## Secret-writer safety is separate from atomicity
 

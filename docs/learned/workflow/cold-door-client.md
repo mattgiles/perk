@@ -108,6 +108,13 @@ A dropped advisory field must also **short-circuit any follow-up drive** — lan
 skips when `objective` is `undefined` (pinned by test). Don't let a downstream drive dereference an
 advisory field the decode dropped.
 
+**A strict decode must also check that the envelope answers THIS request.** Schema validity alone
+is not enough when the warm door acts on the payload: `decodePrepareEnvelope`
+(`extension/pi/v1/librarian.ts`) is built from the request and refuses an envelope whose action,
+requested URL/slug or replace mode differs from what was asked — a schema-valid envelope for some
+other request would otherwise dispatch a writer against the wrong target. The test half is under
+"Migration test rituals".
+
 ## Launch-binding shape diet
 
 The `stack_review` binding set the diet rule for launch bindings (#2033): carry ONLY the fields
@@ -230,6 +237,12 @@ Future doors only test their own decode edges.
 - **`assert.deepEqual` pins on a discriminated-union arm are shape-exhaustive:** adding an optional
   field to the arm (e.g. `payload` on the fail arm) is an assertion change wherever the arm is
   pinned exactly.
+- **Every request-binding check gets its own one-field-mismatch negative test** asserting
+  `bad_output` and zero dispatch, verified by deleting the check and watching the test fail. The
+  first librarian version's fakes all agreed with the request, so deleting a binding check stayed
+  green (`extension/pi/v1/librarian.test.ts`, "the prepare envelope must answer THIS request").
+- **Pass option values that can start with `-` in `--flag=value` form** (`--scope-prefix=<v>`) so
+  Click never reads the value as an option (`prepareArgv`, pinned in `librarian.test.ts`).
 
 ## Testing notes
 

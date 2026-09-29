@@ -128,13 +128,16 @@ is not comparable to them:
    invocation (uv startup, collection, worker spawn and shutdown, basetemp handling) and pytest's
    own reported duration (the `N passed in X.XXs` summary — when the developer has the verdict).
 4. Take at least three samples per tier, rotating the tier order across rounds so every tier
-   occupies every position once; run nothing else heavy alongside.
+   occupies every position once; run nothing else heavy alongside. Wait until the 1-minute load
+   average is below the core count before the first sample, and sample the load
+   (`sysctl -n vm.loadavg` on macOS) every ~15 s through the series; record the range.
 5. Report the median and min–max of both durations per tier, and record the revision, dirty
    status, host, tool versions, worker count and any environment overrides
    (`PYTEST_ADDOPTS`, `PERK_PROSE_REVIEW_TESTS`).
 6. An invalid series (a non-zero exit, a failing test, a tool-availability skip, an interruption,
-   a source edit or an unrelated heavy workload mid-series) is re-run whole in a new root and
-   reported as aborted — never patched sample by sample.
+   a source edit, an unrelated heavy workload mid-series, or host load above the core count during
+   any sample) is re-run whole in a new root and reported as aborted — never patched sample by
+   sample. A contended series is discarded, never caveated.
 
 Measured results live in the archive records
 (`docs/design/archive/python-test-suite-speedup-*.md`), not on this page, so the guide cannot

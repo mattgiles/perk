@@ -8,8 +8,9 @@ sidebar:
 # JSON Schema snapshots
 
 perk commits JSON Schema snapshots for its Pydantic boundary models so a machine-surface change is
-visible and reviewable in the same pull request as its code. The live registry contains **26**
-snapshots: 3 shared contracts, 5 machine inputs, and 18 output envelopes.
+visible and reviewable in the same pull request as its code. The live registry holds shared
+contracts, machine inputs, and `--json` output envelopes — the three inventories below are asserted
+against the registry.
 
 The snapshots are golden artifacts under `shared/schemas/`. They are not runtime resources and do
 not promise a separately versioned public API: Python validates with the live models, while the two

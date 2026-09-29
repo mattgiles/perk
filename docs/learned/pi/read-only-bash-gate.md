@@ -1,6 +1,6 @@
 ---
 title: The read-only bash gate — command-position walker, veto view, allowlist/veto row craft, the bypass-class checklist
-read_when: You are extending SAFE_PATTERNS or a veto row, changing commandPositions.ts, debugging a blocked read-only bash call, or reviewing any shell-model change for bypasses.
+read_when: You are extending SAFE_PATTERNS or a veto row, admitting a networked or write-capable CLI worker, changing commandPositions.ts, debugging a blocked read-only bash call, or probing for bypasses.
 cluster: pi-extension
 ---
 
@@ -21,11 +21,11 @@ cluster: pi-extension
   "The environment can launch programs".
 - Veto rows read a lexer-built normalized view, never raw text patched with span edits; never carve
   out a whole expanding heredoc body — "The veto view".
-- Enumerate verbs; one veto row per argument-level writer/exec flag; Git argument-sensitive commands
-  pass `$`-anchored list-form or bare display-only rows; command-keyed rows use `keyed()`/`TOKEN_END`,
-  never `\b` — "Allowlist policy"; a row and its paired veto share separators — "Cross-row regex rules".
-- Fourteen bypass classes are the review checklist for any shell-model change — "The bypass-class
-  checklist".
+- Enumerate verbs; one veto per writer/exec flag; argument-sensitive Git commands pass `$`-anchored
+  list-form or display-only rows; command-keyed rows use `keyed()`/`TOKEN_END`, never `\b` —
+  "Allowlist policy"; paired rows share separators, and free words in anchored-suffix rows refuse
+  comment/redirection tokens — "Cross-row regex rules".
+- The bypass classes are the checklist for any shell-model change — "The bypass-class checklist".
 - Record shapes a model would not reach by accident; pin every leniency as an allowed test; a gate's
   contract and user docs name its limits — "Leniency vs fix".
 - Replay verdicts to estimate yield, verify tool behavior empirically, budget an adversarial PR-review
@@ -187,6 +187,15 @@ text with ad-hoc span edits; normalize through the syntax model.
   veto against each `SAFE_PATTERNS` arm whose text can contain the word.
 - The `agent-browser` and `curl -o` arg-blind admissions are **recorded leniencies**, not a model
   limit — several rows now inspect arguments.
+- **Networked workers.** A networked CLI worker joins `SAFE_PATTERNS` only when its own CLI
+  preflight confines every write to the gitignored cache; keep the exact `--json`-last grammar and
+  exclude the write-capable sibling explicitly (`perk librarian add source` admitted, `add docs`
+  not). Pair the admission with worker-level refusal tests — removed ignore rules, tracked library
+  content, redirected roots → a typed refusal with no clone/fetch/ls-remote/HTTP, a byte-identical
+  tree and no lock file — so that removing the worker's preflight turns them red.
+- **Reach a mutating worker through a tool, not the gate.** `perk librarian prepare docs|refresh …
+  --json` stays blocked; `run_librarian` reaches it through the extension's own exec
+  (`runColdDoor`), and negative gate cases in `toolGating.test.ts` pin both forms.
 
 ## Cross-row regex rules
 
@@ -202,10 +211,22 @@ are documented beside each constant in `toolGating.ts` — read them there. The 
 - **State describing "the next word" must be closed by every token kind that can intervene** — a
   redirect after keyword `time` left the walker scanning `time`'s options, so `time </dev/null if ls`
   skipped `if` as grammar.
+- **Anchored-suffix rows with free arguments must exclude comment-start and redirection tokens.**
+  The gate matches each simple command's text, and `commandPositions` keeps trailing comments and
+  redirection operands in that text although bash never passes them as arguments. A row accepting
+  free words before an anchored `--json` therefore admitted `perk librarian refresh pi # --json`,
+  `refresh pi #x --json`, `refresh pi <<< --json` and `refresh pi < --json`, where bash never passed
+  `--json`. Harmless while every non-`--json` form was read-only; a real hole once a human `refresh`
+  of a docs entry launched a write-capable session — caught in PR review, not by the plan's "no gate
+  change needed" reading of the regex. The fix: each free-argument word must not start with `#` and
+  must not contain `<` or `>` (a `#` inside a word, such as a URL fragment, stays admitted) — the
+  librarian row in `extension/substrate/toolGating.ts`, regressions in `toolGating.test.ts`. The
+  deeper fix (the walker drops trailing comments) was rejected: it changes pinned `commandPositions`
+  behavior and leaves the redirection case open.
 
 ## The bypass-class checklist
 
-Fourteen classes, each found live by a review of a gate change:
+The classes, each found live by a review of a gate change:
 
 1. **Interior syntax leaking from an unmodeled construct** (`#` inside `${…}` read as a comment hid
    the next command) — consume an unmodeled construct as one opaque unit, or refuse it.
@@ -225,6 +246,9 @@ Fourteen classes, each found live by a review of a gate change:
 12. **Boundary tightening vs attached operands** — list and pin the attached spellings.
 13. **The same word at different positions** — refuse the unmodeled distinction.
 14. **`\b` never ends a command word** — `keyed()`/`TOKEN_END`.
+15. **A previously harmless form turned write-capable** (`refresh pi # --json` once `refresh` of a
+    docs entry launched a write-capable session) — re-probe adversarially against real bash argument
+    semantics whenever a change makes a previously harmless command form write-capable.
 
 **Use this list as the review checklist for any shell-model change.**
 
@@ -331,6 +355,9 @@ fails silently in every lane.
   `listForm()` rows.
 - **#2558** — environment and program-selector closure (`RESERVED_NAME`, the safe pairs,
   `keyed()`/`TOKEN_END`, `TIME_OPENERS`).
+- **#2563 / #2588 / #2601** — the `perk librarian` worker row in `--json`-last form
+  (`list|record|remove`, then the networked `add source`/`check`/`refresh`); #2601 excluded
+  comment-start and redirection tokens from its free-argument words after PR review.
 
 ## Cross-references
 

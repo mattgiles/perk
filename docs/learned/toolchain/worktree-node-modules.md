@@ -1,6 +1,6 @@
 ---
 title: Worktree node_modules resolution trap — stale SDK shadowing
-read_when: CI surfaces failures in files your diff never touched, a fresh worktree fails `tsc`/`node --test` before `npm ci`, a pinned Pi/SDK bump seems inert, or you hit lockfile churn / an already-red main.
+read_when: CI or the native-SDK census drift guard fails in files your diff never touched, a fresh worktree fails tsc before its install, a pinned bump seems inert, or a .pi/npm package is stale on disk.
 cluster: toolchain-gotchas
 ---
 
@@ -95,6 +95,20 @@ nearest-ancestor trust (so it never sees the first) and is not a plan launch (so
 second) — stage it explicitly with
 `materialize_extensions(<main>, <worktree>)` (`perk/run/launch/materialize.py`; shared inodes at
 distinct paths — path-keyed tooling copes).
+
+**A `.pi/npm` package can be stale on disk while npm reports it correct.** The census drift guard
+in `extension/substrate/nativeSdkBridge.test.ts` saw pi-subagents 0.71.0 (no `typebox/value`)
+although `.pi/npm/package.json` wanted `^0.72.1` and both the hidden lockfile and `npm ls` said
+0.72.1 — the package folder's own `package.json` / `CHANGELOG.md` were 0.71.0. A plain
+`npm install` "added 232 packages" and left the folder untouched; the fix was removing
+`.pi/npm/node_modules/<pkg>` and reinstalling. Three consecutive PRs read this as "the census is
+stale" — it was not. The rules:
+
+- A census/version failure that disagrees with the lockfile is **install-root staleness**, not code
+  drift — check the package's on-disk `package.json`, never `npm ls`.
+- The fix is worktree-local and gitignored; the main checkout had the same stale folder.
+- Before blaming a branch, reproduce in a detached `origin/main` worktree with `node_modules` and
+  `.pi/npm` symlinked in.
 
 ## Commit hygiene after installing in a worktree
 

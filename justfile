@@ -1,4 +1,7 @@
 # perk dev tasks. Python: uv + ruff + ty. TypeScript: npm + biome + tsc. Run `just` to list.
+#
+# `just --list` prints only the FINAL comment line above each recipe as its description — keep
+# that line stable when rewriting a multi-line recipe comment (diff `just --list` before and after).
 set shell := ["bash", "-uc"]
 
 # list available recipes

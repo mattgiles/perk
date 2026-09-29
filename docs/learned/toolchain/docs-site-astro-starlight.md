@@ -42,8 +42,8 @@ non-obvious behavioral facts and traps.
   accessibility checks — "Hand-authored SVG variant discipline".
 - Fragment validation follows browser semantics, including decoded ids, empty fragments, and
   pathless query links — "URL-fragment validation needs browser semantics".
-- A scope-scoped CI row must run every relevant GitHub gate, including lint/typecheck for files
-  without a code suffix; cross-scope guards deliberately run twice — "Process patterns".
+- A scope-scoped CI row must reach every relevant GitHub gate; `docs-check` is the single Astro
+  owner and other coverage transfers through code-row globs, never a second run — "Process patterns".
 - Corpus membership and blueprint counts are live facts, not frozen enumerations; reconcile the
   design SSOT whenever the corpus grows — "Starlight/Astro content facts".
 
@@ -301,13 +301,16 @@ and looks pre-existing; and the `## Related` section is capped at 1–3 links
 
 - **Scoped-CI hygiene:** a new file extension (`.mjs`) must be swept into the `[[ci.checks]]`
   glob selectors in the same PR, or future single-extension changes green-skip checks. More
-  importantly, a scope-scoped row must reach every gate GitHub CI would run for that scope.
-  Files selected by the docs row but by no code-suffix lint/typecheck glob — such as
-  `docs/site/src/styles/tokens.css` and `tsconfig.json` — otherwise make an in-session docs-only
-  run skip Biome or tsc. The docs row therefore runs Biome over `docs/site` and the `docs/site`
-  workspace typecheck in addition to the docs check. When one guard's triggers span two scopes,
-  invoke it in both and accept the duplicate full-suite run rather than leaving either scoped
-  run blind.
+  importantly, a scope-scoped row must reach every gate GitHub CI would run for that scope. The
+  current wiring (`.perk/config.toml` `[[ci.checks]]` + the `justfile`): `docs-check` is the
+  **single Astro owner** — the docs-scoped pytest guards under `-n0`, then `docs:typecheck`
+  (astro sync + tsc), then `docs:check` (build + post-build checks + the corpus-reading site
+  tests), serially in one row. Site Biome lint and the site unit tests reach `docs/site` through
+  the `lint-js` / `test-js` rows' `docs/site/**` globs; the `typecheck-js` row runs only the root
+  `npm run typecheck`, while the `just typecheck-js` recipe stays the full union GitHub CI runs.
+  The rule: **prefer transferring coverage through a code row's glob over running a guard in two
+  rows, and never let two rows invoke a tool that rewrites shared generated state** (Astro content
+  sync) — enforced by `tests/test_docs_gates.py::test_docs_check_is_the_only_astro_owner`.
 - **The integration gate is deliberately build-shaped.** Post-build checks live outside `src/`,
   so the unit-test glob cannot run them without a built site; the `docs/site` workspace's
   `check` script orders build before tests. Its accepted cost is a full Astro build (roughly
@@ -362,18 +365,26 @@ and looks pre-existing; and the `## Related` section is capped at 1–3 links
   never re-introduce test literals.
 - The metadata guard's section-index rule keys on path depth (`parts <= 2`) and needs revisiting
   for nested subsections.
-- **Parallel run-all checks race the Astro/Vite caches** — concurrent `typecheck-js` +
-  `docs-check` can fail with `UnknownFilesystemError`/`ENOTEMPTY` under contention; a targeted
-  re-run of the failed check passes. The parallel gate stays nondeterministic on this axis —
-  treat such a failure as a re-run candidate before debugging the site (#2033). Another face of
-  the same race: `docs-check` failing with `Failed to load Pagefind metadata: SyntaxError:
-  Unexpected end of JSON input` across the `checks/pagefind.test.mjs` tests, passing on an
-  isolated re-run — the Pagefind bundle was read mid-write. Same disposition: re-run first.
+- **Parallel run-all checks and the Astro/Vite caches** — the concurrent `typecheck-js` +
+  `docs-check` Astro race is removed structurally: no other row reaches Astro any more. Its last
+  observed face (historical) was an `UnknownFilesystemError` ENOENT renaming
+  `docs/site/.astro/content-assets.mjs.tmp`, passing on an isolated re-run (#2033). Faces that
+  can still happen inside one `docs-check`: `Failed to load Pagefind metadata: SyntaxError:
+  Unexpected end of JSON input` across the `checks/pagefind.test.mjs` tests (the Pagefind bundle
+  read mid-write) and Vite optimizer residue (`ENOTEMPTY`, see "Process patterns"). First
+  diagnostic either way: re-run the one check in isolation before debugging the site.
   The contention is not site-specific: any lane calling `extension/substrate/git.ts::worktreeGitDir`
   (a `git rev-parse --absolute-git-dir` under `execFileSync` with a **5 s** timeout; current caller
   `worktreeResolverLock.test.ts`) can report `invalid-worktree` / `lock: not-acquired` when the
   concurrent run-all starves git. Classify a failure there that took ~5 s as contention, run the
   lane alone to confirm it passes, then re-run the gate.
+- **The docs-site `tsc` program reaches into `extension/`.** Under Astro's `allowJs`, the site's
+  `.mjs` tests import extension modules (`registry.ts`, `toolGating.ts`, the test harness),
+  pulling a large slice of `extension/` into the docs-site `tsc` program. An extension-only
+  change no longer runs that program in-session (only `docs-check` does, on its docs-scoped
+  glob); the root `tsc` — stricter on those files — and GitHub CI's `just typecheck` still do, so
+  the only in-session gap is a failure specific to Astro's compiler options. The measured file
+  count lives in `docs/design/archive/run-ci-gate-restructure.md` §6.
 
 ## Cross-references
 

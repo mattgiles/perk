@@ -418,6 +418,11 @@ instance). The recipe:
 - **Reshaping an `OutputModel` touches two goldens**: the `shared/schemas/` schema golden (this
   harness) AND the `tests/golden/json/` payload golden (`tests/test_json_goldens.py`). Adding a
   trailing defaulted field regenerates both; forgetting the second fails only the JSON drift test.
+- **A NEW cross-plane `--json` `OutputModel` moves three surfaces in lockstep**: a `tests/_schemas.py`
+  `SchemaEntry`, the generated `shared/schemas/outputs/<name>.schema.json` (`PERK_UPDATE_SCHEMAS=1`),
+  **and** a row in the `docs/user-docs/reference/json-schemas.md` inventory, guarded by
+  `tests/test_user_docs_reference_facts.py::test_documented_schema_inventory_matches_registry`. The
+  third surface is the one plans omit.
 - **The doc-amendment rule's deliberate exception:** a node that **defers** the schema-publish +
   contract/doc amendments makes those same-turn amendments **mandatory**, not drift (five surfaces
   in lockstep: `contracts.md`, `shared/README.md`, a user-docs reference + index link, the

@@ -33,6 +33,9 @@ in plan #51, PR #55; the patterns below generalize to any external CLI perk driv
 - Vendoring a skill: byte fidelity to the pinned upstream proves provenance, not correctness —
   record the pin/tree/license/file set, keep semantic acceptance separate, and record any owner-
   approved local correction — "Vendoring a skill: fidelity and correctness are separate".
+- Any external-CLI gateway pins the tool's own user config off, classifies stderr by a targeted
+  regex, learns the tool's implicit path filters, and tests the real binary under `skipif` —
+  "Gateway checklist for any external CLI".
 
 ## Failure posture: D3 superseded for the skills CLI (GitHub readiness stays non-fatal)
 
@@ -417,6 +420,22 @@ surfaced patterns that generalize beyond skills:
   a repo name with `.`/uppercase yields an invalid alias. Flagged as intended-future-work (not
   contradicted reality) — whoever owns alias-correctness adds sanitization or softens the objective
   prose.
+
+## Gateway checklist for any external CLI (the cloc instance)
+
+The per-flag facts for cloc live in `src/perk/substrate/cloc.py`'s module docstring — read them
+there. The generalization for any gateway that shells to a third-party CLI:
+
+- **Pin the tool's own user config off** — cloc auto-loads a user options file, so the gateway
+  passes `--config <os.devnull>`.
+- **Never equate stderr with failure** — classify with a targeted regex. cloc writes its
+  `N errors:` block to stderr and still exits 0 with JSON; locale warnings on stderr would otherwise
+  break a "stderr means failed" rule.
+- **Learn the tool's implicit path filters** — cloc drops any file with a `.git` / `.config` /
+  `.venv` component anywhere in the path it is given, ancestors included, so feed paths relative to
+  a controlled cwd, never absolute `TMPDIR` paths.
+- **Test against the real binary** with `skipif` when it is absent, and record the CI gap that
+  leaves (GitHub CI does not install cloc).
 
 ## Cross-references
 
