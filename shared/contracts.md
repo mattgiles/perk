@@ -685,8 +685,49 @@ operation with `alsoLog: true` and continues gate synchronization and remaining 
 retry, thrown-payload stringification, fabricated linkage problem or replacement mint. Claim ordering,
 stages, derivation/version stamps, handoff authority and persisted `pi_session_id` basenames remain
 unchanged. Mode reflection is the separate exception to otherwise write-free keep startup; keep
-still never backfills version. Tree/compaction never recapture packets/advice. Normal reload recaptures
-the original packet and existing branch mode; loss/tampering of both is outside the repaired profile.
+still never backfills version. Tree/compaction never recapture packets/advice (compaction does restore
+the report task — **Runner task restore** below — while still recapturing nothing about packets or
+advice). Normal reload recaptures the original packet and existing branch mode; loss/tampering of
+both is outside the repaired profile.
+
+**Runner task restore.** A floored report child carries its whole subject (draft, diff, brief,
+manifest) inline in its first user message and cannot re-fetch it; a Pi compaction replaces that
+message with a summary. `extension/substrate/childTaskRestore.ts` (pure policy) +
+`extension/pi/v1/childTaskRestore.ts` (three hooks, registered after the gate with the same latched
+floor supplier) put it back. With **no floor all three hooks are inert** (parents and the floor-less
+foreground writers keep Pi's ordinary compaction). The prompt is the first `message` entry with a
+user role on the branch (its string content, else its first own `{type: "text", text}` part; `null`
+when absent or malformed). Liveness is Pi's own projection: `contextCarriesMarker(activeContextMessages)`
+with marker = the **whole prompt** and owner `perk:task-restore` — user content or
+`perk:task-restore` custom content only; a summary quoting it never counts. `session_compact` (every
+reason) and a `structured_output` `tool_call` both evaluate one ordered verdict over per-activation
+state `{accepted, restores, queuedFor}`: (1) `accepted` ⇒ allow; (2) no prompt ⇒ allow; (3) live ⇒
+allow; (4) prompt over `TASK_RESTORE_MAX_BYTES` (256 KiB, UTF-8 bytes) ⇒ refuse; (5) a restore
+already queued for the latest compaction id (`"none"` when the branch carries none) and no
+`perk:task-restore` custom message on the branch after that compaction ⇒ hold; (6) `restores ≥
+TASK_RESTORE_MAX_ATTEMPTS` (3, the loop bound) ⇒ refuse; (7) otherwise queue. A delivered-but-omitted
+restore (a `context_edit` dropped it) falls past (5) and re-queues, bounded by (6). A **queue** sends
+`{customType: "perk:task-restore", content: [{type: "text", text: TASK_RESTORE_PREAMBLE + "\n\n" +
+prompt}], display: true}` with `deliverAs: "steer"` (prompt bytes untouched; the role-neutral
+preamble carries no anchoring rule or trust framing — each def keeps its own split) and records
+`restores + 1` / `queuedFor`. In `session_compact` a queue is the whole effect; a refuse logs one
+`console.error` line per activation. In the gate, allow passes; queue queues **and** blocks; hold and
+refuse block — the gate is the backstop and re-delivery point for a delayed, omitted or never-sent
+restore (a reload onto an already-compacted branch fires no `session_compact`). Every block reason
+begins `perk: this structured_output call was not accepted — nothing was captured — so your
+once-only completion rule is unaffected: the accepted call is the one that counts.`, then the held
+cause (a byte-exact restored copy arrives next; re-check every quote, call again) or a refuse cause
+(oversized: the byte count and the cap; exhausted: already restored `TASK_RESTORE_MAX_ATTEMPTS`
+times) followed by "stop here without calling structured_output again; the parent records this lane
+as uncovered". **The once-only completion rule counts accepted calls — a blocked call captured
+nothing, and the block reason is the carrier that says so; defs are unchanged.** A `tool_result` for
+`structured_output` with `isError !== true` (an executed report; a schema rejection throws and
+arrives as an error, a blocked call never executes) latches `accepted`, making every later
+evaluation allow: **no restore after an accepted report** — Pi's post-run compaction check runs
+even after a terminating tool, and a steer queued there would make the post-run loop
+`agent.continue()` a lane that already reported. Hook failures log (`console.error`); a failed
+branch/projection read in the gate blocks with the held reason (fail closed). No task, def or wave
+change.
 
 **Tool gating.** The existing mode/active restriction **OR** the runner floor structurally gates tools
 — enforcement, not prompting. Every observation (including `isActive`, context, tool calls and toolset
