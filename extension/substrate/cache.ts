@@ -183,12 +183,14 @@ function assertSafeRunId(runId: string): void {
 
 /**
  * Ensure one checkout-owned path component is a real directory, never a static redirect.
- * Check-before-create races against a same-UID process are intentionally out of scope.
+ *
+ * A missing component is created at `createMode` (still masked by the process umask). The mode of
+ * an EXISTING component is never inspected: the checkout's `.perk` is created by git under the
+ * operator's umask, and Debian/Ubuntu's user-private-group default (umask 002) makes a 0775 tree
+ * the normal state. Check-before-create races against a same-UID process are intentionally out
+ * of scope.
  */
-function ensureUnredirectedDirectory(
-  path: string,
-  opts: { createMode: number; rejectGroupWorldWrite: boolean },
-): void {
+function ensureUnredirectedDirectory(path: string, opts: { createMode: number }): void {
   let stat: ReturnType<typeof lstatSync>;
   try {
     stat = lstatSync(path);
@@ -199,17 +201,14 @@ function ensureUnredirectedDirectory(
   }
   if (stat.isSymbolicLink()) throw new Error(`refusing a symlinked run-scratch path: ${path}`);
   if (!stat.isDirectory()) throw new Error(`refusing a non-directory run-scratch path: ${path}`);
-  if (opts.rejectGroupWorldWrite && (stat.mode & 0o022) !== 0) {
-    throw new Error(`refusing a group/world-writable run-scratch path: ${path}`);
-  }
 }
 
 /**
  * Establish a run root beneath this checkout without following redirected checkout content.
  * Symlinks above `cwd` remain legal; every existing component from `.perk` through the run root
- * must be a real directory without group/world write permission, and missing components are
- * created no broader than 0755 even under a permissive umask. Run-id validation happens before
- * the first filesystem write.
+ * must be a real directory (not a symlink), and missing components are created no broader than
+ * 0755 even under a permissive umask. Run-id validation happens before the first filesystem
+ * write.
  */
 export function ensureRunScratch(cwd: string, runId: string): string {
   assertSafeRunId(runId);
@@ -222,10 +221,7 @@ export function ensureRunScratch(cwd: string, runId: string): string {
     dir,
   ];
   for (const component of components) {
-    ensureUnredirectedDirectory(component, {
-      createMode: 0o755,
-      rejectGroupWorldWrite: true,
-    });
+    ensureUnredirectedDirectory(component, { createMode: 0o755 });
   }
 
   const expected = join(realpathSync(cwd), relative(cwd, dir));
@@ -238,7 +234,8 @@ export function ensureRunScratch(cwd: string, runId: string): string {
 /**
  * Strict current-run data namespace for exclusion and provenance reads. Aliased checkout roots
  * canonicalize together; redirects within checkout-owned components refuse. Reads never create
- * directories. A missing component is absent, not an I/O-error sentinel.
+ * directories. A missing component is absent, not an I/O-error sentinel. Modes of existing
+ * components are not a refusal criterion.
  */
 export function canonicalSessionDataDir(
   cwd: string,
@@ -252,10 +249,7 @@ export function canonicalSessionDataDir(
   for (const segment of relative(root, dir).split(sep)) {
     component = join(component, segment);
     if (opts.create) {
-      ensureUnredirectedDirectory(component, {
-        createMode: 0o755,
-        rejectGroupWorldWrite: true,
-      });
+      ensureUnredirectedDirectory(component, { createMode: 0o755 });
     } else {
       let stat: ReturnType<typeof lstatSync>;
       try {
@@ -264,7 +258,7 @@ export function canonicalSessionDataDir(
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
         throw error;
       }
-      if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o022) !== 0) {
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
         throw new Error(`refusing an unsafe session-data namespace: ${component}`);
       }
     }
@@ -281,10 +275,7 @@ export function canonicalSessionDataDir(
 export function ensureAgentScratch(cwd: string, runId: string): string {
   const runDir = ensureRunScratch(cwd, runId);
   const dir = agentScratchDir(cwd, runId);
-  ensureUnredirectedDirectory(dir, {
-    createMode: 0o700,
-    rejectGroupWorldWrite: false,
-  });
+  ensureUnredirectedDirectory(dir, { createMode: 0o700 });
   const expected = join(realpathSync(runDir), "agent");
   if (realpathSync(dir) !== expected) {
     throw new Error(`refusing a redirected agent scratch dir: ${dir}`);

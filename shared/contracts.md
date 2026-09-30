@@ -204,10 +204,11 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   are an orphan and refuse. Independent stale branch snapshots over advanced disk bytes therefore
   refuse, rather than authorize replacement. Ordinary readers keep their existing tier behavior.
 
-  The strict content port distinguishes ENOENT from I/O failure and rejects symlink/non-directory/
-  group-world-writable namespace components and nonregular artifact files. Its canonical namespace
-  comes through `cache.ts::canonicalSessionDataDir` / the session-data seam; aliases above the
-  checkout are legal, redirects within checkout-owned components are not. Reads never create dirs.
+  The strict content port distinguishes ENOENT from I/O failure and rejects symlink/non-directory
+  namespace components and nonregular artifact files; the POSIX mode of an existing component is
+  never a refusal criterion. Its canonical namespace comes through
+  `cache.ts::canonicalSessionDataDir` / the session-data seam; aliases above the checkout are
+  legal, redirects within checkout-owned components are not. Reads never create dirs.
   `writeArtifact(name, content, {provenance: "strict"})` first verifies prior strict provenance,
   refuses invalid reads before effects, and verifies exact read-back content plus the appended
   pointer. Rejected/unverified review-state writes never authorize effects or speculative repair.
@@ -225,9 +226,12 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 - **Agent scratch.** `.perk/workflow/scratch/runs/<run_id>/agent/` is the run-owned directory for
   disposable command/model intermediates. Interior run-directory creation shares one hardened
   boundary — `extension/substrate/cache.ts::ensureRunScratch` + `ensureAgentScratch` own the
-  segment/symlink/mode/containment mechanics (static redirected-path protection and privacy from
-  other OS users, not a defense against a concurrent same-user process); the Python-plane scratch
-  accessors live in `src/perk/state/cache.py`.
+  segment/symlink/containment mechanics and the creation modes (missing chain components no
+  broader than 0755; `agent/` 0700, re-applied on reuse) — static redirected-path protection and
+  privacy from other OS users, not a defense against a concurrent same-user process. The modes of
+  pre-existing components are never policed: the checkout's `.perk` is created by git under the
+  operator's umask, and Debian/Ubuntu's user-private-group default (umask 002) makes a 0775 tree
+  the normal state. The Python-plane scratch accessors live in `src/perk/state/cache.py`.
 
   The extension provisions the directory before every eligible model turn and injects one hidden
   `customType: "perk:agent-scratch"` block naming the repository-relative current-run path. A

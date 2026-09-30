@@ -60,12 +60,13 @@ not delete existing directories or prevent ordinary lifecycle run-root creation.
 side-model prompt; its effectively read-only and summary shapes do not.
 
 The `agent/` directory is created as POSIX mode `0700` from the outset and repaired idempotently.
-Existing symlinks, non-directories, or group/world-writable ancestors in the checkout-owned run
-path are refused; missing ancestors are created no broader than `0755`, and resolved containment
-beneath the active checkout is verified. On an unsafe run id, filesystem error, or permission
-failure, perk reports a warning, injects no path, and lets the model turn continue; later eligible
-turns retry. The permission protects against other OS users, not another process running as the
-same user.
+Existing symlinks or non-directories in the checkout-owned run path are refused; the modes of
+ancestors that already exist are left alone (a `0775` `.perk/` from `git clone` under
+Debian/Ubuntu's default umask is normal), missing ancestors are created no broader than `0755`,
+and resolved containment beneath the active checkout is verified. On an unsafe run id, filesystem
+error, or permission failure, perk reports a warning, injects no path, and lets the model turn
+continue; later eligible turns retry. The permission protects against other OS users, not another
+process running as the same user.
 
 Agent scratch is **disposable and non-authoritative**. It has no provenance pointer or digest, and
 a durable decision must re-read the canonical repository or backend source rather than trust a
