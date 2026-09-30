@@ -464,9 +464,11 @@ export function fakePerkRouter(
  * present, else the deduped top-level) so stream/message shapes come from the same module
  * instance the runtime consumes (the per-instance-registry trap —
  * docs/learned/pi/headless-session-drive.md). Hermetic: an in-memory credential store, no
- * models.json read (`modelsPath: null`), no create-time refresh.
+ * models.json read (`modelsPath: null`), no create-time refresh. `contextWindow` replaces the faux
+ * default model's window (same id) — a small window lets a real prompt turn cross Pi's compaction
+ * threshold offline.
  */
-export async function fauxModelRuntime(): Promise<{
+export async function fauxModelRuntime(options: { contextWindow?: number } = {}): Promise<{
   modelRuntime: ModelRuntime;
   getModel(): unknown;
   setResponses(responses: unknown[]): void;
@@ -478,7 +480,12 @@ export async function fauxModelRuntime(): Promise<{
   const piAi = existsSync(nested)
     ? ((await import(pathToFileURL(nested).href)) as typeof import("@earendil-works/pi-ai"))
     : await import("@earendil-works/pi-ai");
-  const faux = piAi.fauxProvider();
+  // `faux-1` is the faux provider's default model id; only the window is overridden.
+  const faux = piAi.fauxProvider(
+    options.contextWindow !== undefined
+      ? { models: [{ id: "faux-1", contextWindow: options.contextWindow }] }
+      : {},
+  );
   const modelRuntime = await ModelRuntime.create({
     credentials: new piAi.InMemoryCredentialStore(),
     modelsPath: null,
@@ -584,6 +591,14 @@ export async function loadPerkSession(opts: {
   feedbackReceiverFactory?: NonNullable<Parameters<typeof perk>[1]>["feedbackReceiverFactory"];
   /** Construction-only injected host-SDK bridge status (drives the reporting arms). */
   nativeSdkBridge?: NonNullable<Parameters<typeof perk>[1]>["nativeSdkBridge"];
+  /**
+   * In-memory settings shallow-merged over the deterministic defaults (compaction and retry
+   * off) — e.g. `{ compaction: { enabled: true, reserveTokens, keepRecentTokens } }` to exercise
+   * Pi's real threshold compaction on a faux-runtime turn.
+   */
+  settings?: {
+    compaction?: { enabled?: boolean; reserveTokens?: number; keepRecentTokens?: number };
+  };
 }): Promise<PerkSession> {
   const { cwd, headful = true } = opts;
   const agentDir = mkdtempSync(join(tmpdir(), "perk-agent-"));
@@ -647,6 +662,7 @@ export async function loadPerkSession(opts: {
     settingsManager: SettingsManager.inMemory({
       compaction: { enabled: false },
       retry: { enabled: false },
+      ...(opts.settings ?? {}),
     }),
   });
 
