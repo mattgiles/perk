@@ -9,12 +9,19 @@
 // that changes the rule makes perk and plannotator disagree on the port — loud (the door's
 // readiness probe times out and it degrades), never silent.
 //
-// The one deliberate divergence is who walks a range: plannotator walks it at bind time, but the
-// doors need ONE concrete port up front (the deterministic URL they prime `push_annotations`
-// with), so perk bind-probes the range on loopback and presets the first free port as a single
-// value — plannotator then binds exactly that port. A loopback probe predicts plannotator's
-// remote `0.0.0.0` bind on Linux and macOS: a listener on either address makes the other's bind
-// fail with `EADDRINUSE`.
+// The deliberate divergences are about BUSY ports, never about which port is chosen:
+//  - who walks a range: plannotator walks it at bind time, but the doors need ONE concrete port up
+//    front (the deterministic URL they prime `push_annotations` with), so perk bind-probes the
+//    range on loopback and presets the first free port as a single value — plannotator then binds
+//    exactly that port;
+//  - an occupied fixed port is REFUSED, where plannotator would retry and then preempt a stale
+//    same-process review: a readiness probe cannot tell which review answers on a port, and the
+//    doors prime annotation delivery immediately, so reusing an occupied port would let a door
+//    report ready against — and push findings into — the review already holding it (possibly in
+//    another perk process). The plain `plan_review` arm presets nothing and pushes nothing, so it
+//    keeps plannotator's own retry + self-preemption.
+// A loopback probe predicts plannotator's remote `0.0.0.0` bind on Linux and macOS: a listener on
+// either address makes the other's bind fail with `EADDRINUSE`.
 
 import { createServer } from "node:net";
 
@@ -64,14 +71,14 @@ export function parsePortSelection(value: string): ParsedPortSelection | null {
 }
 
 /**
- * The resolved port selection. `portSource` reuses plannotator's own vocabulary verbatim:
- * `env` (from `PLANNOTATOR_PORT`), `remote-default` (the `19432` remote fallback), `random`
- * (an ephemeral OS pick).
+ * The resolved port selection: `random` (an ephemeral OS pick), `single` (one fixed port — an
+ * explicit `PLANNOTATOR_PORT` or the `19432` remote default), `range` (a `PLANNOTATOR_PORT` range,
+ * walked in order).
  */
 export type PlannotatorPortSelection =
-  | { kind: "random"; portSource: "random" }
-  | { kind: "single"; port: number; portSource: "env" | "remote-default" }
-  | { kind: "range"; ports: readonly number[]; portSource: "env" };
+  | { kind: "random" }
+  | { kind: "single"; port: number }
+  | { kind: "range"; ports: readonly number[] };
 
 /** The per-activation port selection plus whether plannotator will treat the session as remote. */
 export interface PlannotatorPorts {
@@ -94,24 +101,17 @@ export function resolvePlannotatorPorts(env: NodeJS.ProcessEnv): PlannotatorPort
     const parsed = parsePortSelection(envPort);
     if (parsed !== null) {
       if (parsed.kind === "range") {
-        return { selection: { kind: "range", ports: parsed.ports, portSource: "env" }, remote };
+        return { selection: { kind: "range", ports: parsed.ports }, remote };
       }
       const [port] = parsed.ports;
-      if (port === 0) return { selection: { kind: "random", portSource: "random" }, remote };
-      return { selection: { kind: "single", port, portSource: "env" }, remote };
+      if (port === 0) return { selection: { kind: "random" }, remote };
+      return { selection: { kind: "single", port }, remote };
     }
   }
   if (remote) {
-    return {
-      selection: {
-        kind: "single",
-        port: PLANNOTATOR_DEFAULT_REMOTE_PORT,
-        portSource: "remote-default",
-      },
-      remote,
-    };
+    return { selection: { kind: "single", port: PLANNOTATOR_DEFAULT_REMOTE_PORT }, remote };
   }
-  return { selection: { kind: "random", portSource: "random" }, remote };
+  return { selection: { kind: "random" }, remote };
 }
 
 /**
@@ -120,7 +120,7 @@ export function resolvePlannotatorPorts(env: NodeJS.ProcessEnv): PlannotatorPort
  * `process.env`).
  */
 export const LOCAL_PLANNOTATOR_PORTS: PlannotatorPorts = Object.freeze({
-  selection: Object.freeze({ kind: "random", portSource: "random" }),
+  selection: Object.freeze({ kind: "random" }),
   remote: false,
 });
 
@@ -138,9 +138,9 @@ export async function pickEphemeralPort(): Promise<number> {
 }
 
 /**
- * The range probe: whether `port` binds on loopback right now. Any bind error resolves false —
- * conservative: an unusable port is skipped, never chosen. A bind (not a connect) because it must
- * predict plannotator's bind.
+ * The fixed-port probe: whether `port` binds on loopback right now. Any bind error resolves
+ * false — conservative: an unusable port is skipped or refused, never chosen. A bind (not a
+ * connect) because it must predict plannotator's bind.
  */
 export async function portBinds(port: number): Promise<boolean> {
   return await new Promise<boolean>((resolve) => {
@@ -152,7 +152,7 @@ export async function portBinds(port: number): Promise<boolean> {
   });
 }
 
-/** The injectable picker seams (tests drive a fake ephemeral picker / range probe). */
+/** The injectable picker seams (tests drive a fake ephemeral picker / fixed-port probe). */
 export interface PortPickerDeps {
   ephemeral: () => Promise<number>;
   probe: (port: number) => Promise<boolean>;
@@ -160,10 +160,10 @@ export interface PortPickerDeps {
 
 /**
  * The concrete port to preset for a selection. `random` → an ephemeral pick. `single` → the port
- * verbatim, NOT probed: a busy single port is plannotator's to resolve (its 5×500 ms retry, then
- * `startServerWithSelfPreemption` replaces a stale same-process review — the abandoned-tab fix —
- * exactly as in the plain `plan_review` arm). `range` → the first port the probe reports
- * bindable, in order; none → throws (the doors' pick-failure arm reports it).
+ * when the probe reports it bindable, else throws: an occupied fixed port is refused (see the
+ * header — reusing it would let the door announce and prime the review already holding it).
+ * `range` → the first port the probe reports bindable, in order; none → throws. Every throw is
+ * reported by the doors' pick-failure arm.
  */
 export async function pickPlannotatorPort(
   selection: PlannotatorPortSelection,
@@ -172,8 +172,12 @@ export async function pickPlannotatorPort(
   switch (selection.kind) {
     case "random":
       return await deps.ephemeral();
-    case "single":
-      return selection.port;
+    case "single": {
+      if (await deps.probe(selection.port)) return selection.port;
+      throw new Error(
+        `Plannotator port ${selection.port} is in use — another review or process holds it; decide that review first, or set PLANNOTATOR_PORT to a range`,
+      );
+    }
     case "range": {
       for (const port of selection.ports) {
         if (await deps.probe(port)) return port;

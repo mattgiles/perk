@@ -65,23 +65,19 @@ test("parsePortSelection: plannotator's fixed/range table", () => {
 
 test("resolvePlannotatorPorts: plannotator's precedence (env → remote default → random)", () => {
   const ssh = { SSH_CONNECTION: "10.0.0.1 22 10.0.0.2 5000" };
-  const single = (port: number, portSource: "env" | "remote-default") => ({
-    kind: "single",
-    port,
-    portSource,
-  });
-  const random = { kind: "random", portSource: "random" };
+  const single = (port: number) => ({ kind: "single", port });
+  const random = { kind: "random" };
 
   assert.deepEqual(resolvePlannotatorPorts({ PLANNOTATOR_PORT: "19432" }), {
-    selection: single(19432, "env"),
+    selection: single(19432),
     remote: false,
   });
   assert.deepEqual(resolvePlannotatorPorts({ PLANNOTATOR_PORT: "19432", ...ssh }), {
-    selection: single(19432, "env"),
+    selection: single(19432),
     remote: true,
   });
   assert.deepEqual(resolvePlannotatorPorts({ PLANNOTATOR_PORT: "19432-19435" }), {
-    selection: { kind: "range", ports: [19432, 19433, 19434, 19435], portSource: "env" },
+    selection: { kind: "range", ports: [19432, 19433, 19434, 19435] },
     remote: false,
   });
   // A fixed 0 is plannotator's ephemeral bind — perk makes the OS pick itself.
@@ -91,7 +87,7 @@ test("resolvePlannotatorPorts: plannotator's precedence (env → remote default 
   });
   // An unparseable value falls through SILENTLY to the remote rule.
   assert.deepEqual(resolvePlannotatorPorts({ PLANNOTATOR_PORT: "abc", PLANNOTATOR_REMOTE: "1" }), {
-    selection: single(PLANNOTATOR_DEFAULT_REMOTE_PORT, "remote-default"),
+    selection: single(PLANNOTATOR_DEFAULT_REMOTE_PORT),
     remote: true,
   });
   assert.deepEqual(resolvePlannotatorPorts({ PLANNOTATOR_PORT: "abc" }), {
@@ -100,7 +96,7 @@ test("resolvePlannotatorPorts: plannotator's precedence (env → remote default 
   });
   // An empty PLANNOTATOR_PORT is unset (plannotator's `if (envPort)` truthiness).
   assert.deepEqual(resolvePlannotatorPorts({ PLANNOTATOR_PORT: "", ...ssh }), {
-    selection: single(19432, "remote-default"),
+    selection: single(19432),
     remote: true,
   });
   assert.deepEqual(resolvePlannotatorPorts({ PLANNOTATOR_REMOTE: "0", ...ssh }), {
@@ -113,7 +109,7 @@ test("resolvePlannotatorPorts: plannotator's precedence (env → remote default 
 test("LOCAL_PLANNOTATOR_PORTS: frozen, local, random", () => {
   assert.equal(Object.isFrozen(LOCAL_PLANNOTATOR_PORTS), true);
   assert.equal(LOCAL_PLANNOTATOR_PORTS.remote, false);
-  assert.deepEqual(LOCAL_PLANNOTATOR_PORTS.selection, { kind: "random", portSource: "random" });
+  assert.deepEqual(LOCAL_PLANNOTATOR_PORTS.selection, { kind: "random" });
 });
 
 // --- pickPlannotatorPort --------------------------------------------------------------------------
@@ -140,21 +136,31 @@ function fakeDeps(probeAnswers: boolean[] = []) {
 
 test("pickPlannotatorPort: random → the ephemeral pick, never probes", async () => {
   const fake = fakeDeps();
-  const port = await pickPlannotatorPort({ kind: "random", portSource: "random" }, fake.deps);
+  const port = await pickPlannotatorPort({ kind: "random" }, fake.deps);
   assert.equal(port, 45123);
   assert.equal(fake.ephemeralCalls(), 1);
   assert.deepEqual(fake.probed, []);
 });
 
-test("pickPlannotatorPort: single → the port verbatim, neither seam called", async () => {
-  const fake = fakeDeps();
-  const port = await pickPlannotatorPort(
-    { kind: "single", port: 19432, portSource: "env" },
-    fake.deps,
-  );
+test("pickPlannotatorPort: single → the port once the probe reports it bindable", async () => {
+  const fake = fakeDeps([true]);
+  const port = await pickPlannotatorPort({ kind: "single", port: 19432 }, fake.deps);
   assert.equal(port, 19432);
   assert.equal(fake.ephemeralCalls(), 0);
-  assert.deepEqual(fake.probed, [], "a busy single port is plannotator's to resolve");
+  assert.deepEqual(fake.probed, [19432]);
+});
+
+test("pickPlannotatorPort: an occupied single port is refused, naming the port and the remedy", async () => {
+  const fake = fakeDeps([false]);
+  await assert.rejects(
+    pickPlannotatorPort({ kind: "single", port: 19432 }, fake.deps),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message.includes("19432 is in use") &&
+      error.message.includes("PLANNOTATOR_PORT to a range"),
+  );
+  assert.deepEqual(fake.probed, [19432], "probed once, never retried or replaced");
+  assert.equal(fake.ephemeralCalls(), 0, "never falls back to an ephemeral port");
 });
 
 test("pickPlannotatorPort: range → the first bindable port, probed in ascending order", async () => {
@@ -162,7 +168,6 @@ test("pickPlannotatorPort: range → the first bindable port, probed in ascendin
   const selection: PlannotatorPortSelection = {
     kind: "range",
     ports: [19432, 19433, 19434, 19435],
-    portSource: "env",
   };
   assert.equal(await pickPlannotatorPort(selection, fake.deps), 19434);
   assert.deepEqual(fake.probed, [19432, 19433, 19434]);
@@ -172,7 +177,7 @@ test("pickPlannotatorPort: range → the first bindable port, probed in ascendin
 test("pickPlannotatorPort: an exhausted range rejects naming the range", async () => {
   const fake = fakeDeps();
   await assert.rejects(
-    pickPlannotatorPort({ kind: "range", ports: [19432, 19433], portSource: "env" }, fake.deps),
+    pickPlannotatorPort({ kind: "range", ports: [19432, 19433] }, fake.deps),
     (error: unknown) =>
       error instanceof Error &&
       error.message.includes("19432-19433") &&

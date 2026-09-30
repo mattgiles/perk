@@ -63,37 +63,45 @@ variables; there is no perk configuration for it.
 
 1. **Join both machines to your tailnet.** Install Tailscale on the remote box and on your local
    machine.
-2. **Advertise the tailnet name on the remote box.**
+2. **Advertise the tailnet name and ask for a fresh port per review on the remote box.**
 
    ```sh
    export PLANNOTATOR_REMOTE=1
    export PLANNOTATOR_URL_HOST=auto
+   export PLANNOTATOR_PORT=0
    ```
 
-   `"urlHost": "auto"` in `~/.plannotator/config.json` does the same. You need no
-   `PLANNOTATOR_PORT`: each review takes its own port.
+   `PLANNOTATOR_URL_HOST=auto` (or `"urlHost": "auto"` in `~/.plannotator/config.json`) changes
+   only the host in the printed URL. `PLANNOTATOR_PORT=0` gives every review its own free port;
+   without it a remote session falls back to the single port `19432`, which allows one browser
+   review at a time. A range such as `19432-19435` works too if you want predictable ports.
 3. **Open the review.** Plannotator prints `http://<magicdns-name>:<port>`; open it directly in
    your local browser.
 
 In remote mode Plannotator binds `0.0.0.0`. Keep the review ports closed in the EC2 security group
-(the default), and if you run a host firewall, admit them on the `tailscale0` interface only.
+(the default), and if you run a host firewall, admit traffic on the `tailscale0` interface only.
 
 ## Several reviews at once
 
-Two perk sessions take two ports — from the range in Lane A, automatically in Lane B — and both
-tabs stay live. Inside one session perk keeps one current review: a second `/plan-review-browser`
-supersedes the first, whose tab stays open but whose verdict is ignored with a warning.
+Two perk sessions take two ports — from the range in Lane A, a fresh port each in Lane B — and
+both tabs stay live. Inside one session perk keeps one current review: a second
+`/plan-review-browser` supersedes the first, whose tab stays open but whose verdict is ignored with
+a warning.
 
-A single fixed `PLANNOTATOR_PORT` (no range) allows one browser review at a time. An abandoned tab
-in the same session is replaced by the next review; a review started in another session fails with
-`Port 19432 in use`. Decide the open review first, or switch to a range.
+A single fixed port — an explicit `PLANNOTATOR_PORT=19432`, or the `19432` remote default when
+`PLANNOTATOR_PORT` is unset — allows one browser review at a time. While any review, in this
+session or another, still holds the port, perk's browser doors refuse with
+`Plannotator port 19432 is in use` instead of reaching into that review. Decide the open review
+first, or switch to a range or to `PLANNOTATOR_PORT=0`. (The plain `plan_review` browser review
+keeps Plannotator's own handling: it replaces an abandoned review from the same session.)
 
 ## Troubleshooting
 
 - **Wrong port.** `plannotator is up at …` names the port perk actually used. A mistyped
   `PLANNOTATOR_PORT` falls back silently to `19432` (remote) or a random port, exactly as in
   Plannotator.
-- **Port already taken.** `ss -ltnp | grep 1943` on the remote box shows which process holds a
+- **`Plannotator port … is in use`.** Another review still holds your single fixed port: decide
+  it, or configure a range. `ss -ltnp | grep 1943` on the remote box shows which process holds a
   port.
 - **Tunnel died.** A review that loads nothing locally usually means the forward is gone —
   restart `ssh -N ec2`.

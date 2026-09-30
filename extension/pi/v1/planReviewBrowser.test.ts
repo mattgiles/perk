@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -205,7 +206,6 @@ function fakeStarted(
     url: "http://127.0.0.1:45001",
     port: 45001,
     remote,
-    portSource: "random",
     bridgePromise: Promise.resolve(bridge),
     readiness: Promise.resolve(readiness),
   };
@@ -390,7 +390,6 @@ test("observer: superseded WHILE the bridge wait is pending → the post-await c
     url: "http://127.0.0.1:45001",
     port: 45001,
     remote: false,
-    portSource: "random",
     bridgePromise: new Promise<ReviewOutcome>((resolve) => {
       settleBridge = resolve;
     }),
@@ -1576,5 +1575,44 @@ test("/plan-review-browser: an operator's single PLANNOTATOR_PORT is the port th
   } finally {
     await settleBridges(sink);
     h.dispose();
+  }
+});
+
+test("/plan-review-browser: a PLANNOTATOR_PORT another review already serves is refused — no bridge, no primed surfaces, nothing sent to the old review", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  gitInit(cwd, { dirty: false });
+  const sink = newSink();
+  const oldReviewRequests: string[] = [];
+  const oldReview = createHttpServer((req, res) => {
+    oldReviewRequests.push(`${req.method} ${req.url}`);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  });
+  await new Promise<void>((resolve) => oldReview.listen(0, "127.0.0.1", () => resolve()));
+  const address = oldReview.address();
+  const port = typeof address === "object" && address !== null ? address.port : 0;
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_WAVE_RPC_PING_MS: "20", PLANNOTATOR_PORT: String(port) },
+    extraExtensions: [fakePlannotator(sink)],
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.invokeTool("plan_draft", { plan: DRAFT_MD });
+    await h.runCommandHandler("plan-review-browser", "");
+    assert.ok(
+      h.notifies.some(
+        (n) => n.includes("could not pick a free local port") && n.includes(`${port} is in use`),
+      ),
+      "the refusal is reported loudly, naming the occupied port",
+    );
+    assert.equal(sink.envelopes.length, 0, "no bridge request emitted");
+    assert.equal(injected.length, 0, "no guidance injected");
+    assert.equal(await sessionAnnotationMode(h), null, "the annotation surface is never primed");
+    assert.equal(await sessionDraftContextPrimed(h), false, "nor the draft-review context");
+    assert.deepEqual(oldReviewRequests, [], "the old review received no probe and no findings");
+  } finally {
+    h.dispose();
+    await new Promise<void>((resolve) => oldReview.close(() => resolve()));
   }
 });

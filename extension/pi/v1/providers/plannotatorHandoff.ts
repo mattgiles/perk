@@ -45,8 +45,9 @@
 // `getServerPortConfiguration()` reads `PLANNOTATOR_PORT` at bind time — perk's extension and
 // plannotator's server share one Node process, so an env var set here is read there. The core
 // picks the port by MIRRORING plannotator's own selection (`plannotatorPort.ts`): a single
-// `PLANNOTATOR_PORT` verbatim; the first free port of a `PLANNOTATOR_PORT` range, bind-probed on
-// loopback; `19432` when plannotator's remote detection says remote; else a free ephemeral port.
+// `PLANNOTATOR_PORT`; the first free port of a `PLANNOTATOR_PORT` range; `19432` when
+// plannotator's remote detection says remote; else a free ephemeral port. Fixed ports (single or
+// range) are bind-probed on loopback first, and an occupied single port is refused.
 // It then presets the env var (a no-op for plannotator when the value is what it would have
 // resolved itself — and a range reaches it as one concrete port, never re-walked), emits the
 // bridge request, polls a server-flavor-unique readiness route (`GET /api/diff` for code review,
@@ -59,14 +60,15 @@
 // ONCE, at the end), but the readiness poll still earns its keep for plan review — it confirms
 // the server answers, bounds the env-restore window uniformly, and an early handshake failure
 // settles the bridge → the poll stops early (`bridge_settled`), exactly like code review.
-// Concurrency: a busy SINGLE fixed port is plannotator's to resolve — it retries 5×500 ms, then
-// `startServerWithSelfPreemption` stops stale same-process browser sessions (an abandoned tab is
-// replaced, the newest review wins — the same rule perk's draft-review slot already applies to
-// decisions) and retries once; a port held by another process fails `Port <n> in use` → the
-// respond carries `status: "error"` → the bridge settles error/unavailable → the door degrades
-// loudly. Two perk processes on one range are independent (each takes its own free port); two
-// probing the same range port in the same instant is the residual race (the loser degrades
-// loudly).
+// Concurrency: a fixed port another review already serves is REFUSED before anything is emitted
+// — the readiness probe cannot tell which review answers on a port, and the doors prime
+// annotation delivery the moment the port is picked, so reusing it would announce and prime the
+// review already holding it (in this process or another). Plannotator's own busy-port handling
+// (retry, then `startServerWithSelfPreemption` replacing a stale same-process review) therefore
+// applies only to the plain `plan_review` arm, which presets nothing. Two perk processes on one
+// range are independent (each takes its own free port). Residual, loud: a port taken between the
+// probe and plannotator's bind fails `Port <n> in use` → an `error` respond → the bridge settles
+// error/unavailable → the door degrades.
 
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -86,7 +88,6 @@ import type { ReviewOutcome } from "../reviewOutcome.ts";
 import { type PlannotatorBus, requestPlannotatorPlanReview } from "./plannotator.ts";
 import {
   LOCAL_PLANNOTATOR_PORTS,
-  type PlannotatorPortSelection,
   type PlannotatorPorts,
   pickEphemeralPort,
   pickPlannotatorPort,
@@ -566,7 +567,7 @@ export type BrowserReadiness = "ready" | "timeout" | "bridge_settled" | "aborted
  * The injectable browser-open seams (tests drive a fake port picker / probe / clock). `ports` is
  * the per-activation port selection (default `LOCAL_PLANNOTATOR_PORTS` — the ephemeral pick, so
  * a caller passing nothing never reads `process.env`); `pickFreePort` is the EPHEMERAL picker the
- * `random` selection uses; `probePort` is the range's loopback bind probe.
+ * `random` selection uses; `probePort` is the fixed-port (single or range) loopback bind probe.
  */
 export interface StartBrowserDeps {
   ports?: PlannotatorPorts;
@@ -580,14 +581,12 @@ export interface StartBrowserDeps {
 
 /**
  * A started surface open: the deterministic address, whether plannotator treats the session as
- * remote (it then never auto-opens a browser), where the port came from (plannotator's own
- * `portSource` vocabulary), and the two observable promises.
+ * remote (it then never auto-opens a browser), and the two observable promises.
  */
 export interface StartedSurface<T> {
   url: string;
   port: number;
   remote: boolean;
-  portSource: PlannotatorPortSelection["portSource"];
   bridgePromise: Promise<T>;
   readiness: Promise<BrowserReadiness>;
 }
@@ -606,8 +605,8 @@ export type StartedBrowser = StartedSurface<CodeReviewOutcome>;
  * error/unavailable respond means the server never comes — or the turn aborts). The prior env
  * value is ALWAYS restored (delete if previously unset) in a `finally` when the poll ends: after
  * the window the preset is released back to plannotator's own resolution for any later server.
- * A port-pick failure (an exhausted range, a failed ephemeral pick) throws — the caller owns its
- * failure surface.
+ * A port-pick failure (an occupied single port, an exhausted range, a failed ephemeral pick)
+ * throws before anything is emitted — the caller owns its failure surface.
  *
  * The `activity` sink carries the one perk-owned wait an operator cannot otherwise see: begun
  * when readiness resolves `ready` while the bridge is still pending, ended when the bridge
@@ -684,14 +683,7 @@ async function startPlannotatorSurface<T>(
     }
   })();
 
-  return {
-    url,
-    port,
-    remote: ports.remote,
-    portSource: ports.selection.portSource,
-    bridgePromise,
-    readiness,
-  };
+  return { url, port, remote: ports.remote, bridgePromise, readiness };
 }
 
 /**

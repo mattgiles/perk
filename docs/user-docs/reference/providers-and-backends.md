@@ -83,8 +83,9 @@ during a review counts as a changed destination. Python remains the authority fo
 The browser doors pick the review server's port by mirroring Plannotator's own rule: a single
 `PLANNOTATOR_PORT`, the first free port of a `PLANNOTATOR_PORT` range, `19432` when Plannotator
 detects a remote session (`PLANNOTATOR_REMOTE`, else `SSH_TTY`/`SSH_CONNECTION`), otherwise a free
-local port. The plain `plan_review` arm leaves the port to Plannotator itself, so every arm lands
-on the same port — see
+local port. A fixed port that another review still holds is refused loudly rather than shared,
+so a door never reaches into that review. The plain `plan_review` arm leaves the port to
+Plannotator itself, so every arm lands on the same port — see
 [How to review in the browser from a remote machine](../how-to/review-in-the-browser-from-a-remote-machine.md).
 
 ## Known caveats & maturity

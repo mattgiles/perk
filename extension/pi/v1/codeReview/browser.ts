@@ -205,7 +205,8 @@ export interface ReviewBrowserCoreOpts {
  * Accepted stale-clear edge (unchanged from the pre-extraction arm): a second browser door
  * while this browser is still open re-primes (a new browser session supersedes everything),
  * and THIS bridge's later settle would clear the second session's surface — rare and loud
- * (the single-fixed-port caveat, contracts §8.4), noted, not engineered around.
+ * (a fixed port still held by the first review refuses the second open instead — contracts
+ * §8.4), noted, not engineered around.
  */
 export async function openReviewBrowserCore(
   pi: ExtensionAPI,

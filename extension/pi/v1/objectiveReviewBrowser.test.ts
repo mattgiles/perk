@@ -211,7 +211,6 @@ function fakeStarted(
     url: "http://127.0.0.1:45001",
     port: 45001,
     remote,
-    portSource: "random",
     bridgePromise: Promise.resolve(bridge),
     readiness: Promise.resolve(readiness),
   };
@@ -397,7 +396,6 @@ test("observer: superseded WHILE the bridge wait is pending → the post-await c
     url: "http://127.0.0.1:45001",
     port: 45001,
     remote: false,
-    portSource: "random",
     bridgePromise: new Promise<ReviewOutcome>((resolve) => {
       settleBridge = resolve;
     }),

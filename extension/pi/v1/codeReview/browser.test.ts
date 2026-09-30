@@ -7,6 +7,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -207,7 +208,6 @@ function fakeStarted(
     url: "http://127.0.0.1:45001",
     port: 45001,
     remote,
-    portSource: "random",
     bridgePromise: Promise.resolve(bridge),
     readiness: Promise.resolve(readiness),
   };
@@ -831,5 +831,45 @@ test("/pr-review-browser <pr>: an operator's PLANNOTATOR_PORT range presets its 
   } finally {
     await settleBridges(sink);
     h.dispose();
+  }
+});
+
+test("/pr-review-browser <pr>: a PLANNOTATOR_PORT another review already serves is refused at the boundary — nothing emitted, primed, injected, or sent to the old review", async () => {
+  // The fixed-port collision: an "old review" answers every request on the operator's port. The
+  // door must refuse loudly before the bridge request, the annotation prime, or the guidance —
+  // so no readiness probe or annotation push can ever reach the review already holding it.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
+  const sink: FakeBrowser = { envelopes: [], envAtEmit: [] };
+  const oldReviewRequests: string[] = [];
+  const oldReview = createHttpServer((req, res) => {
+    oldReviewRequests.push(`${req.method} ${req.url}`);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  });
+  await new Promise<void>((resolve) => oldReview.listen(0, "127.0.0.1", () => resolve()));
+  const address = oldReview.address();
+  const port = typeof address === "object" && address !== null ? address.port : 0;
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin, PLANNOTATOR_PORT: String(port) },
+    extraExtensions: [fakePlannotator(sink)],
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.runCommandHandler("pr-review-browser", "77");
+    assert.ok(
+      h.notifies.some(
+        (n) => n.includes("could not pick a free local port") && n.includes(`${port} is in use`),
+      ),
+      "the refusal is reported loudly, naming the occupied port",
+    );
+    assert.equal(sink.envelopes.length, 0, "no bridge request emitted");
+    assert.equal(injected.length, 0, "no guidance injected");
+    assert.equal(await sessionSurfacePrimed(h), false, "push_annotations refuses — never primed");
+    assert.deepEqual(oldReviewRequests, [], "the old review received no probe and no findings");
+  } finally {
+    h.dispose();
+    await new Promise<void>((resolve) => oldReview.close(() => resolve()));
   }
 });
