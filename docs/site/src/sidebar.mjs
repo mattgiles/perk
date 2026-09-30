@@ -94,7 +94,11 @@ export const sidebar = [
       },
       {
         label: "Providers & backends",
-        items: ["how-to/select-a-provider", "how-to/switch-to-linear"],
+        items: [
+          "how-to/select-a-provider",
+          "how-to/review-in-the-browser-from-a-remote-machine",
+          "how-to/switch-to-linear",
+        ],
       },
     ],
   },

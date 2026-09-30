@@ -44,10 +44,15 @@
 // `server/serverReview.ts` — bind through the shared `server/network.ts listenOnPort()`, whose
 // `getServerPortConfiguration()` reads `PLANNOTATOR_PORT` at bind time — perk's extension and
 // plannotator's server share one Node process, so an env var set here is read there. The core
-// picks a free ephemeral port, presets the env var, emits the bridge request, polls a
-// server-flavor-unique readiness route (`GET /api/diff` for code review, `GET /api/plan` for
-// plan review — each present only in its own server flavor, so a probe can never false-positive
-// against the wrong one), and ALWAYS restores the prior env value in a `finally` when the poll
+// picks the port by MIRRORING plannotator's own selection (`plannotatorPort.ts`): a single
+// `PLANNOTATOR_PORT`; the first free port of a `PLANNOTATOR_PORT` range; `19432` when
+// plannotator's remote detection says remote; else a free ephemeral port. Fixed ports (single or
+// range) are bind-probed on loopback first, and an occupied single port is refused.
+// It then presets the env var (a no-op for plannotator when the value is what it would have
+// resolved itself — and a range reaches it as one concrete port, never re-walked), emits the
+// bridge request, polls a server-flavor-unique readiness route (`GET /api/diff` for code review,
+// `GET /api/plan` for plan review — each present only in its own server flavor, so a probe can
+// never false-positive against the wrong one), and ALWAYS restores the prior env value in a `finally` when the poll
 // ends. Because the port is read at bind time, the server URL is KNOWN the moment the port is
 // picked — before the server is up — which is what lets a door open the browser in the
 // background and inject its guidance immediately. Lifecycle difference between the flavors: the
@@ -55,12 +60,17 @@
 // ONCE, at the end), but the readiness poll still earns its keep for plan review — it confirms
 // the server answers, bounds the env-restore window uniformly, and an early handshake failure
 // settles the bridge → the poll stops early (`bridge_settled`), exactly like code review.
-// Concurrency caveat: a second plannotator server starting in the same process during the
-// window would collide on the fixed port — rare and loud (EADDRINUSE → plannotator throws →
-// the bridge settles error), never silent.
+// Concurrency: a fixed port another review already serves is REFUSED before anything is emitted
+// — the readiness probe cannot tell which review answers on a port, and the doors prime
+// annotation delivery the moment the port is picked, so reusing it would announce and prime the
+// review already holding it (in this process or another). Plannotator's own busy-port handling
+// (retry, then `startServerWithSelfPreemption` replacing a stale same-process review) therefore
+// applies only to the plain `plan_review` arm, which presets nothing. Two perk processes on one
+// range are independent (each takes its own free port). Residual, loud: a port taken between the
+// probe and plannotator's bind fails `Port <n> in use` → an `error` respond → the bridge settles
+// error/unavailable → the door degrades.
 
 import { randomUUID } from "node:crypto";
-import { createServer } from "node:net";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readPlanRef } from "../../../substrate/cache.ts";
 import {
@@ -76,6 +86,13 @@ import { ACTIVITY_BROWSER_REVIEW, type ActivitySink } from "../../../surfaces/su
 // review-surface machinery.
 import type { ReviewOutcome } from "../reviewOutcome.ts";
 import { type PlannotatorBus, requestPlannotatorPlanReview } from "./plannotator.ts";
+import {
+  LOCAL_PLANNOTATOR_PORTS,
+  type PlannotatorPorts,
+  pickEphemeralPort,
+  pickPlannotatorPort,
+  portBinds,
+} from "./plannotatorPort.ts";
 
 /** Plannotator's code-review slash command — its presence detects the extension is loaded. */
 export const PLANNOTATOR_REVIEW_COMMAND = "plannotator-review";
@@ -519,20 +536,6 @@ export const READINESS_PROBE_INTERVAL_MS = 1_000;
  */
 export const READINESS_PROBE_BUDGET_MS = 120_000;
 
-/** Pick a free ephemeral port: `node:net` listen(0) → read → close (the internal default —
- * tests inject through the `deps.pickFreePort` hook instead). */
-async function pickFreePort(): Promise<number> {
-  return await new Promise<number>((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address !== null ? address.port : 0;
-      server.close(() => resolve(port));
-    });
-  });
-}
-
 /**
  * The code-review readiness route — review-server-only (`server/serverReview.ts`; absent from
  * the plan server), so the probe can never false-positive against a plan server. Pinned at
@@ -560,19 +563,30 @@ async function probeServer(url: string, path: string, signal?: AbortSignal): Pro
 /** How the readiness poll ended (the browser-open core's observable outcome). */
 export type BrowserReadiness = "ready" | "timeout" | "bridge_settled" | "aborted";
 
-/** The injectable browser-open seams (tests drive a fake port picker / probe / clock). */
+/**
+ * The injectable browser-open seams (tests drive a fake port picker / probe / clock). `ports` is
+ * the per-activation port selection (default `LOCAL_PLANNOTATOR_PORTS` — the ephemeral pick, so
+ * a caller passing nothing never reads `process.env`); `pickFreePort` is the EPHEMERAL picker the
+ * `random` selection uses; `probePort` is the fixed-port (single or range) loopback bind probe.
+ */
 export interface StartBrowserDeps {
+  ports?: PlannotatorPorts;
   pickFreePort?: () => Promise<number>;
+  probePort?: (port: number) => Promise<boolean>;
   probe?: (url: string, signal?: AbortSignal) => Promise<boolean>;
   intervalMs?: number;
   budgetMs?: number;
   sleep?: (ms: number) => Promise<void>;
 }
 
-/** A started surface open: the deterministic address + the two observable promises. */
+/**
+ * A started surface open: the deterministic address, whether plannotator treats the session as
+ * remote (it then never auto-opens a browser), and the two observable promises.
+ */
 export interface StartedSurface<T> {
   url: string;
   port: number;
+  remote: boolean;
   bridgePromise: Promise<T>;
   readiness: Promise<BrowserReadiness>;
 }
@@ -581,7 +595,8 @@ export interface StartedSurface<T> {
 export type StartedBrowser = StartedSurface<CodeReviewOutcome>;
 
 /**
- * The generic engine behind both browser-open flavors: pick a free port → save + preset
+ * The generic engine behind both browser-open flavors: pick the port (the plannotator mirror —
+ * `pickPlannotatorPort` over `deps.ports`) → save + preset
  * `PLANNOTATOR_PORT` → invoke the launch closure WHILE the env var is preset (plannotator's
  * `listenOnPort` reads it at bind time) → return immediately with the deterministic `{url, port}`
  * plus the two promises the caller observes: `bridgePromise` (the launch's settled outcome) and
@@ -589,8 +604,9 @@ export type StartedBrowser = StartedSurface<CodeReviewOutcome>;
  * injected test clocks stay deterministic; stops early when the bridge settles first — an early
  * error/unavailable respond means the server never comes — or the turn aborts). The prior env
  * value is ALWAYS restored (delete if previously unset) in a `finally` when the poll ends: after
- * the window the fixed port is released back to plannotator's own resolution (random port) for
- * any later server. A port-pick failure throws — the caller owns its failure surface.
+ * the window the preset is released back to plannotator's own resolution for any later server.
+ * A port-pick failure (an occupied single port, an exhausted range, a failed ephemeral pick)
+ * throws before anything is emitted — the caller owns its failure surface.
  *
  * The `activity` sink carries the one perk-owned wait an operator cannot otherwise see: begun
  * when readiness resolves `ready` while the bridge is still pending, ended when the bridge
@@ -604,7 +620,6 @@ async function startPlannotatorSurface<T>(
   deps: StartBrowserDeps,
   activity: ActivitySink,
 ): Promise<StartedSurface<T>> {
-  const pickPort = deps.pickFreePort ?? pickFreePort;
   const probe =
     deps.probe ??
     ((url: string, probeSignal?: AbortSignal) => probeServer(url, probePath, probeSignal));
@@ -613,7 +628,11 @@ async function startPlannotatorSurface<T>(
   const sleep =
     deps.sleep ?? ((ms: number) => new Promise<void>((r) => globalThis.setTimeout(r, ms)));
 
-  const port = await pickPort();
+  const ports = deps.ports ?? LOCAL_PLANNOTATOR_PORTS;
+  const port = await pickPlannotatorPort(ports.selection, {
+    ephemeral: deps.pickFreePort ?? pickEphemeralPort,
+    probe: deps.probePort ?? portBinds,
+  });
   const url = `http://127.0.0.1:${port}`;
 
   const priorPort = process.env.PLANNOTATOR_PORT;
@@ -664,7 +683,7 @@ async function startPlannotatorSurface<T>(
     }
   })();
 
-  return { url, port, bridgePromise, readiness };
+  return { url, port, remote: ports.remote, bridgePromise, readiness };
 }
 
 /**

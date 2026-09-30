@@ -32,7 +32,8 @@
 // ({objective-author, objective-save}); anything else refuses loudly.
 //
 // THE BACKGROUND OPEN mirrors `planReviewBrowser.ts` byte-for-byte in shape: the plan server's
-// URL is deterministic the moment the port is picked, so the handler starts
+// URL is deterministic the moment the port is picked (picked by mirroring Plannotator's own port
+// selection — see plannotatorHandoff.ts), so the handler starts
 // `startPlannotatorPlanReview` (the `plan-review` bridge carries the rendered objective as
 // `planContent` — arbitrary markdown bytes), primes BOTH companion surfaces
 // (`mode: "plan"` annotations + the `draftType: "objective"` wave context), injects the
@@ -98,6 +99,7 @@ import {
   type StartedSurface,
   startPlannotatorPlanReview,
 } from "./providers/plannotatorHandoff.ts";
+import { browserUpNotice } from "./providers/plannotatorPort.ts";
 import { WAVE_ARRIVAL_NOTICE } from "./providers/waveStatus.ts";
 import { type ReviewOutcome, type ToolResult, untrustedReviewFeedback } from "./review.ts";
 
@@ -180,7 +182,7 @@ export async function observeObjectiveReviewReadiness(
   // A superseded review's observer is inert: no announce, no delivery resume, no degrade.
   if (!session.current()) return;
   if (state === "ready") {
-    report(ctx, SCOPE, "info", `plannotator is up at ${started.url} — browser opening`);
+    report(ctx, SCOPE, "info", browserUpNotice(started));
     resumeAnnotationDelivery(annotations, surface, pi, ctx);
     return;
   }
@@ -514,7 +516,10 @@ export async function openObjectiveReviewAndGuide(
 
 // ------------------------------------------------------------------------ registration
 
-/** Register the warm `/objective-review-browser` command (no tools — the companions are global). */
+/**
+ * Register the warm `/objective-review-browser` command (no tools — the companions are
+ * global). `deps` carries the activation's port selection into every open.
+ */
 export function registerObjectiveReviewBrowser(
   pi: ExtensionAPI,
   gating: ToolGating,
@@ -522,6 +527,7 @@ export function registerObjectiveReviewBrowser(
   annotations: AnnotationState,
   slot: DraftReviewSlot,
   status: ActivityHandle,
+  deps: StartBrowserDeps = {},
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -620,6 +626,7 @@ export function registerObjectiveReviewBrowser(
         annotations,
         slot,
         status,
+        deps,
       );
     },
   });

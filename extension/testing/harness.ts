@@ -605,7 +605,12 @@ export async function loadPerkSession(opts: {
   const savedEnv = new Map<string, string | undefined>();
   // Sentinels on by default so the lifecycle is observable. PERK_CLIPBOARD_CMD/PERK_TERMINAL_LAUNCH
   // default to "" (disabled) so no harness-driven suite clobbers the dev machine's clipboard or
-  // spawns a terminal window. Caller env is spread last, so all remain overridable per-test.
+  // spawns a terminal window. PLANNOTATOR_REMOTE/PLANNOTATOR_PORT pin the local port selection:
+  // the composition root resolves it from process.env at activation, and an SSH-launched test
+  // shell carries SSH_CONNECTION, so without these every harness-driven browser-door test would
+  // silently switch to the 19432 single port when the suite runs over SSH (a test opts in with
+  // `env: { PLANNOTATOR_PORT: ... }`). Caller env is spread last, so all remain overridable
+  // per-test.
   applyEnv(
     {
       PERK_SELFCHECK: "1",
@@ -615,6 +620,8 @@ export async function loadPerkSession(opts: {
       PI_SUBAGENT_CHILD_AGENT: undefined,
       PERK_CLIPBOARD_CMD: "",
       PERK_TERMINAL_LAUNCH: "",
+      PLANNOTATOR_REMOTE: "0",
+      PLANNOTATOR_PORT: undefined,
       ...(opts.env ?? {}),
     },
     savedEnv,

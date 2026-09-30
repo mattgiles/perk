@@ -59,6 +59,22 @@ The plan seam must always produce perk's reviewed, canonical plan artifact.
   unapplyable diff falls back to the original bytes with a warning. Approved objective or gist
   direct edits do not save: they return one revise round so the agent folds the edits into the
   structured draft and re-reviews. Denial returns actionable feedback to the agent.
+  **Remote review:** every browser door (`/plan-review-browser`, `/objective-review-browser`,
+  `/pr-review-browser` PR modes, `/stack-review-browser`, and `plan_review`'s browser + wave arm)
+  picks its server port by mirroring Plannotator's own selection (pinned at
+  `@plannotator/pi-extension@0.27.22`): a single `PLANNOTATOR_PORT`; the first free port
+  of a `PLANNOTATOR_PORT` range (`19432-19435`); `19432` when Plannotator detects a remote session
+  (`PLANNOTATOR_REMOTE` = `1`/`true` or `0`/`false`, else `SSH_TTY`/`SSH_CONNECTION`); otherwise a
+  free local port. The plain `plan_review` arm leaves the port to Plannotator, which applies the
+  same rule (and keeps Plannotator's own busy-port retry + same-process preemption).
+  `PLANNOTATOR_URL_HOST` (`auto` = the Tailscale MagicDNS name) changes only the URL Plannotator
+  advertises, never the port — pair it with `PLANNOTATOR_PORT=0` (a fresh port per review) or a
+  range for concurrent tailnet reviews. The lane (an SSH port-range tunnel, or a tailnet) is chosen
+  by these Plannotator environment variables in the shell that runs `perk` — there is no perk
+  config key. A remote session's readiness notice points at the tunnel/tailnet instead of
+  "browser opening" (Plannotator never auto-opens a browser remotely). Fixed ports are bind-probed:
+  an occupied single port (`Plannotator port <n> is in use`) or an exhausted range fails the door
+  loudly before anything is emitted, never reaching into the review already holding the port.
 
 Every draft review — the blocking `plan_review` tool (Plannotator or first-party; plan, objective,
 gist, refinement) and both browser doors — runs the same four in-memory guards; nothing is

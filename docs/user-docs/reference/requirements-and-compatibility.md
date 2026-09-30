@@ -133,6 +133,11 @@ version (`npm ls @plannotator/pi-extension` under `.pi/npm`) before relying on t
 Ordinary plan and single-PR browser review have no Plannotator floor beyond what `perk init`
 installs.
 
+perk's browser doors mirror Plannotator's remote detection and port selection as of
+`@plannotator/pi-extension@0.27.22` (`server/network.ts`, `generated/port-range.ts`). A later
+Plannotator that changes that rule makes the doors and Plannotator disagree on the port — a loud
+failure (the readiness probe times out and the door degrades), never a silent one.
+
 perk encodes no operating-system gate. Its command and workflow surfaces assume POSIX shell
 behavior; the code and docs make no broader platform-support claim.
 

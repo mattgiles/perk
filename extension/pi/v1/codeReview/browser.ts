@@ -15,8 +15,9 @@
 //             no guidance injection, no port dance (no wave, so no annotation endpoint needed);
 //             the door ends immediately and the single respond routes back later.
 //
-// THE BACKGROUND OPEN: the server URL is deterministic the moment the port is picked
-// (plannotator reads `PLANNOTATOR_PORT` at bind time — see plannotatorHandoff.ts), so in the PR
+// THE BACKGROUND OPEN: the server URL is deterministic the moment the port is picked (picked by
+// mirroring Plannotator's own port selection; plannotator reads the preset `PLANNOTATOR_PORT` at
+// bind time — see plannotatorHandoff.ts), so in the PR
 // modes the handler starts `startPlannotatorBrowser`, injects the mode guidance IMMEDIATELY, and
 // ends its turn — no blocking readiness poll in the handler. The readiness promise is observed
 // in a background task: ready → an info note + a continuation for pending annotation work;
@@ -66,9 +67,11 @@ import {
   resolveReviewTarget,
   routeBrowserRespond,
   routePrReviewOutcome,
+  type StartBrowserDeps,
   type StartedBrowser,
   startPlannotatorBrowser,
 } from "../providers/plannotatorHandoff.ts";
+import { browserUpNotice } from "../providers/plannotatorPort.ts";
 import { WAVE_ARRIVAL_NOTICE } from "../providers/waveStatus.ts";
 import { type CheckoutOk, decodeCheckout } from "./checkout.ts";
 import { parseReviewDoorArgs } from "./terminal.ts";
@@ -140,7 +143,7 @@ export async function observeBrowserReadiness(
   const surface = annotations.surface;
   const state = await started.readiness;
   if (state === "ready") {
-    report(ctx, scope, "info", `plannotator is up at ${started.url} — browser opening`);
+    report(ctx, scope, "info", browserUpNotice(started));
     resumeAnnotationDelivery(annotations, surface, pi, ctx);
     return;
   }
@@ -185,6 +188,8 @@ export interface ReviewBrowserCoreOpts {
    * instead (the tool result is the seeded session's delivery channel).
    */
   injectGuidance?: boolean;
+  /** The browser-open seams: the activation's port selection (default: the local selection). */
+  browserDeps?: StartBrowserDeps;
 }
 
 /**
@@ -200,7 +205,8 @@ export interface ReviewBrowserCoreOpts {
  * Accepted stale-clear edge (unchanged from the pre-extraction arm): a second browser door
  * while this browser is still open re-primes (a new browser session supersedes everything),
  * and THIS bridge's later settle would clear the second session's surface — rare and loud
- * (the fixed-port EADDRINUSE caveat, contracts §8.4), noted, not engineered around.
+ * (a fixed port still held by the first review refuses the second open instead — contracts
+ * §8.4), noted, not engineered around.
  */
 export async function openReviewBrowserCore(
   pi: ExtensionAPI,
@@ -211,11 +217,15 @@ export async function openReviewBrowserCore(
 ): Promise<boolean> {
   let started: StartedBrowser;
   try {
-    started = await startPlannotatorBrowser(pi.events, {
-      ...opts.browserOpts,
-      signal: ctx.signal,
-      activity: (text) => status.beginActivity(ctx, text),
-    });
+    started = await startPlannotatorBrowser(
+      pi.events,
+      {
+        ...opts.browserOpts,
+        signal: ctx.signal,
+        activity: (text) => status.beginActivity(ctx, text),
+      },
+      opts.browserDeps ?? {},
+    );
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     report(
@@ -258,7 +268,7 @@ export async function openReviewBrowserCore(
  * The shared PR-mode arm (foreign + active): the extracted core with this door's values —
  * PR-mode browser opts, the mode guidance + binding suffix, and the default degrade notice /
  * respond mapper (the byte-stability of the pre-extraction behavior is proven by this door's
- * untouched tests).
+ * untouched tests). `deps` carries the activation's port selection.
  */
 async function openBrowserAndGuide(
   pi: ExtensionAPI,
@@ -266,21 +276,28 @@ async function openBrowserAndGuide(
   annotations: AnnotationState,
   status: ActivityHandle,
   opts: PrReviewBrowserGuidanceOpts,
+  deps: StartBrowserDeps = {},
 ): Promise<void> {
   await openReviewBrowserCore(pi, ctx, annotations, status, {
     scope: SCOPE,
     browserOpts: { cwd: ctx.cwd, source: { mode: "pr", prUrl: opts.prUrl } },
     guidance: prReviewBrowserGuidance(opts) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
+    browserDeps: deps,
   });
 }
 
 // ------------------------------------------------------------------------ registration
 
-/** Install the warm `/pr-review-browser` command (no tools — posting rides submit_pr_review). */
+/**
+ * Install the warm `/pr-review-browser` command (no tools — posting rides submit_pr_review).
+ * `deps` carries the activation's port selection into both PR-mode opens (the pre-PR local arm
+ * presets nothing — plannotator resolves the port by the same rule itself).
+ */
 export function installPrReviewBrowserBindings(
   pi: ExtensionAPI,
   annotations: AnnotationState,
   status: ActivityHandle,
+  deps: StartBrowserDeps = {},
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -344,13 +361,20 @@ export function installPrReviewBrowserBindings(
             : `PR #${parsed.pr} → adversarial reviewers → plannotator browser triage → you post from the browser`) +
             WAVE_ARRIVAL_NOTICE,
         );
-        await openBrowserAndGuide(pi, ctx, annotations, status, {
-          mode: "foreign",
-          pr: parsed.pr,
-          prUrl: checkout.data.url,
-          worktree: checkout.data.path,
-          directive: parsed.directive,
-        });
+        await openBrowserAndGuide(
+          pi,
+          ctx,
+          annotations,
+          status,
+          {
+            mode: "foreign",
+            pr: parsed.pr,
+            prUrl: checkout.data.url,
+            worktree: checkout.data.path,
+            directive: parsed.directive,
+          },
+          deps,
+        );
         return;
       }
 
@@ -381,13 +405,20 @@ export function installPrReviewBrowserBindings(
             : `PR #${target.number} (active worktree) → adversarial reviewers → plannotator browser triage → you post from the browser`) +
             WAVE_ARRIVAL_NOTICE,
         );
-        await openBrowserAndGuide(pi, ctx, annotations, status, {
-          mode: "active",
-          pr: target.number,
-          prUrl: target.prUrl,
-          worktree: ctx.cwd,
-          directive: parsed.directive,
-        });
+        await openBrowserAndGuide(
+          pi,
+          ctx,
+          annotations,
+          status,
+          {
+            mode: "active",
+            pr: target.number,
+            prUrl: target.prUrl,
+            worktree: ctx.cwd,
+            directive: parsed.directive,
+          },
+          deps,
+        );
         return;
       }
 

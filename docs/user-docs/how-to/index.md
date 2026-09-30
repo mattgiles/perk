@@ -132,5 +132,7 @@ for exactly one goal.
 
 - [How to select a provider](./select-a-provider.md) — switch `pi-status-footer` to `pi-default` and
   prove that only the selected package changes.
+- [How to review in the browser from a remote machine](./review-in-the-browser-from-a-remote-machine.md)
+  — pick an SSH-tunnel or Tailscale lane so every Plannotator review opens in your local browser.
 - [How to switch the issue backend to Linear](./switch-to-linear.md) — configure Linear, verify its
   readiness, and confirm one issue create/read round trip.

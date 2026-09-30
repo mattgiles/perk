@@ -205,10 +205,12 @@ const COMPLETED: ReviewOutcome = { status: "completed", approved: true, reviewId
 function fakeStarted(
   readiness: "ready" | "timeout" | "bridge_settled" | "aborted",
   bridge: ReviewOutcome = COMPLETED,
+  remote = false,
 ): StartedSurface<ReviewOutcome> {
   return {
     url: "http://127.0.0.1:45001",
     port: 45001,
+    remote,
     bridgePromise: Promise.resolve(bridge),
     readiness: Promise.resolve(readiness),
   };
@@ -252,6 +254,19 @@ function primeBoth(): void {
   primeAnnotationSurface(annotations, { mode: "plan", url: "http://127.0.0.1:45001" });
   primeDraftReviewContext(draftReview, { draftType: "objective", draft: "# The objective\n" });
 }
+
+test("observer: ready in a remote session: the tunnel/tailnet notice, never 'browser opening'", async () => {
+  primeBoth();
+  const { notifies, sent } = await observe(fakeStarted("ready", COMPLETED, true));
+  assert.equal(sent.length, 0);
+  assert.equal(notifies.length, 1);
+  assert.equal(notifies[0]?.severity, "info");
+  assert.match(notifies[0]?.message ?? "", /plannotator is up at http:\/\/127\.0\.0\.1:45001/);
+  assert.match(notifies[0]?.message ?? "", /tunnel or tailnet/);
+  assert.doesNotMatch(notifies[0]?.message ?? "", /browser opening/);
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
 
 test("observer: ready without pending annotation work → info only, surfaces untouched", async () => {
   primeBoth();
@@ -380,6 +395,7 @@ test("observer: superseded WHILE the bridge wait is pending → the post-await c
   const started: StartedSurface<ReviewOutcome> = {
     url: "http://127.0.0.1:45001",
     port: 45001,
+    remote: false,
     bridgePromise: new Promise<ReviewOutcome>((resolve) => {
       settleBridge = resolve;
     }),

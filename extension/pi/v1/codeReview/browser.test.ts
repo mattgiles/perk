@@ -7,6 +7,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -25,6 +26,7 @@ import {
   primeAnnotationSurface,
 } from "../providers/annotations.ts";
 import type { CodeReviewOutcome, StartedBrowser } from "../providers/plannotatorHandoff.ts";
+import { pickEphemeralPort } from "../providers/plannotatorPort.ts";
 import { observeBrowserReadiness, prReviewBrowserGuidance } from "./browser.ts";
 
 /** Probe an annotation state: `findings: []` with nothing held makes NO fetch (pure probe). */
@@ -200,10 +202,12 @@ const HANDLED: CodeReviewOutcome = {
 function fakeStarted(
   readiness: "ready" | "timeout" | "bridge_settled" | "aborted",
   bridge: CodeReviewOutcome = HANDLED,
+  remote = false,
 ): StartedBrowser {
   return {
     url: "http://127.0.0.1:45001",
     port: 45001,
+    remote,
     bridgePromise: Promise.resolve(bridge),
     readiness: Promise.resolve(readiness),
   };
@@ -241,6 +245,16 @@ test("observer: ready without a primed surface → info only, no stale continuat
   assert.equal(notifies.length, 1);
   assert.match(notifies[0]?.message ?? "", /plannotator is up at http:\/\/127\.0\.0\.1:45001/);
   assert.equal(notifies[0]?.severity, "info");
+});
+
+test("observer: ready in a remote session: the tunnel/tailnet notice, never 'browser opening'", async () => {
+  const { notifies, sent } = await observe(fakeStarted("ready", HANDLED, true));
+  assert.equal(sent.length, 0);
+  assert.equal(notifies.length, 1);
+  assert.equal(notifies[0]?.severity, "info");
+  assert.match(notifies[0]?.message ?? "", /plannotator is up at http:\/\/127\.0\.0\.1:45001/);
+  assert.match(notifies[0]?.message ?? "", /tunnel or tailnet/);
+  assert.doesNotMatch(notifies[0]?.message ?? "", /browser opening/);
 });
 
 test("observer: timeout → a loud error + the degrade notice (idle → immediate) + the surface clear", async () => {
@@ -792,5 +806,70 @@ test("/pr-review-browser <pr>: a configured reviewer model never reaches the gui
   } finally {
     await settleBridges(sink);
     h.dispose();
+  }
+});
+
+test("/pr-review-browser <pr>: an operator's PLANNOTATOR_PORT range presets its first free port", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
+  const sink: FakeBrowser = { envelopes: [], envAtEmit: [] };
+  // A free port with room for a three-port range (a dynamic pick keeps CI off 19432).
+  let first = await pickEphemeralPort();
+  while (first + 2 > 65535) first = await pickEphemeralPort();
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin, PLANNOTATOR_PORT: `${first}-${first + 2}` },
+    extraExtensions: [fakePlannotator(sink)],
+  });
+  // The selection was resolved at activation: clearing the variable proves the door never
+  // re-reads it at open time (and lets `settleBridges` observe the poll's restore-by-delete).
+  delete process.env.PLANNOTATOR_PORT;
+  try {
+    await h.runCommandHandler("pr-review-browser", "77");
+    assert.equal(sink.envelopes.length, 1, "the bridge request was emitted");
+    assert.equal(sink.envAtEmit[0], String(first), "the range's first free port is preset");
+  } finally {
+    await settleBridges(sink);
+    h.dispose();
+  }
+});
+
+test("/pr-review-browser <pr>: a PLANNOTATOR_PORT another review already serves is refused at the boundary — nothing emitted, primed, injected, or sent to the old review", async () => {
+  // The fixed-port collision: an "old review" answers every request on the operator's port. The
+  // door must refuse loudly before the bridge request, the annotation prime, or the guidance —
+  // so no readiness probe or annotation push can ever reach the review already holding it.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
+  const sink: FakeBrowser = { envelopes: [], envAtEmit: [] };
+  const oldReviewRequests: string[] = [];
+  const oldReview = createHttpServer((req, res) => {
+    oldReviewRequests.push(`${req.method} ${req.url}`);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  });
+  await new Promise<void>((resolve) => oldReview.listen(0, "127.0.0.1", () => resolve()));
+  const address = oldReview.address();
+  const port = typeof address === "object" && address !== null ? address.port : 0;
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin, PLANNOTATOR_PORT: String(port) },
+    extraExtensions: [fakePlannotator(sink)],
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.runCommandHandler("pr-review-browser", "77");
+    assert.ok(
+      h.notifies.some(
+        (n) => n.includes("could not pick a free local port") && n.includes(`${port} is in use`),
+      ),
+      "the refusal is reported loudly, naming the occupied port",
+    );
+    assert.equal(sink.envelopes.length, 0, "no bridge request emitted");
+    assert.equal(injected.length, 0, "no guidance injected");
+    assert.equal(await sessionSurfacePrimed(h), false, "push_annotations refuses — never primed");
+    assert.deepEqual(oldReviewRequests, [], "the old review received no probe and no findings");
+  } finally {
+    h.dispose();
+    await new Promise<void>((resolve) => oldReview.close(() => resolve()));
   }
 });
