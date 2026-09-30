@@ -25,6 +25,7 @@ import {
   primeAnnotationSurface,
 } from "../providers/annotations.ts";
 import type { CodeReviewOutcome, StartedBrowser } from "../providers/plannotatorHandoff.ts";
+import { pickEphemeralPort } from "../providers/plannotatorPort.ts";
 import { observeBrowserReadiness, prReviewBrowserGuidance } from "./browser.ts";
 
 /** Probe an annotation state: `findings: []` with nothing held makes NO fetch (pure probe). */
@@ -200,10 +201,13 @@ const HANDLED: CodeReviewOutcome = {
 function fakeStarted(
   readiness: "ready" | "timeout" | "bridge_settled" | "aborted",
   bridge: CodeReviewOutcome = HANDLED,
+  remote = false,
 ): StartedBrowser {
   return {
     url: "http://127.0.0.1:45001",
     port: 45001,
+    remote,
+    portSource: "random",
     bridgePromise: Promise.resolve(bridge),
     readiness: Promise.resolve(readiness),
   };
@@ -241,6 +245,16 @@ test("observer: ready without a primed surface → info only, no stale continuat
   assert.equal(notifies.length, 1);
   assert.match(notifies[0]?.message ?? "", /plannotator is up at http:\/\/127\.0\.0\.1:45001/);
   assert.equal(notifies[0]?.severity, "info");
+});
+
+test("observer: ready in a remote session: the tunnel/tailnet notice, never 'browser opening'", async () => {
+  const { notifies, sent } = await observe(fakeStarted("ready", HANDLED, true));
+  assert.equal(sent.length, 0);
+  assert.equal(notifies.length, 1);
+  assert.equal(notifies[0]?.severity, "info");
+  assert.match(notifies[0]?.message ?? "", /plannotator is up at http:\/\/127\.0\.0\.1:45001/);
+  assert.match(notifies[0]?.message ?? "", /tunnel or tailnet/);
+  assert.doesNotMatch(notifies[0]?.message ?? "", /browser opening/);
 });
 
 test("observer: timeout → a loud error + the degrade notice (idle → immediate) + the surface clear", async () => {
@@ -789,6 +803,31 @@ test("/pr-review-browser <pr>: a configured reviewer model never reaches the gui
       h.notifies.some((n) => n.includes("(focus: dig into the CI changes)")),
       "the info line carries the focus",
     );
+  } finally {
+    await settleBridges(sink);
+    h.dispose();
+  }
+});
+
+test("/pr-review-browser <pr>: an operator's PLANNOTATOR_PORT range presets its first free port", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
+  const sink: FakeBrowser = { envelopes: [], envAtEmit: [] };
+  // A free port with room for a three-port range (a dynamic pick keeps CI off 19432).
+  let first = await pickEphemeralPort();
+  while (first + 2 > 65535) first = await pickEphemeralPort();
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin, PLANNOTATOR_PORT: `${first}-${first + 2}` },
+    extraExtensions: [fakePlannotator(sink)],
+  });
+  // The selection was resolved at activation: clearing the variable proves the door never
+  // re-reads it at open time (and lets `settleBridges` observe the poll's restore-by-delete).
+  delete process.env.PLANNOTATOR_PORT;
+  try {
+    await h.runCommandHandler("pr-review-browser", "77");
+    assert.equal(sink.envelopes.length, 1, "the bridge request was emitted");
+    assert.equal(sink.envAtEmit[0], String(first), "the range's first free port is preset");
   } finally {
     await settleBridges(sink);
     h.dispose();

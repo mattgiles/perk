@@ -919,6 +919,126 @@ test("startPlannotatorBrowser: a port-pick failure throws (the caller owns the s
   );
 });
 
+test("startPlannotatorBrowser: no `ports` ⇒ the local selection (ephemeral pick, local, random source)", async () => {
+  const bus = fakeBus();
+  const started = await startPlannotatorBrowser(
+    bus,
+    { cwd: "/repo", source: PR_U, activity: noActivity },
+    {
+      pickFreePort: () => Promise.resolve(45009),
+      probe: () => Promise.resolve(true),
+      intervalMs: 1,
+      budgetMs: 10,
+      sleep: () => Promise.resolve(),
+    },
+  );
+  assert.equal(await started.readiness, "ready");
+  assert.equal(started.port, 45009);
+  assert.equal(started.remote, false);
+  assert.equal(started.portSource, "random");
+});
+
+test("startPlannotatorBrowser: a single env port is preset verbatim — the ephemeral picker is never called", async () => {
+  const bus = fakeBus();
+  const envAtEmit: (string | undefined)[] = [];
+  bus.on("plannotator:request", () => {
+    envAtEmit.push(process.env.PLANNOTATOR_PORT);
+  });
+  let ephemeralCalls = 0;
+  const prior = process.env.PLANNOTATOR_PORT;
+  process.env.PLANNOTATOR_PORT = "4242"; // the prior-SET arm: restored, not deleted
+  try {
+    for (const remote of [false, true]) {
+      envAtEmit.length = 0;
+      const started = await startPlannotatorBrowser(
+        bus,
+        { cwd: "/repo", source: PR_U, activity: noActivity },
+        {
+          ports: { selection: { kind: "single", port: 45010, portSource: "env" }, remote },
+          pickFreePort: () => {
+            ephemeralCalls++;
+            return Promise.resolve(1);
+          },
+          probePort: () => Promise.reject(new Error("a single port is never probed")),
+          probe: () => Promise.resolve(true),
+          intervalMs: 1,
+          budgetMs: 10,
+          sleep: () => Promise.resolve(),
+        },
+      );
+      assert.equal(started.url, "http://127.0.0.1:45010");
+      assert.equal(started.port, 45010);
+      assert.equal(started.portSource, "env");
+      assert.equal(started.remote, remote, "remote mirrors the passed flag");
+      assert.deepEqual(envAtEmit, ["45010"], "the single port is preset for plannotator's bind");
+      assert.equal(await started.readiness, "ready");
+      assert.equal(process.env.PLANNOTATOR_PORT, "4242", "prior value restored after the poll");
+    }
+    assert.equal(ephemeralCalls, 0);
+  } finally {
+    if (prior === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = prior;
+  }
+});
+
+test("startPlannotatorBrowser: a range presets the first bindable port", async () => {
+  const bus = fakeBus();
+  const envAtEmit: (string | undefined)[] = [];
+  bus.on("plannotator:request", () => {
+    envAtEmit.push(process.env.PLANNOTATOR_PORT);
+  });
+  const probed: number[] = [];
+  const answers = [false, true];
+  const started = await startPlannotatorBrowser(
+    bus,
+    { cwd: "/repo", source: PR_U, activity: noActivity },
+    {
+      ports: {
+        selection: { kind: "range", ports: [45020, 45021, 45022], portSource: "env" },
+        remote: true,
+      },
+      probePort: (port) => {
+        probed.push(port);
+        return Promise.resolve(answers[probed.length - 1] ?? false);
+      },
+      probe: () => Promise.resolve(true),
+      intervalMs: 1,
+      budgetMs: 10,
+      sleep: () => Promise.resolve(),
+    },
+  );
+  assert.equal(started.port, 45021);
+  assert.equal(started.url, "http://127.0.0.1:45021");
+  assert.equal(started.portSource, "env");
+  assert.equal(started.remote, true);
+  assert.deepEqual(probed, [45020, 45021]);
+  assert.deepEqual(envAtEmit, ["45021"]);
+  assert.equal(await started.readiness, "ready");
+});
+
+test("startPlannotatorBrowser: an exhausted range throws before anything is emitted", async () => {
+  const bus = fakeBus();
+  let emitted = 0;
+  bus.on("plannotator:request", () => {
+    emitted++;
+  });
+  await assert.rejects(
+    startPlannotatorBrowser(
+      bus,
+      { cwd: "/repo", source: PR_U, activity: noActivity },
+      {
+        ports: {
+          selection: { kind: "range", ports: [45030, 45031], portSource: "env" },
+          remote: false,
+        },
+        probePort: () => Promise.resolve(false),
+      },
+    ),
+    /45030-45031 is exhausted/,
+  );
+  assert.equal(emitted, 0);
+});
+
 // --- startPlannotatorPlanReview (the plan-review flavor of the browser-open core) ----------------
 
 /** The plannotator:request envelope the fake plan-review listener receives (pinned, see header). */
@@ -1070,6 +1190,38 @@ test("startPlannotatorPlanReview: a port-pick failure throws (the caller owns th
     ),
     /no ports/,
   );
+});
+
+test("startPlannotatorPlanReview: the remote-default single port is preset; the started surface says remote", async () => {
+  const bus = fakeBus();
+  const envAtEmit: (string | undefined)[] = [];
+  bus.on("plannotator:request", (data) => {
+    envAtEmit.push(process.env.PLANNOTATOR_PORT);
+    (data as PlanReviewEnvelope).respond({
+      status: "handled",
+      result: { status: "pending", reviewId: "rev-b5" },
+    });
+  });
+  const started = await startPlannotatorPlanReview(
+    bus,
+    { plan: "# A plan", activity: noActivity },
+    {
+      ports: {
+        selection: { kind: "single", port: 46010, portSource: "remote-default" },
+        remote: true,
+      },
+      pickFreePort: () => Promise.reject(new Error("never the ephemeral pick")),
+      probe: () => Promise.resolve(true),
+      intervalMs: 1,
+      budgetMs: 10,
+      sleep: () => Promise.resolve(),
+    },
+  );
+  assert.equal(started.url, "http://127.0.0.1:46010");
+  assert.equal(started.remote, true);
+  assert.equal(started.portSource, "remote-default");
+  assert.deepEqual(envAtEmit, ["46010"]);
+  assert.equal(await started.readiness, "ready");
 });
 
 test("startPlannotatorSurface activity: begun on `ready` while the bridge is pending, ended on settle; timeout / bridge_settled / aborted / a rejecting launch never begin", async () => {

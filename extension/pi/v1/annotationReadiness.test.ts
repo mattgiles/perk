@@ -40,6 +40,8 @@ function fixture(mode: AnnotationMode, idle: boolean) {
   const started = {
     ...surface,
     port: 45001,
+    remote: false,
+    portSource: "random" as const,
     readiness: readiness.promise,
     bridgePromise: new Promise<never>(() => {}),
   };

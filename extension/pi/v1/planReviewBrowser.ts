@@ -22,7 +22,8 @@
 // Pi restart (the human re-runs the door).
 //
 // THE BACKGROUND OPEN: the plan server's URL is deterministic the moment the port is picked
-// (the preset-PLANNOTATOR_PORT mechanism — see plannotatorHandoff.ts), so the handler starts
+// (picked by mirroring Plannotator's own port selection, then preset as PLANNOTATOR_PORT — see
+// plannotatorHandoff.ts), so the handler starts
 // `startPlannotatorPlanReview`, primes BOTH companion surfaces (the `push_annotations` plan-mode
 // annotation surface + the draft-review wave context), injects the guidance IMMEDIATELY, and
 // ends its turn. The readiness poll is observed in a background task (ready → info; never-ready
@@ -87,6 +88,7 @@ import {
   type StartedSurface,
   startPlannotatorPlanReview,
 } from "./providers/plannotatorHandoff.ts";
+import { browserUpNotice } from "./providers/plannotatorPort.ts";
 import { WAVE_ARRIVAL_NOTICE } from "./providers/waveStatus.ts";
 import { type ReviewOutcome, type ToolResult, untrustedReviewFeedback } from "./review.ts";
 
@@ -168,7 +170,7 @@ export async function observePlanReviewReadiness(
   // A superseded review's observer is inert: no announce, no delivery resume, no degrade.
   if (!session.current()) return;
   if (state === "ready") {
-    report(ctx, SCOPE, "info", `plannotator is up at ${started.url} — browser opening`);
+    report(ctx, SCOPE, "info", browserUpNotice(started));
     resumeAnnotationDelivery(annotations, surface, pi, ctx);
     return;
   }
@@ -475,7 +477,10 @@ export async function openPlanReviewAndGuide(
 
 // ------------------------------------------------------------------------ registration
 
-/** Register the warm `/plan-review-browser` command (no tools — the companions are global). */
+/**
+ * Register the warm `/plan-review-browser` command (no tools — the companions are global).
+ * `deps` carries the activation's port selection into every open.
+ */
 export function registerPlanReviewBrowser(
   pi: ExtensionAPI,
   gating: ToolGating,
@@ -483,6 +488,7 @@ export function registerPlanReviewBrowser(
   annotations: AnnotationState,
   slot: DraftReviewSlot,
   status: ActivityHandle,
+  deps: StartBrowserDeps = {},
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -550,6 +556,7 @@ export function registerPlanReviewBrowser(
         annotations,
         slot,
         status,
+        deps,
       );
     },
   });

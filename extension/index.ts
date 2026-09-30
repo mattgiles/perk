@@ -68,7 +68,8 @@ import { installPlanBindings } from "./pi/v1/plan.ts";
 import { openPlanReviewSurface, registerPlanReviewBrowser } from "./pi/v1/planReviewBrowser.ts";
 import { createAnnotationState, installAnnotationBindings } from "./pi/v1/providers/annotations.ts";
 import { installPlannotatorPlanAdapter } from "./pi/v1/providers/plannotator.ts";
-import { plannotatorPresent } from "./pi/v1/providers/plannotatorHandoff.ts";
+import { plannotatorPresent, type StartBrowserDeps } from "./pi/v1/providers/plannotatorHandoff.ts";
+import { resolvePlannotatorPorts } from "./pi/v1/providers/plannotatorPort.ts";
 import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
 import { installScoutWaveBindings } from "./pi/v1/scoutWave.ts";
 import { registerSelfcheck } from "./pi/v1/selfcheck.ts";
@@ -315,6 +316,14 @@ export default function perk(
   // the browser doors; the footer reads it back via get/subscribe.
   const perkStatus = createPerkStatus();
 
+  // The per-activation plannotator port selection (the mirror of plannotator's own rule:
+  // `PLANNOTATOR_PORT` single or range, `19432` when remote, else ephemeral), resolved ONCE here,
+  // BEFORE any door presets `PLANNOTATOR_PORT`: perk's own transient preset lives in the same
+  // variable, so an open-time read could mistake a sibling door's preset for the operator's
+  // setting. Threaded into every browser door, never module state (the annotations /
+  // draftReviewWave pattern).
+  const browserDeps: StartBrowserDeps = { ports: resolvePlannotatorPorts(process.env) };
+
   installPlanBindings(pi, gating, draftReviews, () => runnerChild, perkStatus, {
     present: () => plannotatorPresent(pi),
     plan: (ctx, opts) =>
@@ -327,6 +336,7 @@ export default function perk(
         annotations,
         draftReviews,
         perkStatus,
+        browserDeps,
       ),
     objective: (ctx, opts) =>
       openObjectiveReviewSurface(
@@ -338,6 +348,7 @@ export default function perk(
         annotations,
         draftReviews,
         perkStatus,
+        browserDeps,
       ),
   });
 
@@ -784,19 +795,27 @@ export default function perk(
   // The warm `/pr-review-browser` door: the browser review entry — plannotator always, opened
   // in the background (pre-PR it absorbs the since-base local browser review); posting is the
   // human's own platform-post from the UI, with `submit_pr_review` for request-changes only.
-  installPrReviewBrowserBindings(pi, annotations, perkStatus);
+  installPrReviewBrowserBindings(pi, annotations, perkStatus, browserDeps);
 
   // The warm `/stack-review-browser` door + its cold-launch twin (`open_stack_review`): the
   // stacked-PR browser review over the pinned combined base→top patch — one reviewer wave with
   // `stack: true` bound to the same pins, then judgment-routed per-PR posting through
   // `submit_pr_review`.
-  installStackReviewBindings(pi, annotations, perkStatus, stackPin);
+  installStackReviewBindings(pi, annotations, perkStatus, stackPin, browserDeps);
 
   // The warm `/plan-review-browser` door: the summonable streaming draft review — the
   // plannotator plan-review browser on the working plan draft, draft reviewers streaming
   // phrase-anchored findings in; APPROVE auto-saves via the approvalSave seam, DENY returns a
   // model-mediated revision round.
-  registerPlanReviewBrowser(pi, gating, draftReviewWave, annotations, draftReviews, perkStatus);
+  registerPlanReviewBrowser(
+    pi,
+    gating,
+    draftReviewWave,
+    annotations,
+    draftReviews,
+    perkStatus,
+    browserDeps,
+  );
 
   // The warm `/objective-review-browser` door: the summonable streaming objective-draft review
   // — the plannotator plan-review browser on the RENDERED working objective draft, draft
@@ -809,6 +828,7 @@ export default function perk(
     annotations,
     draftReviews,
     perkStatus,
+    browserDeps,
   );
 
   // The warm `/simplify-plan` / `/simplify-objective` doors: one fresh `perk.simplifier` lane

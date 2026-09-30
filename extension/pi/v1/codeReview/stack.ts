@@ -57,7 +57,11 @@ import {
   pinnedReviewContextCommand,
 } from "../../../waves/adversarialReviewWave.ts";
 import type { AnnotationState } from "../providers/annotations.ts";
-import { plannotatorPresent, stackRespondMessage } from "../providers/plannotatorHandoff.ts";
+import {
+  plannotatorPresent,
+  type StartBrowserDeps,
+  stackRespondMessage,
+} from "../providers/plannotatorHandoff.ts";
 import { openReviewBrowserCore } from "./browser.ts";
 import { type CheckoutOk, decodeCheckout, PR_URL_RE } from "./checkout.ts";
 import { type StackPinState, samePinnedStack } from "./reviewWave.ts";
@@ -372,7 +376,8 @@ export function pinSupersedeRefusal(stackPin: StackPinState, next: PinnedStack):
  * `verifyStackPatch` and `pinSupersedeRefusal` first), and on success bind the verified
  * `pinned` stack into the per-activation `StackPinState` (a later open replaces it — the
  * accepted "second browser door supersedes" posture — unless a stack wave is in flight against
- * a different pin).
+ * a different pin). The server port is picked by mirroring Plannotator's own port selection
+ * (see plannotatorHandoff.ts) over `browserDeps`, the activation's port selection.
  */
 async function openStackBrowser(
   pi: ExtensionAPI,
@@ -386,6 +391,7 @@ async function openStackBrowser(
     pinned: PinnedStack;
     guidance: string;
     injectGuidance: boolean;
+    browserDeps?: StartBrowserDeps;
   },
 ): Promise<boolean> {
   const started = await openReviewBrowserCore(pi, ctx, annotations, status, {
@@ -398,6 +404,7 @@ async function openStackBrowser(
     degradeNotice: STACK_DEGRADE_NOTICE,
     respondMessageFor: stackRespondMessage,
     injectGuidance: opts.injectGuidance,
+    ...(opts.browserDeps !== undefined ? { browserDeps: opts.browserDeps } : {}),
   });
   if (started) stackPin.pinned = opts.pinned;
   return started;
@@ -411,6 +418,7 @@ function registerStackReviewBrowser(
   annotations: AnnotationState,
   status: ActivityHandle,
   stackPin: StackPinState,
+  deps: StartBrowserDeps = {},
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -532,6 +540,7 @@ function registerStackReviewBrowser(
             ...(parsed.directive ? { directive: parsed.directive } : {}),
           }) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
         injectGuidance: true,
+        browserDeps: deps,
       });
     },
   });
@@ -622,7 +631,8 @@ type StackBrowserOpen = typeof openStackBrowser;
 
 /**
  * The `open_stack_review` execute core (exported for direct tests — the `executeStartReviewWave`
- * posture): every gate in registration order, then the shared browser open.
+ * posture): every gate in registration order, then the shared browser open (`deps` is the
+ * activation's port selection, forwarded as the open's `browserDeps`).
  */
 export async function executeOpenStackReview(
   pi: ExtensionAPI,
@@ -632,6 +642,7 @@ export async function executeOpenStackReview(
   status: ActivityHandle,
   stackPin: StackPinState,
   open: StackBrowserOpen = openStackBrowser,
+  deps: StartBrowserDeps = {},
 ): Promise<ReturnType<typeof ok> | ReturnType<ReturnType<typeof failFor>>> {
   const fail = failFor(ctx, "open_stack_review");
   if (!ctx.hasUI) {
@@ -704,6 +715,7 @@ export async function executeOpenStackReview(
     pinned,
     guidance,
     injectGuidance: false,
+    browserDeps: deps,
   });
   if (!started) {
     return fail(
@@ -729,6 +741,7 @@ function registerOpenStackReview(
   annotations: AnnotationState,
   status: ActivityHandle,
   stackPin: StackPinState,
+  deps: StartBrowserDeps = {},
 ): void {
   const latch: OpenLatch = { opened: false };
 
@@ -750,7 +763,16 @@ function registerOpenStackReview(
       properties: {},
     },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return await executeOpenStackReview(pi, ctx, latch, annotations, status, stackPin);
+      return await executeOpenStackReview(
+        pi,
+        ctx,
+        latch,
+        annotations,
+        status,
+        stackPin,
+        openStackBrowser,
+        deps,
+      );
     },
   });
 }
@@ -760,14 +782,16 @@ function registerOpenStackReview(
  * cold-launch twin (`open_stack_review`). Takes the threaded per-activation annotation state —
  * both openers prime it through `openReviewBrowserCore` — and the per-activation
  * `StackPinState` shared with `installReviewWaveBindings` (both openers bind the verified pins
- * on a successful open; `start_review_wave`'s stack mode reads them).
+ * on a successful open; `start_review_wave`'s stack mode reads them). `deps` carries the
+ * activation's port selection into both openers.
  */
 export function installStackReviewBindings(
   pi: ExtensionAPI,
   annotations: AnnotationState,
   status: ActivityHandle,
   stackPin: StackPinState,
+  deps: StartBrowserDeps = {},
 ): void {
-  registerStackReviewBrowser(pi, annotations, status, stackPin);
-  registerOpenStackReview(pi, annotations, status, stackPin);
+  registerStackReviewBrowser(pi, annotations, status, stackPin, deps);
+  registerOpenStackReview(pi, annotations, status, stackPin, deps);
 }

@@ -62,6 +62,7 @@ import {
   primeAnnotationSurface,
 } from "./providers/annotations.ts";
 import type { StartedSurface } from "./providers/plannotatorHandoff.ts";
+import { pickEphemeralPort } from "./providers/plannotatorPort.ts";
 import type { ReviewOutcome } from "./review.ts";
 
 // ------------------------------------------------------------------ surface probes (shared)
@@ -198,10 +199,13 @@ const COMPLETED: ReviewOutcome = { status: "completed", approved: true, reviewId
 function fakeStarted(
   readiness: "ready" | "timeout" | "bridge_settled" | "aborted",
   bridge: ReviewOutcome = COMPLETED,
+  remote = false,
 ): StartedSurface<ReviewOutcome> {
   return {
     url: "http://127.0.0.1:45001",
     port: 45001,
+    remote,
+    portSource: "random",
     bridgePromise: Promise.resolve(bridge),
     readiness: Promise.resolve(readiness),
   };
@@ -255,6 +259,19 @@ test("observer: ready without pending annotation work → info only, surfaces un
   assert.equal(notifies[0]?.severity, "info");
   assert.equal(await annotationMode(), "plan", "the ready arm never clears");
   assert.equal(await draftContextPrimed(), true);
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: ready in a remote session → the tunnel/tailnet notice, never 'browser opening'", async () => {
+  primeBoth();
+  const { notifies, sent } = await observe(fakeStarted("ready", COMPLETED, true));
+  assert.equal(sent.length, 0);
+  assert.equal(notifies.length, 1);
+  assert.equal(notifies[0]?.severity, "info");
+  assert.match(notifies[0]?.message ?? "", /plannotator is up at http:\/\/127\.0\.0\.1:45001/);
+  assert.match(notifies[0]?.message ?? "", /tunnel or tailnet/);
+  assert.doesNotMatch(notifies[0]?.message ?? "", /browser opening/);
   clearAnnotationSurface(annotations);
   clearDraftReviewContext(draftReview);
 });
@@ -372,6 +389,8 @@ test("observer: superseded WHILE the bridge wait is pending → the post-await c
   const started: StartedSurface<ReviewOutcome> = {
     url: "http://127.0.0.1:45001",
     port: 45001,
+    remote: false,
+    portSource: "random",
     bridgePromise: new Promise<ReviewOutcome>((resolve) => {
       settleBridge = resolve;
     }),
@@ -1520,6 +1539,39 @@ test("/plan-review-browser: happy path — primes both surfaces, injects URL-fre
     assert.ok(
       injected.some((m) => m.includes("DENIED") && m.includes("tighten the rollout step")),
       "the deny feedback injected verbatim",
+    );
+  } finally {
+    await settleBridges(sink);
+    h.dispose();
+  }
+});
+
+test("/plan-review-browser: an operator's single PLANNOTATOR_PORT is the port the door presets (resolved at activation)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  gitInit(cwd, { dirty: false });
+  const sink = newSink();
+  const port = await pickEphemeralPort();
+  const h = await loadPerkSession({
+    cwd,
+    env: {
+      PERK_RUN_ID: "01RID",
+      PERK_WAVE_RPC_PING_MS: "20",
+      PLANNOTATOR_PORT: String(port),
+    },
+    extraExtensions: [fakePlannotator(sink)],
+  });
+  // The selection was resolved at activation: clearing the variable now proves the door never
+  // re-reads it at open time (and lets `settleBridges` observe the poll's restore-by-delete).
+  delete process.env.PLANNOTATOR_PORT;
+  try {
+    await h.invokeTool("plan_draft", { plan: DRAFT_MD });
+    await h.runCommandHandler("plan-review-browser", "");
+    assert.equal(sink.envelopes.length, 1, "the plan-review bridge request was emitted");
+    assert.equal(sink.envAtEmit[0], String(port), "the operator's single port is preset");
+    assert.equal(
+      (await sessionAnnotationMode(h)) !== null,
+      true,
+      "the annotation surface is primed on that port's URL",
     );
   } finally {
     await settleBridges(sink);
