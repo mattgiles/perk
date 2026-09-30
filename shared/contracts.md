@@ -2163,15 +2163,33 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   browser-open core in `plannotatorHandoff.ts`):** perk's extension and plannotator's
   in-process `node:http` review server share one Node process, and plannotator's port resolution
   reads `PLANNOTATOR_PORT` at bind time — so the server URL is KNOWN the moment the port is
-  picked, before the server is up. The core picks a free ephemeral port, saves + presets the env
-  var, emits the `code-review` bridge request (the PR-mode payload `{prUrl, cwd}` byte-for-byte,
-  background-awaited), and polls `GET http://127.0.0.1:<port>/api/diff` (a review-server-only
-  route; 1s cadence, 120s budget — the poll stops early on turn abort or when the bridge settles
-  first, an early error/unavailable respond meaning the server never comes), ALWAYS restoring
-  the prior env value (delete if previously unset) in a `finally` when the poll ends.
-  Concurrency caveat: a second plannotator server starting in the same process during the window
-  would collide on the fixed port — rare, loud (EADDRINUSE → plannotator throws → the bridge
-  settles error), never silent.
+  picked, before the server is up. The core picks the port by **mirroring plannotator's own
+  selection** (`plannotatorPort.ts`, pinned at `@plannotator/pi-extension@0.27.22`): an explicit
+  single `PLANNOTATOR_PORT` verbatim; the first loopback-bindable port of a `PLANNOTATOR_PORT`
+  range (`<start>-<end>`, walked in order; an exhausted range fails the pick loudly); `19432`
+  when plannotator's remote detection — `PLANNOTATOR_REMOTE` tri-state, else
+  `SSH_TTY`/`SSH_CONNECTION` — says remote; else a free ephemeral port (`PLANNOTATOR_PORT=0`
+  included; an unparseable value falls through silently, as in plannotator). The selection is
+  resolved ONCE per activation in `extension/index.ts` — before any door presets the variable, so
+  a sibling door's transient preset is never mistaken for the operator's setting — and threaded
+  to every door as `StartBrowserDeps.ports` (a caller passing none gets the local ephemeral
+  selection). The core then saves + presets the env var, emits the `code-review` bridge request
+  (the PR-mode payload `{prUrl, cwd}` byte-for-byte, background-awaited), and polls
+  `GET http://127.0.0.1:<port>/api/diff` (a review-server-only route; 1s cadence, 120s budget —
+  the poll stops early on turn abort or when the bridge settles first, an early error/unavailable
+  respond meaning the server never comes), ALWAYS restoring the prior env value (delete if
+  previously unset) in a `finally` when the poll ends. A remote session's readiness notice points
+  at the tunnel/tailnet instead of "browser opening" (plannotator never auto-opens a browser
+  remotely). The plain `plan_review` arm and the pre-PR local browser arm preset nothing and let
+  plannotator resolve the same rule itself, so the arms never disagree on the port. Concurrency:
+  a busy SINGLE fixed port is plannotator's to resolve — it retries, then its same-process
+  self-preemption stops stale browser sessions (the newest review wins) and retries once; a port
+  held by another process fails loudly (`Port <n> in use` → an `error` respond → the bridge
+  settles error/unavailable → the door degrades). Two perk processes on one range each take
+  their own free port. Residuals, all loud: two processes probing the same range port in the
+  same instant (the loser's bind fails → degrade); a listener bound to a specific non-loopback
+  address on a range port passes the loopback probe but blocks plannotator's `0.0.0.0` bind;
+  a later plannotator that changes the selection rule (the readiness probe times out).
 - **Respond routing (the PR modes — `respondMessage` /
   `routeBrowserRespond` in `plannotatorHandoff.ts`):** the bridge's single respond routes back
   into the session via the pure `respondMessage(outcome)` mapping — `handled`+`exit` → the

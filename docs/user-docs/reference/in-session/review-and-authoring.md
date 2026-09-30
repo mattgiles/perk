@@ -247,6 +247,11 @@ nothing by default.
 The door fails fast in a headless session or when the Plannotator extension is absent; select
 `[providers] plan = "plannotator-plan"`, run `perk init`, and restart Pi.
 
+**Remote sessions.** The door takes its port from Plannotator's own selection — `PLANNOTATOR_PORT`
+(a single port or a range), `19432` when Plannotator detects a remote session, otherwise a free
+local port — so an SSH tunnel or a tailnet reaches it; see
+[How to review in the browser from a remote machine](../../how-to/review-in-the-browser-from-a-remote-machine.md).
+
 It shares `start_review_wave`, `collect_review_wave`, and `submit_pr_review` with the terminal door,
 and adds:
 
@@ -354,6 +359,12 @@ The Plannotator bridge subscribes to the browser's decision before it emits the 
 so a decision emitted during the handshake is not lost; there is no status catch-up query. A
 browser handshake failure produces one in-session fallback notice; if the browser never becomes
 ready, findings degrade loudly to the in-session table and a later browser decision is ignored.
+
+**Remote sessions.** perk's browser doors take their port from Plannotator's own selection —
+`PLANNOTATOR_PORT` (a single port or a range), `19432` when Plannotator detects a remote session,
+otherwise a free local port — so a tunnel or tailnet reaches every review, and a remote session's
+readiness notice points you at it instead of saying the browser is opening; see
+[How to review in the browser from a remote machine](../../how-to/review-in-the-browser-from-a-remote-machine.md).
 
 ### Manual saves and first-party review
 

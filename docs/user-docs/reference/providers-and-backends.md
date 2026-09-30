@@ -80,6 +80,13 @@ header, single-line `"basic"`/`'literal'` strings); for any other valid spelling
 committed `config.toml` instead, so a routing edit is always noticed but any edit to that file
 during a review counts as a changed destination. Python remains the authority for the save.
 
+The browser doors pick the review server's port by mirroring Plannotator's own rule: a single
+`PLANNOTATOR_PORT`, the first free port of a `PLANNOTATOR_PORT` range, `19432` when Plannotator
+detects a remote session (`PLANNOTATOR_REMOTE`, else `SSH_TTY`/`SSH_CONNECTION`), otherwise a free
+local port. The plain `plan_review` arm leaves the port to Plannotator itself, so every arm lands
+on the same port — see
+[How to review in the browser from a remote machine](../how-to/review-in-the-browser-from-a-remote-machine.md).
+
 ## Known caveats & maturity
 
 - `pi-status-footer` does not render extension statuses, so perk's objective progress is not

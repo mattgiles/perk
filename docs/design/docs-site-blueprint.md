@@ -95,6 +95,17 @@ sources counting the four `.mdx` pages; `_authoring.md` stays the one excluded s
 routed pages, **83** sidebar entries (Home, the four section landings, and the 78 enumerated in
 §3 — counted from `docs/site/src/sidebar.mjs`).
 
+*Amendment (2026-09-30, plan #2637):* the corpus has grown by one file —
+`how-to/review-in-the-browser-from-a-remote-machine.md` (the operator path for viewing every
+Plannotator review from a remote perk session through an SSH port-range tunnel or a Tailscale
+tailnet; Providers & backends, between `select-a-provider` and `switch-to-linear`) — now recorded
+in the §2 route table, the §3 sidebar map, and the §4 inventory. This amendment records only its
+own page. Corpus-wide totals re-derived fresh from the tree at this amendment's commit, as its own
+measurement: **81** files by the §1 corpus selector (**85** total sources counting the four `.mdx`
+pages; `_authoring.md` stays the one excluded source), **84** routed pages, **84** sidebar entries
+(Home, the four section landings, and the 79 enumerated in §3 — counted from
+`docs/site/src/sidebar.mjs`).
+
 ## §1 Purpose & binding scope
 
 ### What this blueprint binds
@@ -227,6 +238,7 @@ node that creates them.
 | `docs/user-docs/how-to/scope-pi-resources-per-project.md` | `/how-to/scope-pi-resources-per-project/` | How-to › Customization |
 | `docs/user-docs/how-to/enable-shell-completion.md` *(added 2026-08-18; recorded 2026-08-20)* | `/how-to/enable-shell-completion/` | How-to › Customization |
 | `docs/user-docs/how-to/select-a-provider.md` | `/how-to/select-a-provider/` | How-to › Providers & backends |
+| `docs/user-docs/how-to/review-in-the-browser-from-a-remote-machine.md` *(added 2026-09-30)* | `/how-to/review-in-the-browser-from-a-remote-machine/` | How-to › Providers & backends |
 | `docs/user-docs/how-to/switch-to-linear.md` | `/how-to/switch-to-linear/` | How-to › Providers & backends |
 
 #### Reference
@@ -353,7 +365,8 @@ index order.
 4. **Customization** — attach-a-skill-to-a-stage, author-a-repo-skill, write-a-custom-subagent,
    scope-pi-resources-per-project, *enable-shell-completion* (added 2026-08-18; recorded
    2026-08-20).
-5. **Providers & backends** — select-a-provider, switch-to-linear.
+5. **Providers & backends** — select-a-provider, *review-in-the-browser-from-a-remote-machine*
+   (added 2026-09-30), switch-to-linear.
 
 ### Reference (product-surface order)
 
@@ -491,6 +504,7 @@ batch node.
 | `docs/user-docs/how-to/scope-pi-resources-per-project.md` | How-to | keep-and-polish | `/how-to/scope-pi-resources-per-project/` | checklist | 3.6 |
 | `docs/user-docs/how-to/enable-shell-completion.md` *(added 2026-08-18; recorded 2026-08-20)* | How-to | keep-and-polish | `/how-to/enable-shell-completion/` | checklist (satisfied at creation) | — (shell-completion feature) |
 | `docs/user-docs/how-to/select-a-provider.md` | How-to | keep-and-polish | `/how-to/select-a-provider/` | checklist + must pass the §7 provider-selection (`pi-default`) walkthrough in its batch node | 3.6 |
+| `docs/user-docs/how-to/review-in-the-browser-from-a-remote-machine.md` *(added 2026-09-30)* | How-to | keep-and-polish | `/how-to/review-in-the-browser-from-a-remote-machine/` | checklist (satisfied at creation) | — (plan #2637) |
 | `docs/user-docs/how-to/switch-to-linear.md` | How-to | keep-and-polish | `/how-to/switch-to-linear/` | checklist | 3.6 |
 | `docs/user-docs/explanation/how-perk-thinks.md` | Explanation | keep-and-polish | `/explanation/how-perk-thinks/` | checklist + explanation's no-steps/no-reference boundary enforced at 4.5 | 4.5 |
 | `docs/user-docs/explanation/headless-and-remote.md` | Explanation | keep-and-polish | `/explanation/headless-and-remote/` | checklist + explanation's no-steps/no-reference boundary enforced at 4.5 | 4.5 |
