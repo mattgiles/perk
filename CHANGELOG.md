@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Reviewer and analyst lanes that hit Pi's compaction mid-run get their task — including the inline draft or diff — restored byte-for-byte, and cannot file a report until it is back in context; a lane that has already reported is never restarted by a later compaction. Previously a compacted reviewer reconstructed quotes from a summary, producing findings anchored to text that was never in the draft. (aed3758)
+- Write-capable sessions on Linux hosts with the Debian/Ubuntu default umask (`002`) no longer refuse agent scratch, session-data writes (plan drafts, `run_ci` reports, cold-door input staging), and strict artifact reads when the `.perk/` tree is `0775`. Previously every such session warned `could not provision scratch` on each turn, and `/plan-save` failed with `refusing a group/world-writable run-scratch path`. Symlinked or non-directory components in the run path are still refused. (f127659)
 
 ## [3.8.0] - 2026-09-28
 

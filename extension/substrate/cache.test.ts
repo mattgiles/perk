@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   readSync,
+  realpathSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -19,6 +20,7 @@ import { test } from "node:test";
 import {
   agentScratchDir,
   atomicWriteFileSync,
+  canonicalSessionDataDir,
   clearMarker,
   ensureAgentScratch,
   ensureRunScratch,
@@ -35,6 +37,7 @@ import {
   readHandoff,
   readPlanRef,
   runScratchDir,
+  sessionDataDir,
   setMarker,
   workflowDir,
   writePlanRef,
@@ -185,7 +188,7 @@ test("ensureRunScratch rejects symlinks and non-directories from .perk through t
   }
 });
 
-test("ensureRunScratch rejects group/world-writable checkout-owned ancestors", () => {
+test("ensureRunScratch accepts group/world-writable checkout-owned ancestors without repairing them", () => {
   const components = [
     [".perk"],
     [".perk", "workflow"],
@@ -194,11 +197,45 @@ test("ensureRunScratch rejects group/world-writable checkout-owned ancestors", (
     [".perk", "workflow", "scratch", "runs", "RID"],
   ];
   for (const segments of components) {
+    for (const mode of [0o775, 0o777]) {
+      const cwd = tmp();
+      ensureRunScratch(cwd, "RID");
+      const component = join(cwd, ...segments);
+      chmodSync(component, mode);
+      assert.equal(ensureRunScratch(cwd, "RID"), runScratchDir(cwd, "RID"));
+      // perk never chmods a directory it did not create
+      assert.equal(statSync(component).mode & 0o777, mode, `${segments.join("/")} was repaired`);
+    }
+  }
+});
+
+test("umask 002 (Debian/Ubuntu user-private-group default): a chain pre-created by plain mkdirSync is accepted end to end", () => {
+  const previousUmask = process.umask(0o002);
+  try {
     const cwd = tmp();
-    ensureRunScratch(cwd, "RID");
-    const unsafe = join(cwd, ...segments);
-    chmodSync(unsafe, 0o777);
-    assert.throws(() => ensureRunScratch(cwd, "RID"), /group\/world-writable run-scratch path/);
+    mkdirSync(runScratchDir(cwd, "RID"), { recursive: true });
+    const components = [
+      join(cwd, ".perk"),
+      join(cwd, ".perk", "workflow"),
+      join(cwd, ".perk", "workflow", "scratch"),
+      join(cwd, ".perk", "workflow", "scratch", "runs"),
+      runScratchDir(cwd, "RID"),
+    ];
+    // vacuity guard: the scenario is real only if every component really is group-writable
+    for (const component of components) {
+      assert.notEqual(statSync(component).mode & 0o020, 0, `${component} is not group-writable`);
+    }
+
+    assert.equal(ensureRunScratch(cwd, "RID"), runScratchDir(cwd, "RID"));
+    assert.equal(statSync(ensureAgentScratch(cwd, "RID")).mode & 0o777, 0o700);
+    assert.equal(canonicalSessionDataDir(cwd, "RID", { create: false }), null);
+    mkdirSync(sessionDataDir(cwd, "RID"));
+    assert.equal(
+      canonicalSessionDataDir(cwd, "RID", { create: false }),
+      sessionDataDir(realpathSync(cwd), "RID"),
+    );
+  } finally {
+    process.umask(previousUmask);
   }
 });
 

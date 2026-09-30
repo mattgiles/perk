@@ -5,13 +5,14 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
-import { sessionDataDir } from "../substrate/cache.ts";
+import { runScratchDir, sessionDataDir } from "../substrate/cache.ts";
 import {
   digestSessionData,
   readSessionDataStrict,
@@ -96,6 +97,20 @@ for (const binding of ["branch", "memory"] as const) {
     assert.deepEqual(session.readArtifact(name, strict), { status: "found", content: "" });
   });
 }
+
+test("umask 002: a strict write over a pre-existing 0775 chain applies and reads back found", (t) => {
+  const f = fixture(t);
+  const previousUmask = process.umask(0o002);
+  try {
+    mkdirSync(runScratchDir(f.cwd, "run"), { recursive: true });
+    // vacuity guard: the git-created-under-umask-002 shape is real only if .perk is group-writable
+    assert.notEqual(statSync(join(f.cwd, ".perk")).mode & 0o020, 0, ".perk is not group-writable");
+    assert.equal(f.session.writeArtifact(name, "new", strict).status, "applied");
+    assert.deepEqual(f.session.readArtifact(name, strict), { status: "found", content: "new" });
+  } finally {
+    process.umask(previousUmask);
+  }
+});
 
 const malformedMaps: unknown[] = [
   false,

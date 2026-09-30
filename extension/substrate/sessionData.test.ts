@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   rmSync,
+  statSync,
   symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,12 +14,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ReportTarget } from "../surfaces/report.ts";
-import { sessionDataDir } from "./cache.ts";
+import { runScratchDir, sessionDataDir } from "./cache.ts";
 import {
   activeSessionDataDir,
   activeSessionRunId,
   ensureSessionDataDir,
   readSessionData,
+  readSessionDataStrict,
   type SessionDataCtx,
   writeSessionData,
 } from "./sessionData.ts";
@@ -120,6 +122,31 @@ test("a symlinked checkout cache is refused through the session-data write seam"
   } finally {
     rmSync(cwd, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("umask 002: session-data write and strict read succeed over a pre-existing 0775 chain", () => {
+  const previousUmask = process.umask(0o002);
+  const cwd = tempCwd();
+  try {
+    mkdirSync(runScratchDir(cwd, "RID"), { recursive: true });
+    // vacuity guard: the git-created-under-umask-002 shape is real only if .perk is group-writable
+    assert.notEqual(statSync(join(cwd, ".perk")).mode & 0o020, 0, ".perk is not group-writable");
+    const warnings = captureStderr(() => {
+      assert.equal(ensureSessionDataDir(cwd, "RID"), sessionDataDir(cwd, "RID"));
+      assert.equal(
+        writeSessionData(cwd, "RID", "draft.md", "x"),
+        join(sessionDataDir(cwd, "RID"), "draft.md"),
+      );
+      assert.deepEqual(readSessionDataStrict(cwd, "RID", "draft.md"), {
+        status: "found",
+        content: "x",
+      });
+    });
+    assert.deepEqual(warnings, []);
+  } finally {
+    process.umask(previousUmask);
+    rmSync(cwd, { recursive: true, force: true });
   }
 });
 
