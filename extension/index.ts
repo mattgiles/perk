@@ -15,6 +15,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createDraftReviewWaveState } from "./authoring/review/draftContext.ts";
 import { createHunkFeedbackReceiver, type HunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { registerBashScanTimeout } from "./pi/v1/bashScanTimeout.ts";
+import { registerChildTaskRestore } from "./pi/v1/childTaskRestore.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
 import { installPrReviewBrowserBindings } from "./pi/v1/codeReview/browser.ts";
 import { createStackPinState, installReviewWaveBindings } from "./pi/v1/codeReview/reviewWave.ts";
@@ -222,6 +223,12 @@ export default function perk(
   // `tool_call` hook runs first only because it registers first; a gate block short-circuits
   // before injection matters.
   registerBashScanTimeout(pi);
+
+  // The report child's task restore (§8.3): a floored report child may compact, and compaction
+  // evicts the task it was given inline (a draft, a diff, a brief). The restore hooks put it back
+  // byte-for-byte, hold `structured_output` until it is live again, and go inert once a report is
+  // accepted. Same latched floor supplier as the gate; inert without it.
+  registerChildTaskRestore(pi, () => readOnlyFloor);
 
   // Run-owned disposable scratch guidance for every eligible write-capable model turn. One
   // activation-scoped provisioner shares retry/warning suppression with the isolated /btw side

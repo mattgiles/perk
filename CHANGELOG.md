@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 90c8151 -->
 
+### Fixed
+
+- Reviewer and analyst lanes that hit Pi's compaction mid-run get their task — including the inline draft or diff — restored byte-for-byte, and cannot file a report until it is back in context; a lane that has already reported is never restarted by a later compaction. Previously a compacted reviewer reconstructed quotes from a summary, producing findings anchored to text that was never in the draft. (aed3758)
+
 ## [3.8.0] - 2026-09-28
 
 ### Major Changes

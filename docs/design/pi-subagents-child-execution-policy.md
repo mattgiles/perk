@@ -68,6 +68,74 @@ suppression rides the same runner bit through `installInjectedContext`'s runner 
 composition root's `() => runnerChild` closure as its third argument, and a runner child selects
 nothing — no injection, every owned copy retired — before any caller's selector runs.
 
+## Report children survive compaction
+
+**The failure.** A report child's subject rides verbatim in its first user message (`Task: Angle: …`
++ `<untrusted_draft>…</untrusted_draft>` for a draft reviewer; a diff, brief or manifest for the
+others), and the lane cannot re-fetch it. A heavy-reading lane fills its context window, Pi
+auto-compacts the child mid-run, and the first user message is replaced by a summary; from then on
+the lane reconstructs "byte-exact" quotes from memory. Observed on a 63 KB plan's four-lane
+draft-review wave in a consumer repo — only the two compacted lanes misquoted:
+
+| lane | tool calls | peak context | compacted mid-run | phrases found in any draft version |
+| --- | --- | --- | --- | --- |
+| grounding | 209 | 200,845 tok | yes → 20,316 | 0/5 |
+| risk | 191 | 206,345 tok | yes → 34,916 | 0/2 |
+| decision-completeness | 17 | 72,958 | no | 3/3 |
+| ponytail | 46 | 113,015 | no | 2/2 |
+
+The delivery path preserved bytes end to end, `context: "fresh"` was pinned at spawn, and no lane
+read a draft-like file. pi-subagents exposes no per-child compaction knob (Pi's
+`compaction.enabled` is a settings-global toggle), so the fix lives perk-side, in the extension
+that already runs inside every report child.
+
+**Pi's ordering.** Pi runs threshold compaction while preparing the next model request
+(`prepareNextTurnWithContext`), and pi-agent-core re-polls steering after preparation — so a steer
+queued by a `session_compact` handler there normally reaches the very next request. Pi also runs
+a post-run compaction check (`_checkCompaction`) after the run ended, **including after a
+`terminate: true` tool result**; if a steer is queued when that compaction finishes, the post-run
+loop calls `agent.continue()`.
+
+**The three hooks** (`extension/pi/v1/childTaskRestore.ts` over the pure
+`extension/substrate/childTaskRestore.ts`; all inert without a latched floor, so parents and the
+floor-less writers keep Pi's ordinary compaction):
+
+- `tool_result` latches **acceptance** — an executed `structured_output` whose result is not an
+  error (pi-subagents throws on a schema rejection; a blocked call never executes).
+- `session_compact` (every reason) queues the restore: the first user prompt byte-for-byte behind
+  a role-neutral preamble, as a visible `perk:task-restore` steer.
+- `tool_call` on `structured_output` is the **backstop and re-delivery point**: it queues when
+  nothing is in flight and blocks while the prompt is not live in Pi's own projection (typed
+  evidence — user content or `perk:task-restore` content carrying the whole prompt; a summary
+  quoting it never counts). It covers a restore that was delayed, dropped by a context edit, or
+  never sent — a reload onto an already-compacted branch fires no `session_compact`.
+
+The verdict is evaluated in order: accepted ⇒ allow; no prompt ⇒ allow; live ⇒ allow; oversized ⇒
+refuse; a restore queued for this compaction and not yet on the branch ⇒ hold; attempts spent ⇒
+refuse; otherwise queue.
+
+**Why the acceptance latch.** Without it, a lane that reports as its last act and then crosses the
+threshold would get a restore queued by the post-run compaction, and Pi would `agent.continue()` a
+lane that is already done. The latch short-circuits the verdict first, so after an accepted report
+nothing is ever queued and the post-run loop ends.
+
+**Two bounds, two jobs.** `TASK_RESTORE_MAX_BYTES` (256 KiB) refuses a prompt that could never
+fit — every perk report task is far below it. `TASK_RESTORE_MAX_ATTEMPTS` (3 per activation) is the
+**loop bound**: a task that fits but keeps being compacted away on a small window cannot cycle
+unboundedly. Neither measures live headroom; a bounded count is simpler and guarantees termination.
+A refused lane is told to stop without reporting; the parent records it as uncovered — a report
+reconstructed from a summary cannot be faithful.
+
+**The once-only clause.** Every def says "call `structured_output` once and stop". A blocked call
+captured nothing, so it is not the once; the block reason says exactly that, delivered only to the
+child that needs it, only when it applies. The defs stay unedited — no dead prose in every lane,
+and the def-prose pins stay put.
+
+**Rejected: cancelling compaction.** A `session_before_compact` `{cancel: true}` in report children
+would also prevent fabrication, and is simpler — but it converts a long grounding review into a
+forced early report or an overflow `lane-failed` on large plans and repos. The restore keeps deep
+reviews viable at the cost of one prompt-sized re-injection per compaction.
+
 ## Report definitions
 
 Two layers of invariant apply, and they have different owners.
@@ -139,3 +207,4 @@ writes by design.
 | Producer → consumer composition | `extension/pi/v1/waveIsolation.test.ts` "real composition: the rendered packet floors a child…" (fake RPC bus → rendered item → child session → `write` blocked, parent and handoff untouched) |
 | Report agents keep async/fresh/mission/acceptance posture | `tests/test_subagent_agents.py::test_native_child_profile` (the ten shipped defs); `tests/test_repo_local_agents.py::test_auditor_is_a_background_report_outside_delivery` (`perk-dev.session-auditor`); `reportWave.test.ts` spawn pins |
 | Reflection failure stays loud | `extension/sessionLifecycle.test.ts` "escaping reflection exception reports safely…" |
+| A compacted report child gets its task back; an accepted report is never restarted | `extension/substrate/childTaskRestore.test.ts` verdict table; `extension/pi/v1/childTaskRestore.test.ts` (planted compactions + two faux-runtime turns through Pi's real post-run compaction) |
