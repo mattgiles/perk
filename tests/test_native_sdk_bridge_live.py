@@ -6,7 +6,11 @@ a fixture "Pi"; this smoke drives the REAL ``pi`` bin over this checkout (its in
 ``/perk-selfcheck`` back: namespace capture, facade preparation and the consumers' actual
 requested export names must all agree with the running bundle. A facade named-export mismatch
 would surface as Pi's per-extension ``Failed to load extension`` line while perk kept running —
-so the absence of that line, plus both consumers having registered tools, is the assertion.
+so the absence of that line, plus both consumers having registered tools, is the assertion. The
+installed pi-subagents must also BE the managed pin: a stale install (say 0.74.0, which dropped the
+RPC parameter perk's waves send) would still load and register tools, so a version check on the
+artifact itself — not the configured source label — is what keeps this proof about the pinned
+engine.
 
 Hermetic like the rest of the suite: the agent dir is the throwaway ``PI_CODING_AGENT_DIR`` the
 autouse fixture sets (resolved through :func:`launch_pi_agent_dir`, the precedence ``exec_pi``
@@ -17,6 +21,7 @@ the rest). Slow (a full Pi startup) and skip-guarded: no ``pi`` on PATH, or no i
 skips.
 """
 
+import json
 import os
 import re
 import shutil
@@ -25,6 +30,7 @@ from pathlib import Path
 import pytest
 from perk_dev.profile_startup.pty_session import PtySize, spawn_pty
 
+from perk.convergence.init import SUBAGENTS_PACKAGE
 from perk.substrate import git
 from perk.substrate.config import launch_pi_agent_dir
 
@@ -69,6 +75,16 @@ def _launch_env() -> dict[str, str]:
     return env
 
 
+def test_the_installed_pi_subagents_is_the_managed_pin():
+    pinned = SUBAGENTS_PACKAGE.rpartition("@")[2]
+    manifest = CONSUMER_INSTALL_ROOT / "pi-subagents" / "package.json"
+    installed = json.loads(manifest.read_text(encoding="utf-8"))["version"]
+    assert installed == pinned, (
+        f"{manifest} is pi-subagents {installed}, not the managed pin {SUBAGENTS_PACKAGE} — "
+        "run `perk init` (or `pi install`) in the main checkout to converge the install"
+    )
+
+
 def test_real_pi_selfcheck_reports_the_bridge_installed_and_both_consumers_loaded():
     pi = shutil.which("pi")
     assert pi is not None
@@ -101,5 +117,7 @@ def test_real_pi_selfcheck_reports_the_bridge_installed_and_both_consumers_loade
         assert match is not None and int(match.group(1)) >= 1, (
             f"{name} registered no tools through the facades:\n{per_source}"
         )
+    # The loaded source is the converged project pin, not a bare or user-scope spec.
+    assert f"{SUBAGENTS_PACKAGE}=" in per_source, per_source
 
     assert "Failed to load extension" not in stderr, stderr
