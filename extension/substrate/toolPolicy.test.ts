@@ -134,6 +134,13 @@ recordPerkTool("tt_over", {
   modeOverStage: true,
   kind: "action",
 });
+// A legal-but-unused combination: gate-blocked yet mode-over-stage.
+recordPerkTool("tt_over_blocked", {
+  stages: ["plan"],
+  gated: "blocked",
+  modeOverStage: true,
+  kind: "action",
+});
 recordPerkTool("tt_deferred", {
   stages: ["plan"],
   gated: "allowed",
@@ -162,6 +169,12 @@ test("the formula: stage membership × mode posture, the mode-over-stage term, u
     ["tt_allowed", null, "read-only", true],
     ["tt_unscoped", null, "read-write", true],
     ["tt_unscoped", "plan", "read-write", false],
+    // the mode-over-stage term scopes known stages only: unscoped is the mode rule alone
+    ["tt_over_blocked", "implement", "read-only", true],
+    ["tt_over_blocked", null, "read-only", false],
+    ["tt_over_blocked", "no-such-stage", "read-only", false],
+    ["tt_over_blocked", null, "read-write", true],
+    ["tt_over", null, "read-only", true],
     // an unknown stage id (prototype keys included) is unscoped
     ["tt_blocked", "no-such-stage", "read-write", true],
     ["tt_allowed", "constructor", "read-only", true],

@@ -263,8 +263,11 @@ where its tools are, so the model can still enable them), and independently chec
 eligibility at tool-call time. Lazy hiding only shapes the active set; it is not a call-time
 boundary, and a hidden tool the gate allows is not refused when called. Each stage therefore sees
 its own tools: an `objective-refine` session, for instance, gets read/research/question,
-`plan_review`, `objective_refinement_draft` and the mode-over-stage set — no node claim, no other
-stage's draft or save tool, no delegation. The hidden guidance names the stage's sanctioned bounded
+`plan_review`, `objective_refinement_draft` and the mode-over-stage set — no node claim, no
+objective or gist draft, no save tool, no delegation. Because the `/plan` flow's tools are
+mode-over-stage, `plan_draft` is reachable there too and can write a plan draft, but that draft
+can never be reviewed or saved from a refinement session (`plan_review` reviews only the
+refinement draft, and every save command refuses). The hidden guidance names the stage's sanctioned bounded
 writers (its carve-out tools) under a `[READ-ONLY MODE] (stage <id>)` marker, or
 `[READ-ONLY MODE] (unscoped)` in a session with no stage. Every ineligible tool is denied,
 including `edit`, `write`, save/delivery tools and unknown or late-registered foreign

@@ -1580,7 +1580,7 @@ test("cold claim: an objective-refine handoff imports the run-scratch transfer o
       (await h.emitToolCall("objective_node", { objective: "7", node: "1.1" }))?.block,
       true,
     );
-    // Another stage's draft writer stays out; plan_draft is mode-over-stage (inert here).
+    // Another stage's draft writer stays out (plan_draft is mode-over-stage: reachable, unsaveable).
     assert.equal((await h.emitToolCall("objective_draft", { prose: "p" }))?.block, true);
     assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, true);
     const injected = await h.emitBeforeAgentStart();

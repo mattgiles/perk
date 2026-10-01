@@ -92,6 +92,9 @@ def test_code_factory_filters_in_only_should_be_code(monkeypatch):
     prompt = launched["prompt"] or ""
     assert _INBOX_REL in prompt
     assert "consumed_learn: [47, 48]" in prompt
+    # The cold save step is the review-first handoff carrier, never the gate-blocked tool.
+    assert "from this run's launch handoff automatically" in prompt
+    assert "plan_save" not in prompt
 
 
 def test_code_inbox_carries_classification_target_no_scan(monkeypatch):

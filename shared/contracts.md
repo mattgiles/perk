@@ -487,8 +487,11 @@ mechanism independent of which surface fired. The `learn-docs` cold door stashes
 (explicit flag wins; a non-factory handoff has no key, so plain planning is unaffected). The warm
 `/learn-docs`//`learn-code` doors refuse interactive hosts where the `plan_save` tool is not
 currently active (`pi.getActiveTools()` — the warm gather writes no handoff, so no other surface
-can carry the numbers); the cold doors are the factory path there. Headless invocations keep the
-materialize-only behavior.
+can carry the numbers); the cold doors are the factory path there. The two doors share the seed
+template but not its save step: each plane renders its own composed fragment into the `save_step`
+var — the cold door `prompts/common/learn-save/cold.md` (the review-first handoff carrier), the
+warm door `prompts/common/learn-save/warm.md` (the explicit `plan_save` `consumed_learn`
+carrier). Headless invocations keep the materialize-only behavior.
 
 **Optional handoff naming hints (`naming`).** The same carrier ferries a **namespaced**
 `naming: {title?, node?}` object — the launch-era hints the extension's perk-owned session naming
@@ -7482,7 +7485,8 @@ plan-ref selector: `implement`/`submit`/`address`/`land`/`learn`), `PLAN_FAMILY_
 **The eligibility formula.**
 `eligible(tool, stage, mode) = (stage ∈ tool.stages ∧ (mode = read-write ∨ tool.gated ≠ blocked)) ∨ (mode = read-only ∧ tool.modeOverStage)`.
 An unscoped (`stage = null`) or unknown-stage session (`normalizeStage` → `null`, the fail-open
-posture for version skew) is eligible for every tool the mode allows; a name in no row is
+posture for version skew) is eligible for exactly the tools the mode allows (`mode = read-write ∨
+gated ≠ blocked` — the mode-over-stage term scopes known stages only); a name in no row is
 eligible only read-write (pass-through; under the gate the backstop blocks it). The derived views:
 
 - `gatedToolsFor(stage)` — the gate-ON **activation view**: every name eligible at `read-only`,
@@ -7549,7 +7553,8 @@ through typed launchers — no wave path calls `subagent`/`wait`/`subagent_super
 **(b)** `objective-author`'s diet gains `run_harvest_wave`/`run_dream_wave` (the harvest/dream
 doors borrow that stage, and the policies now declare it); **(c)** the mode-over-stage set, whose
 only additive effect is the gated `objective-refine` view gaining `plan_draft` and the three wave
-companions (inert there — the refinement review arm reads only the refinement draft);
+companions (reachable there: `plan_draft` can write the run's plan-draft artifact, but no plan
+draft can be reviewed or saved from a refinement session — §8.68 records the exception);
 **(d)** an unscoped (or unknown-stage) gated session declares `objective_refinement_draft` (the
 formula's unscoped rule; the tool is inert outside a refinement session — it refuses without a
 refinement grounding context).
@@ -13014,14 +13019,20 @@ snapshots):
 - **Gating** (§8.40): the catalog gains `objective_refinement_draft` (stages `objective-refine`,
   a carve-out). The refinement stage's gated view is an ordinary formula case — read/grep/find/
   ls/bash, `ask_user_question`, `plan_review`, `objective_refinement_draft`, the web/Linear-read/
-  FFF research families, plus the stage-blind mode-over-stage set (inert here: the refinement
-  review arm reads only the refinement draft) — no `objective_node`, no other stage's draft or
-  save tool, no delegation spawn surface or child-side engine tools, no new bash allowance; the
+  FFF research families, plus the stage-blind mode-over-stage set — no `objective_node`, no
+  objective or gist draft, no save tool, no delegation spawn surface or child-side engine tools,
+  no new bash allowance. **One recorded exception:** the mode-over-stage `plan_draft` is
+  reachable and live here — with the refinement run's identity it writes the run's
+  `plan-draft.md` session artifact (and refreshes the session name); it has no refinement
+  refusal. That plan draft can never be saved or routed from the session: `plan_review` routes to
+  the refinement arm (which reads only the refinement draft), and every save surface refuses
+  (Refusals below). The wave companions are likewise reachable but have no plan-draft review
+  to serve. The
   same formula backs the active set and the `tool_call` backstop (recomputed per observation, so a
   late foreign activation is still blocked). Gate-OFF the diet is `ask_user_question`, the draft,
   `plan_review` and research — no PR-loop or model-save tools. Read-only mode renders the
-  `(stage objective-refine)` flavor of the one marker family (§8.3), naming
-  `objective_refinement_draft` as the stage's bounded writer; with the gate ON only the current
+  `(stage objective-refine)` flavor of the one marker family (§8.3), naming the stage's eligible
+  carve-out writers — `plan_draft` and `objective_refinement_draft`; with the gate ON only the current
   flavor's injected block survives in model context (a stale flavor — including a resumed
   pre-migration `[READ-ONLY REFINEMENT MODE]` block, detection-only — is dropped; user content is
   untouched), with the gate OFF every flavor strips.

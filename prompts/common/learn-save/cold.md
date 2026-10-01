@@ -1,0 +1,1 @@
+the plan-authoring flow (draft → review) is carried by this session's injected plan-authoring context — an APPROVED `plan_review` auto-saves the plan and recovers `consumed_learn: [{{ num_list }}]` from this run's launch handoff automatically; `/plan-save` is the human's manual failsafe.

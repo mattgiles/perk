@@ -455,7 +455,8 @@ export function normalizeStage(stage: string | null | undefined): string | null 
 /**
  * The eligibility formula:
  *   (stage ∈ stages ∧ (mode = read-write ∨ gated ≠ blocked)) ∨ (mode = read-only ∧ modeOverStage)
- * with an unscoped stage eligible for every tool the mode allows.
+ * with an unscoped stage eligible for exactly the tools the mode allows — the mode-over-stage term
+ * scopes known stages only, so a gate-blocked tool never activates in an unscoped gated session.
  */
 function formula(
   stages: readonly string[],
@@ -465,9 +466,8 @@ function formula(
   mode: Mode,
 ): boolean {
   const modeAllows = mode === "read-write" || notBlocked;
-  const overStage = mode === "read-only" && modeOverStage;
-  if (stage === null) return modeAllows || overStage;
-  return (stages.includes(stage) && modeAllows) || overStage;
+  if (stage === null) return modeAllows;
+  return (stages.includes(stage) && modeAllows) || (mode === "read-only" && modeOverStage);
 }
 
 /**

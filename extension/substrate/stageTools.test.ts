@@ -21,6 +21,8 @@ import {
 } from "../authoring/objective/prose.ts";
 import { PLAN_AUTHORING_CONTEXT } from "../authoring/plan/prose.ts";
 import { REFINEMENT_CONTEXT } from "../authoring/refinement/prose.ts";
+import { learnFactoryGuidance } from "../learning/prose.ts";
+import { CODE_FACTORY, DOCS_FACTORY } from "../learning/routing.ts";
 import { prReviewGuidance } from "../pi/v1/codeReview/automated.ts";
 import { stackReviewGuidance } from "../pi/v1/codeReview/stack.ts";
 import { prReviewTerminalGuidance } from "../pi/v1/codeReview/terminal.ts";
@@ -1509,6 +1511,13 @@ const DRIVE_COVERAGE: readonly {
         { outcome: "read-only" },
       ),
   },
+  // The warm learn factories run only where the plan_save tool is active (the interactive host
+  // guard): read-write, in a plan-family stage or unscoped.
+  ...[DOCS_FACTORY, CODE_FACTORY].map((kind) => ({
+    drive: `${kind.seedTemplate} (warm /${kind.name})`,
+    landings: [...rw(PLAN_FAMILY_STAGES), { stage: null, mode: "read-write" as const }],
+    text: () => learnFactoryGuidance(kind, "inbox.md", ["45", "50"]),
+  })),
   {
     // The /plan toggle's gated guidance: injected in every gated stage plan guidance rides.
     drive: "contexts/plan-authoring.md (/plan toggle)",

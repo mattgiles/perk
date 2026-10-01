@@ -75,6 +75,15 @@ LANDINGS: dict[str, tuple[Landing, ...]] = {
         ("objective-author", "read-only"),
     ),
     "common/plan-read/linear.md": (("plan", "read-only"), *WORKTREE_RW),
+    # The learn factories' save step: the cold door's review-first carrier, and the warm door's
+    # explicit plan_save carrier (it runs only where that tool is active; the unscoped landing is
+    # the TS half's row).
+    "common/learn-save/cold.md": (("plan", "read-only"),),
+    "common/learn-save/warm.md": (
+        ("plan", "read-write"),
+        ("save", "read-write"),
+        ("objective-plan", "read-write"),
+    ),
 }
 
 # Fragments that name no tool at all (the census still requires every fragment be classified).

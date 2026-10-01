@@ -277,8 +277,13 @@ def run_factory(
 
         # Opaque string ids at every machine boundary (contracts §8.21).
         learn_ids = tuple(issue.id for issue in issues)
+        num_list = ", ".join(learn_ids)
+        # The cold save step: the review-first save recovers consumed_learn from this launch's
+        # handoff (the warm door renders the explicit-carrier twin, common/learn-save/warm.md).
+        save_step = render("common/learn-save/cold.md", {"num_list": num_list})
         seed = render(
-            kind.seed_template, {"inbox_path": str(inbox_path), "num_list": ", ".join(learn_ids)}
+            kind.seed_template,
+            {"inbox_path": str(inbox_path), "num_list": num_list, "save_step": save_step},
         )
         label = "--gather" if gather_only else "--dry-run"
         return SeededLaunch(
