@@ -752,13 +752,19 @@ def _subagent_engine_check(root: Path, self_repo: bool) -> Check:
     )
 
 
-# The pi-owned install dir of the unpinned `npm:pi-subagents` BORROWED_PACKAGES entry
+# The pi-owned install dir of the pinned `init.SUBAGENTS_PACKAGE` BORROWED_PACKAGES entry
 # (pi lazy-installs it under `.pi/npm/node_modules/` at launch).
 _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 
-# The pi-subagents version perk's guidance was source-read against; bumped only on a
-# deliberate re-verify of the guidance (never a pin — the package stays unpinned).
+# The pi-subagents version perk's guidance was source-read against; bumped only on a deliberate
+# re-verify of the guidance. Distinct from the settings pin (`init.SUBAGENTS_PACKAGE`, what
+# consumers install, converged by `settings-wiring`): the two facts coincide today but move
+# independently.
 _SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.70.1"
+
+# The first pi-subagents release perk's report waves cannot drive (it removed the
+# `workflowScript` RPC `spawn` parameter perk sends).
+_SUBAGENTS_FIRST_INCOMPATIBLE_VERSION = "0.74.0"
 
 
 def _installed_subagents_version(pkg_dir: Path) -> str | None:
@@ -780,11 +786,12 @@ def _subagent_compat_check(root: Path) -> Check:
     """Report the installed pi-subagents version against the guidance-verified one.
 
     perk consumes pi-subagents only through public surfaces (the v1 RPC envelope, the
-    delegation events, agent-def frontmatter) and the package is deliberately **unpinned**, so
-    doctor never reads its source: it reports the installed version and **warns** when it
-    differs from the version perk's guidance was last re-verified against (the early drift
-    signal). Report-only — no ``--fix`` arm, never ``fail`` (``report.healthy`` and the exit
-    code are never affected).
+    delegation events, agent-def frontmatter), so doctor never reads its source: it reports the
+    installed version and **warns** when it differs from the version perk's guidance was last
+    re-verified against (the early drift signal). The install itself is pinned by
+    `settings-wiring` (``init.SUBAGENTS_PACKAGE``), whose drift ``--fix`` repairs. Report-only —
+    no ``--fix`` arm of its own, never ``fail`` (``report.healthy`` and the exit code are never
+    affected).
     """
     pkg_dir = init.consumer_npm_install_root(root) / "node_modules" / _SUBAGENTS_PACKAGE_DIRNAME
     if not pkg_dir.is_dir():
@@ -794,7 +801,7 @@ def _subagent_compat_check(root: Path) -> Check:
             "package",
             "info",
             "pi-subagents not installed — compatibility not evaluated",
-            "pi lazy-installs the unpinned npm:pi-subagents borrowed package at launch "
+            f"pi lazy-installs the pinned {init.SUBAGENTS_PACKAGE} borrowed package at launch "
             "(.pi/npm/node_modules/pi-subagents)",
         )
 
@@ -806,8 +813,8 @@ def _subagent_compat_check(root: Path) -> Check:
             "warn",
             "pi-subagents installed but its version is unreadable",
             f"{pkg_dir / 'package.json'} is missing or carries no readable version",
-            "Reinstall the borrowed package (pi lazy-installs npm:pi-subagents at launch) or "
-            "inspect the file.",
+            f"Reinstall the borrowed package (pi lazy-installs {init.SUBAGENTS_PACKAGE} at "
+            "launch) or inspect the file.",
         )
     verified = _SUBAGENTS_GUIDANCE_VERIFIED_VERSION
     if version != verified:
@@ -816,9 +823,13 @@ def _subagent_compat_check(root: Path) -> Check:
             "package",
             "warn",
             f"pi-subagents {version} installed — perk's guidance was verified against {verified}",
-            "the package is unpinned; mechanics perk's guidance leans on are "
-            "source-read-derived at the verified version and unverified at the installed one",
-            "Re-verify perk's subagent guidance against the installed pi-subagents "
+            f"{init.SUBAGENTS_PACKAGE} is the settings pin (settings-wiring); mechanics perk's "
+            "guidance leans on are source-read-derived at the verified version and unverified "
+            f"at the installed one; {_SUBAGENTS_FIRST_INCOMPATIBLE_VERSION}+ is known "
+            "incompatible (it removed the workflowScript RPC spawn parameter perk's waves send)",
+            "Run perk doctor --fix to restore the pinned entry if settings-wiring reports drift "
+            "(Pi reinstalls the pinned version at the next launch); otherwise re-verify perk's "
+            "subagent guidance against the installed pi-subagents "
             "(docs/developers/pi-subagents-reverify.md), then bump "
             "_SUBAGENTS_GUIDANCE_VERIFIED_VERSION in src/perk/convergence/doctor/checks.py.",
         )
@@ -827,7 +838,7 @@ def _subagent_compat_check(root: Path) -> Check:
         "package",
         "ok",
         f"pi-subagents {version} — the guidance-verified version",
-        "report-only — the package stays unpinned",
+        f"report-only — the install is pinned by settings-wiring ({init.SUBAGENTS_PACKAGE})",
     )
 
 
@@ -908,9 +919,10 @@ def _lists_package(
 def _subagent_package_scope_check(root: Path) -> Check:
     """Report-only probe for a user-scope pi-subagents entry beside the project entry.
 
-    perk converges ``npm:pi-subagents`` into the **project** ``.pi/settings.json``. When the
-    launch-precedence agent dir's user ``settings.json`` (:func:`launch_pi_agent_dir` — the ONE
-    precedence resolver) lists the same identity, pi dedupes by package identity (project wins)
+    perk converges ``init.SUBAGENTS_PACKAGE`` (the pinned ``npm:pi-subagents@<version>``) into
+    the **project** ``.pi/settings.json``. When the launch-precedence agent dir's user
+    ``settings.json`` (:func:`launch_pi_agent_dir` — the ONE precedence resolver) lists the same
+    identity, pi dedupes by package identity (project wins)
     but its two-phase trust load (pi 0.85.1) loads the user-scope extensions before project
     trust resolves and drops the user copy from the final set **without invalidating it**:
     pi-subagents' RPC bridge subscribes on ``pi.events``, so the orphan keeps answering perk's

@@ -8,7 +8,11 @@ import pytest
 from perk import __version__
 from perk.convergence.init import run_init
 from perk.convergence.init.blocks import GITIGNORE_BODY, _agents_inner, _apply_managed_block
-from perk.convergence.init.settings import BORROWED_PACKAGES, PONYTAIL_PACKAGE
+from perk.convergence.init.settings import (
+    BORROWED_PACKAGES,
+    PONYTAIL_PACKAGE,
+    SUBAGENTS_PACKAGE,
+)
 from perk.convergence.init.skills import _desired_skills_manifest
 from perk.convergence.managed_state import (
     ArtifactState,
@@ -404,7 +408,7 @@ class TestObservedPayloads:
         settings_path = tmp_path / ".pi" / "settings.json"
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
         settings["packages"] = [
-            "npm:pi-subagents@0.0.1" if p == "npm:pi-subagents" else p for p in settings["packages"]
+            "npm:pi-subagents@0.0.1" if p == SUBAGENTS_PACKAGE else p for p in settings["packages"]
         ]
         settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
         assert descriptor.observed_hash(tmp_path) != base
@@ -457,7 +461,7 @@ class TestObservedPayloads:
         packages = settings["packages"]
         perk_entry = next(p for p in packages if str(p).startswith("npm:@mgiles/perk"))
         packages.remove(perk_entry)
-        packages.insert(packages.index("npm:pi-subagents") + 1, perk_entry)
+        packages.insert(packages.index(SUBAGENTS_PACKAGE) + 1, perk_entry)
         settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 
         state = load_managed_state(tmp_path)

@@ -1030,12 +1030,15 @@ def test_subagent_compat_verified_version_is_ok(scaffolded_perk_repo):
 
 
 def test_subagent_compat_version_mismatch_is_warn_never_fail(scaffolded_perk_repo):
-    # The package is unpinned: installed != guidance-verified is the loud early drift signal —
-    # a warn that never affects health/exit code and has no --fix arm.
+    # installed != guidance-verified is the loud early drift signal — a warn that never affects
+    # health/exit code and has no --fix arm of its own (the pin's repair is settings-wiring's).
     _plant_subagents_package(scaffolded_perk_repo, version="9.9.9")
     compat = _subagent_compat_check(scaffolded_perk_repo)
     assert compat.status == "warn" and compat.group == "package"
     assert "9.9.9" in compat.message and _SUBAGENTS_GUIDANCE_VERIFIED_VERSION in compat.message
+    assert init.SUBAGENTS_PACKAGE in compat.detail
+    assert "0.74.0+ is known incompatible" in compat.detail
+    assert "perk doctor --fix" in compat.remediation
     assert "pi-subagents-reverify.md" in compat.remediation
     assert "_SUBAGENTS_GUIDANCE_VERIFIED_VERSION" in compat.remediation
     report = DoctorReport(checks=[compat], fixed=[], self_repo=False)
@@ -1083,7 +1086,7 @@ def _plant_user_settings(agent_dir, text):
 
 def _project_settings_lists_subagents(root):
     settings = json.loads((root / ".pi/settings.json").read_text(encoding="utf-8"))
-    return "npm:pi-subagents" in settings["packages"]
+    return init.SUBAGENTS_PACKAGE in settings["packages"]
 
 
 def test_subagent_package_scope_absent_user_settings_is_ok(scaffolded_perk_repo):
@@ -1145,7 +1148,7 @@ def test_subagent_package_scope_project_autoload_off_is_ok(
     project = scaffolded_perk_repo / ".pi/settings.json"
     settings = json.loads(project.read_text(encoding="utf-8"))
     settings["packages"] = [
-        {"source": "npm:pi-subagents", "autoload": False} if p == "npm:pi-subagents" else p
+        {"source": init.SUBAGENTS_PACKAGE, "autoload": False} if p == init.SUBAGENTS_PACKAGE else p
         for p in settings["packages"]
     ]
     project.write_text(json.dumps(settings), encoding="utf-8")
@@ -1214,8 +1217,8 @@ def test_subagent_package_scope_bad_config_is_info(scaffolded_perk_repo, monkeyp
 def test_subagent_package_scope_identity_is_the_borrowed_entry():
     # The check matches by `_SUBAGENTS_PACKAGE_DIRNAME`; this pins that constant to the borrowed
     # entry's npm identity (the same reduction settings-wiring dedups by), so the two cannot drift.
-    assert "npm:pi-subagents" in init.BORROWED_PACKAGES
-    assert init._npm_name("npm:pi-subagents") == doctor_checks._SUBAGENTS_PACKAGE_DIRNAME
+    assert init.SUBAGENTS_PACKAGE in init.BORROWED_PACKAGES
+    assert init._npm_name(init.SUBAGENTS_PACKAGE) == doctor_checks._SUBAGENTS_PACKAGE_DIRNAME
 
 
 def test_subagent_package_scope_neither_scope_is_ok_with_an_honest_message(scaffolded_perk_repo):
@@ -1223,7 +1226,7 @@ def test_subagent_package_scope_neither_scope_is_ok_with_an_honest_message(scaff
     # instead of claiming a project-only state.
     project = scaffolded_perk_repo / ".pi/settings.json"
     settings = json.loads(project.read_text(encoding="utf-8"))
-    settings["packages"] = [p for p in settings["packages"] if p != "npm:pi-subagents"]
+    settings["packages"] = [p for p in settings["packages"] if p != init.SUBAGENTS_PACKAGE]
     project.write_text(json.dumps(settings), encoding="utf-8")
     check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
     assert check.status == "ok"
@@ -2225,6 +2228,30 @@ def test_compaction_drift_detected_and_fixed(scaffolded_perk_repo):
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
 
 
+def test_unpinned_subagents_entry_is_settings_drift_and_fix_pins_it(scaffolded_perk_repo):
+    # An existing consumer's unversioned `npm:pi-subagents` entry (what `perk init` wrote before
+    # the pin) is `settings-wiring` drift; `--fix` reruns the same convergence `perk init` runs
+    # and rewrites it to the pin in place.
+    settings_path = scaffolded_perk_repo / ".pi" / "settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    index = settings["packages"].index(init.SUBAGENTS_PACKAGE)
+    settings["packages"][index] = "npm:pi-subagents"
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    wiring = next(c for c in report.checks if c.name == "settings-wiring")
+    assert wiring.status == "fail"
+    assert f"updated npm:pi-subagents -> {init.SUBAGENTS_PACKAGE}" in wiring.detail
+    assert wiring.remediation == "perk doctor --fix"
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert fixed.healthy
+    repaired = json.loads(settings_path.read_text(encoding="utf-8"))["packages"]
+    assert repaired[index] == init.SUBAGENTS_PACKAGE
+    assert "npm:pi-subagents" not in repaired
+    again = run_doctor(scaffolded_perk_repo, verify=False)
+    assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
+
+
 def test_native_consumer_ordering_drift_detected_and_fixed(scaffolded_perk_repo):
     # The host-SDK bridge load-order rule (contracts §8.73) converges inside `settings-wiring`,
     # so a perk entry planted AFTER `npm:pi-subagents` is drift doctor reports (`fail`, detail
@@ -2236,7 +2263,7 @@ def test_native_consumer_ordering_drift_detected_and_fixed(scaffolded_perk_repo)
     packages = settings["packages"]
     perk_entry = next(p for p in packages if str(p).startswith("npm:@mgiles/perk"))
     packages.remove(perk_entry)
-    packages.insert(packages.index("npm:pi-subagents") + 1, perk_entry)
+    packages.insert(packages.index(init.SUBAGENTS_PACKAGE) + 1, perk_entry)
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 
     report = run_doctor(scaffolded_perk_repo, verify=False)
@@ -2247,7 +2274,7 @@ def test_native_consumer_ordering_drift_detected_and_fixed(scaffolded_perk_repo)
     fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy
     repaired = json.loads(settings_path.read_text(encoding="utf-8"))["packages"]
-    assert repaired.index(perk_entry) < repaired.index("npm:pi-subagents")
+    assert repaired.index(perk_entry) < repaired.index(init.SUBAGENTS_PACKAGE)
     again = run_doctor(scaffolded_perk_repo, verify=False)  # converged → no drift
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
 

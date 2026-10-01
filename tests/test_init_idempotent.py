@@ -11,6 +11,8 @@ from perk.convergence.init import run_init
 from perk.convergence.init.settings import (
     PACKAGE_RESOURCE_FILTERS,
     PONYTAIL_PACKAGE,
+    SUBAGENTS_PACKAGE,
+    _npm_version,
     _reconcile_ponytail_entry,
 )
 from perk.substrate import git, paths
@@ -103,7 +105,7 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "npm:@tombell/pi-diff" in packages  # surviving borrowed package (anchor)
     assert "npm:@tombell/pi-status" not in packages  # retired: footer conflict
     assert "npm:@tombell/pi-plan" not in packages  # perk owns plan mode now
-    assert "npm:pi-subagents" in packages  # borrowed spawned-delegation engine
+    assert SUBAGENTS_PACKAGE in packages  # borrowed spawned-delegation engine, version-pinned
     assert "npm:@ff-labs/pi-fff" in packages  # borrowed FFF search
     # Borrowed askuser questionnaire: IDENTITY-based (a fresh init appends the plain string; an
     # object-form `{"source": …}` entry satisfies it — never an exact-string `in packages`).
@@ -944,6 +946,101 @@ def test_init_collapses_mixed_perk_duplicates_object_canonical(tmp_path):
     assert perk_entries == [
         {"source": f"npm:@mgiles/perk@{__version__}", "skills": ["perk-implement"]}
     ]
+
+
+def test_npm_version_reads_the_version_suffix_only():
+    assert _npm_version("npm:pi-subagents@0.73.1") == "0.73.1"
+    assert _npm_version("npm:@scope/name@1.2.3") == "1.2.3"
+    assert _npm_version("npm:pi-subagents") is None
+    assert _npm_version("npm:@scope/name") is None  # a scope's leading @ is not a version
+    assert _npm_version("git:github.com/x/y@v1") is None
+    assert _npm_version("..") is None
+
+
+def test_subagents_borrow_is_version_pinned():
+    # The one version-carrying borrow: pi-subagents 0.74.0 removed the RPC spawn parameter perk's
+    # waves send, so the pin must name a concrete pre-0.74 version.
+    assert _npm_version(SUBAGENTS_PACKAGE) == "0.73.1"
+
+
+def test_init_pins_an_unversioned_subagents_entry_in_place(tmp_path):
+    # An existing consumer's unversioned entry is reconciled forward to the pin at its position.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"packages": ["npm:@me/first", "npm:pi-subagents", "npm:@me/last"]}, indent=2)
+        + "\n"
+    )
+
+    report = run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:pi-subagents" not in packages
+    assert packages.count(SUBAGENTS_PACKAGE) == 1
+    assert packages.index("npm:@me/first") < packages.index(SUBAGENTS_PACKAGE)
+    assert packages.index(SUBAGENTS_PACKAGE) < packages.index("npm:@me/last")
+    assert any(f"updated npm:pi-subagents -> {SUBAGENTS_PACKAGE}" in c for c in report.changes)
+    # Idempotent: the second run reports nothing.
+    assert run_init(tmp_path, verify=False).changes == []
+
+
+def test_init_reconciles_a_stale_subagents_pin_forward(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"packages": ["npm:pi-subagents@0.0.1"]}, indent=2) + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:pi-subagents@0.0.1" not in packages
+    assert packages.count(SUBAGENTS_PACKAGE) == 1
+
+
+def test_init_rewrites_only_the_source_of_an_object_form_subagents_entry(tmp_path):
+    # The user's filter keys survive byte-for-byte; perk never creates the object form itself.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps(
+            {"packages": [{"source": "npm:pi-subagents", "skills": [], "autoload": False}]},
+            indent=2,
+        )
+        + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    subagents = [p for p in packages if _identity(p) == "pi-subagents"]
+    assert subagents == [{"source": SUBAGENTS_PACKAGE, "skills": [], "autoload": False}]
+    assert run_init(tmp_path, verify=False).changes == []
+
+
+def test_init_collapses_duplicate_subagents_entries_to_one_pin(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps(
+            {
+                "packages": [
+                    "npm:pi-subagents",
+                    {"source": "npm:pi-subagents@0.74.0", "extensions": ["index.ts"]},
+                    "npm:pi-subagents@0.70.1",
+                ]
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    subagents = [p for p in packages if _identity(p) == "pi-subagents"]
+    # The object-form entry is canonical (it carries the user's filters).
+    assert subagents == [{"source": SUBAGENTS_PACKAGE, "extensions": ["index.ts"]}]
 
 
 def test_init_recognizes_object_form_borrowed_entry(tmp_path):
