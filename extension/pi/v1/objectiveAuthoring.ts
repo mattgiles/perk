@@ -65,8 +65,10 @@ import { loadPerkConfig } from "../../substrate/config.ts";
 import { failFor, ok, type Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { arrayParam, objectParam, paramsOf, stringParam } from "../../substrate/toolParams.ts";
+import { OBJECTIVE_STAGES } from "../../substrate/toolPolicy.ts";
 import { type BranchEntry, branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
+import { registerPerkTool } from "../perkTool.ts";
 import { installInjectedContext } from "./contextInjection.ts";
 import { type DraftReviewSlot, recordSaveOutcome } from "./draftReview.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
@@ -457,177 +459,190 @@ export function installObjectiveAuthoringBindings(
     runnerChild,
   );
 
-  pi.registerTool({
-    name: "objective_draft",
-    label: "Objective draft",
-    description:
-      "Write (or overwrite) the working objective draft — prose + the structured roadmap — to " +
-      "the session data dir and record its provenance pointer. The only sanctioned write surface " +
-      "while read-only. NOT a save — objective_save//objective-save still persist the objective " +
-      "to GitHub.",
-    promptSnippet:
-      "Persist the working objective draft (prose + structured roadmap) to the session data dir (full rewrite)",
-    promptGuidelines: DRAFT_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["prose"],
-      properties: {
-        prose: {
-          type: "string",
-          description: "The objective prose (the why, the design, the boundaries/non-goals).",
-        },
-        title: {
-          type: "string",
-          description: "Optional objective title (defaults to the prose's first heading).",
-        },
-        base: {
-          type: "string",
-          description:
-            "Optional target branch for this objective's plans (omit to use the repo default).",
-        },
-        delivery: DELIVERY_PARAM_SCHEMA,
-        dream_report: DREAM_REPORT_PARAM_SCHEMA,
-        roadmap: {
-          type: "array",
-          description:
-            "The structured roadmap: a JSON array of nodes. Never hand-write roadmap YAML.",
-          items: ROADMAP_PARAM_SCHEMA,
+  registerPerkTool(
+    pi,
+    {
+      name: "objective_draft",
+      label: "Objective draft",
+      description:
+        "Write (or overwrite) the working objective draft — prose + the structured roadmap — to " +
+        "the session data dir and record its provenance pointer. The only sanctioned write surface " +
+        "while read-only. NOT a save — objective_save//objective-save still persist the objective " +
+        "to GitHub.",
+      promptSnippet:
+        "Persist the working objective draft (prose + structured roadmap) to the session data dir (full rewrite)",
+      promptGuidelines: DRAFT_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["prose"],
+        properties: {
+          prose: {
+            type: "string",
+            description: "The objective prose (the why, the design, the boundaries/non-goals).",
+          },
+          title: {
+            type: "string",
+            description: "Optional objective title (defaults to the prose's first heading).",
+          },
+          base: {
+            type: "string",
+            description:
+              "Optional target branch for this objective's plans (omit to use the repo default).",
+          },
+          delivery: DELIVERY_PARAM_SCHEMA,
+          dream_report: DREAM_REPORT_PARAM_SCHEMA,
+          roadmap: {
+            type: "array",
+            description:
+              "The structured roadmap: a JSON array of nodes. Never hand-write roadmap YAML.",
+            items: ROADMAP_PARAM_SCHEMA,
+          },
         },
       },
-    },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      // The shared param contract: the same decode as `objective_save`, so the two cannot
-      // drift. (The parameter literals are duplicated at both registration sites on purpose —
-      // the prose-review workbench needs in-place literals — and pinned identical by the
-      // registration baselines.)
-      const decoded = decodeObjectiveSaveParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "objective-draft",
-          "objective_draft",
-        )(
-          "objective_draft needs { prose: string, roadmap?: array } per the tool schema",
-          "bad_input",
-        );
-      }
-      const fail = failFor(ctx, "objective-draft");
-      const revised = reviseObjectiveDraft(decoded, {
-        session: openSession(pi, ctx),
-        resolveDreamGate: dreamGateFor(ctx),
-      });
-      switch (revised.status) {
-        case "revised":
-        case "unchanged":
-          // Both arms mean the draft IS the current artifact — refresh the session name under
-          // `override` with its title (contracts.md §8.71(h)): a non-blank declared title wins,
-          // else the prose heading, else `{}` (a stored title survives). The outcome is
-          // ignored: the binding reports `failed`, and a naming failure never fails the write.
-          refreshSessionNameV1(pi, ctx, {
-            hints: titleHints(decoded.title?.trim() || deriveTitle(decoded.prose)),
-            policy: "override",
-          });
-          // A byte-identical rewrite short-circuits interior-side; the rendered result is
-          // computed from identical content either way, so the surface stays byte-stable.
-          return ok(
-            `Objective draft written → ${revised.receipt.path} (${revised.receipt.digest}; ` +
-              `${revised.roadmapNodes} roadmap nodes)`,
-            {
-              name: OBJECTIVE_DRAFT_ARTIFACT,
-              path: revised.receipt.path,
-              digest: revised.receipt.digest,
-              bytes: revised.bytes,
-              run_id: revised.receipt.runId,
-              roadmap_nodes: revised.roadmapNodes,
-            },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        // The shared param contract: the same decode as `objective_save`, so the two cannot
+        // drift. (The parameter literals are duplicated at both registration sites on purpose —
+        // the prose-review workbench needs in-place literals — and pinned identical by the
+        // registration baselines.)
+        const decoded = decodeObjectiveSaveParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "objective-draft",
+            "objective_draft",
+          )(
+            "objective_draft needs { prose: string, roadmap?: array } per the tool schema",
+            "bad_input",
           );
-        case "rejected":
-          return fail(revised.problem, revised.errorType);
-        case "unverified":
-          return fail(revised.problem, "write_failed");
-      }
-    },
-  });
-
-  pi.registerTool({
-    name: "objective_save",
-    label: "Save objective",
-    description:
-      "Persist a drafted objective + structured roadmap to GitHub as a perk:objective issue, " +
-      "activate it, and start budget tracking. Terminating: ends the turn on save. Call only when " +
-      "the objective and roadmap are decision-complete.",
-    promptSnippet: "Save the decision-complete objective + roadmap to GitHub (terminates the turn)",
-    promptGuidelines: SAVE_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["prose"],
-      properties: {
-        prose: {
-          type: "string",
-          description: "The objective prose (the why, the design, the boundaries/non-goals).",
-        },
-        title: {
-          type: "string",
-          description: "Optional objective title (defaults to the prose's first heading).",
-        },
-        base: {
-          type: "string",
-          description:
-            "Optional target branch for this objective's plans (omit to use the repo default).",
-        },
-        delivery: DELIVERY_PARAM_SCHEMA,
-        dream_report: DREAM_REPORT_PARAM_SCHEMA,
-        roadmap: {
-          type: "array",
-          description:
-            "The structured roadmap: a JSON array of nodes. Never hand-write roadmap YAML.",
-          items: ROADMAP_PARAM_SCHEMA,
-        },
+        }
+        const fail = failFor(ctx, "objective-draft");
+        const revised = reviseObjectiveDraft(decoded, {
+          session: openSession(pi, ctx),
+          resolveDreamGate: dreamGateFor(ctx),
+        });
+        switch (revised.status) {
+          case "revised":
+          case "unchanged":
+            // Both arms mean the draft IS the current artifact — refresh the session name under
+            // `override` with its title (contracts.md §8.71(h)): a non-blank declared title wins,
+            // else the prose heading, else `{}` (a stored title survives). The outcome is
+            // ignored: the binding reports `failed`, and a naming failure never fails the write.
+            refreshSessionNameV1(pi, ctx, {
+              hints: titleHints(decoded.title?.trim() || deriveTitle(decoded.prose)),
+              policy: "override",
+            });
+            // A byte-identical rewrite short-circuits interior-side; the rendered result is
+            // computed from identical content either way, so the surface stays byte-stable.
+            return ok(
+              `Objective draft written → ${revised.receipt.path} (${revised.receipt.digest}; ` +
+                `${revised.roadmapNodes} roadmap nodes)`,
+              {
+                name: OBJECTIVE_DRAFT_ARTIFACT,
+                path: revised.receipt.path,
+                digest: revised.receipt.digest,
+                bytes: revised.bytes,
+                run_id: revised.receipt.runId,
+                roadmap_nodes: revised.roadmapNodes,
+              },
+            );
+          case "rejected":
+            return fail(revised.problem, revised.errorType);
+          case "unverified":
+            return fail(revised.problem, "write_failed");
+        }
       },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const decoded = decodeObjectiveSaveParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "objective-save",
-          "objective_save",
-        )(
-          "objective_save needs { prose: string, roadmap?: array } per the tool schema",
-          "bad_input",
-        );
-      }
-      // A refinement session never creates an objective — independent of tool visibility.
-      if (isRefinementSession(branchOf(ctx)))
-        return failFor(ctx, "objective_save")(
-          refinementStageRefusal("objective_save"),
-          "wrong_stage",
-        );
-      // The direct tool path wraps ONLY a present decoded value as the union's `direct` arm
-      // (the save stamps generated_at); no stored parts, so no byte-compare on this path.
-      const { dream_report, ...rest } = decoded;
-      const save = await saveObjective(
-        {
-          ...rest,
-          ...(dream_report !== undefined
-            ? { dream_report: { source: "direct" as const, input: dream_report } }
-            : {}),
-        },
-        objectiveSaveDepsFor(pi, ctx, gating),
-      );
-      // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
-      recordSaveOutcome(reviews, "objective", {
-        confirmed: save.status === "saved",
-        ...(save.status === "failed" ? { detail: save.message } : {}),
-      });
-      activateBudgetIfLinked(pi, save);
-      return objectiveSaveResultOf(ctx, save);
+    {
+      stages: [...OBJECTIVE_STAGES],
+      gated: { carveOut: "the working-objective artifact in the session data dir" },
+      kind: "action",
     },
-  });
+  );
+
+  registerPerkTool(
+    pi,
+    {
+      name: "objective_save",
+      label: "Save objective",
+      description:
+        "Persist a drafted objective + structured roadmap to GitHub as a perk:objective issue, " +
+        "activate it, and start budget tracking. Terminating: ends the turn on save. Call only when " +
+        "the objective and roadmap are decision-complete.",
+      promptSnippet:
+        "Save the decision-complete objective + roadmap to GitHub (terminates the turn)",
+      promptGuidelines: SAVE_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["prose"],
+        properties: {
+          prose: {
+            type: "string",
+            description: "The objective prose (the why, the design, the boundaries/non-goals).",
+          },
+          title: {
+            type: "string",
+            description: "Optional objective title (defaults to the prose's first heading).",
+          },
+          base: {
+            type: "string",
+            description:
+              "Optional target branch for this objective's plans (omit to use the repo default).",
+          },
+          delivery: DELIVERY_PARAM_SCHEMA,
+          dream_report: DREAM_REPORT_PARAM_SCHEMA,
+          roadmap: {
+            type: "array",
+            description:
+              "The structured roadmap: a JSON array of nodes. Never hand-write roadmap YAML.",
+            items: ROADMAP_PARAM_SCHEMA,
+          },
+        },
+      },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const decoded = decodeObjectiveSaveParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "objective-save",
+            "objective_save",
+          )(
+            "objective_save needs { prose: string, roadmap?: array } per the tool schema",
+            "bad_input",
+          );
+        }
+        // A refinement session never creates an objective — independent of tool visibility.
+        if (isRefinementSession(branchOf(ctx)))
+          return failFor(ctx, "objective_save")(
+            refinementStageRefusal("objective_save"),
+            "wrong_stage",
+          );
+        // The direct tool path wraps ONLY a present decoded value as the union's `direct` arm
+        // (the save stamps generated_at); no stored parts, so no byte-compare on this path.
+        const { dream_report, ...rest } = decoded;
+        const save = await saveObjective(
+          {
+            ...rest,
+            ...(dream_report !== undefined
+              ? { dream_report: { source: "direct" as const, input: dream_report } }
+              : {}),
+          },
+          objectiveSaveDepsFor(pi, ctx, gating),
+        );
+        // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
+        recordSaveOutcome(reviews, "objective", {
+          confirmed: save.status === "saved",
+          ...(save.status === "failed" ? { detail: save.message } : {}),
+        });
+        activateBudgetIfLinked(pi, save);
+        return objectiveSaveResultOf(ctx, save);
+      },
+    },
+    { stages: [...OBJECTIVE_STAGES], gated: "blocked", kind: "terminal" },
+  );
 
   registerPerkCommand(pi, "objective-save", {
     description:

@@ -24,7 +24,9 @@ import {
 } from "../../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { failFor, ok, type Result } from "../../../substrate/result.ts";
+import { WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import { report } from "../../../surfaces/report.ts";
+import { registerPerkTool } from "../../perkTool.ts";
 
 // Learn-consume skip reasons that are ordinary, not failures: non-factory plans carry no
 // `consumed_learn` (`no_consumed_learn`), and a dry run reports `dry_run`. Anything else surfaces.
@@ -283,22 +285,26 @@ const TOOL_GUIDELINES = [
 /** Install the per-plan landing bindings: the `land` terminating tool + the `/land` command
  * twin. */
 export function installLandBindings(pi: ExtensionAPI): void {
-  pi.registerTool({
-    name: "land",
-    label: "Land PR",
-    description:
-      "Merge the active plan's approved PR (squash, closing the plan issue) and set pending-learn. " +
-      "Terminating: ends the turn on land. Call only when the PR is ready to merge.",
-    promptSnippet: "Squash-merge the approved PR and set pending-learn (terminates the turn)",
-    promptGuidelines: TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: { type: "object", additionalProperties: false, properties: {} },
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const result = await landPr(pi, ctx);
-      driveReconcileAfterLand(pi, ctx, result.details);
-      return result;
+  registerPerkTool(
+    pi,
+    {
+      name: "land",
+      label: "Land PR",
+      description:
+        "Merge the active plan's approved PR (squash, closing the plan issue) and set pending-learn. " +
+        "Terminating: ends the turn on land. Call only when the PR is ready to merge.",
+      promptSnippet: "Squash-merge the approved PR and set pending-learn (terminates the turn)",
+      promptGuidelines: TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: { type: "object", additionalProperties: false, properties: {} },
+      async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+        const result = await landPr(pi, ctx);
+        driveReconcileAfterLand(pi, ctx, result.details);
+        return result;
+      },
     },
-  });
+    { stages: [...WORKTREE_STAGES], gated: "blocked", kind: "terminal" },
+  );
 
   registerPerkCommand(pi, "land", {
     description: "Merge the active plan's PR and set pending-learn (submit → land).",

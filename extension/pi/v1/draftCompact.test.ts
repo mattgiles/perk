@@ -18,13 +18,14 @@ import {
 } from "../../authoring/review/subjects.ts";
 import { BINDING_HEADER } from "../../substrate/bindingDelivery.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
-import { gatedToolsFor, REFINE_STAGE_ID } from "../../substrate/toolGating.ts";
+import { gatedToolsFor, REGISTRY_STAGE_IDS } from "../../substrate/toolPolicy.ts";
 import {
   loadPerkSession,
   type PerkSession,
   scaffoldRepo,
   spyInjections,
 } from "../../testing/harness.ts";
+import { ensureToolCatalog } from "../../testing/toolCatalog.ts";
 import { draftAndCompactContinuation, draftAndCompactGuidance } from "./draftCompact.ts";
 
 const SUBJECTS: DraftSubject[] = ["plan", "objective", "gist", "refinement"];
@@ -242,11 +243,28 @@ test("no draft-and-compact render names a skill path", () => {
 
 // --- gate-allowlist guard ---------------------------------------------------------------------------
 
-test("every tool the drive and continuation name is reachable in the subject's gated stage", () => {
+/** Subject → every gated landing the session seam routes to it (the plan subject is the rest). */
+const SUBJECT_LANDINGS: Readonly<Record<DraftSubject, readonly (string | null)[]>> = {
+  objective: ["objective-author", "objective-save"],
+  gist: ["gist-author"],
+  refinement: ["objective-refine"],
+  plan: [
+    null,
+    ...REGISTRY_STAGE_IDS.filter(
+      (id) =>
+        !["objective-author", "objective-save", "gist-author", "objective-refine"].includes(id),
+    ),
+  ],
+};
+
+test("every tool the drive and continuation name is reachable in each of the subject's gated landings", async () => {
+  await ensureToolCatalog();
   for (const subject of SUBJECTS) {
-    const allowed = gatedToolsFor(subject === "refinement" ? REFINE_STAGE_ID : null);
-    for (const tool of [DRAFT_SUBJECT_WRITERS[subject], "plan_review", "ask_user_question"]) {
-      assert.ok(allowed.includes(tool), `${subject}: ${tool} is gate-allowlisted`);
+    for (const stage of SUBJECT_LANDINGS[subject]) {
+      const allowed = gatedToolsFor(stage);
+      for (const tool of [DRAFT_SUBJECT_WRITERS[subject], "plan_review", "ask_user_question"]) {
+        assert.ok(allowed.includes(tool), `${subject} @ ${stage}: ${tool} is in the gated view`);
+      }
     }
   }
 });
@@ -396,7 +414,7 @@ test("a byte-identical rewrite skips loudly (unchanged-draft)", async () => {
 test("gist-author and objective-refine sessions drive with their own writer", async () => {
   for (const [stage, subject] of [
     ["gist-author", "gist"],
-    [REFINE_STAGE_ID, "refinement"],
+    ["objective-refine", "refinement"],
   ] as const) {
     const s = await gatedSession(stage);
     try {

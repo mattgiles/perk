@@ -2,7 +2,7 @@
 // bound AgentSession via the T1 harness where the workflow-state binding matters; the exported
 // execute core is driven directly for the Result-rendering arms. The registration surface is
 // pinned as a COMPLETE frozen baseline (deepEqual — the audit.test.ts precedent). The suite
-// also carries the census pins (PERK_TOOLS + READ_ONLY_TOOLS, deliberately NO stage list), the
+// also carries the census pins (catalogued; the borrowed objective-author stage only), the
 // ordered pre-launch refusal ladder (claimed run → manifest existence → parse → strict decode
 // → resolved containment; nothing spawns on any arm), the pre-aborted-signal cancellation arm
 // through the registered execute (zero RPC traffic), the EXACT-text renders for
@@ -27,11 +27,17 @@ import type { DreamAnalysisAggregate } from "../../../learning/dreamAnalysis.ts"
 import { DREAM_ANALYSES_FILENAME, DREAM_REDUCER_ANGLES } from "../../../learning/dreamReducer.ts";
 import { runScratchDir } from "../../../substrate/cache.ts";
 import { digestSessionData } from "../../../substrate/sessionData.ts";
-import { PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "../../../substrate/toolGating.ts";
+import {
+  isEligible,
+  isPerkTool,
+  REGISTRY_STAGE_IDS,
+  stageToolsFor,
+} from "../../../substrate/toolPolicy.ts";
 import { dreamRepoCommit, initDreamRepo } from "../../../testing/dreamFixtures.ts";
 import { createFakeSubagents, type FakeSubagents } from "../../../testing/fakeSubagents.ts";
 import { loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
+import { ensureToolCatalog } from "../../../testing/toolCatalog.ts";
 import { createReportWave, reportWaveOver } from "../../../waves/reportWave.ts";
 import { executeDreamWave, installDreamBindings } from "./dream.ts";
 
@@ -264,18 +270,23 @@ test("registration parity: run_dream_wave matches the frozen baseline", async ()
 
 // ------------------------------------------------------------------------- census pins
 
-test("census: run_dream_wave rides PERK_TOOLS + READ_ONLY_TOOLS and NO stage list", () => {
-  assert.ok(PERK_TOOLS.includes("run_dream_wave"));
-  // The read-only carve-in: the seeded dream session runs GATED (the read-only
-  // objective-author borrow); the tool takes NO parameters, its manifest read AND its one
-  // write (the fixed-name run-scratch bundle) are both derived from the claimed run's
-  // manifest path (the run_audit_wave no-aimable-writer posture, BOTH sides), and it spawns
-  // only the read-only dream analysts/reducers over the carved-in delegation family.
-  assert.ok(READ_ONLY_TOOLS.includes("run_dream_wave"));
-  // The deliberate non-behavior pin: dream is cold-only and gate-on — the gate-ON set ignores
-  // stage lists, so NO stage list carries the tool (we do NOT touch drive coverage).
-  for (const [stage, tools] of Object.entries(STAGE_TOOLS)) {
-    assert.ok(!tools.includes("run_dream_wave"), `stage '${stage}' must not carry run_dream_wave`);
+test("census: run_dream_wave is catalogued and eligible in exactly the borrowed objective-author stage", async () => {
+  await ensureToolCatalog();
+  assert.ok(isPerkTool("run_dream_wave"));
+  // The seeded session borrows the objective-author stage with mode read-only: the tool is
+  // eligible under the gate there (its one bounded read/write is bound to the claimed run, so no
+  // caller-supplied path exists), and in no other stage's gated view or diet.
+  assert.ok(isEligible("run_dream_wave", "objective-author", "read-only"));
+  for (const stage of REGISTRY_STAGE_IDS) {
+    const inDiet = stageToolsFor(stage)?.includes("run_dream_wave") === true;
+    assert.equal(inDiet, stage === "objective-author", `stage '${stage}' diet`);
+    if (stage !== "objective-author") {
+      assert.equal(
+        isEligible("run_dream_wave", stage, "read-only"),
+        false,
+        `stage '${stage}' gated`,
+      );
+    }
   }
 });
 

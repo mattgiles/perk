@@ -39,6 +39,7 @@ import { registerPerkCommand } from "../../../substrate/command.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { failFor, ok } from "../../../substrate/result.ts";
 import { captureSessionPointer } from "../../../substrate/sessionPointers.ts";
+import { WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import {
   branchOf,
   conflictResolutionAttempts,
@@ -46,6 +47,7 @@ import {
   setConflictAttempts,
 } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
+import { registerPerkTool } from "../../perkTool.ts";
 import type { SubmitConflictController } from "./submitConflict.ts";
 
 /**
@@ -410,28 +412,32 @@ export function installSubmitBindings(
   pi: ExtensionAPI,
   controller: SubmitConflictController,
 ): void {
-  pi.registerTool({
-    name: "submit",
-    label: "Submit PR",
-    description:
-      "Push the current plan's branch and open a draft pull request linking the plan. " +
-      "Terminating: ends the turn on submit. Call only after the implementation is committed.",
-    promptSnippet: "Open the draft PR for the committed implementation (terminates the turn)",
-    promptGuidelines: TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: { type: "object", additionalProperties: false, properties: {} },
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const fail = failFor(ctx, "submit");
-      const outcome = await performSubmit(pi, ctx, controller);
-      if (outcome.kind === "refused") return fail(outcome.message, "planning_session");
-      if (outcome.kind === "publish_failed") return fail(outcome.message, outcome.errorType);
-      const result = ok(renderPublishedMessage(outcome.change), outcome.change, {
-        terminate: true,
-      });
-      driveConflictFollowUp(pi, ctx, outcome.conflict, controller);
-      return result;
+  registerPerkTool(
+    pi,
+    {
+      name: "submit",
+      label: "Submit PR",
+      description:
+        "Push the current plan's branch and open a draft pull request linking the plan. " +
+        "Terminating: ends the turn on submit. Call only after the implementation is committed.",
+      promptSnippet: "Open the draft PR for the committed implementation (terminates the turn)",
+      promptGuidelines: TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: { type: "object", additionalProperties: false, properties: {} },
+      async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+        const fail = failFor(ctx, "submit");
+        const outcome = await performSubmit(pi, ctx, controller);
+        if (outcome.kind === "refused") return fail(outcome.message, "planning_session");
+        if (outcome.kind === "publish_failed") return fail(outcome.message, outcome.errorType);
+        const result = ok(renderPublishedMessage(outcome.change), outcome.change, {
+          terminate: true,
+        });
+        driveConflictFollowUp(pi, ctx, outcome.conflict, controller);
+        return result;
+      },
     },
-  });
+    { stages: [...WORKTREE_STAGES], gated: "blocked", kind: "terminal" },
+  );
 
   registerPerkCommand(pi, "submit", {
     description: "Push the branch and open a draft PR for the active plan (implement → submit).",

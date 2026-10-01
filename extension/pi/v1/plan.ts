@@ -72,11 +72,13 @@ import { failFor, ok } from "../../substrate/result.ts";
 import { captureSessionPointer } from "../../substrate/sessionPointers.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { idArrayParam, paramsOf, stringParam } from "../../substrate/toolParams.ts";
+import { OBJECTIVE_STAGES, PLAN_FAMILY_STAGES } from "../../substrate/toolPolicy.ts";
 import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 // `Key` via the surfaces re-export (keybinding vocabulary, not rich UI) — keeps pi-tui imports
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
 import { type ActivityHandle, Key } from "../../surfaces/surfaces.ts";
+import { registerPerkTool } from "../perkTool.ts";
 import { installInjectedContext, isPlanGuidanceStage } from "./contextInjection.ts";
 import { type DraftReviewSlot, recordSaveOutcome } from "./draftReview.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
@@ -424,199 +426,212 @@ export function installPlanBindings(
   // read-only-gate carve-out (session data dir only). The tool takes NO path/name parameter —
   // the artifact name is the fixed constant and the bytes flow through the session seam, so
   // allowlisting its name in READ_ONLY_TOOLS (toolGating.ts) is safe.
-  pi.registerTool({
-    name: "plan_draft",
-    label: "Plan draft",
-    description:
-      "Write (or overwrite) the working plan draft to the session data dir and record its " +
-      "provenance pointer. The only sanctioned write surface while read-only. NOT a save — " +
-      "plan_save//plan-save still persist the plan to GitHub.",
-    promptSnippet: "Persist the working plan draft to the session data dir (full rewrite)",
-    // Registration prose stays INLINE (not a prose.ts constant): the prose-review workbench
-    // edits these arrays through the TypeScript source adapter, which needs literal in-place
-    // values — an identifier indirection is an unsupported source shape there.
-    promptGuidelines: [
-      "Call plan_draft to persist the current working draft as you author or revise the plan; pass the FULL plan markdown each time (it rewrites the whole draft).",
-      "plan_draft never saves to GitHub and never ends the turn — plan_save//plan-save remain the canonical save surface.",
-    ],
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["plan"],
-      properties: {
-        plan: {
-          type: "string",
-          description: "The full working-plan markdown (rewrites the whole draft).",
+  registerPerkTool(
+    pi,
+    {
+      name: "plan_draft",
+      label: "Plan draft",
+      description:
+        "Write (or overwrite) the working plan draft to the session data dir and record its " +
+        "provenance pointer. The only sanctioned write surface while read-only. NOT a save — " +
+        "plan_save//plan-save still persist the plan to GitHub.",
+      promptSnippet: "Persist the working plan draft to the session data dir (full rewrite)",
+      // Registration prose stays INLINE (not a prose.ts constant): the prose-review workbench
+      // edits these arrays through the TypeScript source adapter, which needs literal in-place
+      // values — an identifier indirection is an unsupported source shape there.
+      promptGuidelines: [
+        "Call plan_draft to persist the current working draft as you author or revise the plan; pass the FULL plan markdown each time (it rewrites the whole draft).",
+        "plan_draft never saves to GitHub and never ends the turn — plan_save//plan-save remain the canonical save surface.",
+      ],
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["plan"],
+        properties: {
+          plan: {
+            type: "string",
+            description: "The full working-plan markdown (rewrites the whole draft).",
+          },
         },
       },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const decoded = decodePlanDraftParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "plan-draft",
+            "plan_draft",
+          )("plan_draft needs { plan: string } per the tool schema", "bad_input");
+        }
+        const fail = failFor(ctx, "plan-draft");
+        const revised = revisePlanDraft(decoded, openBranchWorkflowSession(pi, ctx));
+        switch (revised.status) {
+          case "revised":
+          case "unchanged":
+            // Both arms mean the draft IS the current artifact, and its derived title is the
+            // newest fact about what this conversation is (contracts.md §8.71(h)) — refresh the
+            // session name under `override`. The outcome is ignored: the binding reports
+            // `failed`, and a naming failure never fails the draft write.
+            refreshSessionNameV1(pi, ctx, {
+              hints: titleHints(deriveTitle(decoded.plan)),
+              policy: "override",
+            });
+            // A byte-identical rewrite short-circuits interior-side; the rendered result is
+            // computed from identical content either way, so the surface stays byte-stable.
+            return ok(`Plan draft written → ${revised.receipt.path} (${revised.receipt.digest})`, {
+              name: PLAN_DRAFT_ARTIFACT,
+              path: revised.receipt.path,
+              digest: revised.receipt.digest,
+              bytes: revised.bytes,
+              run_id: revised.receipt.runId,
+            });
+          case "rejected":
+            return fail(
+              revised.problem,
+              revised.reason === "blank_plan"
+                ? "invalid_input"
+                : revised.reason === "no_identity"
+                  ? "no_run_id"
+                  : "write_failed",
+            );
+          case "unverified":
+            return fail(revised.problem, "write_failed");
+        }
+      },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const decoded = decodePlanDraftParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "plan-draft",
-          "plan_draft",
-        )("plan_draft needs { plan: string } per the tool schema", "bad_input");
-      }
-      const fail = failFor(ctx, "plan-draft");
-      const revised = revisePlanDraft(decoded, openBranchWorkflowSession(pi, ctx));
-      switch (revised.status) {
-        case "revised":
-        case "unchanged":
-          // Both arms mean the draft IS the current artifact, and its derived title is the
-          // newest fact about what this conversation is (contracts.md §8.71(h)) — refresh the
-          // session name under `override`. The outcome is ignored: the binding reports
-          // `failed`, and a naming failure never fails the draft write.
-          refreshSessionNameV1(pi, ctx, {
-            hints: titleHints(deriveTitle(decoded.plan)),
-            policy: "override",
-          });
-          // A byte-identical rewrite short-circuits interior-side; the rendered result is
-          // computed from identical content either way, so the surface stays byte-stable.
-          return ok(`Plan draft written → ${revised.receipt.path} (${revised.receipt.digest})`, {
-            name: PLAN_DRAFT_ARTIFACT,
-            path: revised.receipt.path,
-            digest: revised.receipt.digest,
-            bytes: revised.bytes,
-            run_id: revised.receipt.runId,
-          });
-        case "rejected":
-          return fail(
-            revised.problem,
-            revised.reason === "blank_plan"
-              ? "invalid_input"
-              : revised.reason === "no_identity"
-                ? "no_run_id"
-                : "write_failed",
-          );
-        case "unverified":
-          return fail(revised.problem, "write_failed");
-      }
+    {
+      stages: [...PLAN_FAMILY_STAGES],
+      gated: { carveOut: "the working-plan artifact in the session data dir" },
+      modeOverStage: true,
+      kind: "action",
     },
-  });
+  );
 
   // ------------------------------------------------- the plan_save tool + /plan-save command
-  pi.registerTool({
-    name: "plan_save",
-    label: "Save plan",
-    description:
-      "Persist the current plan to GitHub as the canonical perk plan and link this session to it. " +
-      "Terminating: ends the turn on save. Call only when the plan is decision-complete.",
-    promptSnippet: "Save the decision-complete plan to GitHub (terminates the turn)",
-    promptGuidelines: [
-      "Use plan_save only after the plan is decision-complete and the user has agreed; it creates the canonical GitHub plan and ends the turn.",
-      "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_save saves; the `plan` parameter is only a fallback when no draft exists. Never reference line numbers — use durable anchors (function names, behavioral descriptions, structural locations).",
-      "Pass plan_save's consumed_learn (the gathered perk:learn issue ids) only from the learned-docs factory — it links the issues the docs plan consolidates so /land closes + labels them.",
-      "When saving an objective-factory plan, pass plan_save BOTH objective_id and node_id — this links the node to the plan and advances it planning → in_progress (no separate backlink call).",
-    ],
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        plan: {
-          type: "string",
-          description:
-            "Optional — the validated plan-draft.md artifact is preferred when present; this " +
-            "param is the fallback for sessions that never wrote a draft (no line-number " +
-            "references).",
-        },
-        title: {
-          type: "string",
-          description: "Optional issue title (defaults to the plan's first heading).",
-        },
-        objective_id: {
-          type: "string",
-          description:
-            "Optional objective issue number to link this plan to (the objective plan factory " +
-            "passes the active objective; omit for a standalone plan).",
-        },
-        node_id: {
-          type: "string",
-          description:
-            "Objective node id to commit on save — the objective plan factory passes it with " +
-            "`objective_id` (links the node and advances it to `in_progress`); omit for a " +
-            "standalone plan.",
-        },
-        consumed_learn: {
-          type: "array",
-          items: { type: ["string", "number"] },
-          description:
-            "Optional perk:learn issue ids this docs plan consumes (the learned-docs factory " +
-            "passes the gathered ids; omit for a standalone plan). /land closes + labels them.",
+  registerPerkTool(
+    pi,
+    {
+      name: "plan_save",
+      label: "Save plan",
+      description:
+        "Persist the current plan to GitHub as the canonical perk plan and link this session to it. " +
+        "Terminating: ends the turn on save. Call only when the plan is decision-complete.",
+      promptSnippet: "Save the decision-complete plan to GitHub (terminates the turn)",
+      promptGuidelines: [
+        "Use plan_save only after the plan is decision-complete and the user has agreed; it creates the canonical GitHub plan and ends the turn.",
+        "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_save saves; the `plan` parameter is only a fallback when no draft exists. Never reference line numbers — use durable anchors (function names, behavioral descriptions, structural locations).",
+        "Pass plan_save's consumed_learn (the gathered perk:learn issue ids) only from the learned-docs factory — it links the issues the docs plan consolidates so /land closes + labels them.",
+        "When saving an objective-factory plan, pass plan_save BOTH objective_id and node_id — this links the node to the plan and advances it planning → in_progress (no separate backlink call).",
+      ],
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          plan: {
+            type: "string",
+            description:
+              "Optional — the validated plan-draft.md artifact is preferred when present; this " +
+              "param is the fallback for sessions that never wrote a draft (no line-number " +
+              "references).",
+          },
+          title: {
+            type: "string",
+            description: "Optional issue title (defaults to the plan's first heading).",
+          },
+          objective_id: {
+            type: "string",
+            description:
+              "Optional objective issue number to link this plan to (the objective plan factory " +
+              "passes the active objective; omit for a standalone plan).",
+          },
+          node_id: {
+            type: "string",
+            description:
+              "Objective node id to commit on save — the objective plan factory passes it with " +
+              "`objective_id` (links the node and advances it to `in_progress`); omit for a " +
+              "standalone plan.",
+          },
+          consumed_learn: {
+            type: "array",
+            items: { type: ["string", "number"] },
+            description:
+              "Optional perk:learn issue ids this docs plan consumes (the learned-docs factory " +
+              "passes the gathered ids; omit for a standalone plan). /land closes + labels them.",
+          },
         },
       },
-    },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const decoded = decodePlanSaveParams(params);
-      if (decoded === null) {
-        // The `label` arg matters: this handler-level closure renders "plan_save failed: …" while
-        // the save's internal failFor(ctx, "plan-save") stays as-is.
-        return failFor(
-          ctx,
-          "plan-save",
-          "plan_save",
-        )("plan_save needs { plan: string, … } per the tool schema", "bad_input");
-      }
-      // A refinement session never saves a plan — independent of the gate (a human toggle
-      // never makes an old plan draft routable here).
-      if (isRefinementSession(branchOf(ctx))) {
-        return failFor(
-          ctx,
-          "plan-save",
-          "plan_save",
-        )(refinementStageRefusal("plan_save"), "wrong_stage");
-      }
-      const deps = planSaveDepsFor(pi, ctx, gating);
-      // No read-only fail-fast here (D1a): the `plan_save` TOOL is structurally unreachable
-      // while read-only (the read-only allowlist excludes it), so reaching this handler means
-      // the gate is already off; the `/plan-save` COMMAND is allowed to run while read-only and
-      // exits the gate on a successful save (the read-only → read-write boundary in one gesture).
-      const src = resolvePlanSource(
-        {
-          draft: (() => {
-            const read = deps.session.readArtifact(PLAN_DRAFT_ARTIFACT);
-            return read.status === "found" ? read.content : null;
-          })(),
-          ...(decoded.plan !== undefined ? { explicit: decoded.plan } : {}),
-          transcript: deps.transcript,
-        },
-        "save",
-      );
-      if (src === null) {
-        return failFor(
-          ctx,
-          "plan-save",
-          "plan_save",
-        )(
-          "no plan to save — write the working draft with plan_draft, or pass the plan parameter",
-          "invalid_input",
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const decoded = decodePlanSaveParams(params);
+        if (decoded === null) {
+          // The `label` arg matters: this handler-level closure renders "plan_save failed: …" while
+          // the save's internal failFor(ctx, "plan-save") stays as-is.
+          return failFor(
+            ctx,
+            "plan-save",
+            "plan_save",
+          )("plan_save needs { plan: string, … } per the tool schema", "bad_input");
+        }
+        // A refinement session never saves a plan — independent of the gate (a human toggle
+        // never makes an old plan draft routable here).
+        if (isRefinementSession(branchOf(ctx))) {
+          return failFor(
+            ctx,
+            "plan-save",
+            "plan_save",
+          )(refinementStageRefusal("plan_save"), "wrong_stage");
+        }
+        const deps = planSaveDepsFor(pi, ctx, gating);
+        // No read-only fail-fast here (D1a): the `plan_save` TOOL is structurally unreachable
+        // while read-only (the read-only allowlist excludes it), so reaching this handler means
+        // the gate is already off; the `/plan-save` COMMAND is allowed to run while read-only and
+        // exits the gate on a successful save (the read-only → read-write boundary in one gesture).
+        const src = resolvePlanSource(
+          {
+            draft: (() => {
+              const read = deps.session.readArtifact(PLAN_DRAFT_ARTIFACT);
+              return read.status === "found" ? read.content : null;
+            })(),
+            ...(decoded.plan !== undefined ? { explicit: decoded.plan } : {}),
+            transcript: deps.transcript,
+          },
+          "save",
         );
-      }
-      const outcome = await savePlan(
-        {
-          plan: src.plan,
-          source: src.source,
-          paramMismatch: src.paramMismatch,
-          ...(decoded.title !== undefined ? { title: decoded.title } : {}),
-          ...(decoded.objective_id !== undefined ? { objectiveId: decoded.objective_id } : {}),
-          ...(decoded.node_id !== undefined ? { nodeId: decoded.node_id } : {}),
-          ...(decoded.consumed_learn !== undefined
-            ? { consumedLearn: decoded.consumed_learn }
-            : {}),
-        },
-        deps,
-      );
-      // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
-      recordSaveOutcome(reviews, "plan", {
-        confirmed: outcome.status === "saved",
-        ...(outcome.status === "failed" ? { detail: outcome.message } : {}),
-      });
-      return deps.renderSave(outcome);
+        if (src === null) {
+          return failFor(
+            ctx,
+            "plan-save",
+            "plan_save",
+          )(
+            "no plan to save — write the working draft with plan_draft, or pass the plan parameter",
+            "invalid_input",
+          );
+        }
+        const outcome = await savePlan(
+          {
+            plan: src.plan,
+            source: src.source,
+            paramMismatch: src.paramMismatch,
+            ...(decoded.title !== undefined ? { title: decoded.title } : {}),
+            ...(decoded.objective_id !== undefined ? { objectiveId: decoded.objective_id } : {}),
+            ...(decoded.node_id !== undefined ? { nodeId: decoded.node_id } : {}),
+            ...(decoded.consumed_learn !== undefined
+              ? { consumedLearn: decoded.consumed_learn }
+              : {}),
+          },
+          deps,
+        );
+        // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
+        recordSaveOutcome(reviews, "plan", {
+          confirmed: outcome.status === "saved",
+          ...(outcome.status === "failed" ? { detail: outcome.message } : {}),
+        });
+        return deps.renderSave(outcome);
+      },
     },
-  });
+    { stages: [...PLAN_FAMILY_STAGES], gated: "blocked", kind: "terminal" },
+  );
 
   registerPerkCommand(pi, "plan-save", {
     description:
@@ -687,57 +702,68 @@ export function installPlanBindings(
   // perk's universal review door. In READ_ONLY_TOOLS so it is callable INSIDE plan mode (the
   // whole point — review happens before the gate ever comes off). Fail-open everywhere:
   // headless / dismissed / backend-unavailable all soft-skip so authoring never wedges.
-  pi.registerTool({
-    name: "plan_review",
-    label: "Plan review",
-    description:
-      "Present the plan to the configured review surface — the Plannotator browser UI when " +
-      "selected, otherwise perk's in-TUI editor review — and wait for the human decision. " +
-      "Reviews the validated plan-draft artifact (keep it current with plan_draft); on approval " +
-      "the plan is auto-saved and the turn terminates. On deny, revise per the returned " +
-      "feedback, rewrite the draft with plan_draft, and call again. On the Plannotator surface " +
-      "the human may first opt into a reviewer wave — the call then returns immediately " +
-      'with wave guidance (status "wave_launched") to follow in the same turn, and the browser ' +
-      "decision routes back automatically. No-op skip when the session is headless or the " +
-      "review is dismissed.",
-    promptSnippet: "Request a human review of the working plan draft",
-    promptGuidelines: [
-      "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_review reviews AND auto-saves; the plan param is only a fallback when no draft exists.",
-      "Call plan_review only when the plan is decision-complete.",
-      "On a DENIED review, revise per the feedback, rewrite the draft with plan_draft, then call plan_review again.",
-      "On an APPROVED plan_review, the plan is auto-saved and the turn ends — never re-dump the plan as a final message and never tell the user to run /plan-save; relay the save outcome instead.",
-      "On a wave_launched result (the human opted into the reviewer wave), follow the returned guidance in the same turn — launch the wave, end the turn, and push its findings after collection; the human's browser decision routes back automatically, so never re-call plan_review while that browser review is open.",
-      "If plan_review reports it was skipped or unavailable (headless, dismissed), fall back to presenting the complete plan; the human runs /plan-save (the manual failsafe).",
-    ],
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        plan: {
-          type: "string",
-          description:
-            "Optional — the validated plan-draft.md artifact is preferred when present; this " +
-            "param is the fallback for sessions that never wrote a draft.",
+  registerPerkTool(
+    pi,
+    {
+      name: "plan_review",
+      label: "Plan review",
+      description:
+        "Present the plan to the configured review surface — the Plannotator browser UI when " +
+        "selected, otherwise perk's in-TUI editor review — and wait for the human decision. " +
+        "Reviews the validated plan-draft artifact (keep it current with plan_draft); on approval " +
+        "the plan is auto-saved and the turn terminates. On deny, revise per the returned " +
+        "feedback, rewrite the draft with plan_draft, and call again. On the Plannotator surface " +
+        "the human may first opt into a reviewer wave — the call then returns immediately " +
+        'with wave guidance (status "wave_launched") to follow in the same turn, and the browser ' +
+        "decision routes back automatically. No-op skip when the session is headless or the " +
+        "review is dismissed.",
+      promptSnippet: "Request a human review of the working plan draft",
+      promptGuidelines: [
+        "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_review reviews AND auto-saves; the plan param is only a fallback when no draft exists.",
+        "Call plan_review only when the plan is decision-complete.",
+        "On a DENIED review, revise per the feedback, rewrite the draft with plan_draft, then call plan_review again.",
+        "On an APPROVED plan_review, the plan is auto-saved and the turn ends — never re-dump the plan as a final message and never tell the user to run /plan-save; relay the save outcome instead.",
+        "On a wave_launched result (the human opted into the reviewer wave), follow the returned guidance in the same turn — launch the wave, end the turn, and push its findings after collection; the human's browser decision routes back automatically, so never re-call plan_review while that browser review is open.",
+        "If plan_review reports it was skipped or unavailable (headless, dismissed), fall back to presenting the complete plan; the human runs /plan-save (the manual failsafe).",
+      ],
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          plan: {
+            type: "string",
+            description:
+              "Optional — the validated plan-draft.md artifact is preferred when present; this " +
+              "param is the fallback for sessions that never wrote a draft.",
+          },
         },
       },
+      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+        // Per call: the activity wait binds the live `ctx` (the bridge itself is a thin object).
+        const bridge = createPlannotatorBridge(pi.events, (text) =>
+          status.beginActivity(ctx, text),
+        );
+        return executePlanReview(
+          pi,
+          ctx,
+          gating,
+          bridge,
+          reviews,
+          planSaveDepsFor(pi, ctx, gating),
+          params,
+          signal,
+          wave,
+        );
+      },
     },
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      // Per call: the activity wait binds the live `ctx` (the bridge itself is a thin object).
-      const bridge = createPlannotatorBridge(pi.events, (text) => status.beginActivity(ctx, text));
-      return executePlanReview(
-        pi,
-        ctx,
-        gating,
-        bridge,
-        reviews,
-        planSaveDepsFor(pi, ctx, gating),
-        params,
-        signal,
-        wave,
-      );
+    {
+      stages: [...PLAN_FAMILY_STAGES, ...OBJECTIVE_STAGES, "objective-refine"],
+      gated: "allowed",
+      modeOverStage: true,
+      kind: "terminal",
     },
-  });
+  );
 }
 
 // -------------------------------------------------------------------------------- plan mode

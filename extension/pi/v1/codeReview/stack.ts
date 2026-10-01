@@ -56,6 +56,7 @@ import {
   type PinnedStack,
   pinnedReviewContextCommand,
 } from "../../../waves/adversarialReviewWave.ts";
+import { registerPerkTool } from "../../perkTool.ts";
 import type { AnnotationState } from "../providers/annotations.ts";
 import {
   plannotatorPresent,
@@ -745,36 +746,40 @@ function registerOpenStackReview(
 ): void {
   const latch: OpenLatch = { opened: false };
 
-  pi.registerTool({
-    name: "open_stack_review",
-    label: "Open stack review",
-    description:
-      "Open the launch-bound stacked-PR browser review (the perk objective stack review " +
-      "session's ONE opener): verifies the pinned combined patch's digest, starts the " +
-      "plannotator browser over that static patch, primes the annotation surface, binds the " +
-      "pinned stack for start_review_wave, and returns the full flow guidance. No parameters: " +
-      "the stack snapshot comes only from the launch handoff. Single-use per session.",
-    promptSnippet: "Open the launch-bound stacked-PR browser review",
-    promptGuidelines: TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {},
+  registerPerkTool(
+    pi,
+    {
+      name: "open_stack_review",
+      label: "Open stack review",
+      description:
+        "Open the launch-bound stacked-PR browser review (the perk objective stack review " +
+        "session's ONE opener): verifies the pinned combined patch's digest, starts the " +
+        "plannotator browser over that static patch, primes the annotation surface, binds the " +
+        "pinned stack for start_review_wave, and returns the full flow guidance. No parameters: " +
+        "the stack snapshot comes only from the launch handoff. Single-use per session.",
+      promptSnippet: "Open the launch-bound stacked-PR browser review",
+      promptGuidelines: TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {},
+      },
+      async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+        return await executeOpenStackReview(
+          pi,
+          ctx,
+          latch,
+          annotations,
+          status,
+          stackPin,
+          openStackBrowser,
+          deps,
+        );
+      },
     },
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return await executeOpenStackReview(
-        pi,
-        ctx,
-        latch,
-        annotations,
-        status,
-        stackPin,
-        openStackBrowser,
-        deps,
-      );
-    },
-  });
+    { stages: ["stack-review"], gated: "blocked", kind: "interactive" },
+  );
 }
 
 /**

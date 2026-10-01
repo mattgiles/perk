@@ -67,7 +67,7 @@ auto-saves — was stated by your launch prompt; this section carries the detail
   human to `/gist-save`.
 - If `plan_review` reports it was **skipped or unavailable**, present the complete gist; the
   **human** runs **`/gist-save`** (artifact-first: it re-reads the draft through the same save
-  seam). The direct `gist_save` tool call remains the post-gate-exit manual failsafe.
+  seam; a draftless session falls back to a driven save turn, which exits the gate first).
 
 ## The consumption story
 
@@ -82,5 +82,5 @@ metadata beside the gist's own header, which is what marks it adopted.
 - **Judgment** — what the intent is, what bounds it, which scope fits — is yours.
 - **User interaction** — clarifying the desire and its constraints — is yours.
 - **The durable write** — creating the gist via the approval-driven save (`plan_review` → the
-  save seam), with `gist_save`/`/gist-save` as the failsafe — is yours; it is the read-only →
-  read-write boundary, the same way `plan_save` is for plans.
+  save seam), with the human's `/gist-save` as the failsafe — is yours; it is the read-only →
+  read-write boundary, the same way the plan save is for plans.

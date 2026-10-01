@@ -27,7 +27,8 @@ import {
   recordSessionPointer,
   type SessionPointer,
 } from "./substrate/sessionPointers.ts";
-import { READ_ONLY_CONTEXT, READ_ONLY_TOOLS } from "./substrate/toolGating.ts";
+import { readOnlyContext } from "./substrate/toolGating.ts";
+import { gatedToolsFor } from "./substrate/toolPolicy.ts";
 import { WORKFLOW_STATE_TYPE } from "./substrate/workflowState.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 
@@ -194,7 +195,7 @@ test("composition: an env-child adopts through the real ports — derived identi
     assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, true);
     const injected = await h.emitBeforeAgentStart();
     assert.ok(
-      injected.some((m) => m.content === READ_ONLY_CONTEXT),
+      injected.some((m) => m.content === readOnlyContext()),
       "the read-only mode context is injected",
     );
   } finally {
@@ -272,7 +273,7 @@ test("regression: a corrupt handoff — cold, the loud unclaimed path with the g
     );
     const injected = await b.emitBeforeAgentStart();
     assert.ok(
-      injected.some((m) => m.content === READ_ONLY_CONTEXT),
+      injected.some((m) => m.content === readOnlyContext()),
       "the read-only mode context is injected",
     );
   } finally {
@@ -419,10 +420,8 @@ test("composition: a post-gate branch-read failure leaves the gate applied and r
     "setActiveToolsByName",
     function (this: AgentSession, names: string[]) {
       original.call(this, names);
-      if (
-        names.length === READ_ONLY_TOOLS.length &&
-        names.every((name, i) => name === READ_ONLY_TOOLS[i])
-      ) {
+      const gated = new Set(gatedToolsFor("implement"));
+      if (names.length === gated.size && names.every((name) => gated.has(name))) {
         gateSynced = true;
       }
     },

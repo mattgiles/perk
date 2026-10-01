@@ -45,8 +45,10 @@ import { registerPerkCommand } from "../../../substrate/command.ts";
 import { type CiCheck, loadPerkConfig } from "../../../substrate/config.ts";
 import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "../../../substrate/modelVisible.ts";
 import { paramsOf, stringParam } from "../../../substrate/toolParams.ts";
+import { WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import { branchOf, rebuildWorkflowState } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
+import { registerPerkTool } from "../../perkTool.ts";
 
 /** The result of running one configured check. `passed = exitCode === 0`. */
 export interface CiCheckResult {
@@ -518,58 +520,62 @@ export function installCiBindings(pi: ExtensionAPI): void {
     default: false,
   });
 
-  pi.registerTool({
-    name: "run_ci",
-    label: "Run CI checks",
-    description:
-      "Run the project's configured CI checks and report pass/fail + failure output. " +
-      "Read-only: never edits, fixes, or loops — analyze the failure, fix it in your own turn, " +
-      "then call run_ci again to re-verify. You own the Run→Report→Fix→Verify loop. " +
-      "A green run-all report is definitive — stop verifying and move on.",
-    promptSnippet: "Run the configured CI checks and report results (never auto-fixes)",
-    promptGuidelines: [
-      "run_ci RUNS the configured CI checks and REPORTS results — it never edits, fixes, or loops.",
-      "Analyze any failure yourself, fix it in your own turn, then call run_ci again to re-verify.",
-      "Pass run_ci a configured check name — or a comma-separated list of names — to run just those checks; omit it to run all. Checks run concurrently; results are reported in declared order.",
-      "You own the Run→Report→Fix→Verify loop; run_ci is a stateless oracle, not an auto-fixer.",
-      "For check-level verification prefer run_ci over invoking the project's check commands via bash — narrow, targeted commands (e.g. one test file) remain fine while iterating.",
-      "A green run-all run_ci report (no check argument) is definitive: the change is verified — do not re-run checks, subsets, or the underlying commands to double-check it; glob-skipped checks are intentionally out of scope for the diff.",
-    ],
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        check: {
-          type: "string",
-          description: "optional check name(s), comma-separated; omit to run all",
+  registerPerkTool(
+    pi,
+    {
+      name: "run_ci",
+      label: "Run CI checks",
+      description:
+        "Run the project's configured CI checks and report pass/fail + failure output. " +
+        "Read-only: never edits, fixes, or loops — analyze the failure, fix it in your own turn, " +
+        "then call run_ci again to re-verify. You own the Run→Report→Fix→Verify loop. " +
+        "A green run-all report is definitive — stop verifying and move on.",
+      promptSnippet: "Run the configured CI checks and report results (never auto-fixes)",
+      promptGuidelines: [
+        "run_ci RUNS the configured CI checks and REPORTS results — it never edits, fixes, or loops.",
+        "Analyze any failure yourself, fix it in your own turn, then call run_ci again to re-verify.",
+        "Pass run_ci a configured check name — or a comma-separated list of names — to run just those checks; omit it to run all. Checks run concurrently; results are reported in declared order.",
+        "You own the Run→Report→Fix→Verify loop; run_ci is a stateless oracle, not an auto-fixer.",
+        "For check-level verification prefer run_ci over invoking the project's check commands via bash — narrow, targeted commands (e.g. one test file) remain fine while iterating.",
+        "A green run-all run_ci report (no check argument) is definitive: the change is verified — do not re-run checks, subsets, or the underlying commands to double-check it; glob-skipped checks are intentionally out of scope for the diff.",
+      ],
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          check: {
+            type: "string",
+            description: "optional check name(s), comma-separated; omit to run all",
+          },
         },
       },
+      async execute(_toolCallId, params, _signal, onUpdate, ctx) {
+        // Tool-boundary decode: absent → undefined (run all); mistyped → a bad_input
+        // CiReport refusal in the executor's native vocabulary (mirrors the unknown_check shape).
+        const p = paramsOf(params);
+        const check = p === null ? undefined : stringParam(p, "check");
+        if (check === null) {
+          return {
+            content: [{ type: "text", text: "run_ci failed: `check` must be a string" }],
+            details: {
+              ok: false,
+              passed: false,
+              checks: [],
+              error_type: "bad_input",
+              error: "`check` must be a string",
+            },
+          } satisfies CiResult;
+        }
+        // Thread the tool's partial-result channel in as the progress sink. Partials are
+        // replace-in-place, never persisted, never sent to the model; they are mode-agnostic
+        // (they also serialize in JSON/RPC modes). The honest `in_progress` marker keeps the
+        // placeholder `passed:false` from being misread by any `tool_execution_update` listener.
+        return runCiImpl(pi, ctx, { check }, latch, onUpdate);
+      },
     },
-    async execute(_toolCallId, params, _signal, onUpdate, ctx) {
-      // Tool-boundary decode: absent → undefined (run all); mistyped → a bad_input
-      // CiReport refusal in the executor's native vocabulary (mirrors the unknown_check shape).
-      const p = paramsOf(params);
-      const check = p === null ? undefined : stringParam(p, "check");
-      if (check === null) {
-        return {
-          content: [{ type: "text", text: "run_ci failed: `check` must be a string" }],
-          details: {
-            ok: false,
-            passed: false,
-            checks: [],
-            error_type: "bad_input",
-            error: "`check` must be a string",
-          },
-        } satisfies CiResult;
-      }
-      // Thread the tool's partial-result channel in as the progress sink. Partials are
-      // replace-in-place, never persisted, never sent to the model; they are mode-agnostic
-      // (they also serialize in JSON/RPC modes). The honest `in_progress` marker keeps the
-      // placeholder `passed:false` from being misread by any `tool_execution_update` listener.
-      return runCiImpl(pi, ctx, { check }, latch, onUpdate);
-    },
-  });
+    { stages: [...WORKTREE_STAGES], gated: "blocked", kind: "action" },
+  );
 
   registerPerkCommand(pi, "ci", {
     description: "Run the project's configured CI checks and report results (never auto-fixes).",

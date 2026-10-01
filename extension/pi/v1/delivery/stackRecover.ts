@@ -23,7 +23,9 @@ import { render } from "../../../substrate/prompts.ts";
 import { failFor, ok } from "../../../substrate/result.ts";
 import type { ToolGating } from "../../../substrate/toolGating.ts";
 import { booleanParam, idParam, paramsOf, stringParam } from "../../../substrate/toolParams.ts";
+import { WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import { resolveStackObjective } from "../../../substrate/workflowState.ts";
+import { registerPerkTool } from "../../perkTool.ts";
 import { driveStackReconcile, evidenceLines, registerStackDrivingCommand } from "./stackDrive.ts";
 import type { StackResult } from "./stackSync.ts";
 
@@ -192,67 +194,71 @@ const RECOVER_TOOL_GUIDELINES = [
 /** Install the stacked-delivery recovery bindings: the `objective_stack_recover` typed tool +
  * the `/objective-recover` driving command. */
 export function installStackRecoverBindings(pi: ExtensionAPI, gating: ToolGating): void {
-  pi.registerTool({
-    name: "objective_stack_recover",
-    label: "Objective stack recover",
-    description:
-      "Conclude an objective's unresolved stack operations (classify against fresh authority; " +
-      "roll forward what verified complete — LAND included; abandon with proof under " +
-      "abandon+confirm; accept an externally merged LAND prefix as a recorded breach under " +
-      "accept_prefix+confirm) and sweep orphaned sync residue. dry_run reports without acting. " +
-      "Delegates to the perk cold door.",
-    promptSnippet: "Conclude unresolved stack operations + sweep orphaned residue",
-    promptGuidelines: RECOVER_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        objective: {
-          type: ["string", "number"],
-          description: "The objective issue id (inferred from the session when omitted).",
-        },
-        operation: {
-          type: "string",
-          description: "The target operation ULID (required when several are unresolved).",
-        },
-        dry_run: {
-          type: "boolean",
-          description: "Classify and report only — no roll-forward, no abandon, no sweep.",
-        },
-        abandon: {
-          type: "boolean",
-          description: "Abandon the target operation (requires an all-before proof + confirm).",
-        },
-        accept_prefix: {
-          type: "boolean",
-          description:
-            "Accept an externally merged LAND prefix as a recorded degraded-atomicity breach " +
-            "(requires an external_prefix classification + confirm).",
-        },
-        confirm: {
-          type: "boolean",
-          description: "Explicit human approval (required with abandon or accept_prefix).",
+  registerPerkTool(
+    pi,
+    {
+      name: "objective_stack_recover",
+      label: "Objective stack recover",
+      description:
+        "Conclude an objective's unresolved stack operations (classify against fresh authority; " +
+        "roll forward what verified complete — LAND included; abandon with proof under " +
+        "abandon+confirm; accept an externally merged LAND prefix as a recorded breach under " +
+        "accept_prefix+confirm) and sweep orphaned sync residue. dry_run reports without acting. " +
+        "Delegates to the perk cold door.",
+      promptSnippet: "Conclude unresolved stack operations + sweep orphaned residue",
+      promptGuidelines: RECOVER_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          objective: {
+            type: ["string", "number"],
+            description: "The objective issue id (inferred from the session when omitted).",
+          },
+          operation: {
+            type: "string",
+            description: "The target operation ULID (required when several are unresolved).",
+          },
+          dry_run: {
+            type: "boolean",
+            description: "Classify and report only — no roll-forward, no abandon, no sweep.",
+          },
+          abandon: {
+            type: "boolean",
+            description: "Abandon the target operation (requires an all-before proof + confirm).",
+          },
+          accept_prefix: {
+            type: "boolean",
+            description:
+              "Accept an externally merged LAND prefix as a recorded degraded-atomicity breach " +
+              "(requires an external_prefix classification + confirm).",
+          },
+          confirm: {
+            type: "boolean",
+            description: "Explicit human approval (required with abandon or accept_prefix).",
+          },
         },
       },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const decoded = decodeRecoverParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "objective-recover",
+            "objective_stack_recover",
+          )(
+            "objective_stack_recover takes { objective?, operation?, dry_run?, abandon?, " +
+              "accept_prefix?, confirm? } — dry_run composes with neither conclusion flag, and " +
+              "abandon and accept_prefix are mutually exclusive",
+            "bad_input",
+          );
+        }
+        return stackRecover(pi, ctx, decoded);
+      },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const decoded = decodeRecoverParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "objective-recover",
-          "objective_stack_recover",
-        )(
-          "objective_stack_recover takes { objective?, operation?, dry_run?, abandon?, " +
-            "accept_prefix?, confirm? } — dry_run composes with neither conclusion flag, and " +
-            "abandon and accept_prefix are mutually exclusive",
-          "bad_input",
-        );
-      }
-      return stackRecover(pi, ctx, decoded);
-    },
-  });
+    { stages: [...WORKTREE_STAGES], gated: "blocked", kind: "action" },
+  );
 
   registerStackDrivingCommand(pi, gating, {
     name: "objective-recover",

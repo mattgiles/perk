@@ -23,7 +23,9 @@ import { render } from "../../../substrate/prompts.ts";
 import { failFor, ok } from "../../../substrate/result.ts";
 import type { ToolGating } from "../../../substrate/toolGating.ts";
 import { booleanParam, idParam, paramsOf } from "../../../substrate/toolParams.ts";
+import { WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import { resolveStackObjective } from "../../../substrate/workflowState.ts";
+import { registerPerkTool } from "../../perkTool.ts";
 import { driveStackReconcile, evidenceLines, registerStackDrivingCommand } from "./stackDrive.ts";
 import { findingLines } from "./stackStatus.ts";
 import type { StackResult } from "./stackSync.ts";
@@ -169,48 +171,52 @@ const LAND_TOOL_GUIDELINES = [
 /** Install the stacked-delivery landing bindings: the `objective_stack_land` typed tool +
  * the `/objective-land` driving command. */
 export function installStackLandBindings(pi: ExtensionAPI, gating: ToolGating): void {
-  pi.registerTool({
-    name: "objective_stack_land",
-    label: "Objective stack land",
-    description:
-      "Land an objective's remaining delivery train atomically: preview readiness (dry_run), " +
-      "or merge the whole train in one journaled operation (merge-async for a multi-layer " +
-      "train; a SHA-pinned direct squash for the dynamic singleton), finalize every layer, " +
-      "and close the objective once every node is terminal. Mutating: requires confirm: true " +
-      "(preview first with dry_run: true). Delegates to the perk cold door.",
-    promptSnippet: "Land the objective's delivery train atomically (confirm-gated)",
-    promptGuidelines: LAND_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        objective: {
-          type: ["string", "number"],
-          description: "The objective issue id (inferred from the session when omitted).",
-        },
-        dry_run: {
-          type: "boolean",
-          description: "Preview landing readiness and the land plan — read-only.",
-        },
-        confirm: {
-          type: "boolean",
-          description: "Explicit human approval (required for the mutating call).",
+  registerPerkTool(
+    pi,
+    {
+      name: "objective_stack_land",
+      label: "Objective stack land",
+      description:
+        "Land an objective's remaining delivery train atomically: preview readiness (dry_run), " +
+        "or merge the whole train in one journaled operation (merge-async for a multi-layer " +
+        "train; a SHA-pinned direct squash for the dynamic singleton), finalize every layer, " +
+        "and close the objective once every node is terminal. Mutating: requires confirm: true " +
+        "(preview first with dry_run: true). Delegates to the perk cold door.",
+      promptSnippet: "Land the objective's delivery train atomically (confirm-gated)",
+      promptGuidelines: LAND_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          objective: {
+            type: ["string", "number"],
+            description: "The objective issue id (inferred from the session when omitted).",
+          },
+          dry_run: {
+            type: "boolean",
+            description: "Preview landing readiness and the land plan — read-only.",
+          },
+          confirm: {
+            type: "boolean",
+            description: "Explicit human approval (required for the mutating call).",
+          },
         },
       },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const decoded = decodeLandParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "objective-land",
+            "objective_stack_land",
+          )("objective_stack_land takes { objective?, dry_run?, confirm? }", "bad_input");
+        }
+        return stackLand(pi, ctx, decoded);
+      },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const decoded = decodeLandParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "objective-land",
-          "objective_stack_land",
-        )("objective_stack_land takes { objective?, dry_run?, confirm? }", "bad_input");
-      }
-      return stackLand(pi, ctx, decoded);
-    },
-  });
+    { stages: [...WORKTREE_STAGES], gated: "blocked", kind: "action" },
+  );
 
   registerStackDrivingCommand(pi, gating, {
     name: "objective-land",

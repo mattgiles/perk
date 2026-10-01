@@ -40,7 +40,9 @@ import {
   stringParam,
   type ToolParams,
 } from "../../../substrate/toolParams.ts";
+import { WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import type { Severity } from "../../../surfaces/report.ts";
+import { registerPerkTool } from "../../perkTool.ts";
 
 // ------------------------------------------------------------------------ params
 
@@ -262,93 +264,97 @@ const TOOL_GUIDELINES = [
 
 /** Install the `submit_pr_review` tool (the review doors register no posting tools of their own). */
 export function installCuratedSubmissionBindings(pi: ExtensionAPI): void {
-  pi.registerTool({
-    name: "submit_pr_review",
-    label: "Submit PR review",
-    description:
-      "Submit the human-curated review-door outcome to the target PR as ONE atomic review " +
-      "(comments + body + event) via the perk cold door — the posting surface of the " +
-      "/pr-review-terminal, /pr-review-browser, and /stack-review-browser doors (a stack " +
-      "review makes one real call per member PR). dry_run validates the anchors without " +
-      "posting (the repair loop); a real submission records last_review and appends the " +
-      "review_posts ledger row in workflow-state.",
-    promptSnippet: "Submit the curated review batch to the PR",
-    promptGuidelines: TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["pr", "event", "body"],
-      properties: {
-        pr: { type: "number", description: "The foreign PR number being reviewed." },
-        event: {
-          type: "string",
-          enum: ["approve", "request-changes", "comment"],
-          description:
-            "The review event, settled with the human during triage. Formal events " +
-            "(approve/request-changes) additionally raise a blocking confirm dialog.",
-        },
-        body: {
-          type: "string",
-          description:
-            "The overall review body (markdown). comment/request-changes require a non-empty " +
-            "body; unanchorable findings fold in here.",
-        },
-        comments: {
-          type: "array",
-          description:
-            "The curated inline comments — human-authored or human-approved only, each anchored " +
-            "to a line in the PR diff. Single-PR mode: never re-anchor a child's finding. Stack " +
-            "mode: the parent re-anchors combined-diff findings into per-PR coordinates under " +
-            "the dry-run loop.",
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["path", "line", "body"],
-            properties: {
-              path: { type: "string", description: "The changed file path." },
-              line: { type: "number", description: "A line present in the PR diff." },
-              side: {
-                type: "string",
-                enum: ["LEFT", "RIGHT"],
-                description: "The diff side the line anchors to (default RIGHT).",
+  registerPerkTool(
+    pi,
+    {
+      name: "submit_pr_review",
+      label: "Submit PR review",
+      description:
+        "Submit the human-curated review-door outcome to the target PR as ONE atomic review " +
+        "(comments + body + event) via the perk cold door — the posting surface of the " +
+        "/pr-review-terminal, /pr-review-browser, and /stack-review-browser doors (a stack " +
+        "review makes one real call per member PR). dry_run validates the anchors without " +
+        "posting (the repair loop); a real submission records last_review and appends the " +
+        "review_posts ledger row in workflow-state.",
+      promptSnippet: "Submit the curated review batch to the PR",
+      promptGuidelines: TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["pr", "event", "body"],
+        properties: {
+          pr: { type: "number", description: "The foreign PR number being reviewed." },
+          event: {
+            type: "string",
+            enum: ["approve", "request-changes", "comment"],
+            description:
+              "The review event, settled with the human during triage. Formal events " +
+              "(approve/request-changes) additionally raise a blocking confirm dialog.",
+          },
+          body: {
+            type: "string",
+            description:
+              "The overall review body (markdown). comment/request-changes require a non-empty " +
+              "body; unanchorable findings fold in here.",
+          },
+          comments: {
+            type: "array",
+            description:
+              "The curated inline comments — human-authored or human-approved only, each anchored " +
+              "to a line in the PR diff. Single-PR mode: never re-anchor a child's finding. Stack " +
+              "mode: the parent re-anchors combined-diff findings into per-PR coordinates under " +
+              "the dry-run loop.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["path", "line", "body"],
+              properties: {
+                path: { type: "string", description: "The changed file path." },
+                line: { type: "number", description: "A line present in the PR diff." },
+                side: {
+                  type: "string",
+                  enum: ["LEFT", "RIGHT"],
+                  description: "The diff side the line anchors to (default RIGHT).",
+                },
+                body: { type: "string", description: "The comment (markdown)." },
               },
-              body: { type: "string", description: "The comment (markdown)." },
             },
           },
-        },
-        dry_run: {
-          type: "boolean",
-          description:
-            "Validate the batch + anchors without posting (the anchor-repair loop). No gates, " +
-            "no last_review record.",
-        },
-        allow_repost: {
-          type: "boolean",
-          description:
-            "Deliberately post ANOTHER review to a PR that already has a review_posts ledger " +
-            "row in this session — the enforced resume guard refuses with already_posted " +
-            "otherwise. Never pass it to work around a stack-resume refusal.",
+          dry_run: {
+            type: "boolean",
+            description:
+              "Validate the batch + anchors without posting (the anchor-repair loop). No gates, " +
+              "no last_review record.",
+          },
+          allow_repost: {
+            type: "boolean",
+            description:
+              "Deliberately post ANOTHER review to a PR that already has a review_posts ledger " +
+              "row in this session — the enforced resume guard refuses with already_posted " +
+              "otherwise. Never pass it to work around a stack-resume refusal.",
+          },
         },
       },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const fail = failFor(ctx, "review", "submit_pr_review");
+        const decoded = decodeSubmitParams(params);
+        if (decoded === null) {
+          return fail(
+            "submit_pr_review needs { pr: int, event: 'approve'|'request-changes'|'comment', " +
+              "body: string, comments?: [{path, line: int, side?: 'LEFT'|'RIGHT', body}], " +
+              "dry_run?: bool }",
+            "bad_input",
+          );
+        }
+        const outcome = await submitCuratedReview(decoded, {
+          submitter: createColdDoorReviewSubmitter(pi, ctx),
+          gate: formalEventGateFor(ctx),
+          session: openBranchWorkflowSession(pi, ctx),
+        });
+        return renderSubmitOutcome(fail, decoded, outcome);
+      },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const fail = failFor(ctx, "review", "submit_pr_review");
-      const decoded = decodeSubmitParams(params);
-      if (decoded === null) {
-        return fail(
-          "submit_pr_review needs { pr: int, event: 'approve'|'request-changes'|'comment', " +
-            "body: string, comments?: [{path, line: int, side?: 'LEFT'|'RIGHT', body}], " +
-            "dry_run?: bool }",
-          "bad_input",
-        );
-      }
-      const outcome = await submitCuratedReview(decoded, {
-        submitter: createColdDoorReviewSubmitter(pi, ctx),
-        gate: formalEventGateFor(ctx),
-        session: openBranchWorkflowSession(pi, ctx),
-      });
-      return renderSubmitOutcome(fail, decoded, outcome);
-    },
-  });
+    { stages: [...WORKTREE_STAGES, "stack-review"], gated: "blocked", kind: "action" },
+  );
 }

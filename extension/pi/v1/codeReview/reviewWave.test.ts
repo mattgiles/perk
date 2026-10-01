@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { PERK_TOOLS, STAGE_TOOLS } from "../../../substrate/toolGating.ts";
+import { isPerkTool, stageToolsFor, WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import {
   createFakeSubagents,
   type FakeSubagents,
@@ -20,6 +20,7 @@ import {
 } from "../../../testing/fakeSubagents.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
+import { ensureToolCatalog } from "../../../testing/toolCatalog.ts";
 import {
   type AdversarialReviewAngle,
   type PinnedStack,
@@ -1113,11 +1114,12 @@ test("installReviewWaveBindings registers exactly the two tools over registratio
   assert.match((collectDef.promptGuidelines ?? []).join("\n"), /honestly/);
 });
 
-test("the review-wave pair is in the tool census (PERK_TOOLS + every worktree stage list)", () => {
+test("the review-wave pair is in the tool catalog and every worktree stage's diet", async () => {
+  await ensureToolCatalog();
   for (const name of ["start_review_wave", "collect_review_wave"]) {
-    assert.ok(PERK_TOOLS.includes(name), `${name} must be in PERK_TOOLS`);
-    for (const stage of ["implement", "submit", "address", "land", "learn"]) {
-      assert.ok(STAGE_TOOLS[stage]?.includes(name), `${stage} must carry ${name}`);
+    assert.ok(isPerkTool(name), `${name} must be catalogued`);
+    for (const stage of WORKTREE_STAGES) {
+      assert.ok(stageToolsFor(stage)?.includes(name), `${stage} must carry ${name}`);
     }
   }
 });

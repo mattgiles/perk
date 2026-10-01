@@ -10,8 +10,9 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { PERK_TOOLS, STAGE_TOOLS } from "../../../substrate/toolGating.ts";
+import { isPerkTool, stageToolsFor, WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import { loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
+import { ensureToolCatalog } from "../../../testing/toolCatalog.ts";
 import {
   clearAnnotationSurface,
   createAnnotationState,
@@ -1787,10 +1788,11 @@ test("installAnnotationBindings registers exactly the one tool; a fresh state st
   assert.equal((unprimed.details as FailDetails).error_type, "no_surface");
 });
 
-test("push_annotations is in the tool census (PERK_TOOLS + every worktree stage list)", () => {
-  assert.ok(PERK_TOOLS.includes("push_annotations"));
-  for (const stage of ["implement", "submit", "address", "land", "learn"]) {
-    assert.ok(STAGE_TOOLS[stage]?.includes("push_annotations"), stage);
+test("push_annotations is in the tool catalog and every worktree stage's diet", async () => {
+  await ensureToolCatalog();
+  assert.ok(isPerkTool("push_annotations"));
+  for (const stage of WORKTREE_STAGES) {
+    assert.ok(stageToolsFor(stage)?.includes("push_annotations"), stage);
   }
 });
 

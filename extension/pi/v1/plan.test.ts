@@ -34,7 +34,7 @@ import { sessionDataDir } from "../../substrate/cache.ts";
 import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import { digestSessionData } from "../../substrate/sessionData.ts";
 import { readSessionPointers } from "../../substrate/sessionPointers.ts";
-import { READ_ONLY_CONTEXT, type ToolGating } from "../../substrate/toolGating.ts";
+import { readOnlyContext, type ToolGating } from "../../substrate/toolGating.ts";
 import type { BranchEntry, EntrySink } from "../../substrate/workflowState.ts";
 import { rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
@@ -229,7 +229,7 @@ test("plan guidance follows the persisted mode: a stuck gate (failed read-write 
       false,
       "plan guidance follows the persisted mode (the human's declared intent)",
     );
-    const modeContext = { customType: "perk:mode-context", content: READ_ONLY_CONTEXT };
+    const modeContext = { customType: "perk:mode-context", content: readOnlyContext() };
     const user = { role: "user", content: "a normal message" };
     const surviving = await h.emitContext([
       { customType: PLAN_CONTEXT_TYPE, content: "[PLAN AUTHORING] stale" },

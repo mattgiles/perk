@@ -17,7 +17,7 @@ import {
   type DraftReviewWaveState,
   primeDraftReviewContext,
 } from "../../authoring/review/draftContext.ts";
-import { PERK_TOOLS, STAGE_TOOLS } from "../../substrate/toolGating.ts";
+import { isPerkTool, stageToolsFor } from "../../substrate/toolPolicy.ts";
 import {
   attachGhostResponder,
   createFakeSubagents,
@@ -32,6 +32,7 @@ import {
   scaffoldRepo,
 } from "../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../testing/memoryAdapter.ts";
+import { ensureToolCatalog } from "../../testing/toolCatalog.ts";
 import type { DraftReviewAngle } from "../../waves/draftReviewWave.ts";
 import { PONYTAIL_PACKAGE_ROOT } from "../../waves/ponytail.ts";
 import { reportWaveOver } from "../../waves/reportWave.ts";
@@ -989,19 +990,20 @@ test("registerDraftReviewWaveTools registers exactly the two tools over registra
   assert.match((collectDef.promptGuidelines ?? []).join("\n"), /honestly/);
 });
 
-test("the draft-review pair is in the tool census (PERK_TOOLS + the draft-door stage lists)", () => {
+test("the draft-review pair is in the tool catalog and the draft-door stage diets", async () => {
+  await ensureToolCatalog();
   for (const name of ["start_draft_review_wave", "collect_draft_review_wave", "push_annotations"]) {
-    assert.ok(PERK_TOOLS.includes(name), `${name} must be in PERK_TOOLS`);
+    assert.ok(isPerkTool(name), `${name} must be catalogued`);
     // The plan-family lists (/plan-review-browser) + the objective lists
     // (/objective-review-browser — gate-OFF coverage after objectiveApprovalSave).
     for (const stage of ["plan", "save", "objective-plan", "objective-author", "objective-save"]) {
-      assert.ok(STAGE_TOOLS[stage]?.includes(name), `${stage} must carry ${name}`);
+      assert.ok(stageToolsFor(stage)?.includes(name), `${stage} must carry ${name}`);
     }
   }
   // The objective door's guidance names plan_review (it routes to the objective review arm
-  // there), so the two objective stage lists must carry it (drive coverage).
+  // there), so the two objective stage diets must carry it (drive coverage).
   for (const stage of ["objective-author", "objective-save"]) {
-    assert.ok(STAGE_TOOLS[stage]?.includes("plan_review"), `${stage} must carry plan_review`);
+    assert.ok(stageToolsFor(stage)?.includes("plan_review"), `${stage} must carry plan_review`);
   }
 });
 

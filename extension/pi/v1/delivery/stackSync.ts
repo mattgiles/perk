@@ -46,12 +46,14 @@ import { acquireResolverLease, releaseResolverClaim } from "../../../substrate/r
 import { failFor, ok, type Result } from "../../../substrate/result.ts";
 import type { ToolGating } from "../../../substrate/toolGating.ts";
 import { booleanParam, idParam, paramsOf, stringParam } from "../../../substrate/toolParams.ts";
+import { WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import {
   conflictResolutionAttempts,
   resolveStackObjective,
   setConflictAttempts,
 } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
+import { registerPerkTool } from "../../perkTool.ts";
 import type { StackConflictResolver, StackResolutionOutcome } from "./stackConflictResolver.ts";
 import { registerStackDrivingCommand } from "./stackDrive.ts";
 
@@ -481,172 +483,193 @@ export function installStackSyncBindings(
   resolver: StackConflictResolver,
   delivery: StackResolutionDelivery = {},
 ): void {
-  pi.registerTool({
-    name: "objective_stack_sync",
-    label: "Objective stack sync",
-    description:
-      "Synchronize an objective's published stack after an amend or base advance: preview " +
-      "(dry_run), cascade, resume a resolved conflict continuation (continue), discard it " +
-      "(abort), or dispatch the conflict-resolver subagent into the retained worktree " +
-      "(resolve, on explicit human request). Modes are mutually exclusive. Delegates to the " +
-      "perk cold door; call mutating modes only on explicit human approval.",
-    promptSnippet:
-      "Cascade-sync the objective's published stack (preview/continue/abort/resolve modes)",
-    promptGuidelines: SYNC_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        objective: {
-          type: ["string", "number"],
-          description: "The objective issue id (inferred from the session when omitted).",
-        },
-        base: {
-          type: "boolean",
-          description: "Also advance the stack root onto the current base head.",
-        },
-        dry_run: {
-          type: "boolean",
-          description: "Preview the cascade — no journal, push, or retention.",
-        },
-        continue: {
-          type: "boolean",
-          description:
-            "Resume the retained conflict continuation (after the rebase was finished — by " +
-            "the human or by the dispatched resolver; publication stays the human's call).",
-        },
-        abort: {
-          type: "boolean",
-          description: "Discard the retained conflict continuation (worktree + temp refs).",
-        },
-        resolve: {
-          type: "boolean",
-          description:
-            "Dispatch the conflict-resolver subagent into the retained continuation worktree " +
-            "(explicit human request; composes with no other mode).",
+  registerPerkTool(
+    pi,
+    {
+      name: "objective_stack_sync",
+      label: "Objective stack sync",
+      description:
+        "Synchronize an objective's published stack after an amend or base advance: preview " +
+        "(dry_run), cascade, resume a resolved conflict continuation (continue), discard it " +
+        "(abort), or dispatch the conflict-resolver subagent into the retained worktree " +
+        "(resolve, on explicit human request). Modes are mutually exclusive. Delegates to the " +
+        "perk cold door; call mutating modes only on explicit human approval.",
+      promptSnippet:
+        "Cascade-sync the objective's published stack (preview/continue/abort/resolve modes)",
+      promptGuidelines: SYNC_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          objective: {
+            type: ["string", "number"],
+            description: "The objective issue id (inferred from the session when omitted).",
+          },
+          base: {
+            type: "boolean",
+            description: "Also advance the stack root onto the current base head.",
+          },
+          dry_run: {
+            type: "boolean",
+            description: "Preview the cascade — no journal, push, or retention.",
+          },
+          continue: {
+            type: "boolean",
+            description:
+              "Resume the retained conflict continuation (after the rebase was finished — by " +
+              "the human or by the dispatched resolver; publication stays the human's call).",
+          },
+          abort: {
+            type: "boolean",
+            description: "Discard the retained conflict continuation (worktree + temp refs).",
+          },
+          resolve: {
+            type: "boolean",
+            description:
+              "Dispatch the conflict-resolver subagent into the retained continuation worktree " +
+              "(explicit human request; composes with no other mode).",
+          },
         },
       },
-    },
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const decoded = decodeSyncParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "objective-sync",
-          "objective_stack_sync",
-        )(
-          "objective_stack_sync takes { objective?, base?, dry_run?, continue?, abort?, " +
-            "resolve? } — continue/abort are mutually exclusive and take no other mode flag; " +
-            "resolve composes with nothing",
-          "bad_input",
-        );
-      }
-      if (decoded.resolve) {
-        const objective = resolveStackObjective(decoded.objective, ctx);
-        const fail = failFor(ctx, "objective-sync", "objective_stack_sync");
-        if (objective === null) return fail(STACK_NO_OBJECTIVE_MESSAGE, "no_objective");
-        const outcome = await runSyncResolution(pi, ctx, objective, null, resolver, signal);
-        if (outcome.kind !== "executed") {
-          if (outcome.isCurrent()) return fail(outcome.reason, outcome.kind);
-          return {
-            content: [{ type: "text", text: `objective_stack_sync failed: ${outcome.reason}` }],
-            details: { ok: false, error: outcome.reason, error_type: outcome.kind },
-          };
+      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+        const decoded = decodeSyncParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "objective-sync",
+            "objective_stack_sync",
+          )(
+            "objective_stack_sync takes { objective?, base?, dry_run?, continue?, abort?, " +
+              "resolve? } — continue/abort are mutually exclusive and take no other mode flag; " +
+              "resolve composes with nothing",
+            "bad_input",
+          );
         }
-        const result = stackResolutionResult(outcome);
-        return deliverSyncResolution(pi, ctx, outcome, result, delivery.guidance, delivery.suffix);
-      }
-      const result = await stackSync(pi, ctx, decoded);
-      // The auto-fire drive (§8.51): after the tool result settles, a mutating sync/continue
-      // that refused `rebase_conflict` dispatches the resolver. Skipped for `resolve` (that IS
-      // the dispatch) and when no objective resolved (the fail was `no_objective`).
-      if (!decoded.resolve) {
-        const objective = resolveStackObjective(decoded.objective, ctx);
-        if (objective !== null) {
-          const mode: SyncMode = decoded.continue_ ? "continue" : decoded.abort ? "abort" : "sync";
-          const failure = result.details.ok ? null : { errorType: result.details.error_type ?? "" };
-          if (autoDispatchEligible(mode, decoded.dryRun, failure)) {
-            const outcome = await runSyncResolution(
-              pi,
-              ctx,
-              objective,
-              result.details.ok ? null : result.details.error,
-              resolver,
-              signal,
-            );
-            // Failure arms only report: the tool result already carries the `rebase_conflict`
-            // refusal, so a miss here must never mask it.
-            if (outcome.kind === "executed") {
-              return deliverSyncResolution(
+        if (decoded.resolve) {
+          const objective = resolveStackObjective(decoded.objective, ctx);
+          const fail = failFor(ctx, "objective-sync", "objective_stack_sync");
+          if (objective === null) return fail(STACK_NO_OBJECTIVE_MESSAGE, "no_objective");
+          const outcome = await runSyncResolution(pi, ctx, objective, null, resolver, signal);
+          if (outcome.kind !== "executed") {
+            if (outcome.isCurrent()) return fail(outcome.reason, outcome.kind);
+            return {
+              content: [{ type: "text", text: `objective_stack_sync failed: ${outcome.reason}` }],
+              details: { ok: false, error: outcome.reason, error_type: outcome.kind },
+            };
+          }
+          const result = stackResolutionResult(outcome);
+          return deliverSyncResolution(
+            pi,
+            ctx,
+            outcome,
+            result,
+            delivery.guidance,
+            delivery.suffix,
+          );
+        }
+        const result = await stackSync(pi, ctx, decoded);
+        // The auto-fire drive (§8.51): after the tool result settles, a mutating sync/continue
+        // that refused `rebase_conflict` dispatches the resolver. Skipped for `resolve` (that IS
+        // the dispatch) and when no objective resolved (the fail was `no_objective`).
+        if (!decoded.resolve) {
+          const objective = resolveStackObjective(decoded.objective, ctx);
+          if (objective !== null) {
+            const mode: SyncMode = decoded.continue_
+              ? "continue"
+              : decoded.abort
+                ? "abort"
+                : "sync";
+            const failure = result.details.ok
+              ? null
+              : { errorType: result.details.error_type ?? "" };
+            if (autoDispatchEligible(mode, decoded.dryRun, failure)) {
+              const outcome = await runSyncResolution(
                 pi,
                 ctx,
-                outcome,
-                result,
-                delivery.guidance,
-                delivery.suffix,
+                objective,
+                result.details.ok ? null : result.details.error,
+                resolver,
+                signal,
               );
-            } else if (outcome.isCurrent()) {
-              if (outcome.kind === "attempt_cap" || outcome.kind === "state_error") {
-                report(ctx, "objective-sync", "error", outcome.reason, { alsoLog: true });
-              } else {
-                report(ctx, "objective-sync", "warning", outcome.reason);
+              // Failure arms only report: the tool result already carries the `rebase_conflict`
+              // refusal, so a miss here must never mask it.
+              if (outcome.kind === "executed") {
+                return deliverSyncResolution(
+                  pi,
+                  ctx,
+                  outcome,
+                  result,
+                  delivery.guidance,
+                  delivery.suffix,
+                );
+              } else if (outcome.isCurrent()) {
+                if (outcome.kind === "attempt_cap" || outcome.kind === "state_error") {
+                  report(ctx, "objective-sync", "error", outcome.reason, { alsoLog: true });
+                } else {
+                  report(ctx, "objective-sync", "warning", outcome.reason);
+                }
               }
             }
           }
         }
-      }
-      return result;
-    },
-  });
-
-  pi.registerTool({
-    name: "objective_stack_adopt",
-    label: "Objective stack adopt",
-    description:
-      "Adopt one node's manually-pushed remote head as the intended stack state, then cascade " +
-      "the layers above it. Mutating: requires confirm: true (preview first with dry_run: " +
-      "true). Delegates to the perk cold door.",
-    promptSnippet: "Adopt a node's manually-pushed head into the stack (confirm-gated)",
-    promptGuidelines: ADOPT_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["node"],
-      properties: {
-        objective: {
-          type: ["string", "number"],
-          description: "The objective issue id (inferred from the session when omitted).",
-        },
-        node: { type: "string", description: "The roadmap node id whose remote head to adopt." },
-        dry_run: {
-          type: "boolean",
-          description: "Preview the adoption cascade — no journal, push, or retention.",
-        },
-        confirm: {
-          type: "boolean",
-          description: "Explicit human approval (required for the mutating call).",
-        },
+        return result;
       },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const decoded = decodeAdoptParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "objective-sync",
-          "objective_stack_adopt",
-        )(
-          "objective_stack_adopt needs { node: <id> } (plus objective?, dry_run?, confirm?)",
-          "bad_input",
-        );
-      }
-      // Adopt never enters the dispatch pipeline: its failures — `rebase_conflict` included —
-      // only ever report through the tool result (pinned here, not via a widened predicate).
-      return stackAdopt(pi, ctx, decoded);
+    { stages: [...WORKTREE_STAGES], gated: "blocked", kind: "orchestration" },
+  );
+
+  registerPerkTool(
+    pi,
+    {
+      name: "objective_stack_adopt",
+      label: "Objective stack adopt",
+      description:
+        "Adopt one node's manually-pushed remote head as the intended stack state, then cascade " +
+        "the layers above it. Mutating: requires confirm: true (preview first with dry_run: " +
+        "true). Delegates to the perk cold door.",
+      promptSnippet: "Adopt a node's manually-pushed head into the stack (confirm-gated)",
+      promptGuidelines: ADOPT_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["node"],
+        properties: {
+          objective: {
+            type: ["string", "number"],
+            description: "The objective issue id (inferred from the session when omitted).",
+          },
+          node: { type: "string", description: "The roadmap node id whose remote head to adopt." },
+          dry_run: {
+            type: "boolean",
+            description: "Preview the adoption cascade — no journal, push, or retention.",
+          },
+          confirm: {
+            type: "boolean",
+            description: "Explicit human approval (required for the mutating call).",
+          },
+        },
+      },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const decoded = decodeAdoptParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "objective-sync",
+            "objective_stack_adopt",
+          )(
+            "objective_stack_adopt needs { node: <id> } (plus objective?, dry_run?, confirm?)",
+            "bad_input",
+          );
+        }
+        // Adopt never enters the dispatch pipeline: its failures — `rebase_conflict` included —
+        // only ever report through the tool result (pinned here, not via a widened predicate).
+        return stackAdopt(pi, ctx, decoded);
+      },
     },
-  });
+    { stages: [...WORKTREE_STAGES], gated: "blocked", kind: "action" },
+  );
 
   registerStackDrivingCommand(pi, gating, {
     name: "objective-sync",
