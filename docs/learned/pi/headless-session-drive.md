@@ -34,9 +34,6 @@ from the right path instead of rediscovering it.
   no in-drive re-engagement) — "Single-prompt drive, NOT a `loop.ts` loop".
 - Never default the model to `getAvailable()[0]` (catalog order, not a curated default; a live
   drive 404'd on it) — leave it undefined — "Never default the model to `getAvailable()[0]`".
-- A stored-credential native provider is available synchronously after registration (Pi 0.99.2);
-  the worker's `resolveAuth` still runs before extension load — "Native-provider availability at
-  initial model selection".
 - Offline e2e drives the REAL runtime with a faux pi-ai model at the `PERK_BIN` seam — "Driving
   the real runtime offline with a faux model (the e2e worker tier)".
 - `session.prompt("/command")` resolves when the command settles, but dispose only after a
@@ -98,7 +95,7 @@ shape, not this one.
 **SDK sessions load none of Pi's CLI built-in extensions.** Since Pi 0.99 the CLI loads
 `codemode`, `tool_search` and MCP as `builtin:<name>` extensions; an SDK-constructed session
 (this runtime-factory path, bare `createAgentSession`) loads them only when the caller supplies
-their factories through `extensionFactories` (pi-coding-agent `docs/sdk.md`). The worker and
+their factories through `extensionFactories` (the package's SDK guide, `sdk.md`). The worker and
 `/btw` supply none, so neither surface gains those tools by construction.
 
 ## A pi SDK pin bump is a session-construction migration audit, not a "verified non-break"
@@ -460,7 +457,7 @@ check the root export list before importing a Pi type by name; mirror/derive dee
 - `@earendil-works/pi-coding-agent` dist —
   `dist/core/{agent-session,agent-session-services,sdk}.{js,d.ts}`,
   `dist/core/{model-registry,model-runtime,model-resolver,settings-manager,session-manager,resource-loader}.js`,
-  `dist/core/model-resolver.d.ts`, `docs/sdk.md`,
+  `dist/core/model-resolver.d.ts`, the package's SDK guide (`sdk.md`),
   `dist/core/compaction/compaction.js`, `dist/modes/rpc/*`, and the nested `@earendil-works/pi-ai`
   (`package.json` `exports`, `dist/compat.d.ts`) — at the version `package.json` `devDependencies`
   pins. The `@earendil-works/*` devDependency pins move in lockstep (the set

@@ -82,7 +82,12 @@ The counterpoint: **`formatSkillsForPrompt`, `Skill`, and `ToolInfo` ARE package
 the payload census measures the exact skills-section prompt contribution with pi's own formatter
 (no local mirror), and the formatter filters `disableModelInvocation` skills itself, so passing
 the full skill list measures the visible contribution. Check the root export list *before*
-mirroring — the rule cuts both ways.
+mirroring — the rule cuts both ways. Since Pi 0.99 `ToolInfo` (what `getAllTools()` returns)
+carries a required `exposure` (`"direct"` for a tool that declares none), so a hand-built
+`ToolInfo` fixture must set it; the CLI also registers its own built-in extensions
+(`builtin:codemode`, `builtin:tool-search`, `builtin:mcp`, `builtin:llama.cpp`) — `codemode`/`tool_search` appear in
+`getAllTools()` but stay out of `getActiveTools()` (`defaultActive: false`) unless `--tools` /
+`defaultTools` / MCP activates them, and `--no-extensions` disables them too.
 
 ## Injected custom messages ARE persisted to the branch
 
@@ -525,7 +530,10 @@ tools or *months-old* code:
   plan re-reads each against the newly *installed* dist (resolved per
   `toolchain/worktree-node-modules.md`; deep-source reads need `pi/read-only-bash-gate.md`'s read-only
   allowlist) and corrects or dates changes. Last full re-verification: the `0.87.0` dist —
-  provenance, not a currency promise; the pin is.
+  provenance, not a currency promise; the pin is. 2026-10-01: the pins moved to `0.99.2` with the
+  suites green and minimal in-place corrections only (the `ToolInfo.exposure` field, CLI built-in
+  extensions); the full re-audit of this doc is owed — facts here are verified at 0.87.0 unless
+  corrected in place.
 
 ## Cross-references
 

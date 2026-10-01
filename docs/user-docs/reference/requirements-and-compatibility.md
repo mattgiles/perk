@@ -112,18 +112,15 @@ The perk CLI and the `@mgiles/perk` Pi extension are expected to have matching v
 mismatch produces a soft, non-fatal launch warning. `perk doctor --fix` reconverges the
 repo-managed package pin and reinstalls the matching extension.
 
-`pi-subagents` deliberately remains unpinned. `perk doctor` probes the installed package for
-the orchestration surfaces perk needs; incompatibility warns loudly but does not fail the
-doctor run or offer a fix. This is an early-warning check rather than a version gate.
-pi-subagents 0.70.1 is the guidance baseline: `subagent-compat` warns on any other installed
-version. The baseline is **source-verified** — perk's engine guidance was re-read against the
-installed 0.70.1 package, `perk doctor` and a read-only `perk.scout` lane were exercised on it —
-while the live browser-wave half of its re-verification is recorded as owed (see
-`docs/design/archive/pi-subagents-0.70.1-reverify.md`); treat it as the version perk's guidance
-matches, not as a promise that every interactive flow was driven on it. perk's report definitions
-no longer carry the `completionGuard` field that pi-subagents removed in 0.70.1, so a 0.68–0.70.0
-engine may fail a report lane whose task text reads as implementation work — upgrade pi-subagents
-rather than re-adding the field.
+`pi-subagents` is pinned to 0.73.1: `perk init` writes `npm:pi-subagents@0.73.1` into
+`.pi/settings.json` and rewrites an existing unpinned or differently pinned entry in place, and
+`perk doctor` reports such an entry as `settings-wiring` drift that `perk doctor --fix` repairs (Pi
+then installs the pinned version at the next launch). The pin exists because pi-subagents 0.74.0
+removed the `workflowScript` RPC spawn parameter perk's report waves send, so every perk wave
+fails on 0.74.0 or newer until perk migrates. Separately, `perk doctor`'s `subagent-compat` check
+compares the installed version with the version perk's engine guidance was last re-verified
+against (currently 0.70.1, see `docs/design/archive/pi-subagents-0.70.1-reverify.md`) and warns
+on any other version; it is an early-warning check that never fails the doctor run.
 
 Plannotator 0.27.16 or newer is required by the stack review browser (`/stack-review-browser`,
 `perk objective stack review`), which opens Plannotator's static-patch mode over the pinned

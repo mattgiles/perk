@@ -753,10 +753,11 @@ Instances:
 - `pr`/`worktree`/`bundle_dir` stay model-relayed (an accepted trust posture;
   `decodeStartReviewWaveParams` is the single seam to adjust if door-recorded context is
   adopted).
-- pi-subagents is deliberately UNPINNED; the guidance is source-re-verified at the version
-  pinned by `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` (`src/perk/convergence/doctor/checks.py`),
-  and the doctor `subagent-compat` version `warn` is the drift tripwire (it never reads the
-  engine's source) — re-verify the adapter on any bump.
+- pi-subagents is PINNED for consumers (`npm:pi-subagents@0.73.1` — 0.74.0 removed the
+  `workflowScript` RPC spawn parameter this adapter sends); the guidance is source-re-verified at
+  the version recorded by `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`
+  (`src/perk/convergence/doctor/checks.py`), and the doctor `subagent-compat` version `warn` is the
+  drift tripwire (it never reads the engine's source) — re-verify the adapter on any bump.
 - The pre-digest recipe for foreign-seam nodes (read the unimportable dependency's source at plan
   time, pin the envelope as module constants, keep unversioned names advertised-not-pinned) is
   recorded in `pi/subagents.md` — cross-link, don't restate.

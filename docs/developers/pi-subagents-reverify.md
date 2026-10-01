@@ -1,10 +1,9 @@
 # How to re-verify pi-subagents after an upstream bump
 
 This page is a **how-to guide**. perk consumes the borrowed `pi-subagents` engine only through
-public surfaces (the v1 RPC envelope, the delegation events, agent-def frontmatter) and the
-package is deliberately **unpinned**, so compatibility rests on a *recorded baseline* plus this
-re-verify ritual — never on a version constraint and never on reading the installed source from
-tests or doctor. One carve-out: the host-SDK bridge's **census drift guard**
+public surfaces (the v1 RPC envelope, the delegation events, agent-def frontmatter), so
+compatibility rests on a *recorded baseline*, a consumer pin (see "The standing pin decision"),
+and this re-verify ritual — never on reading the installed source from tests or doctor. One carve-out: the host-SDK bridge's **census drift guard**
 (`extension/substrate/nativeSdkBridge.test.ts`) lexes the installed consumers' *import specifiers*
 — a structural fact of the shipped artifact (which SDK modules it imports), not engine mechanics —
 so a new release that imports an SDK subpath perk does not bridge fails loudly instead of silently
@@ -103,11 +102,18 @@ loading a second SDK copy.
 6. **Record the evidence**: a dated note in `docs/design/archive/` — the source facts with
    file/function anchors, the decisions, and the live-leg outcome (PASS or FAIL, never omitted).
    `pi-subagents-native-baseline-dogfood.md` (0.65.1), `pi-subagents-0.68.0-reverify.md`
-   (0.68.0) and `pi-subagents-0.70.1-reverify.md` (0.70.1) are the templates.
+   (0.68.0), `pi-subagents-0.70.1-reverify.md` (0.70.1) and `pi-subagents-0.73.1-reverify.md`
+   (0.73.1) are the templates.
 
 ## The standing pin decision
 
-pi-subagents stays **unpinned** (owner-affirmed): perk tracks the engine's latest and pays for
-it with this early-warning + re-verify discipline instead of a pin/upgrade lifecycle. If drift
-ever becomes too expensive, pinning is a one-line `.pi/settings.json` change — and the recorded
-baseline names exactly which version to pin.
+pi-subagents is **pinned** (`SUBAGENTS_PACKAGE = "npm:pi-subagents@0.73.1"` in
+`src/perk/convergence/init/settings.py`) since pi-subagents 0.74.0 removed the `workflowScript`
+RPC `spawn` parameter perk's report waves send (`docs/design/archive/pi-subagents-0.73.1-reverify.md`).
+`perk init` writes the pinned spec and reconciles an existing unpinned or differently pinned entry
+forward; `perk doctor --fix` repairs the same drift through `settings-wiring`. The re-verify ritual
+above now also decides **moving the pin**: a release perk has re-verified (source re-read, `just
+ci`, the live leg) is the candidate for both the guidance stamp and the settings pin — two distinct
+facts (what the guidance was verified against vs. what consumers install) that move together only
+when the evidence covers both. A release that breaks a surface perk sends (as 0.74.0 does) needs
+its migration first.

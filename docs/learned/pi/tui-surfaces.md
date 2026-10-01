@@ -315,7 +315,9 @@ the first production console-swap; prior swaps were all test-local):
 - **Re-verify at each pin bump.** A bump silently re-asserts every dist-scoped fact here: its
   plan re-reads each against the newly *installed* dist (resolved per
   `toolchain/worktree-node-modules.md`) and corrects or dates changes. Last full re-verification:
-  the `0.87.0` dist — provenance, not a currency promise; the pin is.
+  the `0.87.0` dist — provenance, not a currency promise; the pin is. 2026-10-01: the pins moved
+  to `0.99.2` with the suites green and no full re-audit of this doc (owed) — facts here are
+  verified at 0.87.0 unless corrected in place.
 
 ## Cross-references
 
