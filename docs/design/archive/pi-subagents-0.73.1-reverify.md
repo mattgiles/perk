@@ -8,9 +8,10 @@ the evidence for moving `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` from `0.70.1` to 
 template is [`pi-subagents-0.70.1-reverify.md`](pi-subagents-0.70.1-reverify.md); the procedure is
 `docs/developers/pi-subagents-reverify.md`.
 
-**Verdict: PENDING** — the source re-read and the offline halves are complete; the live leg
-(doctor, scout wave, both browser waves) runs from the session relaunched on the Pi 0.99.2 host,
-and the stamp moves only when every half passes (owner decision: no owed half).
+**Verdict: PENDING** — the source re-read, the offline halves, the doctor half and the scout wave
+PASS on the Pi 0.99.2 host. Open: the PR-door browser wave (the owner's `/pr-review-browser` on
+this change's PR) and the owner's confirmation of the plan-door half. The stamp moves only when
+every half passes (owner decision: no owed half).
 
 ## The matrix
 

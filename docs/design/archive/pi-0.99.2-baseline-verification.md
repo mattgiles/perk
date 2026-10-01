@@ -10,9 +10,10 @@ minimum. The procedure is the 2026-09-29 assessment's verification matrix
 carries the native-provider saved-credential fix (`fddc968` — an ancestor of `v0.99.2`, not of
 `v0.99.1`), which this record's model-selection checks pin.
 
-**Verdict: PENDING** — offline evidence complete; the live ledger is filled from the session
-relaunched on the 0.99.2 host (legs 1–6, 8, 9) and the owner's `/pr-review-browser` on this
-change's PR (leg 7). Every leg must read PASS before merge; OWED is not an admissible verdict here.
+**Verdict: PENDING** — offline evidence complete; legs 1–6, 8 and 9 PASS in the session relaunched
+on the 0.99.2 host. Leg 7 (the owner's `/pr-review-browser` on this change's PR) is the one leg
+still open — it needs the PR to exist. Every leg must read PASS before merge; OWED is not an
+admissible verdict here.
 
 ## Snapshot matrix
 
@@ -88,7 +89,7 @@ typechecks; `DefaultResourceLoaderOptions` is still not root-exported.
 | 6 Report waves | owner + implementer | `/plan` on → `run_scout_wave` ≥ 2 briefs → N/N → `/plan` off; parent `bridge=installed` | Parent `/perk-selfcheck`: `bridge=installed`. Owner `/plan` on → `run_scout_wave` with two briefs (`unpinned-prose`, `exact-string-tests`, `perk.scout` on pi-subagents 0.73.1) → **2/2** validated reports, then `/plan` off. The workflow-completion notice capped its return preview ("truncated; full return value … `status.json` (`workflow.value`)") while the tool read both full reports from `status.json → workflow.value` — the 0.73.0 cap touches display text only. One finding acted on (a stale "unpinned engine" sentence in `docs/learned/workflow/mergeability-and-conflict-resolution.md`); the other confirmed no test asserts the bare `npm:pi-subagents` spec | PASS |
 | 7 Browser-review lifecycle | owner | `/pr-review-browser` on this PR: readiness, wave marker, N/N lanes, `perk:*` annotation POST/DELETE, decision correlation | — | PENDING |
 | 8 Suppliers + bridge identity | implementer | `/perk-selfcheck` (`bridge=installed`, both roots, `specifiers=8`, suppliers loaded, no load errors); `web_enable` → `fetch_content`; Plannotator commands listed | Headless `pi --approve --mode json -p /perk-selfcheck` on the 0.99.2 host: `selfcheck — 3.9.0: ok; shared=ok; ambient=reached (append=5359c); agents=reached (files=1); bridge=installed`; `native sdk bridge: installed (roots=2, specifiers=8)`, host `…/node_modules/@earendil-works/pi-coding-agent/dist/index.js`, roots `.pi/npm/node_modules/pi-subagents` + `pi-web-access`; per-source rows `npm:pi-subagents@0.73.1=3`, `npm:pi-web-access=1`, no `Failed to load extension`. In this session `web_enable` enabled `web_search`/`source_check`/`fetch_content`/`get_search_content`; `fetch_content` of `https://en.wikipedia.org/wiki/Node.js` returned the article (the first try, `https://example.com/`, was refused by pi-web-access's "content appears incomplete" heuristic — a too-short page, not a load fault). A `-e` command probe lists Plannotator's `plannotator-plan-mode`, `plannotator-review`, `plannotator-annotate`, `plannotator-last` and `skill:plannotator` | PASS |
-| 9 Theme / TUI | owner | footer/status/widgets readable under the default theme | — | PENDING |
+| 9 Theme / TUI | owner | footer/status/widgets readable under the default theme | Owner inspection on the 0.99.2 host across this session (including the `/plan` toggle, the scout-wave run, `/compact`, `/reload`, `/tree`, `perk resume` and `/btw`): footer, status line and perk widgets all readable under the default theme — nothing clipped, illegible or mis-coloured | PASS |
 
 ## Pi 0.99 built-ins observed
 
