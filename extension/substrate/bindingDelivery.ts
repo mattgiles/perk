@@ -13,8 +13,9 @@
 //   the delivery path for `stage:plan`'s `perk-plan` pointer, since a cold `perk plan` launches
 //   idle (no initial prompt to augment) and a warm `/plan` records no stage at all.
 //   Mechanism B — `bindingSuffix()` is appended into the guidance of perk's warm slash-commands so
-//   each self-delivers its pointer (a warm `/objective-plan` records no stage, so Mechanism A
-//   resolves it to `stage:plan`, never `stage:objective-plan`).
+//   each self-delivers its pointer on the seed turn (a warm `/objective-plan` claims
+//   `stage: objective-plan`, so Mechanism A resolves `stage:objective-plan` on later turns, deduped
+//   by the seed's header evidence like every other door).
 //
 // This is the SINGLE delivery path for perk's own nudges. Delivery NEVER double-delivers. The
 // cross-plane dedup marker is `BINDING_HEADER` on USER turns: the cold door's initial prompt and a
