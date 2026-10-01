@@ -473,13 +473,7 @@ export async function fauxModelRuntime(options: { contextWindow?: number } = {})
   getModel(): unknown;
   setResponses(responses: unknown[]): void;
 }> {
-  const pcaIndex = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
-  // pcaIndex is <…>/pi-coding-agent/dist/index.js → the package root is one level up from dist/.
-  const pcaRoot = resolve(dirname(pcaIndex), "..");
-  const nested = join(pcaRoot, "node_modules", "@earendil-works", "pi-ai", "dist", "index.js");
-  const piAi = existsSync(nested)
-    ? ((await import(pathToFileURL(nested).href)) as typeof import("@earendil-works/pi-ai"))
-    : await import("@earendil-works/pi-ai");
+  const piAi = await loadSdkPiAi();
   // `faux-1` is the faux provider's default model id; only the window is overridden.
   const faux = piAi.fauxProvider(
     options.contextWindow !== undefined
@@ -499,6 +493,22 @@ export async function fauxModelRuntime(options: { contextWindow?: number } = {})
     getModel: () => faux.getModel(),
     setResponses: (responses) => faux.setResponses(responses as never),
   };
+}
+
+/**
+ * pi-ai as pi-coding-agent sees it: the nested `pi-coding-agent/node_modules/@earendil-works/pi-ai`
+ * copy when present, else the deduped top-level. pi-ai module state (the faux provider, the
+ * credential store) is per instance, so anything handed to a real `ModelRuntime` must come from
+ * the runtime's own instance (docs/learned/pi/headless-session-drive.md).
+ */
+export async function loadSdkPiAi(): Promise<typeof import("@earendil-works/pi-ai")> {
+  const pcaIndex = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+  // pcaIndex is <…>/pi-coding-agent/dist/index.js → the package root is one level up from dist/.
+  const pcaRoot = resolve(dirname(pcaIndex), "..");
+  const nested = join(pcaRoot, "node_modules", "@earendil-works", "pi-ai", "dist", "index.js");
+  return existsSync(nested)
+    ? ((await import(pathToFileURL(nested).href)) as typeof import("@earendil-works/pi-ai"))
+    : await import("@earendil-works/pi-ai");
 }
 
 /** A widget component factory as the harness sees it (pi's `setWidget` factory form). */
