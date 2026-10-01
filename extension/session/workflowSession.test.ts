@@ -906,6 +906,44 @@ for (const backing of [branchBacking(), memoryBacking()]) {
     }
   });
 
+  test(`${backing.label}: apply enter-objective-plan-stage — stage-only; applied, then unchanged`, () => {
+    const h = backing.harness("RID", { activeObjective: "7" });
+    try {
+      const before = h.appendCount();
+      assert.deepEqual(h.session.apply({ kind: "enter-objective-plan-stage" }), {
+        status: "applied",
+      });
+      const context = h.session.draftReviewContext();
+      assert.ok(context.ok);
+      assert.equal(context.subject, "plan", "the stage maps to the plan subject");
+      assert.equal(h.session.activeObjective(), "7", "the active objective is preserved");
+      assert.equal(h.session.nodeClaim(), null, "entering the stage never claims a node");
+      assert.equal(h.linkedPlanRef(), null, "entering the stage never links a plan");
+      assert.equal(h.appendCount(), before + 1);
+      assert.deepEqual(h.session.apply({ kind: "enter-objective-plan-stage" }), {
+        status: "unchanged",
+      });
+      assert.equal(h.appendCount(), before + 1, "the idempotent re-entry appends nothing");
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply enter-objective-plan-stage — a read-back miss classifies unverified`, () => {
+    const h = backing.harness("RID");
+    try {
+      h.induceApplyVerificationFailure();
+      const result = quietly(() => h.session.apply({ kind: "enter-objective-plan-stage" }));
+      assert.equal(result.status, "unverified");
+      assert.ok(
+        result.status === "unverified" &&
+          /stage read-back failed for objective-plan/.test(result.problem),
+      );
+    } finally {
+      h.dispose();
+    }
+  });
+
   test(`${backing.label}: apply record-pr-review — applied; a repeat identical record applies AGAIN (no unchanged)`, () => {
     const h = backing.harness("RID");
     try {
@@ -1672,6 +1710,11 @@ test("branch: a read-back miss reports LOUDLY under each change's seam-owned sco
       seed: null,
       change: { kind: "enter-refinement-stage" },
       expected: "perk: objective-refine — stage read-back failed for objective-refine",
+    },
+    {
+      seed: null,
+      change: { kind: "enter-objective-plan-stage" },
+      expected: "perk: objective-plan — stage read-back failed for objective-plan",
     },
     {
       seed: null,

@@ -44,7 +44,7 @@ import {
   stringParam,
 } from "../../substrate/toolParams.ts";
 import { OBJECTIVE_STAGES, WORKTREE_STAGES } from "../../substrate/toolPolicy.ts";
-import { branchOf } from "../../substrate/workflowState.ts";
+import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../../surfaces/report.ts";
 import {
   EXPLORE_ASSIGNMENT_KEY,
@@ -390,6 +390,9 @@ async function executeExploreObjectiveNode(
 }
 
 // ------------------------------------------------------------------------- adapter plumbing
+
+/** The registry stage the warm `/objective-plan` factory claims. */
+const OBJECTIVE_PLAN_STAGE = "objective-plan";
 
 /** The rebuilt `active_objective`, read through the session seam (fail-open null). */
 function activeObjective(pi: ExtensionAPI, ctx: ExtensionContext): string | null {
@@ -780,13 +783,41 @@ export function installObjectivePlanningBindings(
         );
         return;
       }
+      // A stage claim would hijack a worktree session's plan binding: refuse before any append.
+      const current = rebuildWorkflowState(branchOf(ctx)).stage;
+      if (typeof current === "string" && WORKTREE_STAGES.includes(current)) {
+        report(
+          ctx,
+          "objective-plan",
+          "warning",
+          `/objective-plan cannot start inside a ${current} worktree session (a stage claim would ` +
+            "hijack this session's plan binding) — run `perk objective plan <N>` from the repo " +
+            "root or start a fresh session.",
+        );
+        return;
+      }
+      // Claim the stage the cold handoff would have carried (the `/objective-refine` precedent),
+      // so the gated view and every stage-keyed surface follow the objective-plan stage.
+      const staged = openBranchWorkflowSession(pi, ctx).apply({
+        kind: "enter-objective-plan-stage",
+      });
+      if (staged.status === "rejected" || staged.status === "unverified") {
+        report(
+          ctx,
+          "objective-plan",
+          "error",
+          `the objective-plan stage entry failed (${staged.problem}) — re-run /objective-plan`,
+          { alsoLog: true },
+        );
+        return;
+      }
       report(ctx, "objective-plan", "info", `#${objective}${node ? ` node ${node}` : ""}`);
       // Enter the read-only gate (parity with the cold door's `mode: read-only` handoff claim) —
       // skip-if-active so an already-gated session (cold objective-plan, `/plan` on) gets no
-      // duplicate `mode` append or announce. Entering BEFORE sendUserMessage means the seeded
-      // factory turn runs gated and picks up the [READ-ONLY MODE] + [PLAN AUTHORING] injections
-      // on its before_agent_start. Exit stays owned by plan_save (approval auto-save included)
-      // and `/plan` off.
+      // duplicate `mode` append or announce — then re-scope it to the claimed stage. Entering
+      // BEFORE sendUserMessage means the seeded factory turn runs gated and picks up the
+      // read-only + plan-authoring injections on its before_agent_start. Exit stays owned by the
+      // plan save (approval auto-save included) and `/plan` off.
       if (!gating.isActive()) {
         gating.enter(ctx);
         report(
@@ -796,9 +827,10 @@ export function installObjectivePlanningBindings(
           "read-only ON — structurally enforced exploration; plan_save exits (approval auto-saves), or /plan toggles off.",
         );
       }
+      gating.syncFromState("read-only", OBJECTIVE_PLAN_STAGE);
       // Inject the factory guidance as a user message so the model starts the loop (always a turn).
-      // The perk-objective-plan pointer rides the skill-binding suffix (D5) since a warm
-      // /objective-plan outside a stage:objective-plan session gets none from Mechanism A.
+      // The seed turn self-delivers the perk-objective-plan pointer through the skill-binding
+      // suffix; later turns resolve `stage:objective-plan` from the claimed stage.
       const backend = resolveIssueBackendId(ctx.cwd);
       const url = backend === "linear" ? await fetchObjectiveUrl(pi, ctx, objective) : "";
       pi.sendUserMessage(

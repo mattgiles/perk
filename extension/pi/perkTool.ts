@@ -29,5 +29,5 @@ export function registerPerkTool<TParams extends ToolDefinition["parameters"], T
 ): void {
   validateToolPolicy(definition.name, definition, policy, REGISTRY_STAGE_IDS);
   recordPerkTool(definition.name, policy);
-  pi.registerTool<TParams, TDetails>({ ...definition, ...derivePiMetadata(policy) });
+  pi.registerTool({ ...definition, ...derivePiMetadata(policy) });
 }

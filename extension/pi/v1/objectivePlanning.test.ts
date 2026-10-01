@@ -9,15 +9,23 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PLAN_CONTEXT_TYPE } from "../../authoring/plan/prose.ts";
 import { planRefPath, writePlanRef } from "../../substrate/cache.ts";
+import { gatedToolsFor } from "../../substrate/toolPolicy.ts";
 import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import {
   createFakeSubagents,
   type FakeSubagents,
   waveScriptItems,
 } from "../../testing/fakeSubagents.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo, spyInjections } from "../../testing/harness.ts";
+import {
+  fakePerk,
+  loadPerkSession,
+  plantSession,
+  scaffoldRepo,
+  spyInjections,
+} from "../../testing/harness.ts";
 import {
   explorerLaneTask,
   OBJECTIVE_EXPLORER_REPORT_SCHEMA,
@@ -470,7 +478,16 @@ test("/objective-plan enters the read-only gate: mode flips, write blocked, anno
       (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
       "plan guidance rides the gate the factory entered",
     );
-    assert.equal(h.workflowState().stage, undefined, "the warm factory never rewrites the stage");
+    assert.equal(h.workflowState().stage, "objective-plan", "the warm factory claims the stage");
+    // The active set is the objective-plan stage's gated view (the registered subset of it).
+    const gated = gatedToolsFor("objective-plan");
+    const expected = h.session
+      .getAllTools()
+      .map((t) => t.name)
+      .filter((name) => gated.includes(name))
+      .sort();
+    assert.deepEqual([...h.session.getActiveToolNames()].sort(), expected);
+    assert.ok(expected.includes("objective_node") && expected.includes("explore_objective_node"));
   } finally {
     h.dispose();
   }
@@ -505,10 +522,11 @@ test("/objective-plan skip-if-active: an already read-only session gets no dupli
       h.notifies.some((m) => /#7/.test(m)),
       "the objective info line still reports",
     );
-    assert.equal(stateEntries(), before, "skip-if-active appends nothing");
-    // A second invocation still appends nothing.
+    assert.equal(stateEntries(), before + 1, "skip-if-active appends only the stage claim");
+    assert.equal(h.workflowState().stage, "objective-plan");
+    // A second invocation is `unchanged`: no duplicate stage append.
     await h.invokeCommand("objective-plan", "7");
-    assert.equal(stateEntries(), before, "a repeat invocation appends nothing either");
+    assert.equal(stateEntries(), before + 1, "a repeat invocation appends nothing");
   } finally {
     h.dispose();
   }
@@ -530,6 +548,57 @@ test("/objective-plan with no objective leaves the gate off (warning only)", asy
       undefined,
       "writes stay unblocked",
     );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-plan refuses a worktree session: no gate entry, no append, no guidance", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  const injected = spyInjections(h);
+  try {
+    assert.equal(h.workflowState().stage, "implement");
+    const entries = () => h.session.sessionManager.getBranch().length;
+    const before = entries();
+    await h.invokeCommand("objective-plan", "7");
+    assert.ok(
+      h.notifyEvents.some(
+        (e) =>
+          e.severity === "warning" &&
+          e.message.includes("/objective-plan cannot start inside a implement worktree session"),
+      ),
+      "the worktree refusal fires",
+    );
+    assert.equal(entries(), before, "nothing appended");
+    assert.equal(h.workflowState().stage, "implement");
+    assert.notEqual(h.workflowState().mode, "read-only", "the gate stays off");
+    assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, undefined);
+    assert.deepEqual(injected, [], "no factory guidance");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-plan in a refinement session: the refinement refusal fires first (no stage claim)", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [
+    { run_id: "01RID", mode: "read-only", stage: "objective-refine" },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.invokeCommand("objective-plan", "7");
+    assert.ok(
+      h.notifies.some((m) => m.includes("/objective-plan is not available in an objective-refine")),
+      "the refinement refusal fires",
+    );
+    assert.equal(h.workflowState().stage, "objective-refine", "no stage claim");
+    assert.deepEqual(injected, []);
   } finally {
     h.dispose();
   }

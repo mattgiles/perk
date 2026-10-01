@@ -55,7 +55,8 @@
 //   E. Pi registration only in approved adapter/composition files: every production file whose
 //      source carries a registration token (`pi.registerTool(` / `pi.registerCommand(` /
 //      `pi.registerFlag(` / `pi.registerShortcut(` / `pi.registerEntryRenderer(` / `pi.on(` /
-//      `registerPerkCommand(` — whitespace-tolerant, word-bounded; `substrate/command.ts`'s
+//      `registerPerkCommand(` / `registerPerkTool(` — whitespace-tolerant, word-bounded;
+//      `substrate/command.ts`'s
 //      definition site is a legacy entry like any other) must be under the `pi/` home, be
 //      `index.ts`/`workerMain.ts`, or sit in `LEGACY_REGISTRANTS` — frozen from the
 //      activation-day census, shrink-only via the stale arm (the census only burns down as
@@ -102,6 +103,11 @@
 //      not binding-aware machinery. `node:fs` is deliberately NOT matched (an edge-level rule
 //      only — the allowed injectable probes in `learning/containment.ts`/`harvest.ts` hold by
 //      construction). Anti-vacuity floor: every storage-free home must match ≥1 scanned file.
+//   I. Tool-registration chokepoint: among production files, the raw `pi.registerTool(` token
+//      (whitespace- and type-argument-tolerant, across lines) appears in EXACTLY
+//      `pi/perkTool.ts` — the `registerPerkTool` seam that validates, catalogs and derives every
+//      perk tool's Pi metadata (contracts.md §8.40). Exact-set, which doubles as the positive
+//      floor: the seam itself must still carry the token.
 
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -217,7 +223,13 @@ const STORAGE_INTERIOR = [
  * surface at review as a missed registration against the frozen census.
  */
 const REGISTRATION_TOKEN =
-  /\bpi\s*\.\s*(?:registerTool|registerCommand|registerFlag|registerShortcut|registerEntryRenderer|on)\s*\(|\bregisterPerkCommand\s*\(/;
+  /\bpi\s*\.\s*(?:registerTool|registerCommand|registerFlag|registerShortcut|registerEntryRenderer|on)\s*\(|\bregister(?:PerkCommand|PerkTool)\s*\(/;
+
+/** Rule I's raw tool-registration token: whitespace- and type-argument-tolerant, across lines. */
+const RAW_TOOL_REGISTRATION = /\bpi\s*\.\s*registerTool\s*(?:<[^>()]*>\s*)?\(/;
+
+/** Rule I's exact chokepoint census: the one production file that may register a tool raw. */
+const TOOL_REGISTRATION_CHOKEPOINT = ["pi/perkTool.ts"];
 
 /** Rule E's approved registrars: the Pi adapter home + the two composition roots. */
 const APPROVED_REGISTRAR_PREFIXES = ["pi/"];
@@ -513,6 +525,7 @@ test("Rule E: Pi registration only in approved adapter/composition files (frozen
   // Positive extraction proof: the scan must SEE the v1 installers' registrations — a token
   // regex that stopped matching real registrations would otherwise pass vacuously.
   for (const installer of [
+    "pi/perkTool.ts",
     "pi/v1/codeReview/submit.ts",
     "pi/v1/gist.ts",
     "pi/v1/plan.ts",
@@ -535,6 +548,31 @@ test("Rule E: Pi registration only in approved adapter/composition files (frozen
     "stale LEGACY_REGISTRANTS entr(y/ies) with no live registration token — the census is " +
       "shrink-only: delete the entry in the same change that migrated or removed the registration.",
   );
+});
+
+test("Rule I: the raw tool registration lives only in the registerPerkTool seam (exact-set)", () => {
+  const carriers = scan().files.filter((file) =>
+    RAW_TOOL_REGISTRATION.test(readProductionFile(file)),
+  );
+  assert.deepEqual(
+    carriers,
+    TOOL_REGISTRATION_CHOKEPOINT,
+    "a production `pi.registerTool(` outside pi/perkTool.ts bypasses the tool catalog — register " +
+      "through registerPerkTool with a policy descriptor",
+  );
+});
+
+test("control: Rule I's token matches split and generic registrations, never near-misses", () => {
+  for (const source of [
+    "pi.registerTool({",
+    "pi\n  .registerTool (\n  {",
+    "pi.registerTool<TParams, TDetails>({",
+  ]) {
+    assert.ok(RAW_TOOL_REGISTRATION.test(source), source);
+  }
+  for (const source of ["registerPerkTool(pi, {", "spi.registerTool(", "pi.registerTools("]) {
+    assert.equal(RAW_TOOL_REGISTRATION.test(source), false, source);
+  }
 });
 
 test("Rule F: worker-plane confinement (exact edges; SDK specifiers only in the adapter)", () => {

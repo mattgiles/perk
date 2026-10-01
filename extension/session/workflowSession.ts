@@ -56,6 +56,7 @@ export type SessionProblem = string;
 
 /** The refinement stage id (the session keys its subject mapping + stage-only entry on it). */
 const REFINE_STAGE_ID = "objective-refine";
+const OBJECTIVE_PLAN_STAGE_ID = "objective-plan";
 
 /**
  * The refinement grounding-context artifact name — session-owned vocabulary because the review
@@ -229,6 +230,13 @@ export type WorkflowChange =
    * idempotent re-entry short-circuits `unchanged`.
    */
   | { kind: "enter-refinement-stage" }
+  /**
+   * Enter the objective-plan stage from a warm session: append `stage: "objective-plan"` iff the
+   * live stage differs — the same STAGE-ONLY shape as `enter-refinement-stage` (the warm
+   * `/objective-plan` factory claims the stage the cold handoff would have carried). An
+   * idempotent re-entry short-circuits `unchanged`.
+   */
+  | { kind: "enter-objective-plan-stage" }
   /**
    * Record the last automated `/pr-review` outcome: ONE `last_pr_review` append (LWW), strict
    * read-back. No pre-read, no dedupe (same runtime invariant as `record-review`:
@@ -886,6 +894,16 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
             expected: REFINE_STAGE_ID,
             scope: "objective-refine",
             failure: `stage read-back failed for ${REFINE_STAGE_ID}`,
+          });
+        }
+        case "enter-objective-plan-stage": {
+          if (state.rebuild().stage === OBJECTIVE_PLAN_STAGE_ID) return { status: "unchanged" };
+          return state.appendVerified({
+            data: { stage: OBJECTIVE_PLAN_STAGE_ID },
+            field: "stage",
+            expected: OBJECTIVE_PLAN_STAGE_ID,
+            scope: "objective-plan",
+            failure: `stage read-back failed for ${OBJECTIVE_PLAN_STAGE_ID}`,
           });
         }
         case "record-pr-review": {
