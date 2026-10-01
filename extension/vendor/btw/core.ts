@@ -3,10 +3,12 @@
 //
 // Vendored from `mitsuhiko/agent-stuff` `extensions/btw.ts` (MIT) and adapted for perk: the helpers
 // below were lifted verbatim except for the conformance changes called out inline (the extended
-// `stripDynamicSystemPromptFooter` regex; `sideSessionTools`, the perk gate-mirror; and the §5
-// themed-glyph conformance in `renderToolCallLines`/`renderErrorLine` — `❌`→`✗`, running `⚙`→`▸`).
+// `stripDynamicSystemPromptFooter` regex; `sideSessionTools`, the perk gate-mirror derived from
+// the builtin posture rows; and the §5 themed-glyph conformance in
+// `renderToolCallLines`/`renderErrorLine` — `❌`→`✗`, running `⚙`→`▸`).
 
 import { truncateToWidth } from "@earendil-works/pi-tui";
+import { BUILTIN_TOOL_POLICY } from "../../substrate/toolPolicy.ts";
 
 /** The minimal theme surface the pure renderers need (pi's real `Theme` satisfies it). */
 export interface ThemeLike {
@@ -114,13 +116,15 @@ export function formatToolArgs(toolName: string, args: unknown): string {
 }
 
 /**
- * The gate-mirror decision (plan decision 1): the side session's toolset mirrors perk's read-only
- * gate. When read-only it gets `["read"]` only — a foreign session's `bash` cannot be sandboxed by
- * perk's `isReadOnlyBashCommand`, so `bash` is excluded under read-only — preserving perk's
- * structural read-only guarantee; when read-write it gets the full set.
+ * The gate-mirror decision: the side session's builtin toolset derives from perk's builtin
+ * posture rows. Read-only → the builtins whose gate posture is plain `allowed` (`bash`'s
+ * `verdict` posture cannot be enforced inside a foreign session, so it is excluded) — preserving
+ * perk's structural read-only guarantee; read-write → every builtin.
  */
 export function sideSessionTools(readOnly: boolean): string[] {
-  return readOnly ? ["read"] : ["read", "bash", "edit", "write"];
+  return Object.entries(BUILTIN_TOOL_POLICY)
+    .filter(([, posture]) => !readOnly || posture === "allowed")
+    .map(([name]) => name);
 }
 
 /**

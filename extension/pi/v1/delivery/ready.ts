@@ -37,7 +37,9 @@ import { resolveIssueBackendId } from "../../../substrate/config.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { failFor, ok } from "../../../substrate/result.ts";
 import type { ToolGating } from "../../../substrate/toolGating.ts";
+import { WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import { report } from "../../../surfaces/report.ts";
+import { registerPerkTool } from "../../perkTool.ts";
 import { fetchObjectiveUrl } from "../objective.ts";
 
 /**
@@ -275,31 +277,35 @@ const TOOL_GUIDELINES = [
 /** Install the ready + handoff bindings: the `ready` terminating tool + the `/ready` command
  * twin. */
 export function installReadyBindings(pi: ExtensionAPI, gating: ToolGating): void {
-  pi.registerTool({
-    name: "ready",
-    label: "Mark PR ready",
-    description:
-      "Ready the active plan's PR. Incremental: mark the draft PR ready for review (the " +
-      "deliberate review gate; submit keeps the PR draft). Stacked: the deliberate post-review " +
-      "HUMAN handoff — stamps the exact verified published head (draft and non-draft PRs); " +
-      "never routine post-submit choreography, never auto-run. Terminating: ends the turn.",
-    promptSnippet:
-      "Ready the PR: open the draft for review (incremental) or record the post-review " +
-      "handoff stamp (stacked; human-asked only). Terminates the turn.",
-    promptGuidelines: TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: { type: "object", additionalProperties: false, properties: {} },
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const fail = failFor(ctx, "ready");
-      const outcome = await readyChange(readyDepsFor(pi, ctx, gating));
-      if (outcome.kind === "failed") return fail(outcome.message, outcome.errorType);
-      const result = ok(renderReadyMessage(outcome.facts), readyDetails(outcome.facts), {
-        terminate: true,
-      });
-      await driveReadyContinuation(pi, ctx, outcome);
-      return result;
+  registerPerkTool(
+    pi,
+    {
+      name: "ready",
+      label: "Mark PR ready",
+      description:
+        "Ready the active plan's PR. Incremental: mark the draft PR ready for review (the " +
+        "deliberate review gate; submit keeps the PR draft). Stacked: the deliberate post-review " +
+        "HUMAN handoff — stamps the exact verified published head (draft and non-draft PRs); " +
+        "never routine post-submit choreography, never auto-run. Terminating: ends the turn.",
+      promptSnippet:
+        "Ready the PR: open the draft for review (incremental) or record the post-review " +
+        "handoff stamp (stacked; human-asked only). Terminates the turn.",
+      promptGuidelines: TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: { type: "object", additionalProperties: false, properties: {} },
+      async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+        const fail = failFor(ctx, "ready");
+        const outcome = await readyChange(readyDepsFor(pi, ctx, gating));
+        if (outcome.kind === "failed") return fail(outcome.message, outcome.errorType);
+        const result = ok(renderReadyMessage(outcome.facts), readyDetails(outcome.facts), {
+          terminate: true,
+        });
+        await driveReadyContinuation(pi, ctx, outcome);
+        return result;
+      },
     },
-  });
+    { stages: [...WORKTREE_STAGES], gated: "blocked", kind: "terminal" },
+  );
 
   registerPerkCommand(pi, "ready", {
     description:

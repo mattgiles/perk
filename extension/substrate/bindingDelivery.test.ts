@@ -406,7 +406,7 @@ test("an owned copy of a superseded render is stale: not evidence, and stripped 
 test("a USER turn carrying the header with a different render (a warm seed) still suppresses Mechanism A", async () => {
   const cwd = scaffoldRepo();
   writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
-  // A staged session, and the stage-less read-only shape a warm `/objective-plan` leaves: both
+  // A staged session, and a stage-less read-only (plan-mode) session: both
   // resolve to a trigger whose render differs from the seed's, and the seed is the door's own
   // delivery while it is live.
   for (const data of [

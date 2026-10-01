@@ -105,9 +105,17 @@
   vars:
     inbox_path: ".perk/workflow/scratch/learn-docs-inbox.md"
     num_list: "45, 50"
+    save_step: "call the save tool."
 - template: "stages/learn-code.md"
   vars:
     inbox_path: ".perk/workflow/scratch/learn-code-inbox.md"
+    num_list: "45, 50"
+    save_step: "call the save tool."
+- template: "common/learn-save/cold.md"
+  vars:
+    num_list: "45, 50"
+- template: "common/learn-save/warm.md"
+  vars:
     num_list: "45, 50"
 - template: "stages/learn-harvest.md"
   vars:
@@ -615,14 +623,12 @@
     draft: "{\"schema_version\":1,\"markdown\":\"# Refinement\\n\\n## Unresolved\\n\\n- assume the seam exists\"}\n"
 - template: "contexts/read-only.md"
   vars:
-    marker: "[READ-ONLY MODE]"
-    writer: "plan_draft"
-    artifact: "working-plan artifact"
+    marker: "[READ-ONLY MODE] (unscoped)"
+    writers: "- `plan_draft` is a sanctioned bounded write: the working-plan artifact in the session data dir.\n- `gist_draft` is a sanctioned bounded write: the working-gist artifact in the session data dir."
 - template: "contexts/read-only.md"
   vars:
-    marker: "[READ-ONLY REFINEMENT MODE]"
-    writer: "objective_refinement_draft"
-    artifact: "working-refinement artifact"
+    marker: "[READ-ONLY MODE] (stage objective-refine)"
+    writers: "- `objective_refinement_draft` is a sanctioned bounded write: the working-refinement artifact in the session data dir."
 - template: "contexts/plan-authoring.md"
   vars:
     marker: "[PLAN AUTHORING]"

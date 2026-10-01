@@ -63,8 +63,10 @@ import { render } from "../../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
+import { GIST_STAGES } from "../../substrate/toolPolicy.ts";
 import { type BranchEntry, branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
+import { registerPerkTool } from "../perkTool.ts";
 import { installInjectedContext } from "./contextInjection.ts";
 import {
   checkDraftReviewDecision,
@@ -272,156 +274,168 @@ export function installGistBindings(
     runnerChild,
   );
 
-  pi.registerTool({
-    name: "gist_draft",
-    label: "Gist draft",
-    description:
-      "Write (or overwrite) the working gist draft — the statement-of-intent prose + an " +
-      "optional scope hint — to the session data dir and record its provenance pointer. The " +
-      "only sanctioned write surface while read-only. NOT a save — gist_save//gist-save still " +
-      "persist the gist to the issue backend.",
-    promptSnippet:
-      "Persist the working gist draft (statement-of-intent prose) to the session data dir (full rewrite)",
-    promptGuidelines: GIST_DRAFT_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["prose"],
-      properties: {
-        prose: {
-          type: "string",
-          description:
-            "The gist prose (the problem-space intent: what we want, why it matters, what " +
-            "bounds it, and any high-level solution leanings — no implementation steps).",
-        },
-        title: {
-          type: "string",
-          description: "Optional gist title (defaults to the prose's first heading).",
-        },
-        scope: {
-          type: "string",
-          enum: [...GIST_SCOPES],
-          description:
-            "Optional consumption tier: plan (plan-sized intent) or objective (objective-sized).",
+  registerPerkTool(
+    pi,
+    {
+      name: "gist_draft",
+      label: "Gist draft",
+      description:
+        "Write (or overwrite) the working gist draft — the statement-of-intent prose + an " +
+        "optional scope hint — to the session data dir and record its provenance pointer. The " +
+        "only sanctioned write surface while read-only. NOT a save — gist_save//gist-save still " +
+        "persist the gist to the issue backend.",
+      promptSnippet:
+        "Persist the working gist draft (statement-of-intent prose) to the session data dir (full rewrite)",
+      promptGuidelines: GIST_DRAFT_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["prose"],
+        properties: {
+          prose: {
+            type: "string",
+            description:
+              "The gist prose (the problem-space intent: what we want, why it matters, what " +
+              "bounds it, and any high-level solution leanings — no implementation steps).",
+          },
+          title: {
+            type: "string",
+            description: "Optional gist title (defaults to the prose's first heading).",
+          },
+          scope: {
+            type: "string",
+            enum: [...GIST_SCOPES],
+            description:
+              "Optional consumption tier: plan (plan-sized intent) or objective (objective-sized).",
+          },
         },
       },
-    },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      // The shared param contract: the same decode as `gist_save`, so the two cannot drift.
-      const decoded = decodeGistSaveParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "gist-draft",
-          "gist_draft",
-        )(
-          "gist_draft needs { prose: string, scope?: plan|objective } per the tool schema",
-          "bad_input",
-        );
-      }
-      const fail = failFor(ctx, "gist-draft");
-      const revised = reviseGistDraft(decoded, openSession(pi, ctx));
-      switch (revised.status) {
-        case "revised":
-        case "unchanged":
-          // Both arms mean the draft IS the current artifact — refresh the session name under
-          // `override` with its title (contracts.md §8.71(h)): a non-blank declared title wins,
-          // else the prose heading, else `{}` (a stored title survives). A gist session's name is
-          // `<stage> | <title>` — names carry no gist segment. The outcome is ignored: the
-          // binding reports `failed`, and a naming failure never fails the write.
-          refreshSessionNameV1(pi, ctx, {
-            hints: titleHints(decoded.title?.trim() || deriveTitle(decoded.prose)),
-            policy: "override",
-          });
-          // A byte-identical rewrite short-circuits interior-side; the rendered result is
-          // computed from identical content either way, so the surface stays byte-stable.
-          return ok(`Gist draft written → ${revised.receipt.path} (${revised.receipt.digest})`, {
-            name: GIST_DRAFT_ARTIFACT,
-            path: revised.receipt.path,
-            digest: revised.receipt.digest,
-            bytes: revised.bytes,
-            run_id: revised.receipt.runId,
-          });
-        case "rejected":
-          return fail(
-            revised.problem,
-            revised.reason === "blank_prose"
-              ? "invalid_input"
-              : revised.reason === "no_identity"
-                ? "no_run_id"
-                : "write_failed",
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        // The shared param contract: the same decode as `gist_save`, so the two cannot drift.
+        const decoded = decodeGistSaveParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "gist-draft",
+            "gist_draft",
+          )(
+            "gist_draft needs { prose: string, scope?: plan|objective } per the tool schema",
+            "bad_input",
           );
-        case "unverified":
-          return fail(revised.problem, "write_failed");
-      }
-    },
-  });
-
-  pi.registerTool({
-    name: "gist_save",
-    label: "Save gist",
-    description:
-      "Persist a drafted gist (a statement of intent) to the issue backend as a tracked " +
-      "perk:gist. Terminating: ends the turn on save. Call only when the gist says what it " +
-      "means.",
-    promptSnippet: "Save the converged gist to the issue backend (terminates the turn)",
-    promptGuidelines: GIST_SAVE_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["prose"],
-      properties: {
-        prose: {
-          type: "string",
-          description:
-            "The gist prose (the problem-space intent: what we want, why it matters, what " +
-            "bounds it, and any high-level solution leanings — no implementation steps).",
-        },
-        title: {
-          type: "string",
-          description: "Optional gist title (defaults to the prose's first heading).",
-        },
-        scope: {
-          type: "string",
-          enum: [...GIST_SCOPES],
-          description:
-            "Optional consumption tier: plan (plan-sized intent) or objective (objective-sized).",
-        },
+        }
+        const fail = failFor(ctx, "gist-draft");
+        const revised = reviseGistDraft(decoded, openSession(pi, ctx));
+        switch (revised.status) {
+          case "revised":
+          case "unchanged":
+            // Both arms mean the draft IS the current artifact — refresh the session name under
+            // `override` with its title (contracts.md §8.71(h)): a non-blank declared title wins,
+            // else the prose heading, else `{}` (a stored title survives). A gist session's name is
+            // `<stage> | <title>` — names carry no gist segment. The outcome is ignored: the
+            // binding reports `failed`, and a naming failure never fails the write.
+            refreshSessionNameV1(pi, ctx, {
+              hints: titleHints(decoded.title?.trim() || deriveTitle(decoded.prose)),
+              policy: "override",
+            });
+            // A byte-identical rewrite short-circuits interior-side; the rendered result is
+            // computed from identical content either way, so the surface stays byte-stable.
+            return ok(`Gist draft written → ${revised.receipt.path} (${revised.receipt.digest})`, {
+              name: GIST_DRAFT_ARTIFACT,
+              path: revised.receipt.path,
+              digest: revised.receipt.digest,
+              bytes: revised.bytes,
+              run_id: revised.receipt.runId,
+            });
+          case "rejected":
+            return fail(
+              revised.problem,
+              revised.reason === "blank_prose"
+                ? "invalid_input"
+                : revised.reason === "no_identity"
+                  ? "no_run_id"
+                  : "write_failed",
+            );
+          case "unverified":
+            return fail(revised.problem, "write_failed");
+        }
       },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const decoded = decodeGistSaveParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "gist-save",
-          "gist_save",
-        )(
-          "gist_save needs { prose: string, scope?: plan|objective } per the tool schema",
-          "bad_input",
-        );
-      }
-      // A refinement session never creates a gist — independent of tool visibility.
-      if (isRefinementSession(branchOf(ctx)))
-        return failFor(
-          ctx,
-          "gist-save",
-          "gist_save",
-        )(refinementStageRefusal("gist_save"), "wrong_stage");
-      // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
-      const save = await saveGist(decoded, {
-        backend: coldDoorGistBackend(pi, ctx),
-        runId: openSession(pi, ctx).runId,
-      });
-      recordSaveOutcome(reviews, "gist", {
-        confirmed: save.status === "saved",
-        ...(save.status === "failed" ? { detail: save.message } : {}),
-      });
-      return gistSaveResultOf(ctx, save);
+    {
+      stages: [...GIST_STAGES],
+      gated: { carveOut: "the working-gist artifact in the session data dir" },
+      kind: "action",
     },
-  });
+  );
+
+  registerPerkTool(
+    pi,
+    {
+      name: "gist_save",
+      label: "Save gist",
+      description:
+        "Persist a drafted gist (a statement of intent) to the issue backend as a tracked " +
+        "perk:gist. Terminating: ends the turn on save. Call only when the gist says what it " +
+        "means.",
+      promptSnippet: "Save the converged gist to the issue backend (terminates the turn)",
+      promptGuidelines: GIST_SAVE_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["prose"],
+        properties: {
+          prose: {
+            type: "string",
+            description:
+              "The gist prose (the problem-space intent: what we want, why it matters, what " +
+              "bounds it, and any high-level solution leanings — no implementation steps).",
+          },
+          title: {
+            type: "string",
+            description: "Optional gist title (defaults to the prose's first heading).",
+          },
+          scope: {
+            type: "string",
+            enum: [...GIST_SCOPES],
+            description:
+              "Optional consumption tier: plan (plan-sized intent) or objective (objective-sized).",
+          },
+        },
+      },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const decoded = decodeGistSaveParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "gist-save",
+            "gist_save",
+          )(
+            "gist_save needs { prose: string, scope?: plan|objective } per the tool schema",
+            "bad_input",
+          );
+        }
+        // A refinement session never creates a gist — independent of tool visibility.
+        if (isRefinementSession(branchOf(ctx)))
+          return failFor(
+            ctx,
+            "gist-save",
+            "gist_save",
+          )(refinementStageRefusal("gist_save"), "wrong_stage");
+        // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
+        const save = await saveGist(decoded, {
+          backend: coldDoorGistBackend(pi, ctx),
+          runId: openSession(pi, ctx).runId,
+        });
+        recordSaveOutcome(reviews, "gist", {
+          confirmed: save.status === "saved",
+          ...(save.status === "failed" ? { detail: save.message } : {}),
+        });
+        return gistSaveResultOf(ctx, save);
+      },
+    },
+    { stages: [...GIST_STAGES], gated: "blocked", kind: "terminal" },
+  );
 
   registerPerkCommand(pi, "gist-save", {
     description:
@@ -466,7 +480,7 @@ export function installGistBindings(
         report(ctx, "gist-save", severity, message);
         return;
       }
-      // Exit the read-only gate so the gist_save tool (excluded from READ_ONLY_TOOLS) becomes
+      // Exit the read-only gate so the gist_save tool (gate-blocked) becomes
       // reachable on the driven turn, then drive the turn (mirrors /objective-save).
       if (gating.isActive()) gating.exit(ctx);
       report(ctx, "gist-save", "info", "handing the save to the session");

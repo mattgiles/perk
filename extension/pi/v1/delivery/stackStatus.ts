@@ -1,7 +1,7 @@
 // The stacked-delivery status read (contracts.md §8.51): the `objective_stack_status` tool +
 // the `/objective-stack` command over the Python cold worker `perk objective stack status`
 // (read-only end to end — the command works in every session, including gate-on; the tool stays
-// deliberately gate-off, documented in toolGating.ts). Pure decoding + rendering + delegation —
+// gate-blocked by its policy descriptor). Pure decoding + rendering + delegation —
 // no feature operation backs this module (zero-policy passthrough); the mutating stack family
 // lives in the sibling adapters (stackSync.ts / stackRecover.ts / stackLand.ts over the
 // `delivery/` feature ops, with the shared drive helpers in stackDrive.ts).
@@ -30,8 +30,10 @@ import {
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { failFor, ok, type Result } from "../../../substrate/result.ts";
 import { idParam, paramsOf } from "../../../substrate/toolParams.ts";
+import { WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import { resolveStackObjective } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
+import { registerPerkTool } from "../../perkTool.ts";
 
 /** The lenient finding-row render shared with the landing readiness preview
  * (stackLand.ts imports it — the ONE copy; the door-era duplicate died with the door). */
@@ -180,41 +182,45 @@ async function stackStatus(
 /** Install the stacked-delivery status read: the `objective_stack_status` tool (strict
  * tri-state param decode, non-terminating) + the `/objective-stack` command. */
 export function installStackStatusBindings(pi: ExtensionAPI): void {
-  pi.registerTool({
-    name: "objective_stack_status",
-    label: "Objective stack status",
-    description:
-      "Report an objective's stacked delivery train: layers, publication states, build " +
-      "readiness, unresolved operations, pending continuation, and orphaned sync residue. " +
-      "Read-only (delegates to the perk cold door).",
-    promptSnippet: "Report the objective's stacked delivery train (read-only)",
-    promptGuidelines: [
-      "objective_stack_status is read-only — call it freely to inspect the delivery train, unresolved operations, pending continuations, and orphaned residue (objective inferred when omitted).",
-    ],
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        objective: {
-          type: ["string", "number"],
-          description: "The objective issue id (inferred from the session when omitted).",
+  registerPerkTool(
+    pi,
+    {
+      name: "objective_stack_status",
+      label: "Objective stack status",
+      description:
+        "Report an objective's stacked delivery train: layers, publication states, build " +
+        "readiness, unresolved operations, pending continuation, and orphaned sync residue. " +
+        "Read-only (delegates to the perk cold door).",
+      promptSnippet: "Report the objective's stacked delivery train (read-only)",
+      promptGuidelines: [
+        "objective_stack_status is read-only — call it freely to inspect the delivery train, unresolved operations, pending continuations, and orphaned residue (objective inferred when omitted).",
+      ],
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          objective: {
+            type: ["string", "number"],
+            description: "The objective issue id (inferred from the session when omitted).",
+          },
         },
       },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const p = paramsOf(params);
+        const objective = p === null ? null : idParam(p, "objective");
+        if (p === null || objective === null) {
+          return failFor(
+            ctx,
+            "objective-stack",
+            "objective_stack_status",
+          )("objective_stack_status takes { objective?: <id> }", "bad_input");
+        }
+        return stackStatus(pi, ctx, objective);
+      },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const p = paramsOf(params);
-      const objective = p === null ? null : idParam(p, "objective");
-      if (p === null || objective === null) {
-        return failFor(
-          ctx,
-          "objective-stack",
-          "objective_stack_status",
-        )("objective_stack_status takes { objective?: <id> }", "bad_input");
-      }
-      return stackStatus(pi, ctx, objective);
-    },
-  });
+    { stages: [...WORKTREE_STAGES], gated: "blocked", kind: "query" },
+  );
 
   registerPerkCommand(pi, "objective-stack", {
     description:

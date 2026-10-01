@@ -81,9 +81,11 @@ door, or model tool; they are human-facing only.
 - **`/btw`** — a side-chat popover: a separate in-memory conversation seeded with your main
   conversation context, so it can answer without polluting the main thread. `/btw <text>` asks
   immediately; bare `/btw` opens the thread or offers to continue/start fresh. Closing the popover
-  offers to inject a summary into the main chat. Its tools follow perk's read-only mode — read-only
-  sessions get `read` only and read-write sessions get the full tool set — so it cannot escape the
-  structural gate. It is TUI-only and exposes no model tool.
+  offers to inject a summary into the main chat. Its tools follow perk's read-only mode, derived
+  from the builtin posture rows: read-only sessions get the plainly-allowed builtins (`read`,
+  `grep`, `find`, `ls` — no `bash`, whose read-only verdict cannot run inside a side session) and
+  read-write sessions get every builtin — so it cannot escape the structural gate. It is TUI-only
+  and exposes no model tool.
 - **`whimsical`** — replaces Pi's default “Working…” label with a random whimsical phrase each
   turn. It is ambient and cosmetic, with no command or config toggle.
 - **The watch feedback receiver** — in an eligible implement session, saved notes from a live

@@ -732,7 +732,7 @@ export default function perk(
   // `/objective-recover`/`/objective-land` drives + the four typed stack tools over the
   // `delivery/stackConflict.ts` + `delivery/stackReconcile.ts` feature ops. Takes `gating` for
   // the driving commands' gate-on soft refusal (stack sync/recovery mutates published
-  // branches; the stack tools never join READ_ONLY_TOOLS).
+  // branches; the stack tools are gate-blocked in every stage).
   installStackSyncBindings(pi, gating, stackConflict, options.stackResolutionDelivery);
   installStackRecoverBindings(pi, gating);
   installStackLandBindings(pi, gating);

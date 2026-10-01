@@ -343,7 +343,10 @@ def test_zero_fragment_governed_tool_reports_opaque_and_missing_contract(
     assert build_catalog(ROOT).findings == (
         Finding(
             code="missing-tool-contract",
-            message=f"PERK_TOOLS tool has no discovered contract: {tool}",
+            message=(
+                "tool catalog (shared/fixtures/tool-matrix.json) tool has no discovered "
+                f"contract: {tool}"
+            ),
         ),
         Finding(
             code="opaque-tool-contract",

@@ -124,6 +124,9 @@ def test_launches_with_inbox_seeded_prompt(monkeypatch, unborn_git_repo_factory)
     prompt = launched["prompt"] or ""
     assert _INBOX_REL in prompt
     assert "consumed_learn: [45, 50]" in prompt
+    # The cold save step is the review-first handoff carrier, never the gate-blocked tool.
+    assert "from this run's launch handoff automatically" in prompt
+    assert "plan_save" not in prompt
     # The perk-learn-docs skill POINTER (the path-carrying read line) is not hardcoded in the
     # seed — it rides the skill-binding mechanism (command:learn-docs). Name-only mentions (the
     # cue-contract pointer in step 4) are fine, so this pins the pointer shape, not the bare name.

@@ -81,6 +81,7 @@ import {
   type WorkflowState,
 } from "../../substrate/workflowState.ts";
 import { report } from "../../surfaces/report.ts";
+import { registerPerkTool } from "../perkTool.ts";
 import { installInjectedContext } from "./contextInjection.ts";
 import {
   checkDraftReviewDecision,
@@ -607,84 +608,92 @@ export function installObjectiveRefinementBindings(
     runnerChild,
   );
 
-  pi.registerTool({
-    name: "objective_refinement_draft",
-    label: "Refinement draft",
-    description:
-      "Write (or overwrite) the working objective-node refinement — the advisory Markdown — to " +
-      "the session data dir, bound to this session's grounding context. The only sanctioned " +
-      "write surface in a refinement session. NOT a save: an APPROVED plan_review, or the " +
-      "human's /objective-refinement-save, persists the node's refinement comment.",
-    promptSnippet:
-      "Persist the working refinement Markdown to the session data dir (full rewrite, context-bound)",
-    promptGuidelines: REFINEMENT_DRAFT_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["markdown"],
-      properties: {
-        markdown: {
-          type: "string",
-          description:
-            "The full refinement Markdown: what the node must deliver, the prerequisites that " +
-            "do not exist yet, the code seams as observed at capture time, the risks, and the " +
-            "assumptions a later real plan must re-verify.",
+  registerPerkTool(
+    pi,
+    {
+      name: "objective_refinement_draft",
+      label: "Refinement draft",
+      description:
+        "Write (or overwrite) the working objective-node refinement — the advisory Markdown — to " +
+        "the session data dir, bound to this session's grounding context. The only sanctioned " +
+        "write surface in a refinement session. NOT a save: an APPROVED plan_review, or the " +
+        "human's /objective-refinement-save, persists the node's refinement comment.",
+      promptSnippet:
+        "Persist the working refinement Markdown to the session data dir (full rewrite, context-bound)",
+      promptGuidelines: REFINEMENT_DRAFT_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["markdown"],
+        properties: {
+          markdown: {
+            type: "string",
+            description:
+              "The full refinement Markdown: what the node must deliver, the prerequisites that " +
+              "do not exist yet, the code seams as observed at capture time, the risks, and the " +
+              "assumptions a later real plan must re-verify.",
+          },
         },
       },
-    },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const fail = failFor(ctx, "objective-refinement-draft", "objective_refinement_draft");
-      const decoded = decodeRefinementDraftParams(params);
-      if (decoded === null)
-        return fail("objective_refinement_draft needs { markdown: string }", "bad_input");
-      // Independent of tool visibility: the draft writer only exists inside a refinement session.
-      if (!inRefinementStage(ctx))
-        return fail(
-          "objective_refinement_draft is only available in an objective-refine session " +
-            "(enter one with perk objective refine <objective> or /objective-refine)",
-          "wrong_stage",
-        );
-      const revised = reviseRefinementDraft(decoded, openSession(pi, ctx));
-      switch (revised.status) {
-        case "revised":
-        case "unchanged": {
-          const c = revised.context.context;
-          return ok(
-            `Refinement draft written → ${revised.receipt.path} (${revised.receipt.digest}); ` +
-              `bound to objective ${c.objective.id} node ${c.target.identity.node_id} ` +
-              `(context ${revised.context.digest})`,
-            {
-              name: REFINEMENT_DRAFT_ARTIFACT,
-              path: revised.receipt.path,
-              digest: revised.receipt.digest,
-              bytes: revised.bytes,
-              run_id: revised.receipt.runId,
-              context_digest: revised.context.digest,
-              objective_id: c.objective.id,
-              node_id: c.target.identity.node_id,
-              unchanged: revised.status === "unchanged",
-            },
-          );
-        }
-        case "rejected":
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const fail = failFor(ctx, "objective-refinement-draft", "objective_refinement_draft");
+        const decoded = decodeRefinementDraftParams(params);
+        if (decoded === null)
+          return fail("objective_refinement_draft needs { markdown: string }", "bad_input");
+        // Independent of tool visibility: the draft writer only exists inside a refinement session.
+        if (!inRefinementStage(ctx))
           return fail(
-            revised.problem,
-            revised.reason === "blank_markdown"
-              ? "invalid_input"
-              : revised.reason === "no_identity"
-                ? "no_run_id"
-                : revised.reason === "no_context"
-                  ? "refinement_context_missing"
-                  : revised.reason === "context_refused"
-                    ? "refinement_context_invalid"
-                    : "write_failed",
+            "objective_refinement_draft is only available in an objective-refine session " +
+              "(enter one with perk objective refine <objective> or /objective-refine)",
+            "wrong_stage",
           );
-        case "unverified":
-          return fail(revised.problem, "write_failed");
-      }
+        const revised = reviseRefinementDraft(decoded, openSession(pi, ctx));
+        switch (revised.status) {
+          case "revised":
+          case "unchanged": {
+            const c = revised.context.context;
+            return ok(
+              `Refinement draft written → ${revised.receipt.path} (${revised.receipt.digest}); ` +
+                `bound to objective ${c.objective.id} node ${c.target.identity.node_id} ` +
+                `(context ${revised.context.digest})`,
+              {
+                name: REFINEMENT_DRAFT_ARTIFACT,
+                path: revised.receipt.path,
+                digest: revised.receipt.digest,
+                bytes: revised.bytes,
+                run_id: revised.receipt.runId,
+                context_digest: revised.context.digest,
+                objective_id: c.objective.id,
+                node_id: c.target.identity.node_id,
+                unchanged: revised.status === "unchanged",
+              },
+            );
+          }
+          case "rejected":
+            return fail(
+              revised.problem,
+              revised.reason === "blank_markdown"
+                ? "invalid_input"
+                : revised.reason === "no_identity"
+                  ? "no_run_id"
+                  : revised.reason === "no_context"
+                    ? "refinement_context_missing"
+                    : revised.reason === "context_refused"
+                      ? "refinement_context_invalid"
+                      : "write_failed",
+            );
+          case "unverified":
+            return fail(revised.problem, "write_failed");
+        }
+      },
     },
-  });
+    {
+      stages: ["objective-refine"],
+      gated: { carveOut: "the working-refinement artifact in the session data dir" },
+      kind: "action",
+    },
+  );
 
   registerPerkCommand(pi, "objective-refine", {
     description:

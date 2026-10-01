@@ -18,53 +18,54 @@ These tools are registered by perk itself. Command-specific semantics live in
 [Review and authoring](./review-and-authoring.md).
 
 <!-- BEGIN perk tool census -->
-| Family | Tool |
-| --- | --- |
-| Plan authoring | `plan_review` |
-| Plan authoring | `plan_save` |
-| Plan authoring | `plan_draft` |
-| Objective authoring | `objective_save` |
-| Objective workflow | `objective_node` |
-| Objective workflow | `reconcile_objective` |
-| Objective workflow | `add_objective_node` |
-| Objective authoring | `objective_draft` |
-| Gist authoring | `gist_draft` |
-| Gist authoring | `gist_save` |
-| Refinement authoring | `objective_refinement_draft` |
-| Learn lifecycle | `learn` |
-| Learn lifecycle | `run_learn_wave` |
-| Developer analysis | `run_audit_wave` |
-| Learn factories | `run_harvest_wave` |
-| Learn factories | `run_dream_wave` |
-| PR lifecycle | `land` |
-| Automated review | `post_pr_review` |
-| PR lifecycle | `ready` |
-| Address loop | `classify_review_feedback` |
-| Address loop | `finalize_address` |
-| Objective workflow | `explore_objective_node` |
-| Read-only investigation | `run_scout_wave` |
-| Library | `run_librarian` |
-| Automated review | `run_pr_review_wave` |
-| Human PR review | `submit_pr_review` |
-| Human PR review | `start_review_wave` |
-| Human PR review | `collect_review_wave` |
-| Browser review | `push_annotations` |
-| Human PR review | `open_stack_review` |
-| Draft review | `start_draft_review_wave` |
-| Draft review | `collect_draft_review_wave` |
-| Verification | `run_ci` |
-| PR lifecycle | `submit` |
-| PR lifecycle | `resolve_submit_conflicts` |
-| Stacked delivery | `objective_stack_status` |
-| Stacked delivery | `objective_stack_sync` |
-| Stacked delivery | `objective_stack_adopt` |
-| Stacked delivery | `objective_stack_recover` |
-| Stacked delivery | `objective_stack_land` |
+| Family | Tool | Kind | Under the gate |
+| --- | --- | --- | --- |
+| Plan authoring | `plan_review` | terminal | allowed, mode-over-stage |
+| Plan authoring | `plan_save` | terminal | blocked |
+| Plan authoring | `plan_draft` | action | carve-out, mode-over-stage |
+| Objective authoring | `objective_save` | terminal | blocked |
+| Objective workflow | `objective_node` | action | carve-out |
+| Objective workflow | `reconcile_objective` | action | blocked |
+| Objective workflow | `add_objective_node` | action | blocked |
+| Objective authoring | `objective_draft` | action | carve-out |
+| Gist authoring | `gist_draft` | action | carve-out |
+| Gist authoring | `gist_save` | terminal | blocked |
+| Refinement authoring | `objective_refinement_draft` | action | carve-out |
+| Learn lifecycle | `learn` | terminal | blocked |
+| Learn lifecycle | `run_learn_wave` | orchestration | blocked |
+| Developer analysis | `run_audit_wave` | orchestration | carve-out |
+| Learn factories | `run_harvest_wave` | orchestration | allowed |
+| Learn factories | `run_dream_wave` | orchestration | carve-out |
+| PR lifecycle | `land` | terminal | blocked |
+| Automated review | `post_pr_review` | action | blocked |
+| PR lifecycle | `ready` | terminal | blocked |
+| Address loop | `classify_review_feedback` | orchestration | blocked |
+| Address loop | `finalize_address` | terminal | blocked |
+| Objective workflow | `explore_objective_node` | orchestration | allowed |
+| Read-only investigation | `run_scout_wave` | orchestration | allowed |
+| Library | `run_librarian` | orchestration | carve-out |
+| Automated review | `run_pr_review_wave` | orchestration | blocked |
+| Human PR review | `submit_pr_review` | action | blocked |
+| Human PR review | `start_review_wave` | orchestration | blocked |
+| Human PR review | `collect_review_wave` | action | blocked |
+| Browser review | `push_annotations` | action | allowed, mode-over-stage |
+| Human PR review | `open_stack_review` | interactive | blocked |
+| Draft review | `start_draft_review_wave` | orchestration | allowed, mode-over-stage |
+| Draft review | `collect_draft_review_wave` | action | allowed, mode-over-stage |
+| Verification | `run_ci` | action | blocked |
+| PR lifecycle | `submit` | terminal | blocked |
+| PR lifecycle | `resolve_submit_conflicts` | orchestration | blocked |
+| Stacked delivery | `objective_stack_status` | query | blocked |
+| Stacked delivery | `objective_stack_sync` | orchestration | blocked |
+| Stacked delivery | `objective_stack_adopt` | action | blocked |
+| Stacked delivery | `objective_stack_recover` | action | blocked |
+| Stacked delivery | `objective_stack_land` | action | blocked |
 <!-- END perk tool census -->
 
 The terminating subset ends the current turn on its success path: `plan_save`, `objective_save`,
 `gist_save`, `submit`, `ready`, `finalize_address` on full success, `land`, `learn`, and
-`plan_review` when approval completes its save. Other perk-owned tools are non-terminating.
+`plan_review` when approval completes its save — exactly the tools of kind `terminal`, all
+model-only. Other perk-owned tools are non-terminating.
 
 `resolve_submit_conflicts` consumes one unused, verified submit/address conflict authorization.
 It is sequential and non-terminating: only a `resolved` result permits the parent to call canonical
@@ -219,8 +220,8 @@ For package selection, registration timing, and provider fallback behavior, use 
 These engine tools are not parent-stage tools. They exist only in spawned-child contexts and are
 kept reachable when a child adopts a read-only gate. perk's own waves spawn with the pi-subagents
 intercom bridge off, so their children never have `contact_supervisor` (review waves are
-completion-only); the allowlist entry keeps the supervisor door for an ad-hoc gated child whose
-bridge is active.
+completion-only); their gate eligibility (every stage but `objective-refine`) keeps the
+supervisor door for an ad-hoc gated child whose bridge is active.
 
 <!-- BEGIN child tool census -->
 | Purpose | Tool |
@@ -231,23 +232,50 @@ bridge is active.
 
 ## Gating and stage scoping
 
+Every perk tool registers with a **policy descriptor** — the stages it belongs to, its posture under
+the read-only gate (`allowed`, `blocked`, or a named carve-out — one bounded write), whether a mode
+gesture needs it regardless of stage, and its kind (`terminal`, `interactive`, `orchestration`,
+`query`, `action`). Each tool's Kind and Under-the-gate posture appear in the census above.
+Everything perk installs is derived from those descriptors through one **eligibility formula**: a
+tool is eligible in a session when its stage is one of the tool's stages and the mode allows it
+(read-write always does; read-only does unless the tool is gate-blocked), or when the session is
+read-only and the tool is **mode-over-stage**. A session with no stage (or an unknown one) is
+eligible for every tool the mode allows. Foreign packages' tools get the same treatment through a
+fixed posture table, and Pi's builtins through their own rows (`read`/`grep`/`find`/`ls` allowed,
+`bash` under the read-only verdict, `edit`/`write` blocked). The full stage-by-tool result is
+committed as `shared/fixtures/tool-matrix.json`.
+
+The mode-over-stage tools are exactly the `/plan` toggle's flow — `plan_draft`, `plan_review`, and
+the reviewer-wave companions `start_draft_review_wave`, `collect_draft_review_wave` and
+`push_annotations` — so toggling `/plan` in any session (a worktree session included) leaves the
+whole draft → review → reviewer-wave flow reachable.
+
+Terminal, interactive and orchestration tools are declared to the model as **model-only**: Pi never
+lets another tool (for example a `codemode` script) call them through `ctx.executeTool()`, so no
+nested call can end the turn or open a human surface.
+
 ### Structural read-only gate
 
 Effective read-only gating is the existing workflow mode **or** a captured runner restriction
-floor. Perk installs `READ_ONLY_TOOLS` as the active set — minus any lazy-loaded tool its package
-currently hides (the loaders themselves are allowlisted, so the model can still enable them) — and
-independently checks the full allowlist at tool-call time. Lazy hiding only shapes the active set;
-it is not a call-time boundary, and a hidden tool the gate allows is not refused when called. The
-exception is an `objective-refine` session, whose gate-ON set is its
-own narrower refinement allowlist (read/research/question, `plan_review`, and
-`objective_refinement_draft` — no node claim, no other draft or save tool, no delegation) and
-whose hidden guidance is the `[READ-ONLY REFINEMENT MODE]` flavor naming that writer. Every excluded tool is denied, including `edit`, `write`, save/delivery
-tools and unknown or late-registered foreign mutators—even if toolset synchronization failed.
-Allowlisted `bash` retains a textual command-position sub-allowlist. It first applies the
+floor. Perk installs the stage's **gated view** — every tool eligible read-only there — as the
+active set, minus any lazy-loaded tool its package currently hides (a loader is eligible exactly
+where its tools are, so the model can still enable them), and independently checks full
+eligibility at tool-call time. Lazy hiding only shapes the active set; it is not a call-time
+boundary, and a hidden tool the gate allows is not refused when called. Each stage therefore sees
+its own tools: an `objective-refine` session, for instance, gets read/research/question,
+`plan_review`, `objective_refinement_draft` and the mode-over-stage set — no node claim, no
+objective or gist draft, no save tool, no delegation. Because the `/plan` flow's tools are
+mode-over-stage, `plan_draft` is reachable there too and can write a plan draft, but that draft
+can never be reviewed or saved from a refinement session (`plan_review` reviews only the
+refinement draft, and every save command refuses). The hidden guidance names the stage's sanctioned bounded
+writers (its carve-out tools) under a `[READ-ONLY MODE] (stage <id>)` marker, or
+`[READ-ONLY MODE] (unscoped)` in a session with no stage. Every ineligible tool is denied,
+including `edit`, `write`, save/delivery tools and unknown or late-registered foreign
+mutators—even if toolset synchronization failed. Allowlisted `bash` retains a textual command-position sub-allowlist. It first applies the
 whole-command destructive veto, then walks every command position — after sequencing operators and
 newlines, inside substitutions, after shell keywords/redirections/wrappers, and at `find -exec`/
 `fd -x` — then matches every emitted command against `SAFE_PATTERNS` in
-`extension/substrate/toolGating.ts` (the inventory). A refusal names its reason beneath the echoed
+`extension/substrate/readOnlyBash.ts` (the inventory). A refusal names its reason beneath the echoed
 command. Heredoc data remains data while substitutions in an expanding heredoc are commands.
 
 The walker distinguishes three kinds of position. A shell position may parse assignment prefixes
@@ -337,11 +365,12 @@ No packet is never a write grant. `structured_output` and `contact_supervisor` s
 
 ### Stage tool diet
 
-With the gate off and a known stage active, `STAGE_TOOLS` subtractively filters the scoped universe
-`PERK_TOOLS ∪ BORROWED_TOOLS`. Each stage receives its own authoring/lifecycle tools plus the
-research family. The five worktree stages — implement, submit, address, land, and learn — share the
-whole PR-loop family so a later warm command cannot dead-end in an earlier worktree session. That
-shared family includes submission, readiness, CI, review/address, land/learn, reconciliation, and
+With the gate off and a known stage active, the stage's **diet** — every perk and borrowed tool
+eligible read-write there — subtractively filters the scoped universe (the perk tool catalog plus
+the borrowed-tool census). Each stage receives its own authoring/lifecycle tools plus the research
+family. The five worktree stages — implement, submit, address, land, and learn — share the whole
+PR-loop family so a later warm command cannot dead-end in an earlier worktree session. That shared
+family includes submission, readiness, CI, review/address, land/learn, reconciliation, and
 stack-control operations, plus delegation and the checklist.
 
 When perk first engages it records the host's active starting set and the registered-tool census,
@@ -350,7 +379,7 @@ extension's `session_start` has run). The base is that starting set plus every l
 tool perk has seen active with the gate off — the delegation supervisor tool, which registers late,
 lands inside the diet at launch and is restored when navigation returns to a stage that carries it;
 a late tool its owner deactivated before perk saw it is left alone; a tool inactive at the start is
-never re-activated by perk. A late tool outside the read-only allowlist is inactive from the first
+never re-activated by perk. A late tool outside the gated view is inactive from the first
 turn and is not restored at gate exit. Lazy-loaded tools follow their package's current selection
 rather than the starting set, and stage exclusion still applies to them: a `subagent` the model
 enabled is still removed in a stage that excludes delegation.

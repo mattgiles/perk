@@ -23,7 +23,7 @@ from perk.substrate.skill_exposure import parse_skill_frontmatter
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # The scout launcher's judgment tier rides exactly these three skills (each bound to the one stage
-# whose STAGE_TOOLS list carries the tool).
+# whose stage diet carries the tool).
 SCOUT_GUIDANCE_SKILLS: dict[str, list[str]] = {
     "perk-plan": ["plan"],
     "perk-objective-plan": ["objective-plan"],
@@ -305,13 +305,14 @@ def test_perk_simplify_sole_carried_detail():
 def test_scout_launcher_guidance_rides_exactly_the_three_authoring_skills():
     """The dispatch-parity / negative-space pin for the scout launcher's guidance carriers.
 
-    `run_scout_wave` rides exactly the `plan` / `objective-plan` / `objective-author` `STAGE_TOOLS`
-    lists (contracts §8.70 item 6; pinned on the TS side by `extension/substrate/stageTools.test.ts`
-    "run_scout_wave rides exactly the three authoring stage lists"), and the skill guidance naming
-    it rides exactly the skills bound to those three stages — the two-carrier shape
-    `explore_objective_node` established (tool `promptGuidelines` for the mechanics, the bound
-    stage skill for the judgment). Consequence: no other `skills/perk-*/SKILL.md` (`perk-expert`,
-    `perk-grill`, `perk-replan`, …) may carry the literal `run_scout_wave`; the
+    `run_scout_wave` rides exactly the `plan` / `objective-plan` / `objective-author` stage
+    diets (contracts §8.70 item 6; pinned on the TS side by
+    `extension/substrate/stageTools.test.ts` "stage diets: run_scout_wave rides exactly the three
+    authoring stages"), and the skill guidance naming it rides exactly the skills bound to those
+    three stages — the two-carrier shape `explore_objective_node` established (tool
+    `promptGuidelines` for the mechanics, the bound stage skill for the judgment). Consequence:
+    no other `skills/perk-*/SKILL.md` (`perk-expert`, `perk-grill`, `perk-replan`, …) may carry
+    the literal `run_scout_wave`; the
     `skills/perk-expert/references/*.md` mirror is outside this sweep and may.
     """
     carriers: dict[str, Path] = {}
@@ -327,7 +328,7 @@ def test_scout_launcher_guidance_rides_exactly_the_three_authoring_skills():
         frontmatter, reason = parse_skill_frontmatter(carriers[skill].read_text(encoding="utf-8"))
         assert reason is None, f"{skill}: {reason}"
         assert frontmatter.get("stages") == stages, (
-            f"{skill} must be bound to exactly {stages} (the stage whose STAGE_TOOLS list carries "
+            f"{skill} must be bound to exactly {stages} (the stage whose diet carries "
             f"run_scout_wave); got {frontmatter.get('stages')!r}"
         )
 
@@ -335,9 +336,9 @@ def test_scout_launcher_guidance_rides_exactly_the_three_authoring_skills():
 def test_run_librarian_guidance_rides_the_librarian_skill():
     """The library writer launcher's guidance carrier: among `skills/*/SKILL.md`, exactly the
     `librarian` skill names `run_librarian`, and it is bound to exactly the stages whose
-    `STAGE_TOOLS` lists carry the tool (the TS pin in `extension/substrate/stageTools.test.ts`
-    owns the stage-list side; submit/land carry the tool by the worktree family's shared list
-    but bind no librarian guidance).
+    stage diets carry the tool (the TS pin in `extension/substrate/stageTools.test.ts` owns the
+    diet side; submit/land carry the tool through the worktree family but bind no librarian
+    guidance).
     """
     carriers = sorted(
         path.parent.name

@@ -126,8 +126,8 @@ neither a durable artifact nor a common tool name — `pi-web-access` exposes
 `web_search`/`code_search`/`fetch_content`/`get_search_content`, `@ollama/pi-web-search` exposes
 `ollama_web_search`/`ollama_web_fetch`, `@juicesharp/rpiv-web-tools` exposes `web_search`/`web_fetch`.
 The contract is only the loose "web search + fetch capability is available", so perk **does not
-normalize names** — it allowlists the **union** of all known web tool names in `READ_ONLY_TOOLS`
-(inert when a package is absent). (2) **Foreign default:** perk owns **no** native web provider, so
+normalize names** — it makes the **union** of all known web tool names gate-eligible (the web
+research foreign row, §8.40; inert when a package is absent). (2) **Foreign default:** perk owns **no** native web provider, so
 the behavior-preserving default (`pi-web-access`, C3) is itself a **foreign package** — the first
 seam where the default carries a non-null `package`. The adapter is **vacate-only with nothing to
 vacate**: perk registers no web tools, so selection simply swaps the installed package (`adapter:

@@ -95,6 +95,16 @@ for (const kind of [DOCS_FACTORY, CODE_FACTORY]) {
     assert.match(text, /consumed_learn: \[45, 50\]/);
   });
 
+  test(`learnFactoryGuidance (${kind.name}) saves through the explicit plan_save carrier (no warm handoff)`, () => {
+    const text = learnFactoryGuidance(kind, "inbox.md", ["45", "50"]);
+    assert.match(text, /call the `plan_save` tool passing `consumed_learn: \[45, 50\]`/);
+    assert.doesNotMatch(
+      text,
+      /launch handoff automatically/,
+      "never the cold review-first promise",
+    );
+  });
+
   test(`learnFactoryGuidance (${kind.name}) does not hardcode the perk-${kind.name} skill pointer`, () => {
     const text = learnFactoryGuidance(kind, "inbox.md", ["45"]);
     assert.doesNotMatch(text, new RegExp(`Follow the perk-${kind.name} skill`));

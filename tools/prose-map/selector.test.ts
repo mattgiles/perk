@@ -283,6 +283,37 @@ pi.registerTool({
   assert.deepEqual([ambiguous.line, ambiguous.column], [6, 41]);
 });
 
+test("the registerPerkTool seam: the definition is arguments[1]; the policy argument is never scanned", () => {
+  const source = `
+registerPerkTool(
+  pi,
+  { name: "seam", description: "via the seam" },
+  { stages: [], gated: { carveOut: "a bounded write" }, kind: "action", description: "policy" },
+);`;
+  assert.equal(focus(source, "tool:seam.description"), '"via the seam"');
+  const sf = ts.createSourceFile("seam.ts", source, ts.ScriptTarget.Latest, true);
+  const { records } = enumerateSelectorSites(sf);
+  assert.deepEqual(
+    records.map((record) => (record.kind === "tool-registration" ? record.name : record.kind)),
+    ["seam"],
+    "one registration, named from the definition",
+  );
+  const zero =
+    'registerPerkTool(pi, { name: "bare" }, { stages: [], gated: "allowed", kind: "query" });';
+  const bare = enumerateSelectorSites(
+    ts.createSourceFile("bare.ts", zero, ts.ScriptTarget.Latest, true),
+  );
+  assert.equal(bare.records.length, 1, "a zero-fragment registration is still a registration");
+  assert.deepEqual(bare.sites, [], "with no prose fragments");
+  const other = 'helper.registerPerkTool(pi, { name: "x", description: "no" }, {});';
+  assert.deepEqual(
+    enumerateSelectorSites(ts.createSourceFile("o.ts", other, ts.ScriptTarget.Latest, true))
+      .records,
+    [],
+    "only the bare seam identifier matches",
+  );
+});
+
 test("numeric static keys, array indexes, duplicate keys, and registrations never guess", () => {
   const source = `
 pi.registerTool({

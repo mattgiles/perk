@@ -69,6 +69,31 @@ factory; a `mode`, never a recorded `stage`. A stage-less session in plan mode r
 counts.
 _Avoid_: plan stage (for the toggle), warm plan session, stage-less plan
 
+**Tool catalog**:
+The process-wide record of every perk tool and its policy descriptor, filled by the one registration
+seam `registerPerkTool`; every gate and stage view, each tool's Pi exposure metadata, the read-only
+context's writer list and the golden tool matrix (`shared/fixtures/tool-matrix.json`) derive from it.
+_Avoid_: PERK_TOOLS, perk tool list, tool census (for perk's own tools)
+
+**Policy descriptor**:
+A perk tool's registration-time record — the stages it belongs to, its gate posture (`allowed`,
+`blocked`, or a **carve-out** naming its one bounded write), whether it is mode-over-stage, and its
+kind (`terminal` / `interactive` / `orchestration` / `query` / `action`; the first three are
+declared model-only).
+_Avoid_: tool config, tool metadata, tool flags
+
+**Eligibility formula**:
+The one rule deciding whether a tool may be active in a (stage, mode) landing:
+`(stage ∈ stages ∧ (read-write ∨ not gate-blocked)) ∨ (read-only ∧ mode-over-stage)`, an unscoped or
+unknown stage being eligible for everything the mode allows. Its read-only result is a stage's
+**gated view**; its read-write result over the scoped universe is the **stage diet**.
+_Avoid_: gate-ON allowlist, READ_ONLY_TOOLS, STAGE_TOOLS, stage list
+
+**Mode gesture**:
+A session action that changes the mode but records no stage — the `/plan` toggle. The tools its
+flow needs are mode-over-stage, so the flow completes wherever the gesture lands.
+_Avoid_: mode switch, plan stage (for the toggle)
+
 **Lazy loader**:
 A borrowed package's tool that activates that package's other tools on demand — `subagents_enable`,
 `web_enable`; perk gives it the eligibility of the tools it enables and refuses a call to it
@@ -81,6 +106,9 @@ its mode/stage eligibility but takes its membership from the owner's live select
 _Avoid_: hidden tool, deferred tool, heavy tool
 
 ### Read-only bash gate
+
+The verdict (`readOnlyBashVerdict`) lives in `extension/substrate/readOnlyBash.ts`; the gate applies
+it to `bash` under the builtin row's `verdict` posture.
 
 **Command position**:
 A place in a bash command string where bash reads the next word as a command to run — the start

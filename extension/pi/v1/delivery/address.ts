@@ -45,6 +45,7 @@ import {
   stringParam,
   type ToolParams,
 } from "../../../substrate/toolParams.ts";
+import { WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import { activePlanRef } from "../../../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../../../surfaces/report.ts";
 import {
@@ -57,6 +58,7 @@ import {
   REVIEW_CLASSIFIER_FLOW,
   runReviewClassifierWave,
 } from "../../../waves/reviewClassifierWave.ts";
+import { registerPerkTool } from "../../perkTool.ts";
 import {
   driveConflictFollowUp,
   publishDepsFor,
@@ -375,88 +377,96 @@ export function installAddressBindings(
   wave: ReportWave,
   controller: SubmitConflictController,
 ): void {
-  pi.registerTool({
-    name: "classify_review_feedback",
-    label: "Classify review feedback",
-    description:
-      "Fetch + classify the active PR's review feedback in an isolated read-only child " +
-      "(perk.review-classifier through the perk wave module, engine-validated report schema) and " +
-      "return the typed classification. The raw GitHub text never enters this session. Call ONCE " +
-      "per address pass; on failure surface the error and stop.",
-    promptSnippet: "Classify the PR's review feedback in an isolated read-only child",
-    promptGuidelines: CLASSIFY_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {},
+  registerPerkTool(
+    pi,
+    {
+      name: "classify_review_feedback",
+      label: "Classify review feedback",
+      description:
+        "Fetch + classify the active PR's review feedback in an isolated read-only child " +
+        "(perk.review-classifier through the perk wave module, engine-validated report schema) and " +
+        "return the typed classification. The raw GitHub text never enters this session. Call ONCE " +
+        "per address pass; on failure surface the error and stop.",
+      promptSnippet: "Classify the PR's review feedback in an isolated read-only child",
+      promptGuidelines: CLASSIFY_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {},
+      },
+      async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
+        // Model resolution lives here (not in the guidance): `[models.subagents] review-classifier`
+        // rides the wave as the workflow-level `model` default. `subagentModel` anchors the
+        // gitignored `.perk/local.toml` overlay to the MAIN checkout, so a per-user override
+        // survives the cold worktree launch (worktrees never materialize local.toml).
+        const model = subagentModel(ctx.cwd, "review-classifier");
+        return executeClassifyReviewFeedback(wave, ctx, {
+          ...(model !== undefined ? { model } : {}),
+          ...(signal !== undefined ? { signal } : {}),
+        });
+      },
     },
-    async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
-      // Model resolution lives here (not in the guidance): `[models.subagents] review-classifier`
-      // rides the wave as the workflow-level `model` default. `subagentModel` anchors the
-      // gitignored `.perk/local.toml` overlay to the MAIN checkout, so a per-user override
-      // survives the cold worktree launch (worktrees never materialize local.toml).
-      const model = subagentModel(ctx.cwd, "review-classifier");
-      return executeClassifyReviewFeedback(wave, ctx, {
-        ...(model !== undefined ? { model } : {}),
-        ...(signal !== undefined ? { signal } : {}),
-      });
-    },
-  });
+    { stages: [...WORKTREE_STAGES], gated: "blocked", kind: "orchestration" },
+  );
 
-  pi.registerTool({
-    name: "finalize_address",
-    label: "Finalize addressed feedback",
-    description:
-      "Publish committed review fixes through the normal submit operation, then reply to and " +
-      "resolve the addressed threads. Terminates only when both steps succeed.",
-    promptSnippet: "Publish fixes, then resolve the addressed PR review threads",
-    promptGuidelines: TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["threads"],
-      properties: {
-        threads: {
-          type: "array",
-          description: "The threads to resolve.",
-          items: {
+  registerPerkTool(
+    pi,
+    {
+      name: "finalize_address",
+      label: "Finalize addressed feedback",
+      description:
+        "Publish committed review fixes through the normal submit operation, then reply to and " +
+        "resolve the addressed threads. Terminates only when both steps succeed.",
+      promptSnippet: "Publish fixes, then resolve the addressed PR review threads",
+      promptGuidelines: TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["threads"],
+        properties: {
+          threads: {
+            type: "array",
+            description: "The threads to resolve.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["thread_id"],
+              properties: {
+                thread_id: { type: "string", description: "The GraphQL node id of the thread." },
+                comment: { type: "string", description: "Optional reply posted before resolving." },
+              },
+            },
+          },
+          pr: { type: "number", description: "Optional PR number, recorded in last_review_batch." },
+          counts: {
             type: "object",
+            description: "Optional classification counts, recorded in last_review_batch.",
             additionalProperties: false,
-            required: ["thread_id"],
             properties: {
-              thread_id: { type: "string", description: "The GraphQL node id of the thread." },
-              comment: { type: "string", description: "Optional reply posted before resolving." },
+              actionable: { type: "number" },
+              informational: { type: "number" },
+              praise: { type: "number" },
+              question: { type: "number" },
             },
           },
         },
-        pr: { type: "number", description: "Optional PR number, recorded in last_review_batch." },
-        counts: {
-          type: "object",
-          description: "Optional classification counts, recorded in last_review_batch.",
-          additionalProperties: false,
-          properties: {
-            actionable: { type: "number" },
-            informational: { type: "number" },
-            praise: { type: "number" },
-            question: { type: "number" },
-          },
-        },
+      },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const decoded = decodeResolveParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "address",
+            "finalize_address",
+          )("finalize_address needs { threads: [{thread_id, comment?}] }", "bad_input");
+        }
+        return executeFinalizeAddress(pi, ctx, decoded, controller);
       },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const decoded = decodeResolveParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "address",
-          "finalize_address",
-        )("finalize_address needs { threads: [{thread_id, comment?}] }", "bad_input");
-      }
-      return executeFinalizeAddress(pi, ctx, decoded, controller);
-    },
-  });
+    { stages: [...WORKTREE_STAGES], gated: "blocked", kind: "terminal" },
+  );
 
   registerPerkCommand(pi, "address", {
     description:

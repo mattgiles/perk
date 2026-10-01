@@ -19,8 +19,8 @@ decision-complete, a DENY returns feedback for a revise-and-re-review round, an 
 auto-saves — is stated by your session's plan-authoring context; this section carries the detail
 behind it.
 
-- The posture is **review-first**: the `plan_save` tool is hidden while the read-only gate is on
-  (and `/plan` is a user command you cannot run).
+- The posture is **review-first**: the save tool is hidden while the read-only gate is on (and
+  `/plan` is a user command you cannot run).
 - Before requesting review, follow the `perk-grill` skill (read
   `.agents/skills/perk-grill/SKILL.md`) — stress-test the plan with the user until no decision
   residue remains.
@@ -52,12 +52,11 @@ your latest message; on success it exits plan mode — the read-only → read-wr
 gesture).
 
 Orchestrated factory flows (objective-plan, the learn factories, replan, plan-from) are
-review-first too — their gated read-only sessions hide the `plan_save` tool, and the
-approval-driven save recovers each factory's link params (the node link, `consumed_learn`,
-`adopt_from`) from the run's carriers. The `plan_save` tool remains the canonical programmatic
-surface where it is active (read-write sessions — e.g. the warm learn doors, which pass
-`consumed_learn` explicitly). There is no tag or marker convention to use — just author a
-clean plan.
+review-first too — their gated read-only sessions hide the save tool, and the approval-driven
+save recovers each factory's link params (the node link, `consumed_learn`, `adopt_from`) from the
+run's carriers. The save tool remains the canonical programmatic surface where it is active
+(read-write sessions — e.g. the warm learn doors, which pass `consumed_learn` explicitly). There is
+no tag or marker convention to use — just author a clean plan.
 
 ## Structure
 
@@ -141,7 +140,7 @@ and which briefs failed or went unanswered. The plan's judgment and authoring st
 
 ## What the tool does (so you don't have to)
 
-`plan_save` derives the title, splits the queryable header from the full body, creates the GitHub
+The save derives the title, splits the queryable header from the full body, creates the GitHub
 plan issue idempotently, writes the local `cache.plan-ref`, and links this session. It is
 deterministic — it **stores what you give it** and computes nothing about the plan's content. Give it
 a complete plan; it will not reason on your behalf.

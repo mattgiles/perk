@@ -117,6 +117,11 @@ export interface PerkSession {
     promptGuidelines?: string[];
     executionMode?: string;
   } | null;
+  /**
+   * A registered tool's `getAllTools()` record — Pi's view of its derived `exposure` and
+   * `annotations`; null when the tool is not registered.
+   */
+  toolInfo(name: string): { name: string; exposure: string; annotations?: unknown } | null;
   /** A registered command's declared surface (invocation name + description) — the byte pin twin. */
   registeredCommand(name: string): { name: string; description?: string } | null;
   /** Fire `session_tree` by navigating to an entry. */
@@ -760,6 +765,15 @@ export async function loadPerkSession(opts: {
         ...(def.promptSnippet !== undefined ? { promptSnippet: def.promptSnippet } : {}),
         ...(def.promptGuidelines !== undefined ? { promptGuidelines: def.promptGuidelines } : {}),
         ...(def.executionMode !== undefined ? { executionMode: def.executionMode as string } : {}),
+      };
+    },
+    toolInfo(name: string) {
+      const info = session.getAllTools().find((t) => t.name === name);
+      if (!info) return null;
+      return {
+        name: info.name,
+        exposure: info.exposure,
+        ...(info.annotations !== undefined ? { annotations: info.annotations } : {}),
       };
     },
     registeredCommand(name: string) {

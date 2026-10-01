@@ -1,9 +1,10 @@
-// Stage-scoped active tools (contracts.md §8.40): the STAGE_TOOLS map hygiene + the live
-// scoping behavior driven through a REAL bound AgentSession via the harness (fully offline).
+// Stage-scoped active tools (contracts.md §8.40): the derived stage-diet hygiene, the
+// catalog↔live-registration census, the live scoping behavior driven through a REAL bound
+// AgentSession via the harness (fully offline), and the both-planes prompt guard's TS half.
 // Sibling of toolGating.test.ts (which stays focused on the read-only gate itself).
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { before, test } from "node:test";
 import { fauxAssistantMessage, fauxText, getCurrentTools } from "@earendil-works/pi-ai";
 import {
   buildSessionContext,
@@ -11,9 +12,21 @@ import {
   type ExtensionContext,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { reconcileGuidance } from "../authoring/objective/prose.ts";
+import { GIST_AUTHORING_CONTEXT } from "../authoring/gist/prose.ts";
+import {
+  factoryGuidance,
+  OBJECTIVE_AUTHORING_CONTEXT,
+  objectiveReadInstruction,
+  reconcileGuidance,
+} from "../authoring/objective/prose.ts";
+import { PLAN_AUTHORING_CONTEXT } from "../authoring/plan/prose.ts";
+import { REFINEMENT_CONTEXT } from "../authoring/refinement/prose.ts";
+import { learnFactoryGuidance } from "../learning/prose.ts";
+import { CODE_FACTORY, DOCS_FACTORY } from "../learning/routing.ts";
 import { prReviewGuidance } from "../pi/v1/codeReview/automated.ts";
 import { stackReviewGuidance } from "../pi/v1/codeReview/stack.ts";
+import { prReviewTerminalGuidance } from "../pi/v1/codeReview/terminal.ts";
+import { isPlanGuidanceStage } from "../pi/v1/contextInjection.ts";
 import {
   commitAndCompactContinuation,
   commitAndCompactGuidance,
@@ -24,6 +37,8 @@ import {
   objectiveSyncGuidance,
   syncConflictResolutionGuidance,
 } from "../pi/v1/delivery/stackSync.ts";
+import { draftAndCompactContinuation, draftAndCompactGuidance } from "../pi/v1/draftCompact.ts";
+import { gistSaveGuidance } from "../pi/v1/gist.ts";
 import { simplifyGuidance } from "../pi/v1/simplify.ts";
 import { retainedDispatch } from "../testing/fakeConflictResolver.ts";
 import {
@@ -34,20 +49,33 @@ import {
   plantSession,
   scaffoldRepo,
 } from "../testing/harness.ts";
+import { ensureToolCatalog } from "../testing/toolCatalog.ts";
 import { render } from "./prompts.ts";
-import { loadRegistry } from "./registry.ts";
+import { LAZY_TOOL_LOADERS, renderReadOnlyContext } from "./toolGating.ts";
 import {
+  AUTHORING_STAGES,
   BORROWED_TOOLS,
+  dietUniverse,
   FFF_SEARCH_TOOLS,
-  LAZY_TOOL_LOADERS,
+  FOREIGN_TOOL_POLICY,
+  GIST_STAGES,
+  gatedToolsFor,
+  isEligible,
   LINEAR_MUTATING_TOOLS,
-  LINEAR_READ_TOOLS,
-  PERK_TOOLS,
+  type Mode,
+  OBJECTIVE_STAGES,
+  PLAN_FAMILY_STAGES,
   PLANNOTATOR_PHASE_TOOLS,
-  READ_ONLY_TOOLS,
-  STAGE_TOOLS,
+  perkToolNames,
+  REGISTRY_STAGE_IDS,
+  stageToolsFor,
+  toolMatrix,
   WEB_RESEARCH_TOOLS,
-} from "./toolGating.ts";
+  WORKTREE_STAGES,
+} from "./toolPolicy.ts";
+
+// The pure diet/guard tests read the catalog: fill it the way production does first.
+before(ensureToolCatalog);
 
 /**
  * loadPerkSession with process.cwd() pointed at the scaffold for the load: provider vacating
@@ -79,155 +107,72 @@ const AUTHORING_TOOLS = [
   "objective_save",
 ];
 
-test("STAGE_TOOLS: the two objective stage lists are pinned exactly (least privilege)", () => {
-  // The exact-set pin for the /objective-review-browser widening: the six authoring/reconcile
-  // tools + the draft-review companions + plan_review (the door guidance names it; it routes to
-  // the objective review arm in both stages) + the universal research bundle — and NOTHING
-  // else. A presence check alone would let unrelated scoped tools ride these gate-OFF sessions
-  // (e.g. the §8.66 ready-time reconcile guidance deliberately avoids naming `ready`, so the
-  // zero-argument ready tool never rides an unbound main-root objective session where it could
-  // act on the cached selector's plan instead of the continuation's). The two lists differ by
-  // exactly TWO names: the authoring session carries the scout launcher and the library writer
-  // launcher; the save session carries neither.
-  const pinned = [
-    "ask_user_question",
-    "objective_draft",
-    "objective_save",
-    "reconcile_objective",
-    "add_objective_node",
-    "objective_node",
-    "start_draft_review_wave",
-    "collect_draft_review_wave",
-    "push_annotations",
-    "plan_review",
-    ...WEB_RESEARCH_TOOLS,
-    ...LINEAR_READ_TOOLS,
-    ...FFF_SEARCH_TOOLS,
-  ];
-  const expected: Record<string, string[]> = {
-    "objective-author": [...pinned, "run_scout_wave", "run_librarian"].sort(),
-    "objective-save": [...pinned].sort(),
-  };
-  for (const [stage, tools] of Object.entries(expected)) {
-    assert.deepEqual(
-      [...(STAGE_TOOLS[stage] ?? [])].sort(),
-      tools,
-      `STAGE_TOOLS.${stage} must carry exactly the pinned objective-stage set`,
-    );
-  }
-});
-
-test("STAGE_TOOLS: run_scout_wave rides exactly the three authoring stage lists", () => {
+test("stage diets: run_scout_wave rides exactly the three authoring stages", () => {
   // The scout launcher's gate-OFF placement (contracts.md §8.70): plan / objective-plan /
-  // objective-author and NO other stage — not the save stages, the gist stages, the worktree
-  // family, audit, stack-review, or the refinement row.
-  const authoring = new Set(["plan", "objective-plan", "objective-author"]);
-  for (const [stage, tools] of Object.entries(STAGE_TOOLS)) {
+  // objective-author and NO other stage.
+  for (const stage of REGISTRY_STAGE_IDS) {
     assert.equal(
-      tools.includes("run_scout_wave"),
-      authoring.has(stage),
-      `run_scout_wave ${authoring.has(stage) ? "must ride" : "must not ride"} STAGE_TOOLS.${stage}`,
+      stageToolsFor(stage)?.includes("run_scout_wave"),
+      AUTHORING_STAGES.includes(stage),
+      `run_scout_wave in the ${stage} diet`,
     );
   }
-  assert.ok(PERK_TOOLS.includes("run_scout_wave"));
 });
 
-test("STAGE_TOOLS: run_librarian rides exactly the plan / objective-plan / objective-author lists and the worktree family", () => {
-  // The library writer launcher's gate-OFF placement (contracts.md §8.75(l)): the three
-  // authoring stages plus the ONE shared worktree list — so submit/land carry it by the
-  // family's one-shared-list rule (accepted, pinned here) — and NO other stage.
-  const carriers = new Set([
-    "plan",
-    "objective-plan",
-    "objective-author",
-    "implement",
-    "submit",
-    "address",
-    "land",
-    "learn",
-  ]);
-  for (const [stage, tools] of Object.entries(STAGE_TOOLS)) {
+test("stage diets: run_librarian rides exactly the three authoring stages and the worktree family", () => {
+  // The library writer launcher's gate-OFF placement (contracts.md §8.75(l)).
+  const carriers = new Set([...AUTHORING_STAGES, ...WORKTREE_STAGES]);
+  for (const stage of REGISTRY_STAGE_IDS) {
     assert.equal(
-      tools.includes("run_librarian"),
+      stageToolsFor(stage)?.includes("run_librarian"),
       carriers.has(stage),
-      `run_librarian ${carriers.has(stage) ? "must ride" : "must not ride"} STAGE_TOOLS.${stage}`,
+      `run_librarian in the ${stage} diet`,
     );
   }
-  assert.ok(PERK_TOOLS.includes("run_librarian"));
 });
 
-test("STAGE_TOOLS: keys set-equal the registry stage ids", () => {
-  const registryIds = loadRegistry()
-    .stages.map((s) => s.id)
-    .sort();
-  const mapKeys = Object.keys(STAGE_TOOLS).sort();
-  assert.deepEqual(
-    mapKeys,
-    registryIds,
-    "STAGE_TOOLS must carry exactly one entry per registry stage id",
-  );
-});
-
-test("STAGE_TOOLS: every listed name is in the scoped universe, and ask_user_question is universal", () => {
-  const scoped = new Set([...PERK_TOOLS, ...BORROWED_TOOLS]);
-  for (const [stage, tools] of Object.entries(STAGE_TOOLS)) {
-    for (const name of tools) {
-      assert.ok(
-        scoped.has(name),
-        `${stage} lists a name outside PERK_TOOLS ∪ BORROWED_TOOLS: ${name}`,
-      );
+test("stage diets: every diet lies in the diet universe and carries ask_user_question + the research families", () => {
+  const universe = new Set(dietUniverse());
+  for (const stage of REGISTRY_STAGE_IDS) {
+    const diet = stageToolsFor(stage) ?? [];
+    for (const name of diet)
+      assert.ok(universe.has(name), `${stage}: ${name} outside the universe`);
+    for (const name of ["ask_user_question", ...WEB_RESEARCH_TOOLS, ...FFF_SEARCH_TOOLS]) {
+      assert.ok(diet.includes(name), `${stage} must carry ${name}`);
     }
-    assert.ok(tools.includes("ask_user_question"), `${stage} must carry ask_user_question`);
   }
 });
 
-test("STAGE_TOOLS: the census-only family (Linear mutators + plannotator phase tools) appears in NO stage list", () => {
-  // The §8.40 invariant itself, not only its `implement` instance (the matrix test below): these
-  // names are in the borrowed census so every stage session sheds their schemas, and NO stage
-  // list may carry them — Linear mutations are the Python plane's job, and perk never drives
-  // plannotator's plan phases. A future edit adding either family to `plan`, an `objective-*`
-  // stage, or `stack-review` fails here.
+test("stage diets: the census-only family (Linear mutators + plannotator phase tools) rides NO stage", () => {
+  // The §8.40 invariant: these names are in the borrowed census so every stage session sheds
+  // their schemas, and NO stage may carry them — Linear mutations are the Python plane's job,
+  // and perk never drives plannotator's plan phases.
   const censusOnly = [...LINEAR_MUTATING_TOOLS, ...PLANNOTATOR_PHASE_TOOLS];
   for (const name of censusOnly) {
     assert.ok(BORROWED_TOOLS.includes(name), `census-only name must be in BORROWED_TOOLS: ${name}`);
-  }
-  for (const [stage, tools] of Object.entries(STAGE_TOOLS)) {
-    for (const name of censusOnly) {
-      assert.ok(
-        !tools.includes(name),
-        `STAGE_TOOLS.${stage} must not carry the census-only ${name}`,
-      );
+    for (const stage of REGISTRY_STAGE_IDS) {
+      assert.ok(!stageToolsFor(stage)?.includes(name), `${stage} must not carry ${name}`);
     }
   }
 });
 
-test("STAGE_TOOLS: every stage list carries the FFF search tools (via the universal bundle)", () => {
-  // FFF local search rides RESEARCH_TOOLS (the universal non-mutating bundle); this pins the
-  // universality so a future stage-list refactor can't silently shed it.
-  for (const [stage, tools] of Object.entries(STAGE_TOOLS)) {
-    for (const name of FFF_SEARCH_TOOLS) {
-      assert.ok(tools.includes(name), `${stage} must carry the FFF search tool ${name}`);
-    }
-  }
-});
-
-test("BORROWED_TOOLS: no duplicates and zero overlap with PERK_TOOLS (single governance)", () => {
+test("BORROWED_TOOLS: no duplicates and zero overlap with the tool catalog (single governance)", () => {
   assert.equal(
     new Set(BORROWED_TOOLS).size,
     BORROWED_TOOLS.length,
     "BORROWED_TOOLS carries a duplicate name",
   );
   assert.deepEqual(
-    BORROWED_TOOLS.filter((name) => PERK_TOOLS.includes(name)),
+    BORROWED_TOOLS.filter((name) => perkToolNames().includes(name)),
     [],
-    "a name is governed ONCE — it lives in exactly one census (perk-registered names in PERK_TOOLS, borrowed names like ask_user_question in BORROWED_TOOLS)",
+    "a name is governed ONCE — perk-registered names in the catalog, borrowed names like ask_user_question in BORROWED_TOOLS",
   );
 });
 
-test("PERK_TOOLS: set-equals the non-builtin tools a perk-only session registers", async () => {
+test("the tool catalog set-equals the non-builtin tools a perk-only session registers", async () => {
   // The completeness drift guard: the harness binds ONLY perk with no [providers] config, so all
-  // perk registrations are live and builtins are the only other source. A new perk tool must be
-  // classified into PERK_TOOLS + STAGE_TOOLS before it can register.
+  // perk registrations are live and builtins are the only other source — and every one of them
+  // went through the seam (no registration bypasses the catalog).
   const cwd = scaffoldRepo();
   const h = await loadAt(cwd, { env: { PERK_RUN_ID: undefined } });
   try {
@@ -236,11 +181,7 @@ test("PERK_TOOLS: set-equals the non-builtin tools a perk-only session registers
       .filter((t) => t.sourceInfo.source !== "builtin")
       .map((t) => t.name)
       .sort();
-    assert.deepEqual(
-      registered,
-      [...PERK_TOOLS].sort(),
-      "a new perk tool must be classified into PERK_TOOLS and the STAGE_TOOLS map",
-    );
+    assert.deepEqual(registered, [...perkToolNames()].sort());
   } finally {
     h.dispose();
   }
@@ -278,35 +219,34 @@ test("implement claim: PR-loop family active, the 5 authoring tools scoped off",
   }
 });
 
-test("gated stage: gate ON keeps exactly the READ_ONLY_TOOLS-available subset (no stage filter)", async () => {
+test("gated stage: gate ON keeps exactly the registered subset of the stage's gated view", async () => {
   const runId = "01STAGETOOLOBJP";
   const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "objective-plan" } });
   const h = await loadAt(cwd, {
     env: { PERK_RUN_ID: runId },
-    // `subagent` registered so the gated delegation carve-in has a name to activate (the
-    // objective-plan explorer spawn).
+    // `subagent` registered so the narrowing has a name to keep off: the objective-plan session
+    // reaches delegation only through its typed launchers.
     extraExtensions: [fakeBorrowedPackage(["subagent"])],
   });
   try {
     const active = [...h.session.getActiveToolNames()].sort();
-    // The gate-on set is byte-for-byte today's: the registered subset of READ_ONLY_TOOLS,
-    // including the carve-outs a strict stage intersection would have broken.
+    const gated = gatedToolsFor("objective-plan");
     const expected = h.session
       .getAllTools()
       .map((t) => t.name)
-      .filter((name) => READ_ONLY_TOOLS.includes(name))
+      .filter((name) => gated.includes(name))
       .sort();
     assert.deepEqual(active, expected);
     for (const name of [
       "objective_node",
+      "explore_objective_node",
       "plan_draft",
       "plan_review",
-      "subagent",
       "run_scout_wave",
     ]) {
       assert.ok(active.includes(name), `gated carve-out must stay active: ${name}`);
     }
-    for (const name of ["edit", "write"]) {
+    for (const name of ["edit", "write", "subagent", "plan_save"]) {
       assert.ok(!active.includes(name), `${name} must be inactive while gated`);
     }
   } finally {
@@ -380,7 +320,7 @@ test("bare session: no stage → zero perk intervention (pi's default active set
   try {
     const active = new Set(h.session.getActiveToolNames());
     // Nothing filtered: every perk tool and the default-active builtins stay active.
-    for (const name of [...PERK_TOOLS, "read", "bash", "edit", "write"]) {
+    for (const name of [...perkToolNames(), "read", "bash", "edit", "write"]) {
       assert.ok(active.has(name), `must stay active in an unscoped session: ${name}`);
     }
     // Nothing widened: pi registers grep/find/ls but leaves them INACTIVE by default — an
@@ -407,13 +347,14 @@ test("tree navigation: gate/stage recompute across mode entries", async () => {
     const ids = h.entryIds();
     const [readOnlyId, readWriteId] = ids as [string, string];
 
-    // Navigate to the read-only entry → gate ON → exactly the READ_ONLY_TOOLS-available subset.
+    // Navigate to the read-only entry → gate ON → exactly the plan stage's gated view.
     await h.navigateTo(readOnlyId);
     const gated = [...h.session.getActiveToolNames()].sort();
+    const planGated = gatedToolsFor("plan");
     const expectedGated = h.session
       .getAllTools()
       .map((t) => t.name)
-      .filter((name) => READ_ONLY_TOOLS.includes(name))
+      .filter((name) => planGated.includes(name))
       .sort();
     assert.deepEqual(gated, expectedGated);
 
@@ -754,9 +695,9 @@ test("late registration: filtered at resources_discover in an authoring stage; a
   }
 });
 
-test("gated session: allowlisted subagent_supervisor stays active across navigation; a late non-allowlisted tool is inactive from startup and not restored at gate exit", async () => {
+test("gated session: an eligible subagent_supervisor stays active across navigation; a late ineligible tool is inactive from startup and not restored at gate exit", async () => {
   const runId = "01STAGETOOLGLAT";
-  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "objective-plan" } });
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "implement" } });
   const h = await loadAt(cwd, {
     env: { PERK_RUN_ID: runId },
     extraExtensions: [
@@ -772,7 +713,7 @@ test("gated session: allowlisted subagent_supervisor stays active across navigat
         assert.ok(!active.includes(name), `${name} must be inactive while gated ${when}`);
       }
     };
-    // Gate ON is by name: the resources_discover re-apply installs the allowlist over the late
+    // Gate ON is by name: the resources_discover re-apply installs the gated view over the late
     // registrations — schema-invisible from the first turn, not from the first navigation.
     assertGated("after startup");
     await h.emitLifecycle({
@@ -782,7 +723,7 @@ test("gated session: allowlisted subagent_supervisor stays active across navigat
     });
     assertGated("after a tree navigation");
 
-    // Gate OFF (`exit()` → the objective-plan stage filter over the baseline): the late tool the
+    // Gate OFF (`exit()` → the implement stage filter over the baseline): the late tool the
     // gate kept inactive was never seen active by a gate-OFF reconciliation, so it is not
     // admitted and not restored — the accepted residual, pinned.
     await h.invokeCommand("plan");
@@ -791,7 +732,7 @@ test("gated session: allowlisted subagent_supervisor stays active across navigat
       !active.includes("late_foreign_tool"),
       "accepted residual: not restored at gate exit",
     );
-    for (const name of ["edit", "write", "plan_draft"]) {
+    for (const name of ["edit", "write", "submit", "subagent_supervisor"]) {
       assert.ok(active.includes(name), `restored once the gate is off: ${name}`);
     }
   } finally {
@@ -814,7 +755,7 @@ test("inactive at snapshot: a tool the host started inactive is never re-activat
     for (const name of inactiveAtStart) {
       assert.ok(!active.includes(name), `precondition: inactive before perk engages: ${name}`);
     }
-    // Gate ON names them (READ_ONLY_TOOLS) — pre-existing gate-ON behavior, asserted only so the
+    // Gate ON names them (the unscoped gated view) — pre-existing behavior, asserted only so the
     // restore assertion below is non-vacuous.
     await h.invokeCommand("plan");
     active = h.session.getActiveToolNames();
@@ -904,14 +845,14 @@ test("lazy owners: the fakes enable exactly what LAZY_TOOL_LOADERS maps", () => 
   });
 });
 
-test("lazy owners, fresh gated plan: the owners' hiding holds under the gate, the loaders pass, and the gate stays intact", async () => {
-  const runId = "01LAZYGATEDPLAN";
-  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "plan" } });
+test("lazy owners, fresh gated implement: the owners' hiding holds under the gate, the loaders pass, and the gate stays intact", async () => {
+  const runId = "01LAZYGATEDIMPL";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "implement" } });
   const h = await loadAt(cwd, { env: { PERK_RUN_ID: runId }, extraExtensions: lazyOwners() });
   try {
     assertActivity(h, HIDDEN_WITH_LOADERS, "after a gated startup");
     for (const loader of LOADERS) {
-      assert.equal(await h.emitToolCall(loader, {}), undefined, `${loader} passes gated in plan`);
+      assert.equal(await h.emitToolCall(loader, {}), undefined, `${loader} passes gated`);
     }
     await h.invokeTool("subagents_enable", {});
     assertActivity(h, { subagent: true }, "after the loader call");
@@ -1091,23 +1032,29 @@ test("lazy owners, a declaration-less non-empty transcript: perk follows each ow
   }
 });
 
-test("eager owner (no loader registered): a gate toggle through a non-admitting stage restores delegation on re-entry", async () => {
+test("eager owner (no loader registered): navigating through a non-admitting stage restores delegation on the gated re-entry", async () => {
   // An owner that registers its tools eagerly — an older pi-subagents, or the current one's
   // host-probe fallback — registers no loader, so nothing can re-enable a tool perk stripped.
-  // Without a registered loader the name is NOT lazy-owned: the gate-ON allowlist installs it.
-  const runId = "01LAZYEAGERPLAN";
-  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "plan" } });
+  // Without a registered loader the name is NOT lazy-owned: the gated view installs it by name.
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [
+    { mode: "read-write" },
+    { stage: "plan" },
+    { stage: "implement", mode: "read-only" },
+  ]);
   const h = await loadAt(cwd, {
-    env: { PERK_RUN_ID: runId },
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
     extraExtensions: [fakeBorrowedPackage(["subagent", ...WEB_LAZY_TOOLS])],
   });
   try {
+    const [, planId, gatedId] = h.entryIds() as [string, string, string];
     const eager = { subagent: true, ...webTools(true) };
-    assertActivity(h, eager, "after a gated startup");
-    await h.invokeCommand("plan");
-    assertActivity(h, { subagent: false, ...webTools(true) }, "after the gate exits into plan");
-    await h.invokeCommand("plan");
-    assertActivity(h, eager, "after the gate re-engages");
+    assertActivity(h, eager, "after a gated implement startup");
+    await h.navigateTo(planId);
+    assertActivity(h, { subagent: false, ...webTools(true) }, "on the read-write plan branch");
+    await h.navigateTo(gatedId);
+    assertActivity(h, eager, "after the gated re-entry");
   } finally {
     h.dispose();
   }
@@ -1179,9 +1126,8 @@ test("headless prompt turn: the model-visible census after startup", async () =>
   }
 });
 
-// --- the drive-coverage guard (the structural "this must not happen again") ---------------------
+// --- the prompt guard (both planes; tests/test_tool_matrix_prompts.py is the Python half) ------
 
-const WORKTREE_STAGES: readonly string[] = ["implement", "submit", "address", "land", "learn"];
 const GLOBAL_COMMAND_STAGES: readonly string[] = [
   ...WORKTREE_STAGES,
   "objective-author",
@@ -1191,30 +1137,70 @@ const GLOBAL_COMMAND_STAGES: readonly string[] = [
   "save",
 ];
 
+/** One (stage, mode) landing a carrier can have; `stage: null` = an unscoped session. */
+type Landing = { stage: string | null; mode: Mode };
+const rw = (stages: readonly string[]): Landing[] =>
+  stages.map((stage) => ({ stage, mode: "read-write" }));
+const ro = (stages: readonly (string | null)[]): Landing[] =>
+  stages.map((stage) => ({ stage, mode: "read-only" }));
+/** Every gated landing: each registry stage plus the unscoped session. */
+const EVERY_GATED: readonly Landing[] = ro([null, ...REGISTRY_STAGE_IDS]);
+
 /**
- * Every scoped-universe tool name a rendered guidance references (word-boundary scan against
- * PERK_TOOLS ∪ BORROWED_TOOLS). Conservative on purpose: a negative mention ("do NOT call X")
- * still counts — acceptable, since an inactive X would confuse the model either way. Names are
- * `[a-z_]+` so no regex escaping is needed, and `_` is a word char so `\bsubagent\b` does not
- * match inside `subagent_supervisor`.
+ * The scan universe: the matrix's perk- and foreign-owned names. Builtins are excluded — never
+ * stage-scoped, the gate's own prose names `edit`/`write`, and `read`/`write`/`find` are ordinary
+ * English.
  */
-function referencedScopedTools(text: string): string[] {
-  return [...new Set([...PERK_TOOLS, ...BORROWED_TOOLS])].filter((name) =>
-    new RegExp(`\\b${name}\\b`).test(text),
-  );
+function scanUniverse(): string[] {
+  return Object.entries(toolMatrix().tools)
+    .filter(([, entry]) => entry.owner !== "builtin")
+    .map(([name]) => name);
 }
 
 /**
- * The static drive→stages table: every gate-OFF warm-door drive (a `sendUserMessage` guidance
- * injection) paired with EVERY stage its session can be in when the guidance lands. Each render
- * uses dummy params with all optional params SET (the richer conditional arm — the tool names
- * appear in both arms today). Gated-landing drives (the objective-plan seed/guidance, the
- * plan-family factory seeds) are deliberately excluded: gate-ON ignores stage lists, and the
- * gated-stage test above covers that surface (READ_ONLY_TOOLS carve-outs incl. delegation).
+ * The match rule (shared with the Python half): a name containing `_` matches as a bare word —
+ * an underscore identifier in prose is always a tool mention (`_` is a word char, so
+ * `\bplan_save\b` never matches inside a longer identifier); a single-word name (`submit`,
+ * `ready`, `todo`, …) matches only backtick-quoted. Model-facing guidance code-quotes tool names
+ * by convention; an unquoted single-word mention is an accepted, recorded miss. Conservative on
+ * purpose: a negative mention ("do NOT call X") still counts.
+ */
+function toolMention(name: string): RegExp {
+  return name.includes("_") ? new RegExp(`\\b${name}\\b`) : new RegExp(`\`${name}\``);
+}
+
+/** Every scan-universe tool name a carrier references. */
+function referencedScopedTools(text: string): string[] {
+  return scanUniverse().filter((name) => toolMention(name).test(text));
+}
+
+/** The draft-and-compact subjects and the gated landings the session seam routes to each. */
+const DRAFT_SUBJECT_LANDINGS: readonly ["plan" | "objective" | "gist" | "refinement", Landing[]][] =
+  [
+    ["objective", ro(["objective-author", "objective-save"])],
+    ["gist", ro(["gist-author"])],
+    ["refinement", ro(["objective-refine"])],
+    [
+      "plan",
+      ro([
+        null,
+        ...REGISTRY_STAGE_IDS.filter(
+          (id) =>
+            !["objective-author", "objective-save", "gist-author", "objective-refine"].includes(id),
+        ),
+      ]),
+    ],
+  ];
+
+/**
+ * The carrier → landings table: every model-facing guidance (a gate-OFF drive, a gated context, a
+ * mode-over-stage flow) paired with EVERY (stage, mode) landing its session can have when it
+ * lands. The rule: a carrier may name only tools eligible in every landing it has. Each render
+ * uses dummy params with all optional params SET (the richer conditional arm).
  */
 const DRIVE_COVERAGE: readonly {
   drive: string;
-  stages: readonly string[];
+  landings: readonly Landing[];
   text: () => string;
   /** The drive deliberately names NO scoped tool — skip the scan-broken tripwire for this row. */
   namesNoTools?: boolean;
@@ -1223,7 +1209,7 @@ const DRIVE_COVERAGE: readonly {
     // The reported regression: `/land` auto-drives the reconcile pass in the CURRENT worktree
     // session, and the manual `/objective-reconcile` gesture is registered globally.
     drive: "reconcileGuidance (post-land drive + /objective-reconcile)",
-    stages: [...WORKTREE_STAGES, "objective-author", "objective-save", "objective-plan"],
+    landings: rw([...WORKTREE_STAGES, "objective-author", "objective-save", "objective-plan"]),
     text: () => reconcileGuidance("5", "github", "https://example.test/issues/5"),
   },
   {
@@ -1234,7 +1220,7 @@ const DRIVE_COVERAGE: readonly {
     // ready/land re-entry gesture (re-entry guidance lives on the human-facing surfaces), so
     // this row passes without widening the objective-stage lists.
     drive: "driveReadyContinuation (stages/objective-reconcile-ready.md)",
-    stages: [...WORKTREE_STAGES, "objective-author", "objective-save", "objective-plan"],
+    landings: rw([...WORKTREE_STAGES, "objective-author", "objective-save", "objective-plan"]),
     text: () =>
       render("stages/objective-reconcile-ready.md", {
         objective: "5",
@@ -1249,25 +1235,25 @@ const DRIVE_COVERAGE: readonly {
   {
     // The stacked-delivery drives: registered globally, gate-on soft-refuses, and the
     // worktree family is where they land in practice (post-amend sync from implement/address;
-    // recovery and the atomic landing from anywhere in the PR loop) — WORKTREE_STAGE_TOOLS
+    // recovery and the atomic landing from anywhere in the PR loop) — the worktree family
     // carries the quintet.
     drive: "stages/objective-sync.md (/objective-sync)",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () => objectiveSyncGuidance("5"),
   },
   {
     drive: "stages/objective-recover.md (/objective-recover)",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () => objectiveRecoverGuidance("5"),
   },
   {
     drive: "stages/objective-land.md (/objective-land)",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () => objectiveLandGuidance("5"),
   },
   {
     drive: "stages/learn.md",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () =>
       render("stages/learn.md", {
         provider: "github",
@@ -1278,7 +1264,7 @@ const DRIVE_COVERAGE: readonly {
   },
   {
     drive: "stages/learn-orchestrate.md",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () =>
       render("stages/learn-orchestrate.md", {
         manifest_path: "/tmp/bundle/manifest.json",
@@ -1287,7 +1273,7 @@ const DRIVE_COVERAGE: readonly {
   },
   {
     drive: "stages/conflict-resolution.md",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () =>
       render("stages/conflict-resolution.md", {
         base: "main",
@@ -1297,7 +1283,7 @@ const DRIVE_COVERAGE: readonly {
   },
   {
     drive: "stages/conflict-resolution-continuation.md (sync conflict drive + resolve mode)",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () =>
       syncConflictResolutionGuidance(retainedDispatch("/tmp/wt"), 1, 2, {
         kind: "continuation-ready",
@@ -1317,7 +1303,7 @@ const DRIVE_COVERAGE: readonly {
   },
   {
     drive: "stages/address/preview.md",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () =>
       render("stages/address/preview.md", {
         provider: "github",
@@ -1327,7 +1313,7 @@ const DRIVE_COVERAGE: readonly {
   },
   {
     drive: "stages/address/action.md",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () =>
       render("stages/address/action.md", {
         provider: "github",
@@ -1337,12 +1323,12 @@ const DRIVE_COVERAGE: readonly {
   },
   {
     drive: "stages/pr-review.md",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () => prReviewGuidance("focus"),
   },
   {
     drive: "stages/pr-review-terminal/active.md",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () =>
       render("stages/pr-review-terminal/active.md", {
         pr: "42",
@@ -1353,7 +1339,7 @@ const DRIVE_COVERAGE: readonly {
   },
   {
     drive: "stages/pr-review-terminal/foreign.md",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () =>
       render("stages/pr-review-terminal/foreign.md", {
         pr: "42",
@@ -1364,7 +1350,7 @@ const DRIVE_COVERAGE: readonly {
   },
   {
     drive: "stages/pr-review-browser/active.md",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () =>
       render("stages/pr-review-browser/active.md", {
         pr: "42",
@@ -1375,7 +1361,7 @@ const DRIVE_COVERAGE: readonly {
   },
   {
     drive: "stages/pr-review-browser/foreign.md",
-    stages: WORKTREE_STAGES,
+    landings: rw(WORKTREE_STAGES),
     text: () =>
       render("stages/pr-review-browser/foreign.md", {
         pr: "42",
@@ -1389,7 +1375,7 @@ const DRIVE_COVERAGE: readonly {
     // family (a warm mid-loop gesture) or the dedicated `perk objective stack review` launch
     // session (where `open_stack_review` returns the same guidance).
     drive: "stages/stack-review-browser/stack.md (/stack-review-browser + open_stack_review)",
-    stages: [...WORKTREE_STAGES, "stack-review"],
+    landings: rw([...WORKTREE_STAGES, "stack-review"]),
     text: () =>
       stackReviewGuidance({
         topPr: 42,
@@ -1432,7 +1418,7 @@ const DRIVE_COVERAGE: readonly {
     // The stack-review cold seed: the launched session's initial prompt names the ONE
     // open_stack_review call, so the tool must be active in the stack-review stage.
     drive: "stages/stack-review/cold.md (perk objective stack review seed)",
-    stages: ["stack-review"],
+    landings: rw(["stack-review"]),
     text: () =>
       render("stages/stack-review/cold.md", {
         stack_phrase: "objective #77's delivery train",
@@ -1444,7 +1430,9 @@ const DRIVE_COVERAGE: readonly {
     // The draft-review door: registered globally but stage-gated at entry to the three
     // plan-draft-authoring stages — the guidance can only ever land in those sessions.
     drive: "stages/plan-review-browser.md (/plan-review-browser)",
-    stages: ["plan", "save", "objective-plan"],
+    // It is ALSO plan_review's wave-launched guidance: the reviewer wave is offered in any gated
+    // session holding a plan draft (the /plan toggle lands everywhere), so every gated landing.
+    landings: [...rw(PLAN_FAMILY_STAGES), ...EVERY_GATED],
     text: () =>
       render("stages/plan-review-browser.md", {
         custom: "check every migration step against the rollback story",
@@ -1454,7 +1442,8 @@ const DRIVE_COVERAGE: readonly {
     // The objective draft-review door: registered globally but stage-gated at entry to the two
     // objective-draft-authoring stages — the guidance can only ever land in those sessions.
     drive: "stages/objective-review-browser.md (/objective-review-browser)",
-    stages: ["objective-author", "objective-save"],
+    // The objective chooser's wave arm lands it gated too.
+    landings: [...rw(OBJECTIVE_STAGES), ...ro(OBJECTIVE_STAGES)],
     text: () =>
       render("stages/objective-review-browser.md", {
         custom: "check the roadmap ordering against the dependency story",
@@ -1462,26 +1451,38 @@ const DRIVE_COVERAGE: readonly {
   },
   {
     // The simplify doors: registered globally but stage-gated at entry to the stages whose
-    // STAGE_TOOLS carry the subject's draft tool (the browser doors' draft stages).
+    // diets carry the subject's draft tool (the browser doors' draft stages).
     drive: "stages/simplify.md (/simplify-plan)",
-    stages: ["plan", "save", "objective-plan"],
+    landings: rw(["plan", "save", "objective-plan"]),
     text: () => simplifyGuidance({ subject: "plan", intensity: "lite", nodeScoped: true }),
   },
   {
     drive: "stages/simplify.md (/simplify-objective)",
-    stages: ["objective-author", "objective-save"],
+    landings: rw(["objective-author", "objective-save"]),
     text: () => simplifyGuidance({ subject: "objective", intensity: "ultra", nodeScoped: false }),
   },
   {
+    // The draftless /gist-save fallback exits the gate first; the save tool is the gist pair's.
+    drive: "stages/gist-save.md (/gist-save)",
+    landings: rw(GIST_STAGES),
+    text: () => gistSaveGuidance("Test gist"),
+  },
+  {
+    drive: "stages/pr-review-terminal/local.md",
+    landings: rw(WORKTREE_STAGES),
+    text: () => prReviewTerminalGuidance({ mode: "local", worktree: "/tmp/wt", baseSha: "abc123" }),
+    namesNoTools: true,
+  },
+  {
     drive: "stages/objective-save.md",
-    stages: ["objective-author", "objective-save"],
+    landings: rw(["objective-author", "objective-save"]),
     text: () => render("stages/objective-save.md", { title: "Test objective" }),
   },
   {
     // Registered globally, so the drive can land in any of the 10 registry stages. The guidance
     // names no scoped tool by design (plain git work) — the entry keeps future edits honest.
     drive: "commit-and-compact.md (/commit-and-compact)",
-    stages: GLOBAL_COMMAND_STAGES,
+    landings: rw(GLOBAL_COMMAND_STAGES),
     text: () => commitAndCompactGuidance(),
     namesNoTools: true,
   },
@@ -1489,7 +1490,7 @@ const DRIVE_COVERAGE: readonly {
     // Completion can dispatch from the same globally registered command in every stage. The
     // generic arm names no scoped tool; provider-aware plan rereads are selected at runtime.
     drive: "commit-and-compact-continuation.md (/commit-and-compact completion)",
-    stages: GLOBAL_COMMAND_STAGES,
+    landings: rw(GLOBAL_COMMAND_STAGES),
     text: () => commitAndCompactContinuation(null, { outcome: "clean" }),
     namesNoTools: true,
   },
@@ -1497,7 +1498,7 @@ const DRIVE_COVERAGE: readonly {
     // The Linear arm names its canonical read tools, so the global-stage census must prove both
     // remain reachable wherever a provider-aware continuation can land.
     drive: "commit-and-compact-continuation.md (Linear active plan)",
-    stages: GLOBAL_COMMAND_STAGES,
+    landings: rw(GLOBAL_COMMAND_STAGES),
     text: () =>
       commitAndCompactContinuation(
         {
@@ -1510,6 +1511,77 @@ const DRIVE_COVERAGE: readonly {
         { outcome: "read-only" },
       ),
   },
+  // The warm learn factories run only where the plan_save tool is active (the interactive host
+  // guard): read-write, in a plan-family stage or unscoped.
+  ...[DOCS_FACTORY, CODE_FACTORY].map((kind) => ({
+    drive: `${kind.seedTemplate} (warm /${kind.name})`,
+    landings: [...rw(PLAN_FAMILY_STAGES), { stage: null, mode: "read-write" as const }],
+    text: () => learnFactoryGuidance(kind, "inbox.md", ["45", "50"]),
+  })),
+  {
+    // The /plan toggle's gated guidance: injected in every gated stage plan guidance rides.
+    drive: "contexts/plan-authoring.md (/plan toggle)",
+    landings: ro([null, ...REGISTRY_STAGE_IDS.filter((id) => isPlanGuidanceStage(id))]),
+    text: () => PLAN_AUTHORING_CONTEXT,
+  },
+  {
+    drive: "contexts/objective-authoring.md",
+    landings: ro(["objective-author"]),
+    text: () => OBJECTIVE_AUTHORING_CONTEXT,
+  },
+  {
+    drive: "contexts/gist-authoring.md",
+    landings: ro(["gist-author"]),
+    text: () => GIST_AUTHORING_CONTEXT,
+  },
+  {
+    drive: "contexts/objective-refinement.md",
+    landings: ro(["objective-refine"]),
+    text: () => REFINEMENT_CONTEXT,
+  },
+  {
+    // The warm /objective-plan seed — the session claims stage objective-plan, gated.
+    drive: "factoryGuidance (warm /objective-plan, github)",
+    landings: ro(["objective-plan"]),
+    text: () => factoryGuidance("5", "2.1", "github", "https://example.test/issues/5"),
+  },
+  {
+    drive: "factoryGuidance (warm /objective-plan, linear)",
+    landings: ro(["objective-plan"]),
+    text: () => factoryGuidance("5", "2.1", "linear", "https://linear.app/x/ENG-5"),
+  },
+  {
+    // The warm /objective-refine seed (refinementGuidance renders this template).
+    drive: "stages/objective-refine/seed.md (warm /objective-refine)",
+    landings: ro(["objective-refine"]),
+    text: () =>
+      render("stages/objective-refine/seed.md", {
+        number: "5",
+        title: "Test objective",
+        node_id: "2.1",
+        node_description: "Refine the node",
+        read_clause: objectiveReadInstruction("linear", "5", "https://linear.app/x/ENG-5"),
+        context_path: "/tmp/context.json",
+        prior_note: "A prior refinement exists.",
+      }),
+  },
+  ...[null, ...REGISTRY_STAGE_IDS].map((stage) => ({
+    drive: `renderReadOnlyContext(${String(stage)})`,
+    landings: ro([stage]),
+    text: () => renderReadOnlyContext(stage),
+  })),
+  ...DRAFT_SUBJECT_LANDINGS.flatMap(([subject, landings]) => [
+    {
+      drive: `draftAndCompactGuidance(${subject})`,
+      landings,
+      text: () => draftAndCompactGuidance(subject, "current draft"),
+    },
+    {
+      drive: `draftAndCompactContinuation(${subject})`,
+      landings,
+      text: () => draftAndCompactContinuation(subject, "the draft content"),
+    },
+  ]),
 ];
 
 test("drive coverage: the simplify guidance names exactly its draft tool + plan_review in every arm", () => {
@@ -1527,22 +1599,59 @@ test("drive coverage: the simplify guidance names exactly its draft tool + plan_
   }
 });
 
-test("drive coverage: every gate-off drive's named tools are active in every stage it can land in", () => {
-  for (const { drive, stages, text, namesNoTools } of DRIVE_COVERAGE) {
+test("prompt guard: every carrier names only tools eligible in every (stage, mode) landing it has", () => {
+  const violations: string[] = [];
+  for (const { drive, landings, text, namesNoTools } of DRIVE_COVERAGE) {
     const named = referencedScopedTools(text());
-    if (namesNoTools !== true) {
-      assert.ok(named.length > 0, `${drive}: names no scoped tool at all — is the scan broken?`);
+    if (namesNoTools !== true && named.length === 0) {
+      violations.push(`${drive}: names no scoped tool at all — is the scan broken?`);
     }
-    for (const stage of stages) {
-      const stageList = STAGE_TOOLS[stage];
-      assert.ok(stageList !== undefined, `${drive}: unknown stage id in the table: ${stage}`);
+    for (const { stage, mode } of landings) {
+      if (stage !== null && !REGISTRY_STAGE_IDS.includes(stage)) {
+        violations.push(`${drive}: unknown stage id in the table: ${stage}`);
+      }
       for (const name of named) {
-        assert.ok(
-          stageList.includes(name),
-          `${drive} names \`${name}\` but STAGE_TOOLS.${stage} scopes it off — the drive ` +
-            "would dead-end in that session (add the tool to the stage list or fix the drive)",
-        );
+        if (!isEligible(name, stage, mode)) {
+          violations.push(`${drive} names \`${name}\` — ineligible in (${String(stage)}, ${mode})`);
+        }
       }
     }
+  }
+  // A violation means the carrier would dead-end in that session: reword the carrier — never
+  // widen a policy to fit.
+  assert.deepEqual(violations, []);
+});
+
+test("prompt guard: the match rule's representative cases", () => {
+  // The gate's own prose and the generated writer lines are never findings.
+  for (const stage of [null, ...REGISTRY_STAGE_IDS]) {
+    const context = renderReadOnlyContext(stage);
+    assert.ok(context.includes("edit/write are blocked"));
+    assert.ok(!referencedScopedTools(context).includes("edit"));
+    assert.ok(!referencedScopedTools(context).includes("write"));
+  }
+  assert.deepEqual(referencedScopedTools("the bounded write is fine; the plan is ready"), []);
+  // A backticked single-word tool IS a finding (ineligible in a gated authoring landing)…
+  assert.deepEqual(referencedScopedTools("then call `submit`"), ["submit"]);
+  assert.equal(isEligible("submit", "plan", "read-only"), false);
+  // …while the bare word is not; an underscore name matches bare.
+  assert.deepEqual(referencedScopedTools("when ready, submit the work"), []);
+  assert.deepEqual(referencedScopedTools("fall back to plan_save"), ["plan_save"]);
+  assert.equal(isEligible("plan_save", "objective-plan", "read-only"), false);
+  // `_` is a word char: no partial-identifier match.
+  assert.deepEqual(referencedScopedTools("subagent_supervisor"), ["subagent_supervisor"]);
+  assert.deepEqual(referencedScopedTools("`subagent` and subagent_supervisor").sort(), [
+    "subagent",
+    "subagent_supervisor",
+  ]);
+});
+
+test("prompt guard: the scan universe is the matrix's perk + foreign names (every foreign row, no builtin)", () => {
+  const universe = new Set(scanUniverse());
+  for (const name of [...perkToolNames(), ...FOREIGN_TOOL_POLICY.flatMap((r) => r.names)]) {
+    assert.ok(universe.has(name), name);
+  }
+  for (const name of ["read", "bash", "edit", "write", "grep", "find", "ls"]) {
+    assert.ok(!universe.has(name), name);
   }
 });

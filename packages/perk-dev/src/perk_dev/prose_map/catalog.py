@@ -543,12 +543,18 @@ def build_catalog(root: Path) -> Catalog:
     governed_set = set(governed_tools)
     for name in sorted(governed_set - discovered_tools):
         findings.append(
-            Finding("missing-tool-contract", f"PERK_TOOLS tool has no discovered contract: {name}")
+            Finding(
+                "missing-tool-contract",
+                f"tool catalog (shared/fixtures/tool-matrix.json) tool has no discovered "
+                f"contract: {name}",
+            )
         )
     for name in sorted(discovered_tools - governed_set):
         findings.append(
             Finding(
-                "ungoverned-tool-contract", f"registered tool is absent from PERK_TOOLS: {name}"
+                "ungoverned-tool-contract",
+                f"registered tool is absent from the tool catalog "
+                f"(shared/fixtures/tool-matrix.json): {name}",
             )
         )
 

@@ -71,7 +71,7 @@ export interface SimplifySubject {
   subject: SimplifySubjectId;
   /** The command name = report scope; the binding trigger is `command:<scope>`. */
   scope: "simplify-plan" | "simplify-objective";
-  /** The registry stages whose STAGE_TOOLS carry the subject's writer (the browser doors' draft stages). */
+  /** The registry stages whose diet carries the subject's writer (the browser doors' drafts). */
   stages: ReadonlySet<string>;
   /** The one writer the guidance names. */
   draftTool: string;

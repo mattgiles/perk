@@ -28,7 +28,7 @@
 // ARTIFACT-FIRST, DRAFTS ONLY: the reviewed bytes are the RENDERED validated
 // `objective-draft.json` artifact (one seam read + `decodeObjectiveDraft` + `renderObjectiveDraft`) — no param
 // tier, no transcript tier, never raw JSON (the review-surface law; JSON is storage only).
-// Stage-gated to the two registry stages whose STAGE_TOOLS carry `objective_draft`
+// Stage-gated to the two registry stages whose stage diet carries `objective_draft`
 // ({objective-author, objective-save}); anything else refuses loudly.
 //
 // THE BACKGROUND OPEN mirrors `planReviewBrowser.ts` byte-for-byte in shape: the plan server's
@@ -107,7 +107,7 @@ import { type ReviewOutcome, type ToolResult, untrustedReviewFeedback } from "./
 const SCOPE = "objective-review-browser";
 
 /**
- * The stage gate: the two registry stages whose STAGE_TOOLS carry `objective_draft` — every
+ * The stage gate: the two registry stages whose stage diet carries `objective_draft` — every
  * session where the objective draft is the working draft. Other/absent stage → loud refusal.
  */
 const DRAFT_STAGES: ReadonlySet<string> = new Set(["objective-author", "objective-save"]);

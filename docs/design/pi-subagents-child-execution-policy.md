@@ -49,7 +49,8 @@ floor for the activation (`readOnlyFloor ||= …`): a same-activation `session_s
 gate `exit()`, or a `session_tree` navigation cannot clear it; a `/reload` re-runs the factory and
 re-reads the env. The floor composes into `extension/substrate/toolGating.ts` unchanged:
 `isActive = active || hasFloor()`, a floor-refused `exit()`, and the all-names `tool_call`
-backstop that blocks anything outside `READ_ONLY_TOOLS` even if the toolset rebuild failed. A
+backstop that blocks anything the eligibility formula makes ineligible under the gate (§8.40)
+even if the toolset rebuild failed. A
 throwing floor supplier is restrictive for that observation.
 
 `session/lifecycle.ts::reflectSessionReadOnlyFloor` keeps the child's persisted mode honest: on an

@@ -67,8 +67,8 @@ auto-saves — was stated by your launch prompt; this section carries the detail
 - If `plan_review` reports it was **skipped or unavailable** (headless session, the human
   dismissed the review, no surface), present the complete objective + structured roadmap; the
   **human** runs **`/objective-save`** (artifact-first: it re-reads the draft through the same
-  save seam; only a draftless session falls back to the legacy drive-the-session `objective_save`
-  flow). The direct `objective_save` tool call remains the post-gate-exit manual failsafe.
+  save seam; only a draftless session falls back to the legacy drive-the-session save flow, which
+  exits the gate first).
 
 ## 🔴 Never hand-write roadmap YAML
 
@@ -87,5 +87,5 @@ rather than encoding a guess into the roadmap.
 - **Judgment** — the goal, its boundaries, how it decomposes into nodes — is yours.
 - **User interaction** — clarifying scope and trade-offs — is yours.
 - **The durable write** — creating the objective via the approval-driven save (`plan_review` →
-  the save seam), with `objective_save`/`/objective-save` as the failsafe — is yours; it is the
-  read-only → read-write boundary, the same way `plan_save` is for plans.
+  the save seam), with the human's `/objective-save` as the failsafe — is yours; it is the
+  read-only → read-write boundary, the same way the plan save is for plans.

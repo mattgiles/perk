@@ -52,15 +52,18 @@ export function learnOrchestrateGuidance(opts: {
 /**
  * The seed guidance the warm factory door injects to start the factory loop (the per-kind skill
  * pointer rides the skill-binding suffix — not hardcoded here). Pure + exported for offline
- * tests.
+ * tests. The warm gather writes no launch handoff, so its save step is the explicit `plan_save`
+ * carrier (`common/learn-save/warm.md`) — the cold door renders the review-first twin.
  */
 export function learnFactoryGuidance(
   kind: LearnFactoryKind,
   inboxPath: string,
   learnNumbers: string[],
 ): string {
+  const numList = learnNumbers.join(", ");
   return render(kind.seedTemplate, {
     inbox_path: inboxPath,
-    num_list: learnNumbers.join(", "),
+    num_list: numList,
+    save_step: render("common/learn-save/warm.md", { num_list: numList }),
   });
 }

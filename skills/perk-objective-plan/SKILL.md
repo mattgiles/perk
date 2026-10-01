@@ -99,9 +99,9 @@ exploration call, and the completion audit. Judgment, user interaction, and dura
    `objective_id`/`node_id` automatically from the planning claim — atomically backlinking the
    node to the plan **and** advancing it `planning → in_progress` (no separate `objective_node`
    backlink call). A **DENIED** review → revise per the feedback, rewrite the draft with
-   `plan_draft`, and call `plan_review` again. **Manual failsafe:** `/plan-save`, or the
-   `plan_save` tool passing **both** `objective_id: "N"` and `node_id: "<id>"` (e.g. when
-   `plan_review` reports skipped/unavailable). **Always save — never implement directly** from
+   `plan_draft`, and call `plan_review` again. **Manual failsafe:** the human's `/plan-save`
+   (e.g. when `plan_review` reports skipped/unavailable) — it recovers the node link from the
+   same planning claim. **Always save — never implement directly** from
    this session. (The `objective_node` `pr`-only shape still exists for manual repair, but it is
    no longer part of the factory loop.)
 
@@ -126,5 +126,5 @@ paths — the refusal is honest about enforcing only your path.
 - **Judgment** — node scope, what the plan must decide, whether the node is actually done — is yours.
 - **The plan** — authoring and saving it — is yours; the explorer child never plans or writes.
 - **Durable writes** — the node status/backlink mutations (via `objective_node`) and the plan save
-  (approval-driven via `plan_review`, or the `/plan-save`/`plan_save` failsafe surfaces) — are
+  (approval-driven via `plan_review`, or the `/plan-save` failsafe) — are
   yours, never the child's. The spawned explorer is read-only and exploration-only.

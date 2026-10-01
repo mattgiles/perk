@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { markerPath, PENDING_LEARN, workflowDir } from "../../../substrate/cache.ts";
-import { BORROWED_TOOLS, PERK_TOOLS, STAGE_TOOLS } from "../../../substrate/toolGating.ts";
+import { dietUniverse, stageToolsFor } from "../../../substrate/toolPolicy.ts";
 import { REPORT_DETAIL_TYPE } from "../../../surfaces/surfaces.ts";
 import {
   fakePerk,
@@ -20,6 +20,7 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../../testing/harness.ts";
+import { ensureToolCatalog } from "../../../testing/toolCatalog.ts";
 import { driveReconcileAfterLand } from "./land.ts";
 
 const LAND_JSON = JSON.stringify({
@@ -448,7 +449,8 @@ test("driveReconcileAfterLand: idle (/land command) → immediate; streaming (la
   }
 });
 
-test("driveReconcileAfterLand: every scoped tool the injected guidance names is stage-active", () => {
+test("driveReconcileAfterLand: every scoped tool the injected guidance names is stage-active", async () => {
+  await ensureToolCatalog();
   // The drive lands in the CURRENT worktree session (stage `implement` when `/land` runs
   // there), so every scoped-universe tool the injected reconcile guidance names must survive
   // that stage's filter — or the drive dead-ends.
@@ -456,15 +458,13 @@ test("driveReconcileAfterLand: every scoped tool the injected guidance names is 
   const ctx = { cwd: ".", isIdle: () => true } as unknown as ExtensionContext;
   driveReconcileAfterLand(pi, ctx, OBJECTIVE_DETAILS);
   const content = calls[0]?.content ?? "";
-  const named = [...new Set([...PERK_TOOLS, ...BORROWED_TOOLS])].filter((name) =>
-    new RegExp(`\\b${name}\\b`).test(content),
-  );
+  const named = dietUniverse().filter((name) => new RegExp(`\\b${name}\\b`).test(content));
   assert.ok(named.includes("reconcile_objective"), "sanity: the guidance names the reconcile tool");
-  const implementTools = STAGE_TOOLS.implement ?? [];
+  const implementTools = stageToolsFor("implement") ?? [];
   for (const name of named) {
     assert.ok(
       implementTools.includes(name),
-      `the reconcile drive names \`${name}\` but STAGE_TOOLS.implement scopes it off`,
+      `the reconcile drive names \`${name}\` but the implement diet scopes it off`,
     );
   }
 });

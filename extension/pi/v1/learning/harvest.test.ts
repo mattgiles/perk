@@ -3,7 +3,7 @@
 // exported execute core is driven directly for the Result-rendering arms. The registration
 // surface is pinned as a COMPLETE frozen baseline (deepEqual — the audit.test.ts precedent),
 // stronger than substring pins: any metadata/schema drift fails byte-exactly. The suite also
-// carries the census pins (PERK_TOOLS + READ_ONLY_TOOLS, deliberately NO stage list), the
+// carries the census pins (catalogued; the borrowed objective-author stage only), the
 // ordered pre-spawn refusal ladder (params → binding → strict decode → single-lane → resolved
 // containment; nothing spawns on any arm), exact-text ok/fail renders over the memory adapter,
 // the pre-aborted-signal cancellation arm (zero RPC traffic), and the fake-RPC e2e sinking
@@ -21,10 +21,16 @@ import {
   type HarvestManifest,
 } from "../../../learning/harvest.ts";
 import { runScratchDir } from "../../../substrate/cache.ts";
-import { PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "../../../substrate/toolGating.ts";
+import {
+  isEligible,
+  isPerkTool,
+  REGISTRY_STAGE_IDS,
+  stageToolsFor,
+} from "../../../substrate/toolPolicy.ts";
 import { createFakeSubagents, type FakeSubagents } from "../../../testing/fakeSubagents.ts";
 import { loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
+import { ensureToolCatalog } from "../../../testing/toolCatalog.ts";
 import { createReportWave, reportWaveOver } from "../../../waves/reportWave.ts";
 import { executeHarvestWave, installHarvestBindings } from "./harvest.ts";
 
@@ -136,19 +142,23 @@ test("registration parity: run_harvest_wave matches the frozen baseline", async 
 
 // ------------------------------------------------------------------------- census pins
 
-test("census: run_harvest_wave rides PERK_TOOLS + READ_ONLY_TOOLS and NO stage list", () => {
-  assert.ok(PERK_TOOLS.includes("run_harvest_wave"));
-  // The read-only carve-in: the seeded learn-harvest session runs GATED, and the manifest read
-  // is structurally bound to the claimed run-scoped scratch path (any other path refused), so
-  // the tool is safe in every gated session (the run_audit_wave posture, read-side).
-  assert.ok(READ_ONLY_TOOLS.includes("run_harvest_wave"));
-  // The deliberate non-behavior pin: harvest is cold-only and gate-on — the gate-ON set ignores
-  // stage lists, so NO stage list carries the tool (we do NOT touch drive coverage).
-  for (const [stage, tools] of Object.entries(STAGE_TOOLS)) {
-    assert.ok(
-      !tools.includes("run_harvest_wave"),
-      `stage '${stage}' must not carry run_harvest_wave`,
-    );
+test("census: run_harvest_wave is catalogued and eligible in exactly the borrowed objective-author stage", async () => {
+  await ensureToolCatalog();
+  assert.ok(isPerkTool("run_harvest_wave"));
+  // The seeded session borrows the objective-author stage with mode read-only: the tool is
+  // eligible under the gate there (its one bounded read/write is bound to the claimed run, so no
+  // caller-supplied path exists), and in no other stage's gated view or diet.
+  assert.ok(isEligible("run_harvest_wave", "objective-author", "read-only"));
+  for (const stage of REGISTRY_STAGE_IDS) {
+    const inDiet = stageToolsFor(stage)?.includes("run_harvest_wave") === true;
+    assert.equal(inDiet, stage === "objective-author", `stage '${stage}' diet`);
+    if (stage !== "objective-author") {
+      assert.equal(
+        isEligible("run_harvest_wave", stage, "read-only"),
+        false,
+        `stage '${stage}' gated`,
+      );
+    }
   }
 });
 

@@ -1,0 +1,1 @@
+call the `plan_save` tool passing `consumed_learn: [{{ num_list }}]` — this warm session wrote no launch handoff, so that explicit parameter is the only carrier for the consumed issues.

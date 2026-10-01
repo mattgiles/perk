@@ -43,7 +43,8 @@ import {
   stringArrayParam,
   stringParam,
 } from "../../substrate/toolParams.ts";
-import { branchOf } from "../../substrate/workflowState.ts";
+import { OBJECTIVE_STAGES, WORKTREE_STAGES } from "../../substrate/toolPolicy.ts";
+import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../../surfaces/report.ts";
 import {
   EXPLORE_ASSIGNMENT_KEY,
@@ -55,6 +56,7 @@ import {
   type ReportWaveAttemptReceipt,
   toAttemptReceipt,
 } from "../../waves/reportWave.ts";
+import { registerPerkTool } from "../perkTool.ts";
 import { fetchObjectiveUrl } from "./objective.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 
@@ -389,6 +391,9 @@ async function executeExploreObjectiveNode(
 
 // ------------------------------------------------------------------------- adapter plumbing
 
+/** The registry stage the warm `/objective-plan` factory claims. */
+const OBJECTIVE_PLAN_STAGE = "objective-plan";
+
 /** The rebuilt `active_objective`, read through the session seam (fail-open null). */
 function activeObjective(pi: ExtensionAPI, ctx: ExtensionContext): string | null {
   return openBranchWorkflowSession(pi, ctx).activeObjective();
@@ -452,249 +457,281 @@ export function installObjectivePlanningBindings(
   gating: ToolGating,
   wave: ReportWave,
 ): void {
-  pi.registerTool({
-    name: "objective_node",
-    label: "Update objective node",
-    description:
-      "Update an objective node as part of the objective workflow. Call ONLY to (a) link a saved " +
-      'plan to its node — pass pr:"#N" with no status; or (b) advance a node\'s status when ' +
-      'explicitly part of the workflow — and set status:"done" ONLY when the node\'s work has ' +
-      "actually landed, supplying the completion `audit`.",
-    promptSnippet: "Link a saved plan to its objective node, or advance a node's status",
-    promptGuidelines: NODE_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["objective", "node"],
-      properties: {
-        objective: { type: ["string", "number"], description: "The objective issue id." },
-        node: { type: "string", description: "The roadmap node id (e.g. 2.3)." },
-        status: {
-          type: "string",
-          enum: [...NODE_STATUSES],
-          description: "Optional new status (explicit-only; never inferred from pr).",
-        },
-        pr: {
-          type: "string",
-          description: 'Set/clear the linked PR/plan ("#N" sets, "" clears).',
-        },
-        description: {
-          type: "string",
-          description:
-            "Optional new node description (e.g. reconciling node scope/naming drift against the " +
-            "merged diff). May be passed alone (no status/pr).",
-        },
-        audit: {
-          type: "string",
-          description:
-            'Required when status is "done": a requirement→evidence mapping proving the node\'s ' +
-            "work actually landed (treat uncertainty as not-done).",
+  registerPerkTool(
+    pi,
+    {
+      name: "objective_node",
+      label: "Update objective node",
+      description:
+        "Update an objective node as part of the objective workflow. Call ONLY to (a) link a saved " +
+        'plan to its node — pass pr:"#N" with no status; or (b) advance a node\'s status when ' +
+        'explicitly part of the workflow — and set status:"done" ONLY when the node\'s work has ' +
+        "actually landed, supplying the completion `audit`.",
+      promptSnippet: "Link a saved plan to its objective node, or advance a node's status",
+      promptGuidelines: NODE_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["objective", "node"],
+        properties: {
+          objective: { type: ["string", "number"], description: "The objective issue id." },
+          node: { type: "string", description: "The roadmap node id (e.g. 2.3)." },
+          status: {
+            type: "string",
+            enum: [...NODE_STATUSES],
+            description: "Optional new status (explicit-only; never inferred from pr).",
+          },
+          pr: {
+            type: "string",
+            description: 'Set/clear the linked PR/plan ("#N" sets, "" clears).',
+          },
+          description: {
+            type: "string",
+            description:
+              "Optional new node description (e.g. reconciling node scope/naming drift against the " +
+              "merged diff). May be passed alone (no status/pr).",
+          },
+          audit: {
+            type: "string",
+            description:
+              'Required when status is "done": a requirement→evidence mapping proving the node\'s ' +
+              "work actually landed (treat uncertainty as not-done).",
+          },
         },
       },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const decoded = decodeObjectiveNodeParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "objective-plan",
+            "objective_node",
+          )("objective_node needs { objective: <id>, node: <id> }", "bad_input");
+        }
+        const fail = failFor(ctx, "objective-plan", "objective_node");
+        // A refinement session never claims or advances a node — independent of tool visibility.
+        if (isRefinementSession(branchOf(ctx)))
+          return fail(refinementStageRefusal("objective_node"), "wrong_stage");
+        // A node transition moves the plan save destination's `node_claim` component: an open
+        // review's approval is refused by the destination fence (`draftReview.ts`), never saved
+        // against the moved claim.
+        const outcome = await transitionObjectiveNode(decoded, {
+          backend: coldDoorObjectiveNodeBackend(pi, ctx),
+          session: openBranchWorkflowSession(pi, ctx),
+        });
+        if (outcome.status === "failed") return fail(outcome.message, outcome.errorType);
+        const detail = decoded.status
+          ? `node ${decoded.node} → ${decoded.status}`
+          : decoded.pr !== undefined
+            ? `linked node ${decoded.node} to ${decoded.pr}`
+            : `updated node ${decoded.node} description`;
+        return ok(`Updated objective #${decoded.objective}: ${detail}.`, {
+          objective: decoded.objective,
+          node: decoded.node,
+          comment_updated: outcome.commentUpdated,
+        });
+      },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const decoded = decodeObjectiveNodeParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "objective-plan",
-          "objective_node",
-        )("objective_node needs { objective: <id>, node: <id> }", "bad_input");
-      }
-      const fail = failFor(ctx, "objective-plan", "objective_node");
-      // A refinement session never claims or advances a node — independent of tool visibility.
-      if (isRefinementSession(branchOf(ctx)))
-        return fail(refinementStageRefusal("objective_node"), "wrong_stage");
-      // A node transition moves the plan save destination's `node_claim` component: an open
-      // review's approval is refused by the destination fence (`draftReview.ts`), never saved
-      // against the moved claim.
-      const outcome = await transitionObjectiveNode(decoded, {
-        backend: coldDoorObjectiveNodeBackend(pi, ctx),
-        session: openBranchWorkflowSession(pi, ctx),
-      });
-      if (outcome.status === "failed") return fail(outcome.message, outcome.errorType);
-      const detail = decoded.status
-        ? `node ${decoded.node} → ${decoded.status}`
-        : decoded.pr !== undefined
-          ? `linked node ${decoded.node} to ${decoded.pr}`
-          : `updated node ${decoded.node} description`;
-      return ok(`Updated objective #${decoded.objective}: ${detail}.`, {
-        objective: decoded.objective,
-        node: decoded.node,
-        comment_updated: outcome.commentUpdated,
-      });
+    {
+      stages: [...OBJECTIVE_STAGES, "objective-plan", ...WORKTREE_STAGES],
+      gated: {
+        carveOut:
+          "a bounded node status/backlink transition delegated to the canonical `perk objective node` — never a worktree write",
+      },
+      kind: "action",
     },
-  });
+  );
 
-  pi.registerTool({
-    name: "explore_objective_node",
-    label: "Explore objective node",
-    description:
-      "Explore the codebase for one objective node in an isolated read-only child " +
-      "(perk.objective-explorer through the perk wave module, engine-validated report schema) and " +
-      "return the typed findings (relevant files, symbols, anchors, patterns, open questions). " +
-      "Optional — for large nodes; on failure, explore directly instead.",
-    promptSnippet: "Explore an objective node in an isolated read-only child",
-    promptGuidelines: EXPLORE_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["node", "description"],
-      properties: {
-        node: { type: "string", description: "The roadmap node id (e.g. 2.3)." },
-        description: {
-          type: "string",
-          description: "The node's description — what the work delivers (untrusted DATA).",
-        },
-        focus: {
-          type: "string",
-          description: "Optional: what to map (exploration emphasis, untrusted DATA).",
+  registerPerkTool(
+    pi,
+    {
+      name: "explore_objective_node",
+      label: "Explore objective node",
+      description:
+        "Explore the codebase for one objective node in an isolated read-only child " +
+        "(perk.objective-explorer through the perk wave module, engine-validated report schema) and " +
+        "return the typed findings (relevant files, symbols, anchors, patterns, open questions). " +
+        "Optional — for large nodes; on failure, explore directly instead.",
+      promptSnippet: "Explore an objective node in an isolated read-only child",
+      promptGuidelines: EXPLORE_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["node", "description"],
+        properties: {
+          node: { type: "string", description: "The roadmap node id (e.g. 2.3)." },
+          description: {
+            type: "string",
+            description: "The node's description — what the work delivers (untrusted DATA).",
+          },
+          focus: {
+            type: "string",
+            description: "Optional: what to map (exploration emphasis, untrusted DATA).",
+          },
         },
       },
+      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+        const decoded = decodeExploreParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "objective-plan",
+            "explore_objective_node",
+          )(
+            "explore_objective_node needs { node: <id>, description: <non-empty string>, " +
+              "focus?: <non-empty string> }",
+            "bad_input",
+          );
+        }
+        // Model resolution lives here (not in the guidance): `[models.subagents]
+        // objective-explorer` rides the wave as the workflow-level `model` default; the
+        // gitignored `.perk/local.toml` overlay is anchored to the MAIN checkout (see
+        // `subagentModel`).
+        const model = subagentModel(ctx.cwd, "objective-explorer");
+        return executeExploreObjectiveNode(wave, ctx, {
+          ...decoded,
+          ...(model !== undefined ? { model } : {}),
+          ...(signal !== undefined ? { signal } : {}),
+        });
+      },
     },
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const decoded = decodeExploreParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "objective-plan",
-          "explore_objective_node",
-        )(
-          "explore_objective_node needs { node: <id>, description: <non-empty string>, " +
-            "focus?: <non-empty string> }",
-          "bad_input",
-        );
-      }
-      // Model resolution lives here (not in the guidance): `[models.subagents]
-      // objective-explorer` rides the wave as the workflow-level `model` default; the
-      // gitignored `.perk/local.toml` overlay is anchored to the MAIN checkout (see
-      // `subagentModel`).
-      const model = subagentModel(ctx.cwd, "objective-explorer");
-      return executeExploreObjectiveNode(wave, ctx, {
-        ...decoded,
-        ...(model !== undefined ? { model } : {}),
-        ...(signal !== undefined ? { signal } : {}),
-      });
-    },
-  });
+    { stages: ["objective-plan"], gated: "allowed", kind: "orchestration" },
+  );
 
-  pi.registerTool({
-    name: "reconcile_objective",
-    label: "Reconcile objective prose",
-    description:
-      "Rewrite the objective's Reconcilable prose region (the marker-bounded prose in the " +
-      "objective body) to reconcile it against the pass's evidence — a merged PR (post-land) or " +
-      "a stacked layer's pinned accepted diff range (the ready-time pass). The Mechanical " +
-      "roadmap table and any Immutable notes are NEVER touched. Delegates the write to the perk " +
-      "cold door.",
-    promptSnippet:
-      "Reconcile the objective's Reconcilable prose region against the pass's evidence " +
-      "(merged diff, or the ready-time pinned accepted range)",
-    promptGuidelines: RECONCILE_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["objective", "prose"],
-      properties: {
-        objective: { type: ["string", "number"], description: "The objective issue id." },
-        prose: {
-          type: "string",
-          description:
-            "The full replacement prose for the Reconcilable region (overwrites it wholesale).",
+  registerPerkTool(
+    pi,
+    {
+      name: "reconcile_objective",
+      label: "Reconcile objective prose",
+      description:
+        "Rewrite the objective's Reconcilable prose region (the marker-bounded prose in the " +
+        "objective body) to reconcile it against the pass's evidence — a merged PR (post-land) or " +
+        "a stacked layer's pinned accepted diff range (the ready-time pass). The Mechanical " +
+        "roadmap table and any Immutable notes are NEVER touched. Delegates the write to the perk " +
+        "cold door.",
+      promptSnippet:
+        "Reconcile the objective's Reconcilable prose region against the pass's evidence " +
+        "(merged diff, or the ready-time pinned accepted range)",
+      promptGuidelines: RECONCILE_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["objective", "prose"],
+        properties: {
+          objective: { type: ["string", "number"], description: "The objective issue id." },
+          prose: {
+            type: "string",
+            description:
+              "The full replacement prose for the Reconcilable region (overwrites it wholesale).",
+          },
         },
       },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const decoded = decodeReconcileParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "objective-reconcile",
+            "reconcile_objective",
+          )("reconcile_objective needs { objective: <id>, prose: <string> }", "bad_input");
+        }
+        const outcome = await reconcileViaColdDoor(pi, ctx, decoded);
+        if (outcome.status === "failed") {
+          return failFor(
+            ctx,
+            "objective-reconcile",
+            "reconcile_objective",
+          )(outcome.message, outcome.errorType);
+        }
+        return ok(`Reconciled objective #${decoded.objective} prose region.`, {
+          objective: decoded.objective,
+          updated: outcome.updated,
+        });
+      },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const decoded = decodeReconcileParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "objective-reconcile",
-          "reconcile_objective",
-        )("reconcile_objective needs { objective: <id>, prose: <string> }", "bad_input");
-      }
-      const outcome = await reconcileViaColdDoor(pi, ctx, decoded);
-      if (outcome.status === "failed") {
-        return failFor(
-          ctx,
-          "objective-reconcile",
-          "reconcile_objective",
-        )(outcome.message, outcome.errorType);
-      }
-      return ok(`Reconciled objective #${decoded.objective} prose region.`, {
-        objective: decoded.objective,
-        updated: outcome.updated,
-      });
+    {
+      stages: [...OBJECTIVE_STAGES, "objective-plan", ...WORKTREE_STAGES],
+      gated: "blocked",
+      kind: "action",
     },
-  });
+  );
 
-  pi.registerTool({
-    name: "add_objective_node",
-    label: "Add objective node",
-    description:
-      "Add a NEW node to an objective roadmap. Use SPARINGLY — only during reconciliation, when a " +
-      "genuine new unit of work emerged that wasn't planned (a deferred follow-up the PR flagged, " +
-      "an uncovered defect/gap, a missing prerequisite for a later node, or human-requested work " +
-      "from the engagement block). Auto-assigns the next `<phase>.<n>` id. Delegates the write to " +
-      "the perk cold door.",
-    promptSnippet: "Add a genuinely-new node to an objective roadmap (sparingly, during reconcile)",
-    promptGuidelines: ADD_NODE_TOOL_GUIDELINES,
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["objective", "phase", "description"],
-      properties: {
-        objective: { type: ["string", "number"], description: "The objective issue id." },
-        phase: { type: "number", description: "The phase number to insert the node into." },
-        description: { type: "string", description: "What the new node delivers." },
-        status: {
-          type: "string",
-          enum: [...NODE_STATUSES],
-          description: "Optional initial status (defaults to pending).",
+  registerPerkTool(
+    pi,
+    {
+      name: "add_objective_node",
+      label: "Add objective node",
+      description:
+        "Add a NEW node to an objective roadmap. Use SPARINGLY — only during reconciliation, when a " +
+        "genuine new unit of work emerged that wasn't planned (a deferred follow-up the PR flagged, " +
+        "an uncovered defect/gap, a missing prerequisite for a later node, or human-requested work " +
+        "from the engagement block). Auto-assigns the next `<phase>.<n>` id. Delegates the write to " +
+        "the perk cold door.",
+      promptSnippet:
+        "Add a genuinely-new node to an objective roadmap (sparingly, during reconcile)",
+      promptGuidelines: ADD_NODE_TOOL_GUIDELINES,
+      executionMode: "sequential",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["objective", "phase", "description"],
+        properties: {
+          objective: { type: ["string", "number"], description: "The objective issue id." },
+          phase: { type: "number", description: "The phase number to insert the node into." },
+          description: { type: "string", description: "What the new node delivers." },
+          status: {
+            type: "string",
+            enum: [...NODE_STATUSES],
+            description: "Optional initial status (defaults to pending).",
+          },
+          slug: {
+            type: "string",
+            description: "Optional short slug (auto-derived from the description if omitted).",
+          },
+          depends_on: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional node ids this node depends on.",
+          },
+          comment: { type: "string", description: "Optional note attached to the node." },
         },
-        slug: {
-          type: "string",
-          description: "Optional short slug (auto-derived from the description if omitted).",
-        },
-        depends_on: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional node ids this node depends on.",
-        },
-        comment: { type: "string", description: "Optional note attached to the node." },
+      },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const decoded = decodeAddObjectiveNodeParams(params);
+        if (decoded === null) {
+          return failFor(
+            ctx,
+            "objective-reconcile",
+            "add_objective_node",
+          )(
+            "add_objective_node needs { objective: <id>, phase: <int>, description: <string> }",
+            "bad_input",
+          );
+        }
+        const outcome = await addNodeViaColdDoor(pi, ctx, decoded);
+        if (outcome.status === "failed") {
+          return failFor(
+            ctx,
+            "objective-reconcile",
+            "add_objective_node",
+          )(outcome.message, outcome.errorType);
+        }
+        return ok(`Added node ${outcome.node} to objective #${decoded.objective}.`, {
+          objective: decoded.objective,
+          node: outcome.node,
+          comment_updated: outcome.commentUpdated,
+        });
       },
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const decoded = decodeAddObjectiveNodeParams(params);
-      if (decoded === null) {
-        return failFor(
-          ctx,
-          "objective-reconcile",
-          "add_objective_node",
-        )(
-          "add_objective_node needs { objective: <id>, phase: <int>, description: <string> }",
-          "bad_input",
-        );
-      }
-      const outcome = await addNodeViaColdDoor(pi, ctx, decoded);
-      if (outcome.status === "failed") {
-        return failFor(
-          ctx,
-          "objective-reconcile",
-          "add_objective_node",
-        )(outcome.message, outcome.errorType);
-      }
-      return ok(`Added node ${outcome.node} to objective #${decoded.objective}.`, {
-        objective: decoded.objective,
-        node: outcome.node,
-        comment_updated: outcome.commentUpdated,
-      });
+    {
+      stages: [...OBJECTIVE_STAGES, "objective-plan", ...WORKTREE_STAGES],
+      gated: "blocked",
+      kind: "action",
     },
-  });
+  );
 
   registerPerkCommand(pi, "objective-reconcile", {
     description:
@@ -746,13 +783,41 @@ export function installObjectivePlanningBindings(
         );
         return;
       }
+      // A stage claim would hijack a worktree session's plan binding: refuse before any append.
+      const current = rebuildWorkflowState(branchOf(ctx)).stage;
+      if (typeof current === "string" && WORKTREE_STAGES.includes(current)) {
+        report(
+          ctx,
+          "objective-plan",
+          "warning",
+          `/objective-plan cannot start inside a ${current} worktree session (a stage claim would ` +
+            "hijack this session's plan binding) — run `perk objective plan <N>` from the repo " +
+            "root or start a fresh session.",
+        );
+        return;
+      }
+      // Claim the stage the cold handoff would have carried (the `/objective-refine` precedent),
+      // so the gated view and every stage-keyed surface follow the objective-plan stage.
+      const staged = openBranchWorkflowSession(pi, ctx).apply({
+        kind: "enter-objective-plan-stage",
+      });
+      if (staged.status === "rejected" || staged.status === "unverified") {
+        report(
+          ctx,
+          "objective-plan",
+          "error",
+          `the objective-plan stage entry failed (${staged.problem}) — re-run /objective-plan`,
+          { alsoLog: true },
+        );
+        return;
+      }
       report(ctx, "objective-plan", "info", `#${objective}${node ? ` node ${node}` : ""}`);
       // Enter the read-only gate (parity with the cold door's `mode: read-only` handoff claim) —
       // skip-if-active so an already-gated session (cold objective-plan, `/plan` on) gets no
-      // duplicate `mode` append or announce. Entering BEFORE sendUserMessage means the seeded
-      // factory turn runs gated and picks up the [READ-ONLY MODE] + [PLAN AUTHORING] injections
-      // on its before_agent_start. Exit stays owned by plan_save (approval auto-save included)
-      // and `/plan` off.
+      // duplicate `mode` append or announce — then re-scope it to the claimed stage. Entering
+      // BEFORE sendUserMessage means the seeded factory turn runs gated and picks up the
+      // read-only + plan-authoring injections on its before_agent_start. Exit stays owned by the
+      // plan save (approval auto-save included) and `/plan` off.
       if (!gating.isActive()) {
         gating.enter(ctx);
         report(
@@ -762,9 +827,10 @@ export function installObjectivePlanningBindings(
           "read-only ON — structurally enforced exploration; plan_save exits (approval auto-saves), or /plan toggles off.",
         );
       }
+      gating.syncFromState("read-only", OBJECTIVE_PLAN_STAGE);
       // Inject the factory guidance as a user message so the model starts the loop (always a turn).
-      // The perk-objective-plan pointer rides the skill-binding suffix (D5) since a warm
-      // /objective-plan outside a stage:objective-plan session gets none from Mechanism A.
+      // The seed turn self-delivers the perk-objective-plan pointer through the skill-binding
+      // suffix; later turns resolve `stage:objective-plan` from the claimed stage.
       const backend = resolveIssueBackendId(ctx.cwd);
       const url = backend === "linear" ? await fetchObjectiveUrl(pi, ctx, objective) : "";
       pi.sendUserMessage(
