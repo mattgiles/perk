@@ -35,6 +35,7 @@ import { registerPerkCommand } from "../../substrate/command.ts";
 import { type BridgeStatus, describeBridge } from "../../substrate/nativeSdkBridge.ts";
 import { branchOf } from "../../substrate/workflowState.ts";
 import { report as reportTo } from "../../surfaces/report.ts";
+import { activeContextMessages, type ContextProjectionSource } from "./contextEvidence.ts";
 
 /** Project-scoped ambient routing index, relative to the repo root. */
 export const AMBIENT_INDEX_REL_PATH = join(".pi", "APPEND_SYSTEM.md");
@@ -263,11 +264,24 @@ export interface CensusBranchEntry {
   content?: unknown;
 }
 
+/**
+ * The structural slice of a projected (live-context) message the census reads: injected contexts
+ * project as `role: "custom"` messages carrying their `customType`.
+ */
+export interface CensusLiveMessage {
+  role: string;
+  customType?: string;
+}
+
 /** Derived counts for perk-injected branch context (perk's customTypes share the `perk:` prefix). */
 export interface BranchContextCensus {
   entries: number;
-  /** `custom_message` entries whose customType starts with `perk:`, sorted by customType. */
-  perkContexts: { customType: string; copies: number; totalChars: number }[];
+  /**
+   * `custom_message` entries whose customType starts with `perk:`, sorted by customType. `copies`
+   * is HISTORICAL (every copy on the branch, compacted or context-edited ones included); `live` is
+   * the count of that customType in the current context projection (`null` = the read failed).
+   */
+  perkContexts: { customType: string; copies: number; totalChars: number; live: number | null }[];
   /** `custom_message` entries without the `perk:` prefix (borrowed packages). */
   otherCustomMessages: { copies: number; totalChars: number };
   /** Entries (any type) whose JSON form carries `BINDING_HEADER` — the cold↔warm dedup marker. */
@@ -290,8 +304,33 @@ function contentChars(content: unknown): number {
   return JSON.stringify(content).length;
 }
 
-/** Census the session branch's injected context (counts/chars only — never message content). */
-export function branchContextCensus(entries: readonly CensusBranchEntry[]): BranchContextCensus {
+/**
+ * The live context projection for the census, or `null` when the read throws — the census is
+ * report-only, so a failed read renders `live=?` instead of failing the command.
+ */
+export function readLiveProjection(
+  source: ContextProjectionSource,
+): readonly CensusLiveMessage[] | null {
+  try {
+    return activeContextMessages(source);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Census the session branch's injected context (counts/chars only — never message content):
+ * historical copies from `entries`, live copies from the `live` projection (`null` = unknown).
+ */
+export function branchContextCensus(
+  entries: readonly CensusBranchEntry[],
+  live: readonly CensusLiveMessage[] | null,
+): BranchContextCensus {
+  const liveCount = (customType: string): number | null =>
+    live === null
+      ? null
+      : live.filter((message) => message.role === "custom" && message.customType === customType)
+          .length;
   const perk = new Map<string, { copies: number; totalChars: number }>();
   const other = { copies: 0, totalChars: 0 };
   let bindingHeaderCopies = 0;
@@ -313,7 +352,7 @@ export function branchContextCensus(entries: readonly CensusBranchEntry[]): Bran
   return {
     entries: entries.length,
     perkContexts: [...perk.entries()]
-      .map(([customType, row]) => ({ customType, ...row }))
+      .map(([customType, row]) => ({ customType, ...row, live: liveCount(customType) }))
       .sort((a, b) => (a.customType < b.customType ? -1 : a.customType > b.customType ? 1 : 0)),
     otherCustomMessages: other,
     bindingHeaderCopies,
@@ -324,8 +363,9 @@ export function branchContextCensus(entries: readonly CensusBranchEntry[]): Bran
  * Render the census as a fixed multi-line block. The line grammar (the `census:` /
  * `append-system-prompt:` / `context-files:` / `skills:` / `tools:` / `per source:` / `branch:` /
  * `perk contexts:` / `native sdk bridge:` keys) is stable — the closing audit diffs against these
- * exact keys. The bridge block carries `describeBridge`, the host entry (or `-`) and the root
- * paths — identifiers only.
+ * exact keys; each `perk contexts:` row appends a `live=<n>` token (`?` when the projection read
+ * failed) after its historical `×copies (chars)`. The bridge block carries `describeBridge`, the
+ * host entry (or `-`) and the root paths — identifiers only.
  */
 export function renderCensus(
   prompt: PromptCensus,
@@ -363,7 +403,7 @@ export function renderCensus(
     `  branch: ${branch.entries} entries; binding-header-copies=${branch.bindingHeaderCopies}`,
   );
   const perkRows = branch.perkContexts.map(
-    (r) => `${r.customType} ×${r.copies} (${r.totalChars}c)`,
+    (r) => `${r.customType} ×${r.copies} (${r.totalChars}c) live=${r.live ?? "?"}`,
   );
   const perkSegment = perkRows.length > 0 ? perkRows.join("; ") : "none";
   lines.push(
@@ -404,7 +444,7 @@ export function registerSelfcheck(
       const census = renderCensus(
         promptCensus(options),
         toolsCensus(pi.getAllTools(), pi.getActiveTools()),
-        branchContextCensus(branchOf(ctx)),
+        branchContextCensus(branchOf(ctx), readLiveProjection(ctx)),
         opts.bridge,
       );
       // Headless-safe: report() surfaces the derived counts/identifiers (never raw prompt content).

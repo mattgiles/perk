@@ -18,6 +18,7 @@ import {
   managedAgentsProbe,
   promptCensus,
   readAmbientIndex,
+  readLiveProjection,
   renderCensus,
   toolsCensus,
 } from "./selfcheck.ts";
@@ -306,37 +307,78 @@ test("toolsCensus: no tools → zeros, no source rows", () => {
 // ---------------------------------------------------------------------------
 
 test("branchContextCensus: perk custom_message copies counted; workflow state excluded", () => {
-  const census = branchContextCensus([
-    { type: "custom_message", customType: "perk:mode-context", content: "a".repeat(40) },
-    { type: "custom_message", customType: "perk:mode-context", content: "b".repeat(60) },
-    // A `type: "custom"` state entry (workflow state) must NOT count as injected context.
-    { type: "custom", customType: "perk:workflow-state", content: "c".repeat(99) },
-    // A non-perk custom_message counts under "other" (borrowed packages).
-    { type: "custom_message", customType: "other:overlay", content: "d".repeat(10) },
-    // Array-form content sums the text-part lengths only.
-    {
-      type: "custom_message",
-      customType: "perk:binding-context",
-      content: [
-        { type: "text", text: "12345" },
-        { type: "image", data: "zzz" },
-      ],
-    },
-    // A user message embedding the binding header counts toward bindingHeaderCopies.
-    { type: "user", content: `hello\n${BINDING_HEADER}\nrest` },
-    { type: "assistant", content: "plain turn" },
-  ]);
+  const census = branchContextCensus(
+    [
+      { type: "custom_message", customType: "perk:mode-context", content: "a".repeat(40) },
+      { type: "custom_message", customType: "perk:mode-context", content: "b".repeat(60) },
+      // A `type: "custom"` state entry (workflow state) must NOT count as injected context.
+      { type: "custom", customType: "perk:workflow-state", content: "c".repeat(99) },
+      // A non-perk custom_message counts under "other" (borrowed packages).
+      { type: "custom_message", customType: "other:overlay", content: "d".repeat(10) },
+      // Array-form content sums the text-part lengths only.
+      {
+        type: "custom_message",
+        customType: "perk:binding-context",
+        content: [
+          { type: "text", text: "12345" },
+          { type: "image", data: "zzz" },
+        ],
+      },
+      // A user message embedding the binding header counts toward bindingHeaderCopies.
+      { type: "user", content: `hello\n${BINDING_HEADER}\nrest` },
+      { type: "assistant", content: "plain turn" },
+    ],
+    [],
+  );
   assert.equal(census.entries, 7);
   assert.deepEqual(census.perkContexts, [
-    { customType: "perk:binding-context", copies: 1, totalChars: 5 },
-    { customType: "perk:mode-context", copies: 2, totalChars: 100 },
+    { customType: "perk:binding-context", copies: 1, totalChars: 5, live: 0 },
+    { customType: "perk:mode-context", copies: 2, totalChars: 100, live: 0 },
   ]);
   assert.deepEqual(census.otherCustomMessages, { copies: 1, totalChars: 10 });
   assert.equal(census.bindingHeaderCopies, 1);
 });
 
+test("branchContextCensus: live counts come from the projection, distinct from historical copies", () => {
+  // Two historical copies (one compacted away), one live copy in the current projection.
+  const entries = [
+    { type: "custom_message", customType: "perk:mode-context", content: "a".repeat(40) },
+    { type: "compaction" },
+    { type: "custom_message", customType: "perk:mode-context", content: "b".repeat(40) },
+  ];
+  const projection = [
+    { role: "compactionSummary" },
+    { role: "custom", customType: "perk:mode-context" },
+    // Another owner's custom message and a user turn never count toward the row.
+    { role: "custom", customType: "other:overlay" },
+    { role: "user" },
+  ];
+  const census = branchContextCensus(entries, projection);
+  assert.deepEqual(census.perkContexts, [
+    { customType: "perk:mode-context", copies: 2, totalChars: 80, live: 1 },
+  ]);
+});
+
+test("branchContextCensus: a throwing projection read leaves live unknown (never throws)", () => {
+  const live = readLiveProjection({
+    sessionManager: {
+      buildSessionProjection: () => {
+        throw new Error("projection unavailable");
+      },
+    },
+  });
+  assert.equal(live, null);
+  const census = branchContextCensus(
+    [{ type: "custom_message", customType: "perk:mode-context", content: "x" }],
+    live,
+  );
+  assert.deepEqual(census.perkContexts, [
+    { customType: "perk:mode-context", copies: 1, totalChars: 1, live: null },
+  ]);
+});
+
 test("branchContextCensus: empty branch → zeros", () => {
-  const census = branchContextCensus([]);
+  const census = branchContextCensus([], []);
   assert.deepEqual(census, {
     entries: 0,
     perkContexts: [],
@@ -371,8 +413,8 @@ test("renderCensus: full block pins the line grammar", () => {
     {
       entries: 142,
       perkContexts: [
-        { customType: "perk:binding-context", copies: 1, totalChars: 900 },
-        { customType: "perk:mode-context", copies: 3, totalChars: 14400 },
+        { customType: "perk:binding-context", copies: 1, totalChars: 900, live: 1 },
+        { customType: "perk:mode-context", copies: 3, totalChars: 14400, live: null },
       ],
       otherCustomMessages: { copies: 0, totalChars: 0 },
       bindingHeaderCopies: 2,
@@ -397,7 +439,7 @@ test("renderCensus: full block pins the line grammar", () => {
       "  tools: 24 active / 41 registered; schemas=61234c; guidelines=2400c; snippets=800c",
       "    per source: builtin=20 (50000c); perk=4 (11234c)",
       "  branch: 142 entries; binding-header-copies=2",
-      "    perk contexts: perk:binding-context ×1 (900c); perk:mode-context ×3 (14400c); other custom_message ×0 (0c)",
+      "    perk contexts: perk:binding-context ×1 (900c) live=1; perk:mode-context ×3 (14400c) live=?; other custom_message ×0 (0c)",
       `  native sdk bridge: installed (roots=2, specifiers=${NATIVE_SDK_CENSUS.length}, reused)`,
       "    host: /pi/dist/index.js",
       "    roots: 2 — /repo/consumers/pi-subagents, /repo/consumers/pi-web-access",

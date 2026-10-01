@@ -26,7 +26,7 @@ import { fakePerkRouter, fauxModelRuntime, scaffoldWorkerWorktree } from "../tes
 // Test-side adapter import: the E2E tier mints the nominal selection deliberately (the faux
 // runtime + faux model ride the SAME production `defaultCreateRuntime` path).
 import { WorkerModelSelection } from "./sdkAdapter.ts";
-import { type DriveStage, type RunEvent, runStage } from "./stageExecution.ts";
+import { type DriveBudget, type DriveStage, type RunEvent, runStage } from "./stageExecution.ts";
 
 // Extension delivery is the PRODUCTION load path: `defaultCreateRuntime` layers disk settings
 // (`SettingsManager.create(worktree, throwawayAgentDir)`), so the scaffold's `.pi/settings.json`
@@ -40,7 +40,7 @@ import { type DriveStage, type RunEvent, runStage } from "./stageExecution.ts";
 /** A trailing idle message (D6): a continued loop never hits "no more faux responses queued". */
 const idle = () => fauxAssistantMessage([fauxText("done")], { stopReason: "stop" });
 
-const BUDGET = { maxTurns: 100, maxTokens: 1_000_000, wallClockMs: 60_000 };
+const BUDGET: DriveBudget = { maxTurns: 100, maxTokens: 1_000_000, wallClockMs: 60_000 };
 
 let runCounter = 0;
 
@@ -57,6 +57,12 @@ async function runDrive(opts: {
   fileSink?: boolean;
   /** Capture cold-door command keys in invocation order. */
   captureArgv?: boolean;
+  /** The drive budget (default: the generous `BUDGET`). */
+  budget?: DriveBudget;
+  /** The external abort signal threaded into `runStage`. */
+  signal?: AbortSignal;
+  /** Observe each event as the injected array sink receives it (e.g. to abort mid-drive). */
+  onEvent?: (event: RunEvent) => void;
 }) {
   const runId = `01JE2E${String(runCounter++).padStart(20, "0")}`;
   const cwd = scaffoldWorkerWorktree({
@@ -87,11 +93,19 @@ async function runDrive(opts: {
         stage: opts.stage,
         initialPrompt: opts.initialPrompt ?? `Drive the ${opts.stage} stage.`,
         model: new WorkerModelSelection(reg.modelRuntime, reg.getModel() as unknown as Model<Api>),
-        budget: BUDGET,
+        budget: opts.budget ?? BUDGET,
+        signal: opts.signal,
       },
       // When `fileSink`, omit the array sink so the production default NDJSON file sink runs; then
       // parse it back into `events` (the default sink is a no-op unless PERK_RUN_ID is set, which it is).
-      opts.fileSink ? {} : { eventSink: (e) => events.push(e) },
+      opts.fileSink
+        ? {}
+        : {
+            eventSink: (e) => {
+              events.push(e);
+              opts.onEvent?.(e);
+            },
+          },
     );
     if (opts.fileSink) {
       for (const line of readFileSync(runEventsPath(cwd, runId), "utf8").trim().split("\n")) {
@@ -346,5 +360,71 @@ test("e2e: NO-EXTENSION-TOOLS — empty packages list → zero-turn failed/no_ex
     ["run_started", "run_finished"],
     "a well-formed zero-turn event pair",
   );
+  assertMonotonicSeq(events);
+});
+
+// --- Scenario 7: EXTERNAL ABORT on the real runtime ---------------------------------------------
+//
+// `stageExecution.test.ts` covers the abort routes over a FakeSession; this is the real-runtime
+// arm: the signal fires mid-drive (on the first `tool_outcome` — the first event after the entry
+// sample) and the real `session.abort()` ends the prompt.
+
+test("e2e: EXTERNAL-ABORT — a mid-drive abort ends the real session → aborted/external_abort", async () => {
+  const controller = new AbortController();
+  const { outcome, events } = await runDrive({
+    stage: "implement",
+    responses: [
+      fauxAssistantMessage([fauxToolCall("read", { path: ".pi/settings.json" })], {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage([fauxToolCall("submit", {})], { stopReason: "toolUse" }),
+      idle(),
+    ],
+    routes: implementHappyRoutes,
+    signal: controller.signal,
+    onEvent: (event) => {
+      if (event.kind === "tool_outcome") controller.abort();
+    },
+  });
+
+  assert.equal(outcome.status, "aborted");
+  assert.equal(outcome.terminal_signal, "external_abort");
+  assert.equal(outcome.error?.type, "external_abort");
+  assert.equal(outcome.pr, null);
+  const tools = events.flatMap((e) => (e.kind === "tool_outcome" ? [e.tool] : []));
+  assert.deepEqual(tools, ["read"], "the drive stopped before the scripted submit");
+  // Asserted here, not in the sink: the emitter swallows a throwing sink by design.
+  assert.ok(events.some((e) => e.kind === "tool_outcome" && e.ok), "the read executed");
+  assert.equal(events.at(-1)?.kind, "run_finished");
+  assertMonotonicSeq(events);
+});
+
+// --- Scenario 8: BUDGET TRIP on the real runtime ------------------------------------------------
+
+test("e2e: BUDGET — the turn cap trips the watchdog on the real session → budget_exhausted/budget", async () => {
+  const maxTurns = 1;
+  const { outcome, events } = await runDrive({
+    stage: "implement",
+    responses: [
+      fauxAssistantMessage([fauxToolCall("read", { path: ".pi/settings.json" })], {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage([fauxToolCall("submit", {})], { stopReason: "toolUse" }),
+      idle(),
+    ],
+    routes: implementHappyRoutes,
+    budget: { ...BUDGET, maxTurns },
+  });
+
+  assert.equal(outcome.status, "budget_exhausted");
+  assert.equal(outcome.terminal_signal, "budget");
+  assert.equal(outcome.error?.type, "budget");
+  // The watchdog trips on the cap's turn_end, but Pi's agent loop does not re-check the signal
+  // between turns: the next turn starts, its stream ends `aborted`, and that turn still emits a
+  // turn_end the counters record — so the real runtime reports cap + 1 (a FakeSession stops at
+  // the cap). The guarantee is that nothing past the cap executes.
+  assert.equal(outcome.budget.turns, maxTurns + 1);
+  const tools = events.flatMap((e) => (e.kind === "tool_outcome" ? [e.tool] : []));
+  assert.deepEqual(tools, ["read"], "no tool past the cap executed");
   assertMonotonicSeq(events);
 });
