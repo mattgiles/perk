@@ -35,6 +35,19 @@ export const TOOL_FIELD_POLICIES = {
     kind: "non-prose",
     reason: "runtime argument preparation, not model-facing prose",
   },
+  // A schema like `parameters`: its nested descriptions reach the model through codemode.
+  outputSchema: { kind: "parameter-schema" },
+  exposure: { kind: "non-prose", reason: "model-reachability mode, not model-facing prose" },
+  // Both can carry model-facing text in non-string shapes (a namespace's description and
+  // instructions; a loadout hook's computed descriptions); classifying them as prose makes a
+  // governed tool that adopts one surface as an unresolvable site instead of passing silently.
+  namespace: { kind: "model-facing-prose", collector: "field" },
+  annotations: {
+    kind: "non-prose",
+    reason: "boolean behavior hints for permission policy, not model-facing prose",
+  },
+  defaultActive: { kind: "non-prose", reason: "activation default, not model-facing prose" },
+  prepareLoadout: { kind: "model-facing-prose", collector: "field" },
   executionMode: {
     kind: "non-prose",
     reason: "runtime execution configuration, not model-facing prose",

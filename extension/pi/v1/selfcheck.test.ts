@@ -263,6 +263,8 @@ function fakeTool(name: string, source: string): ToolInfo {
     name,
     description: `${name} tool`,
     parameters: { type: "object" } as ToolInfo["parameters"],
+    // Pi's default for a tool that declares no exposure — the live ToolInfo shape.
+    exposure: "direct",
     sourceInfo: { path: `/ext/${source}`, source, scope: "project", origin: "package" },
   };
 }
