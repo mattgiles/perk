@@ -425,7 +425,7 @@ export function installPlanBindings(
   // The working-draft file tool: the first session-data PRODUCER and the narrow structural
   // read-only-gate carve-out (session data dir only). The tool takes NO path/name parameter —
   // the artifact name is the fixed constant and the bytes flow through the session seam, so
-  // allowlisting its name in READ_ONLY_TOOLS (toolGating.ts) is safe.
+  // its carve-out posture (eligible under the gate) is safe.
   registerPerkTool(
     pi,
     {
@@ -699,8 +699,8 @@ export function installPlanBindings(
   });
 
   // ---------------------------------------------------------------- the plan_review tool
-  // perk's universal review door. In READ_ONLY_TOOLS so it is callable INSIDE plan mode (the
-  // whole point — review happens before the gate ever comes off). Fail-open everywhere:
+  // perk's universal review door. Gate-allowed and mode-over-stage so it is callable INSIDE plan
+  // mode (the whole point — review happens before the gate ever comes off). Fail-open everywhere:
   // headless / dismissed / backend-unavailable all soft-skip so authoring never wedges.
   registerPerkTool(
     pi,

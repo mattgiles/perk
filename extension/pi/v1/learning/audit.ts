@@ -6,8 +6,8 @@
 // the cold door's workflow-state binding: `perk-dev audit judge` launches with
 // `handoff_extra={audit_bundle_dir}` and the session's claimed run_id recovers it through the
 // rebuilt workflow-state + handoff seam (the `consumed_learn` recovery pattern). That is the
-// STRUCTURAL boundary justifying `READ_ONLY_TOOLS` membership (contracts.md §8.40/§8.50): the
-// read-only gate makes every gated session's tools reachable, so a param-relayed path would let
+// STRUCTURAL boundary justifying its carve-out posture (contracts.md §8.40/§8.50): a gated
+// session reaches every eligible carve-out writer, so a param-relayed path would let
 // any gated session aim the writer anywhere — with no param, no model-relayed path exists.
 //
 // Verdicts are written to `<bundle>/verdicts.json` in EVERY arm in which the wave was launched

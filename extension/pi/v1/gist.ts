@@ -480,7 +480,7 @@ export function installGistBindings(
         report(ctx, "gist-save", severity, message);
         return;
       }
-      // Exit the read-only gate so the gist_save tool (excluded from READ_ONLY_TOOLS) becomes
+      // Exit the read-only gate so the gist_save tool (gate-blocked) becomes
       // reachable on the driven turn, then drive the turn (mirrors /objective-save).
       if (gating.isActive()) gating.exit(ctx);
       report(ctx, "gist-save", "info", "handing the save to the session");

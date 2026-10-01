@@ -14,7 +14,7 @@
 // feedback via a second editor dialog.
 //
 // REVIEW SEMANTICS (file-first, approval auto-saves): the review runs while the session is still
-// read-only (the tool is in READ_ONLY_TOOLS — review happens before the gate ever comes off).
+// read-only (the tool is gate-allowed — review happens before the gate ever comes off).
 // The reviewed plan resolves FILE-FIRST via `resolvePlanSource` (the validated `plan-draft.md`
 // artifact wins; the `plan` param is the fallback; the transcript scrape is NEVER reviewed — an
 // approval would auto-save scraped conversation bytes, so no draft + no param soft-skips with a

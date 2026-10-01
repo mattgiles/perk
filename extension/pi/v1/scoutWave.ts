@@ -15,8 +15,8 @@
 // Child-controlled text is framed so it cannot escape its block: report JSON is rendered under a
 // content-proof fence (longer than any backtick run inside, no raw line terminator survives),
 // and a failed lane's arbitrary error string is collapsed to one bounded line. There is NO
-// stage check here — the read-only gate (`REFINEMENT_READ_ONLY_TOOLS` excludes the tool) is the
-// one authority for the refinement-stage exclusion.
+// stage check here — the tool's stage policy (the three authoring stages; never
+// `objective-refine`) is the one authority for the refinement-stage exclusion.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { subagentModel } from "../../substrate/config.ts";

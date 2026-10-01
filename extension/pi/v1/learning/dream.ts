@@ -9,8 +9,8 @@
 // so no caller-supplied path exists and a gated session cannot aim the reader or the writer
 // anywhere. A session with no run-scoped dream manifest is structurally refused `bad_state` —
 // only a `perk learn dream` launch plants one, so the tool is registered globally but
-// structurally unreachable outside a dream launch. That is what makes the `READ_ONLY_TOOLS`
-// membership safe (contracts.md §8.61).
+// structurally unreachable outside a dream launch. That is what makes the carve-out posture
+// safe (contracts.md §8.61).
 //
 // The two-level sequencing, the digest-marker/removal ordering, the byte budget, the §8.65
 // bracket placement, and the finalize-in-place rewrite all live in `analyzeDream` — this

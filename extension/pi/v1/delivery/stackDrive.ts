@@ -87,8 +87,8 @@ export function driveStackReconcile(
 /**
  * The ONE stack driving-command registrar (`/objective-sync`, `/objective-recover`,
  * `/objective-land`): gate-on soft refusal (notify + inject nothing — stack sync/recovery/
- * landing mutates published branches and PRs, and the mutating tools never join
- * READ_ONLY_TOOLS) → resolve the objective (explicit argument → workflow `active_objective` →
+ * landing mutates published branches and PRs, and the mutating tools are gate-blocked
+ * everywhere) → resolve the objective (explicit argument → workflow `active_objective` →
  * plan-ref `objective_id`) → report → inject the preview-first guidance naming the typed tools
  * plus the binding suffix.
  */

@@ -22,8 +22,8 @@ import { loadRegistry, stageConsumesPlanRef } from "./registry.ts";
  * worktree, morally equivalent to the already-allowlisted curl. perk does NOT normalize names, so
  * all three providers' divergent names are listed: pi-web-access (its four default tools
  * web_search/source_check/fetch_content/get_search_content, plus its lazy loader `web_enable` —
- * see `LAZY_TOOL_LOADERS` in toolGating.ts; `code_search` is not registered by any current version and is kept as an
- * inert static name for version tolerance), @ollama/pi-web-search (ollama_web_search/
+ * see `LAZY_TOOL_LOADERS` in toolGating.ts; `code_search` is not registered by any current
+ * version and is kept as an inert static name for version tolerance), @ollama/pi-web-search (ollama_web_search/
  * ollama_web_fetch), and @juicesharp/rpiv-web-tools (web_search shared, web_fetch). All register
  * at load time; `web_enable` registers only when pi-web-access's dynamic-tools probe passes (an
  * inert name otherwise).

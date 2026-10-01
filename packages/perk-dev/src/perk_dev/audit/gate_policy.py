@@ -1,6 +1,6 @@
 """A plain Python copy of the read-only bash gate's pure policy.
 
-Source of truth: ``extension/substrate/toolGating.ts`` (``DESTRUCTIVE_PATTERNS``,
+Source of truth: ``extension/substrate/readOnlyBash.ts`` (``DESTRUCTIVE_PATTERNS``,
 ``SAFE_PATTERNS``, ``splitTopLevelSegments``, ``isReadOnlyBashCommand``). Pattern bodies
 are copied verbatim (each TS ``/…/i`` literal becomes ``re.compile(r"…", re.IGNORECASE)``;
 no-flag literals compile bare). There is deliberately **no drift guard**: silent drift

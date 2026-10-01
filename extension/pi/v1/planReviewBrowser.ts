@@ -10,7 +10,7 @@
 // ARTIFACT-FIRST, DRAFTS ONLY: the reviewed bytes are the validated `plan-draft.md` artifact —
 // no param tier, no transcript tier (the review-surface law, tightened to drafts-only: an
 // approval auto-saves the reviewed bytes). Stage-gated to the three registry stages whose
-// STAGE_TOOLS carry `plan_draft` ({plan, save, objective-plan} — every session where the plan
+// stage diet carries `plan_draft` ({plan, save, objective-plan} — every session where the plan
 // draft is the working draft); anything else refuses loudly.
 //
 // THE GUARDS (`draftReview.ts`, contracts.md §8.23): the door opens the activation's
@@ -96,7 +96,7 @@ import { type ReviewOutcome, type ToolResult, untrustedReviewFeedback } from "./
 const SCOPE = "plan-review-browser";
 
 /**
- * The stage gate: the three registry stages whose STAGE_TOOLS carry `plan_draft` — every
+ * The stage gate: the three registry stages whose stage diet carries `plan_draft` — every
  * session where the plan draft is the working draft. Other/absent stage → loud refusal.
  */
 const DRAFT_STAGES: ReadonlySet<string> = new Set(["plan", "save", "objective-plan"]);

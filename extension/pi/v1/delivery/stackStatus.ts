@@ -1,7 +1,7 @@
 // The stacked-delivery status read (contracts.md §8.51): the `objective_stack_status` tool +
 // the `/objective-stack` command over the Python cold worker `perk objective stack status`
 // (read-only end to end — the command works in every session, including gate-on; the tool stays
-// deliberately gate-off, documented in toolGating.ts). Pure decoding + rendering + delegation —
+// gate-blocked by its policy descriptor). Pure decoding + rendering + delegation —
 // no feature operation backs this module (zero-policy passthrough); the mutating stack family
 // lives in the sibling adapters (stackSync.ts / stackRecover.ts / stackLand.ts over the
 // `delivery/` feature ops, with the shared drive helpers in stackDrive.ts).

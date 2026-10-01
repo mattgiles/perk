@@ -8,7 +8,7 @@
 // acceptable path `runScratchDir(run_id)/harvest-manifest.json`, requires the param to be
 // absolute and realpath-identical to it, and then reads the DERIVED path, never the param. A
 // gated non-harvest session (no claimed harvest manifest) is structurally refused — that is
-// what makes the `READ_ONLY_TOOLS` membership safe in every gated session (the `run_audit_wave`
+// what makes the gate-allowed posture safe in every gated session (the `run_audit_wave`
 // no-aimable-writer posture, read-side; this tool writes nothing at all).
 //
 // A single-lane manifest is refused toward the seed's direct-analysis path — the fallback

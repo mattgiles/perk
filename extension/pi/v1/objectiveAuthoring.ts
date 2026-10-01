@@ -16,8 +16,8 @@
 // review surface — the review arm renders markdown via the feature's resume+render helpers; the
 // approval→save orchestration re-reads the STRUCTURED artifact. Carve-out doctrine: the draft
 // tool takes NO path/name parameter (the artifact name is fixed and the bytes flow through the
-// session seam), so allowlisting `objective_draft` in `READ_ONLY_TOOLS` keeps the read-only
-// invariant intact.
+// session seam), so the `objective_draft` carve-out posture keeps the read-only invariant
+// intact.
 
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -679,7 +679,7 @@ export function installObjectiveAuthoringBindings(
         return;
       }
       if (outcome.status === "no-draft") {
-        // Exit the read-only gate so the objective_save tool (excluded from READ_ONLY_TOOLS)
+        // Exit the read-only gate so the objective_save tool (gate-blocked)
         // becomes reachable on the driven turn, then drive the turn (mirrors /address and
         // /objective-plan).
         if (gating.isActive()) gating.exit(ctx);
