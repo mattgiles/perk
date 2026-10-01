@@ -95,8 +95,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   explicitly *not* perk-owned and stay hand-built at their Pi-native sites.
 
   **The draft file tools (`plan_draft` / `objective_draft`).** Two interior-only session-data
-  producers (no Python twins) share one invariant set. Each is allowlisted in `READ_ONLY_TOOLS`
-  (`extension/substrate/toolGating.ts`) as a **narrow structural carve-out**: the tool has no
+  producers (no Python twins) share one invariant set. Each is gate-eligible in its stages
+  through a **narrow structural carve-out** posture (§8.40): the tool has no
   path/name parameter — the artifact name is a fixed constant and the path derives exclusively
   through the accessor seam (the `WorkflowSession` artifact write: file + provenance pointer,
   implemented once by the session engine, `extension/session/workflowSession.ts`) — so the only
@@ -478,7 +478,7 @@ handoff and defaults `objective_id`/`node_id` from it only when neither flag was
 flags always win; a non-objective handoff has no `objective_id`, so plain planning is unaffected).
 
 The same carrier ferries `consumed_learn`. `learn-docs` launches a **read-only** plan-mode
-session, where the `plan_save` *tool* is gated out (`toolGating.ts`); the save lands review-first
+session, where the `plan_save` *tool* is gate-blocked (§8.40); the save lands review-first
 through `approvalSave` (or the `/plan-save` failsafe), and only the `plan_save` tool's explicit
 `consumed_learn` param can carry the numbers warm — the handoff carrier makes the consume
 mechanism independent of which surface fired. The `learn-docs` cold door stashes them as
@@ -558,7 +558,7 @@ end of the section).
 | `predecessor` | string \| null | the prior `run_id` this run forked from (or cold-relaunched after), §8.2; null for an original run |
 | `pi_session_id` | string | the current session handle — the basename of Pi's session file; the **fork discriminator** (§8.2) and the key to resume via `SessionManager.open`/`continueRecent` |
 | `mode` | string | the active registry stage `mode` (`read-only` / `read-write`) — **structurally gates tools** (see below) |
-| `stage` | string | the registry stage id this run is acting on, recorded at cold **claim** from the handoff — or, for the ONE warm exception, appended by the stage-only `enter-refinement-stage` change when `/objective-refine` enters a refinement pass in an unbound session (§8.68); lets the interior distinguish read-only stages (e.g. `objective-author` vs `plan` vs `objective-refine`) and inject the right authoring context |
+| `stage` | string | the registry stage id this run is acting on, recorded at cold **claim** from the handoff — or, for the TWO warm exceptions, appended by a stage-only change: `enter-refinement-stage` when `/objective-refine` enters a refinement pass in an unbound session (§8.68), and `enter-objective-plan-stage` when the warm `/objective-plan` factory starts (it refuses a worktree-stage session first — a stage claim would hijack that session's plan binding); lets the interior distinguish read-only stages (e.g. `objective-author` vs `plan` vs `objective-refine`) and inject the right authoring context |
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (`/objective <id>` sets it, `/objective clear` nulls it) |
 | `last_review_batch` | object \| null | the last fully processed review batch, appended by `finalize_address` only after publication and thread resolution succeed: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
@@ -740,53 +740,56 @@ restrictive for that observation. A floor works without successful tool snapshot
 read or persistence. With a floor, `exit()` skips the read-write append and reapplies restriction,
 leaving persisted mode unchanged after failed reflection. Without a floor, ordinary enter/exit and
 stage/snapshot semantics remain. `/btw`'s `gating.isActive()` supplier sees the same restriction. While effectively read-only the interior (`extension/substrate/toolGating.ts`): (1) restricts the
-active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` + `ask_user_question` +
-`plan_review` + the `plan_draft`/`objective_draft`/`gist_draft` session-data carve-outs + `objective_node`
-(delegates a bounded node transition to the canonical Python plane) + the **`web` seam**
-providers' research tools (including pi-web-access's `source_check` and its `web_enable` lazy
-loader), the read-only Linear tools, the pi-fff search family (both mode
-name-sets — `fffind`/`ffgrep`/`fff-multi-grep` + override's `multi_grep`; the override names
-`find`/`grep` are already present — local search belongs in read-only exploration, and FFF's
-frecency state lives under `~/.pi/agent/fff/`, outside the worktree), and the pi-subagents delegation family
-(`subagent`/`subagents_enable`/`wait` + `subagent_supervisor` — `subagents_enable` being its lazy
-loader; kept reachable for the gated delegation flows
-and for answering ad-hoc children's supervisor asks; **accepted no-backstop posture**: spawned
-children are unscoped by design (§8.40 adopt-never-impersonates) — `subagent` itself can spawn
-ad-hoc read-write children, a deliberate documented leniency like the arg-blind
-`curl`/`agent-browser` entries, with no agent allowlist) + `explore_objective_node` (the gated
-objective-plan session's OPTIONAL explore step: it spawns the read-only `perk.objective-explorer`
-child over the already-carved-in delegation family and writes nothing to the worktree) +
+active tool set to the stage's **gated view** `gatedToolsFor(stage)` (§8.40 — the eligibility
+formula at mode `read-only`: the builtins `read`/`grep`/`find`/`ls`/`bash`, the foreign rows
+eligible in the stage, every catalogued perk tool eligible in the stage whose gate posture is not
+`blocked`, and the mode-over-stage set; an unscoped or unknown-stage session gets every tool the
+mode allows). The read-only bar each non-blocked posture meets: `ask_user_question` and
+`plan_review` mutate nothing; the `plan_draft`/`objective_draft`/`gist_draft`/
+`objective_refinement_draft` session-data carve-outs write one fixed artifact in the run-scoped
+session data dir; `objective_node` delegates a bounded node transition to the canonical Python
+plane; the **`web` seam** providers' research tools (including pi-web-access's `source_check` and
+its `web_enable` lazy loader), the read-only Linear tools and the pi-fff search family (both mode
+name-sets — `fffind`/`ffgrep`/`fff-multi-grep` + override's `multi_grep`; FFF's frecency state
+lives under `~/.pi/agent/fff/`, outside the worktree) write nothing in the worktree; the
+pi-subagents delegation family (`subagent`/`subagents_enable`/`wait` + `subagent_supervisor` —
+`subagents_enable` being its lazy loader; gate-eligible in the worktree family and
+`stack-review`, for the gated delegation flows and for answering ad-hoc children's supervisor
+asks) carries an **accepted no-backstop posture**: spawned children are unscoped by design
+(§8.40 adopt-never-impersonates) — `subagent` itself can spawn ad-hoc read-write children, a
+deliberate documented leniency like the arg-blind `curl`/`agent-browser` entries, with no agent
+allowlist; `explore_objective_node` (the gated objective-plan session's OPTIONAL explore step)
+spawns the read-only `perk.objective-explorer` child and writes nothing to the worktree;
 `run_scout_wave` (the authoring sessions' scout launcher: one read-only `perk.scout` lane per
-brief over the carved-in delegation family; no worktree writes; reachable in every gated stage
-except `objective-refine` on the `explore_objective_node` precedent; §8.70) + `run_librarian`
-(the library writer launcher: the parent stays gated; the `perk.librarian` child writes only the
-gitignored library in the main checkout, proven by the §8.75(l) end-state bracket) + the
-pi-subagents **child-side engine tools** (`SUBAGENT_CHILD_TOOLS` = `structured_output` +
-`contact_supervisor` — delivered through the child prompt runtime / native supervisor bridge,
-inert when absent in parents; native wakes require no wait-tool carve-in; kept active so a gated
-**adopted** child can make the engine-required `structured_output` completion call — stripping it
-fails an `outputSchema` run with `structuredOutputFailed` — and so an ad-hoc gated child whose
-bridge IS active keeps its supervisor door. Perk's own waves never carry `contact_supervisor`:
-every wave spawns with the intercom bridge off — `WAVE_INTERCOM_BRIDGE`, below — so the tool is
-simply absent there; the allowlist entry is inertness-safe, never a grant) — a static union of foreign
-tool names, inert when a package is absent — plus `run_audit_wave` (the gated audit-judge
-session's wave call: its one write is structurally bound to the cold door's handoff
-`audit_bundle_dir`, §8.50 — no caller-supplied path exists), `run_harvest_wave` (the gated
-learn-harvest session's wave call: its manifest read is structurally bound to the session's
-claimed run-scoped scratch path, §8.48 — the relayed param is verified against it and any
-other path refused; no worktree writes), and `run_dream_wave` (the gated learn-dream session's
-wave call: NO parameters — its manifest read AND its one write, the fixed-name run-scratch
-bundle beside that manifest, are both derived from the claimed run's manifest path, §8.61 —
-the no-aimable-writer posture on both sides)) via `pi.setActiveTools` — lazy-owned members
+brief; no worktree writes; §8.70); `run_librarian` (the library writer launcher: the parent stays
+gated; the `perk.librarian` child writes only the gitignored library in the main checkout, proven
+by the §8.75(l) end-state bracket); the pi-subagents **child-side engine tools**
+(`SUBAGENT_CHILD_TOOLS` = `structured_output` + `contact_supervisor` — delivered through the
+child prompt runtime / native supervisor bridge, inert when absent in parents; native wakes
+require no wait-tool carve-in; kept active so a gated **adopted** child can make the
+engine-required `structured_output` completion call — stripping it fails an `outputSchema` run
+with `structuredOutputFailed` — and so an ad-hoc gated child whose bridge IS active keeps its
+supervisor door. Perk's own waves never carry `contact_supervisor`: every wave spawns with the
+intercom bridge off — `WAVE_INTERCOM_BRIDGE`, below — so the tool is simply absent there; gate
+eligibility is inertness-safe, never a grant); `run_audit_wave` (the gated audit-judge session's
+wave call: its one write is structurally bound to the cold door's handoff `audit_bundle_dir`,
+§8.50 — no caller-supplied path exists); `run_harvest_wave` (the gated learn-harvest session's
+wave call: its manifest read is structurally bound to the session's claimed run-scoped scratch
+path, §8.48 — the relayed param is verified against it and any other path refused; no worktree
+writes); and `run_dream_wave` (the gated learn-dream session's wave call: NO parameters — its
+manifest read AND its one write, the fixed-name run-scratch bundle beside that manifest, are both
+derived from the claimed run's manifest path, §8.61 — the no-aimable-writer posture on both
+sides) — installed via `pi.setActiveTools`; lazy-owned members
 (`subagent` and pi-web-access's four default tools, while their loader is registered) are installed
 only while their owner has them selected (§8.40; the tool-call check below keeps the full set) —
 **snapshot-then-restore** (the restore
 falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) rejects
-**every** tool outside that same `READ_ONLY_TOOLS` set at `tool_call`, including `plan_save`, delivery
-and unknown/late foreign mutators, even when toolset narrowing failed. This backstop applies to all
+**every** tool the formula makes ineligible there (`isEligible(name, stage, "read-only")`) at
+`tool_call`, including `plan_save`, delivery and unknown/late foreign mutators, even when toolset narrowing failed. This backstop applies to all
 effective read-only sessions, parents too. `edit`/`write` keep their file-modification denial wording;
 other excluded tools receive a read-only not-allowlisted denial (an excluded lazy loader receives the stage-naming loader denial, §8.40). Listed non-bash tools pass this gate but retain downstream authority checks. Listed `bash`
-additionally requires its argument check, in this order: (a) the whole-string destructive veto over
+additionally requires its argument check (`readOnlyBashVerdict`, `extension/substrate/readOnlyBash.ts`
+— the verdict's own module), in this order: (a) the whole-string destructive veto over
 the walker's **veto view** (`commandPositions.ts`'s `vetoText`: every substitution, `${…}` and
 heredoc body collapsed out of the text that holds it, each substitution's own text appended on a
 line of its own); (b) the command-position walker; then (c) `SAFE_PATTERNS` against every command
@@ -883,8 +886,17 @@ writers in awk/sed/jq, unusual/expanded exec-flag spellings, internal flag quoti
 getopt abbreviations remain recorded limits. Tool inventories are unchanged; there is no OS-sandbox
 claim for allowlisted delegation, web/browser or artifact carve-outs.
 
-(3) injects a hidden `[READ-ONLY MODE]` context at `before_agent_start` — **once-only per
-selected branch**: the injection is FULL-branch-scan dedup'd on the marker (`branchCarries` over
+(3) injects a hidden read-only context at `before_agent_start` — rendered per call from
+`prompts/contexts/read-only.md`, its bounded-writer bullet listing exactly the stage's carve-out
+writers (`carveOutWritersFor(stage)`, catalog order — `` `<name>` is a sanctioned bounded write:
+<carveOut>. ``, or `No bounded writer is sanctioned in this session.`), under ONE rendered marker
+family: `[READ-ONLY MODE] (unscoped)` or `[READ-ONLY MODE] (stage <id>)` (an unknown stage
+renders unscoped; the closing parenthesis keeps no flavor a prefix of another). Detection
+(the strip and stale-flavor arms) matches the family substring `[READ-ONLY MODE]` plus the
+**detection-only** legacy literal `[READ-ONLY REFINEMENT MODE]` — never rendered again — so a
+resumed pre-migration refinement block is dropped as stale while gated and stripped on gate
+exit, and a legacy marker-bearing user echo keeps being stripped. The injection is **once-only
+per selected branch**: FULL-branch-scan dedup'd on the selected flavor's marker (`branchCarries` over
 `branchOf(ctx)` — selected-branch history across compaction, not live model context and not a
 process-global latch), so a branch that has ever carried the copy does not receive it again even
 after compaction summarizes it out of context (the gate enforces structurally regardless of what
@@ -897,10 +909,28 @@ from the rebuilt `mode`) and re-applied once at `resources_discover` from the in
 mode/stage (§8.40). **Fail-closed:** a failed state-rebuild never opens the gate, and
 `tool_call` blocks on any internal error. The `enter(ctx?)`/`exit(ctx?)` surface is the API the
 interior consumers compose — the gate-**entry** consumers are plan mode (`/plan`, `--plan`,
-`Ctrl+Alt+P`), the warm `/objective-plan` factory and the warm `/objective-refine` entry; `exit`
+`Ctrl+Alt+P`), the warm `/objective-plan` factory (which first claims `stage: objective-plan`
+via `enter-objective-plan-stage` — refusing a worktree-stage session — and re-scopes the gate to
+it) and the warm `/objective-refine` entry; `exit`
 rides the plan-mode toggle and the save/exit doors (the CI executor never touches the gate) —
 and the gate is the single read-only authority. Beside the gate, the same rebuild points apply **stage-scoped active tools** keyed off the
 `stage` field (§8.40) — fail-open where the gate is fail-closed.
+
+**Terminal tools are model-only.** Every perk tool's Pi `exposure` is derived from its policy
+descriptor (§8.40), never hand-set: `kind` `terminal` (anything that can return
+`terminate: true`), `interactive` or `orchestration` → `model-only` — declared to the model,
+never in Pi's callable set — so a nested `ctx.executeTool()` (e.g. a `codemode` script, mode
+`on` or `only`) can never reach a turn-ending result: the nested runner answers
+`Tool <name> not found`. The terminal set is pinned — `plan_review`, `plan_save`,
+`objective_save`, `gist_save`, `submit`, `ready`, `finalize_address`, `land`, `learn` — and kept
+honest by a **per-registration source scan** (`extension/pi/perkTool.test.ts`): for every
+`registerPerkTool` call, the definition literal terminates iff its span carries
+`terminate: true` or references a frozen, stale-armed `TERMINATING_ENTRY_POINTS` delegate, and
+that must equal `kind === "terminal"` in both directions. **Recorded residual:** a non-terminal
+registration that terminates through a helper absent from that list, without the token in its
+span, is undetected — the scan is a reviewed-set guard, not a proof; the structural half of the
+guarantee is `kind → model-only`. The seam adds only the derived metadata — no execute wrapper,
+no result rewriting.
 
 **Authoring guidance selection.** Plan guidance rides the read-only gate for every stage
 `isPlanGuidanceStage` admits (`extension/pi/v1/contextInjection.ts`). Excluded, for one of two
@@ -928,7 +958,7 @@ door stashes `handoff_extra={"audit_bundle_dir": <absolute bundle dir>}` in its 
 blob (the §8.2 optional-extra carrier, the `consumed_learn` shape). The warm `run_audit_wave`
 tool takes **no parameters** and recovers the dir through the rebuilt workflow-state `run_id` →
 the run's handoff blob — the field is the tool's **sole write-target authority** (the structural
-boundary justifying its `READ_ONLY_TOOLS` carve-in: no model-relayed path exists, so a gated
+boundary justifying its carve-out posture: no model-relayed path exists, so a gated
 session cannot aim the writer anywhere). A session whose launch state lacks the field — i.e.
 every session that is not a claimed `audit judge` launch — is refused `bad_state`.
 
@@ -3138,10 +3168,10 @@ launches **idle** (no prompt to augment) and a warm `/plan` records no stage, so
 pointer is delivered explicitly here. **Mechanism B** — `bindingSuffix` is
 appended into the guidance of **every** perk warm slash-command so each **self-delivers** its
 pointer: `/address`→`stage:address`, `/learn`→`stage:learn`, `/objective-plan`→`stage:objective-plan`
-(a warm `/objective-plan` records no stage, so Mechanism A resolves it to `stage:plan`, never
-`stage:objective-plan`; its seeded render is user-turn evidence, so `stage:plan` is delivered there
-only once no seeded header is live — eligibility, not a guarantee: a factory session that saves
-before compaction may never see it), `/objective-reconcile`→`command:objective-reconcile`,
+(a warm `/objective-plan` claims `stage: objective-plan` (§8.3), so Mechanism A resolves the same
+`stage:objective-plan` on later turns; its seeded render is user-turn evidence, so Mechanism A
+delivers there only once no seeded header is live — eligibility, not a guarantee: a factory
+session that saves before compaction may never see it), `/objective-reconcile`→`command:objective-reconcile`,
 `/learn-docs`→`command:learn-docs`. Delivery is the **single path** for perk's own nudges
 and **never double-delivers**.
 
@@ -4738,10 +4768,10 @@ create one — on an adopted issue with prior comments the created plan-body com
 first (`LinearIssueBackend`). Learn prompts
 (`_learn_prompt`, `extension/learning/prose.ts::learnGuidance`) keep the `gh pr list --head plan-<pr_id>
 --state merged` merged-PR derivation under every backend — PRs are GitHub-universal.
-`extension/substrate/toolGating.ts::READ_ONLY_TOOLS` allowlists the 19 read-only `linear_*` tool names
-unconditionally (foreign names are inert when the package is absent); the mutating/sensitive
-tools (`linear_create_issue`, `linear_update_issue`, `linear_create_comment`, the two
-`linear_upload_file*`, `linear_configure_auth`) are deliberately excluded. The perk-implement and
+The interim foreign rows (§8.40) make the 19 read-only `linear_*` tool names gate-eligible in
+every stage unconditionally (foreign names are inert when the package is absent); the
+mutating/sensitive tools (`linear_create_issue`, `linear_update_issue`, `linear_create_comment`,
+the two `linear_upload_file*`, `linear_configure_auth`) are gate-blocked and eligible in no stage. The perk-implement and
 perk-learn skills carry per-backend `backends/` reference directories (`github`, `linear`),
 delivered by the whole-directory skills sync.
 
@@ -5011,7 +5041,7 @@ emitted remains unrecoverable — the human re-runs the door.
   artifact → param **only** — the transcript tier is excluded because an approval auto-saves the
   reviewed bytes, and scraped conversation bytes must never be what gets approved. The browser
   doors tighten further to **validated artifact only**.
-- **The review door + the approval seam.** `plan_review` (in `READ_ONLY_TOOLS`; backend-neutral,
+- **The review door + the approval seam.** `plan_review` (gate-allowed and mode-over-stage, §8.40; backend-neutral,
   `extension/pi/v1/planReview.ts`; the objective arm's home is `extension/pi/v1/objectiveReview.ts`)
   dispatches: plannotator-selected → the event-bus bridge; **any**
   other selection → the first-party `ctx.ui.editor` review. APPROVED (either backend) runs the
@@ -5026,7 +5056,11 @@ emitted remains unrecoverable — the human re-runs the door.
   stale-approval / destination-changed stops and the sanctioned fail-open skips), so `tool_outcome`
   run events classify it via `details.ok` rather than the `!isError` fallback. On an eligible
   plannotator-arm round `plan_review` offers an in-TUI launch chooser ("Browser review + reviewer
-  wave" vs "Browser review only"); an ineligible round keeps the plain blocking review.
+  wave" vs "Browser review only"); an ineligible round keeps the plain blocking review. The
+  chooser carries no stage check (a plan-draft source in any gated session), so the wave flow's
+  companions — `start_draft_review_wave`, `collect_draft_review_wave`, `push_annotations` — are
+  **mode-over-stage** beside `plan_draft`/`plan_review` (§8.40): the flow is completable wherever
+  the `/plan` toggle lands, including a gated worktree session.
 - **The three backends.** All three speak review-first
   (`plan_draft` → `plan_review` → auto-save on approval); provider deltas are §8.10:
 
@@ -5813,7 +5847,7 @@ order: the engagement block (or `no pre-planning engagement on node <id>`); the 
 block then `refinement: <absolute path>` (or one line `refinement: absent|unsupported|unavailable`);
 one `warning: [<surface>/<code>] <message>` line per warning. Stable exits (0 ok — including
 partial success · 1 invalid/op-failure · 2 not-a-repo). The read-only bash gate
-(`toolGating.ts`) admits the worker unchanged; its scratch write is the accepted `pr
+(`readOnlyBash.ts`) admits the worker unchanged; its scratch write is the accepted `pr
 review-context` leniency.
 
 **Cold injects, warm instructs.** The cold door (`plan_cmd.py`) already knows the node → AFTER
@@ -7402,47 +7436,151 @@ transitions, and the remote worker (§8.38 named difference 7) are untouched.
 
 ## §8.40 · Stage-scoped active tools (the warm plane)
 
-A stage session's model carries only the perk tool schemas its stage's flows can actually invoke.
-The mechanism is extension-owned end to end: a curated per-stage map (`STAGE_TOOLS`, beside
-`READ_ONLY_TOOLS` in `extension/substrate/toolGating.ts`, keyed by registry stage ids) applied at
-the `session_start`/`session_tree` rebuild points via `syncFromState(mode, stage)` and re-applied
-ONCE at `resources_discover` from the in-memory mode/stage — after every extension's
-`session_start` has registered its tools. The
-key is the branch-LWW workflow-state **`stage`** field (§8.3): claim syncs the handoff-recorded
-stage just appended; keep/none sync the branch-rebuilt stage; **fork inherits** the parent's
-stage (a forked implement session is an implement session); **adopt never impersonates** (spawned
-subagent children stay unscoped — their fresh branch carries no stage). Stage-borrowing cold
-doors land on real stage ids (`plan from`/`plan replan`/`learn docs`/`learn code` borrow `plan`;
-`objective replan`/`objective author --from` borrow `objective-author`; `skills create/refine`
-borrow `save`), so the per-stage sets cover every borrower. The gist stages (`gist-author`,
-`gist-save` — §8.41) each carry `ask_user_question` + `gist_draft` + `gist_save` + the research
-families (the objective-author shape; `plan_review` governs via the gate-ON set). The `audit`
-stage (§8.50) carries `ask_user_question` + `run_audit_wave` + the research families — its
-sessions run GATED (read-only mode), where the gate-ON set governs, so the row exists for the
-keys≡registry pin and the defensive gate-off arm; `run_audit_wave` also joins `PERK_TOOLS`
-and `READ_ONLY_TOOLS` (§8.3's carve-in — the write target is handoff-bound, never
-caller-supplied). `run_harvest_wave` and `run_dream_wave` likewise join `PERK_TOOLS` +
-`READ_ONLY_TOOLS` with NO stage row at all (cold-only, gate-on — §8.48/§8.61). The
-`stack-review` stage (§8.4 stacked-PR review) runs UNGATED (read-write — the warm-door parity
-posture), so its row IS the flow's tool authority: exactly the stack flow set —
-`ask_user_question`, `open_stack_review`, `start_review_wave`, `collect_review_wave`,
-`push_annotations`, `submit_pr_review`, the delegation family, and the research families;
-`open_stack_review` joins `PERK_TOOLS` (its one write target — the browser open — is
-handoff-bound, §8.3). **Scoped universe:
-`PERK_TOOLS ∪ BORROWED_TOOLS`** — perk's own name-keyed census plus the enumerated
-borrowed-package census (`toolGating.ts` owns the census inventory, pinned by
-`stageTools.test.ts`); builtins and un-enumerated foreign names
-pass through untouched (fail-open — enumeration is diet-completeness, not correctness).
+A stage session's model carries only the tool schemas its stage's flows can actually invoke, and
+every view that decides it is **derived** from one table — the **tool catalog** — through one
+**eligibility formula** (`extension/substrate/toolPolicy.ts`, pure). Nothing is hand-listed per
+stage. The views are applied extension-side at the `session_start`/`session_tree` rebuild points
+via `syncFromState(mode, stage)` and re-applied ONCE at `resources_discover` from the in-memory
+mode/stage — after every extension's `session_start` has registered its tools. The key is the
+branch-LWW workflow-state **`stage`** field (§8.3): claim syncs the handoff-recorded stage just
+appended; keep/none sync the branch-rebuilt stage; **fork inherits** the parent's stage (a forked
+implement session is an implement session); **adopt never impersonates** (spawned subagent
+children stay unscoped — their fresh branch carries no stage). Stage-borrowing cold doors land on
+real stage ids (`plan from`/`plan replan`/`learn docs`/`learn code` borrow `plan`;
+`objective replan`/`objective author --from`/`learn harvest`/`learn dream` borrow
+`objective-author`; `skills create/refine` borrow `save`), and a tool a borrower needs declares
+the borrowed stage in its own policy.
 
-**The borrowed census posture.** Static names, inert when absent (the `READ_ONLY_TOOLS`
-posture — `setActiveTools` simply has nothing to enable; no presence detection). Every census
+**The catalog and the policy descriptor.** Every perk tool registers through
+`registerPerkTool(pi, definition, policy)` (`extension/pi/perkTool.ts` — the ONE production
+caller of `pi.registerTool(`, pinned by the import-direction guard's Rule I). The seam validates,
+records the tool in the process-wide catalog (registration order; an identical re-registration is
+a no-op, a divergent one throws), then registers `{ ...definition, ...derivePiMetadata(policy) }`
+— adding only the derived metadata. The descriptor:
+
+| Field | Values | Meaning |
+|---|---|---|
+| `stages` | registry stage ids | where the tool is eligible (validated at registration; empty = reachable only unscoped) |
+| `gated` | `allowed` · `blocked` · `{ carveOut: "<prose>" }` | its posture under the read-only gate; a carve-out names its one bounded write |
+| `modeOverStage` | boolean (default false) | a mode gesture needs it regardless of stage |
+| `kind` | `terminal` · `interactive` · `orchestration` · `query` · `action` | what the tool IS — `terminal` if it can return `terminate: true`; `interactive` if it opens a human surface and hands off without terminating; `orchestration` if it spawns children, a wave or a foreground child/resolver; `query` for a pure read; else `action` (a trust/confirm dialog does not change the kind) |
+| `declared` | `always` (default) · `deferred` | reserved for discoverable-not-activated tools; `deferred` requires kind `query`/`action` |
+
+Registration refuses (`perk tool policy: <name> — …`): an unknown stage id, a blank carve-out,
+`declared: deferred` on a model-only kind, a definition carrying `exposure`, `annotations`,
+`defaultActive` or `prepareLoadout` (the policy owns them — type-level and at runtime), and a
+divergent re-registration. **Derived Pi metadata:** `kind ∈ {terminal, interactive,
+orchestration}` → `exposure: "model-only"` (§8.3's terminal guarantee); else `declared: deferred`
+→ `"deferred"`; else `"direct"`. `gated ≠ blocked` → `annotations.readOnlyHint: true` ("never
+modifies the worktree" — a hint, never a permission grant). Stage families used in `stages`
+spreads, each registry-validated: `WORKTREE_STAGES` (derived — the stages that consume the
+plan-ref selector: `implement`/`submit`/`address`/`land`/`learn`), `PLAN_FAMILY_STAGES`
+(`plan`/`save`/`objective-plan`), `OBJECTIVE_STAGES` (`objective-author`/`objective-save`),
+`AUTHORING_STAGES` (`plan`/`objective-plan`/`objective-author`), `GIST_STAGES`
+(`gist-author`/`gist-save`).
+
+**The eligibility formula.**
+`eligible(tool, stage, mode) = (stage ∈ tool.stages ∧ (mode = read-write ∨ tool.gated ≠ blocked)) ∨ (mode = read-only ∧ tool.modeOverStage)`.
+An unscoped (`stage = null`) or unknown-stage session (`normalizeStage` → `null`, the fail-open
+posture for version skew) is eligible for every tool the mode allows; a name in no row is
+eligible only read-write (pass-through; under the gate the backstop blocks it). The derived views:
+
+- `gatedToolsFor(stage)` — the gate-ON **activation view**: every name eligible at `read-only`,
+  never a `deferred` one, in canonical order (builtins, the foreign rows in table order, perk
+  tools in catalog order). The gate's `tool_call` backstop checks `isEligible(name, stage,
+  "read-only")` itself, so a host-activated eligible deferred tool is never blocked.
+- `stageToolsFor(stage)` — the gate-OFF **diet**: names in the scoped universe
+  `perkToolNames() ∪ BORROWED_TOOLS` eligible at `read-write` (never `deferred`); `undefined`
+  when unscoped (no diet). Builtins, the child-side tools and un-enumerated foreign names sit
+  outside the universe and pass through (fail-open — enumeration is diet-completeness, not
+  correctness).
+- `carveOutWritersFor(stage)` — the carve-out writers eligible under the gate there (catalog
+  order, with their prose) — the bounded-writer list the read-only context names (§8.3).
+
+**The mode-over-stage set** is exactly the `/plan` toggle's flow: what its own guidance names
+(`plan_draft`, `plan_review`) plus what `plan_review`'s wave-launched guidance names
+(`start_draft_review_wave`, `collect_draft_review_wave`, `push_annotations`). `/plan` is a pure
+mode gesture (it records no stage) and `plan_review` offers the reviewer wave in any gated session
+holding a plan draft, so the flow must be completable wherever the toggle lands — the term is
+stage-blind by design. Placement rationale the policies encode: the worktree family shares one
+PR-loop set (any PR-loop warm command works in any worktree session; the headless worker needs
+`submit`/`finalize_address`); the reconcile trio (`reconcile_objective`/`add_objective_node`/
+`objective_node`) rides the objective stages, `objective-plan` and the worktree family (`/land`
+auto-drives the reconcile pass in-session and `/objective-reconcile` is global); the draft-review
+companions ride the plan and objective families (gate-OFF coverage after an approval save exits
+the gate mid-flow); `run_scout_wave` rides exactly the three authoring stages (§8.70);
+`run_librarian` rides the authoring stages plus the worktree family (§8.75(l)); `stack-review` (run
+read-write) carries exactly its flow set (`open_stack_review`, the review-wave pair,
+`push_annotations`, `submit_pr_review`, delegation, research); `objective-refine` carries only its
+draft writer + `plan_review` + research (§8.68); `audit` carries `run_audit_wave`. The full
+stage×tool result is the **golden matrix** `shared/fixtures/tool-matrix.json` — generated by
+`extension/substrate/toolMatrix.test.ts` from `toolMatrix()` (regenerate with
+`PERK_UPDATE_TOOL_MATRIX=1`), byte-drift-guarded, test-only (neither plane reads it at runtime):
+one row per tool (perk: `kind`/`stages`/`gated`/`mode_over_stage`/`declared`/`exposure`;
+foreign: `stages`/`gated`; builtin: `gated`) and, per registry stage plus `unscoped`, the sorted
+`read-only` (the gated view) and `read-write` (the diet plus pass-through names) eligibility.
+
+**The interim foreign and builtin rows.** Foreign tools get a name-keyed posture table
+(`FOREIGN_TOOL_POLICY`) until provenance-derived rows replace it:
+
+| Names | stages | gated |
+|---|---|---|
+| `ask_user_question` | every registry stage | allowed |
+| `WEB_RESEARCH_TOOLS`, `LINEAR_READ_TOOLS`, `FFF_SEARCH_TOOLS` | every registry stage | allowed |
+| `SUBAGENT_TOOLS` | `WORKTREE_STAGES` + `stack-review` | allowed |
+| `todo` | `WORKTREE_STAGES` | blocked |
+| `LINEAR_MUTATING_TOOLS`, `PLANNOTATOR_PHASE_TOOLS` | none | blocked |
+| `SUBAGENT_CHILD_TOOLS` | every registry stage except `objective-refine` (§8.68's least-privilege refinement selection); outside the diet universe | allowed |
+
+The builtin rows (`BUILTIN_TOOL_POLICY`): `read`/`grep`/`find`/`ls` `allowed`; `bash` `verdict`
+(allowed under the gate subject to `readOnlyBashVerdict`, §8.3); `edit`/`write` `blocked`.
+Builtins are never stage-scoped and sit outside the diet universe and the prompt-guard scan
+universe. `/btw` derives its side-session tools from these rows (read-only → the plainly
+`allowed` builtins; read-write → every builtin).
+
+**The migration delta record.** The derived views equal the deleted hand lists (`PERK_TOOLS`,
+`READ_ONLY_TOOLS`, `REFINEMENT_READ_ONLY_TOOLS`, `STAGE_TOOLS`) except for four enumerated
+deltas, pinned as set equality by `extension/substrate/toolPolicyParity.test.ts` (a migration
+bridge holding the old lists as frozen data): **(a)** per-stage gate-ON narrowing — a gated stage
+session now sees exactly its stage's tools plus the mode-over-stage set (e.g. a gated `plan`
+session no longer declares `objective_draft`, `gist_draft`, `objective_node`, the delegation
+family, `explore_objective_node` or the learn waves; authoring sessions reach delegation only
+through typed launchers — no wave path calls `subagent`/`wait`/`subagent_supervisor`);
+**(b)** `objective-author`'s diet gains `run_harvest_wave`/`run_dream_wave` (the harvest/dream
+doors borrow that stage, and the policies now declare it); **(c)** the mode-over-stage set, whose
+only additive effect is the gated `objective-refine` view gaining `plan_draft` and the three wave
+companions (inert there — the refinement review arm reads only the refinement draft);
+**(d)** an unscoped (or unknown-stage) gated session declares `objective_refinement_draft` (the
+formula's unscoped rule; the tool is inert outside a refinement session — it refuses without a
+refinement grounding context).
+
+**The prompt guard (both planes).** A carrier — any model-facing guidance a drive, door, context
+or seed lands — may name only tools eligible in **every** (stage, mode) landing it has. Scan
+universe: the matrix's perk- and foreign-owned names (builtins excluded). Match rule: a name
+containing `_` matches as a bare word; a single-word name (`submit`, `ready`, `land`, `todo`, …)
+matches only backtick-quoted — an unquoted single-word mention is an accepted, recorded miss.
+TS (`extension/substrate/stageTools.test.ts`, `DRIVE_COVERAGE`): every warm drive/door/context
+row with its `(stage, mode)` landings, eligibility from the live formula. Python
+(`tests/test_tool_matrix_prompts.py`): the cold-door seed templates, the composed
+`prompts/common/**` fragments (by their interpolators' landings) and every stage-bound
+`skills/perk-*/SKILL.md` body, eligibility from the fixture; census tests require every stage
+template and fragment to be classified. Coverage is raw template/skill source only — dynamic
+data blocks, interpolated runtime values and user transclusions are out of scope. A flagged
+carrier is fixed by rewording, never by widening a policy.
+
+The reconciliation half below (the borrowed census posture, the baseline/admitted set, the lazy
+owners) is unchanged by the catalog — its views now come from the formula — and is rewritten when
+the foreign rows become provenance-derived.
+
+**The borrowed census posture.** Static names, inert when absent (`setActiveTools` simply has
+nothing to enable; no presence detection). Every census
 name registers at load time EXCEPT pi-subagents' `subagent_supervisor`, which registers during
 its own `session_start` after perk's sync and is admitted by the `resources_discover` re-apply
-under the baseline rule below — inside the diet at launch, kept where a stage list carries it,
-filtered where none does (`intercom` is the separate pi-intercom bridge's tool name — a static
+under the baseline rule below — inside the diet at launch, kept where its row makes it eligible,
+filtered where it does not (`intercom` is the separate pi-intercom bridge's tool name — a static
 census entry, inert unless that package is present). A name is governed ONCE — exactly one
 census (hygiene-tested): `ask_user_question` and `todo` are required-borrow names owned by
-`BORROWED_TOOLS`, not `PERK_TOOLS` (their packages register at load; the questionnaire
+`BORROWED_TOOLS`, not the perk catalog (their packages register at load; the questionnaire
 strips/restores its tool per `hasUI` before each turn, so headless sessions carry no
 `ask_user_question` schema). Foreign packages that run their own `setActiveTools`
 (plannotator's phase machinery, @tombell/pi-plan's plan mode) win between perk's reconciliation
@@ -7451,75 +7589,42 @@ re-installs perk's set over a foreign toggle, admitted late tools included; reco
 not re-engineered — and plannotator's idle-phase strip of its load-time phase tools runs in its
 OWN `session_start`, after perk's first-engagement snapshot, which is exactly why every
 plannotator phase tool must be enumerated (an un-enumerated one is a snapshot member the
-`resources_discover` re-apply restores). Stage placement:
-the research families (web union + Linear reads + FFF local search) ride EVERY stage list — the
-web union carries pi-web-access's four default tools (`web_search`, `source_check`,
-`fetch_content`, `get_search_content`) plus its lazy loader `web_enable`; delegation
-(`subagent`/`subagents_enable`/`wait`/`subagent_supervisor`/`intercom` — `subagents_enable` being
-pi-subagents' lazy loader) and `todo` are worktree-family only among the gate-OFF stage lists
-(delegation additionally rides the read-only gate — §8.3);
+`resources_discover` re-apply restores). Stage placement follows the interim foreign rows
+above: the research families ride every stage — the web union carries pi-web-access's four
+default tools (`web_search`, `source_check`, `fetch_content`, `get_search_content`) plus its lazy
+loader `web_enable`; delegation (`subagent`/`subagents_enable`/`wait`/`subagent_supervisor`/
+`intercom` — `subagents_enable` being pi-subagents' lazy loader) rides the worktree family and
+`stack-review` (gate-eligible there too), and `todo` the worktree family read-write only;
 `LINEAR_MUTATING_TOOLS` (incl. `linear_configure_auth`, which writes `~/.pi/agent/auth.json`)
 and plannotator's two phase tools (`PLANNOTATOR_PHASE_TOOLS`: `plannotator_submit_plan`,
-`plannotator_mark_done`) appear in NO stage list — in the census, so subtracted from every
+`plannotator_mark_done`) are eligible in NO stage — in the census, so subtracted from every
 stage session; bare/unscoped sessions keep full access. Child-session tools
 (`structured_output`/`contact_supervisor` — `SUBAGENT_CHILD_TOOLS`; perk's own waves spawn with
 the intercom bridge off, so `contact_supervisor` is absent in THEIR children, but an ad-hoc gated
 child keeps it) live in **neither census**: children stay **stage**-unscoped by design
 (adopt-never-impersonates above), so the stage filter never sees a child session — but the
-read-only **gate** IS inherited by adopted children (§8.3), so the child-side engine tools live
-in `READ_ONLY_TOOLS`, gate membership being their only governance surface.
+read-only **gate** IS inherited by adopted children (§8.3), so the child-side engine tools are
+gate-eligible through their row, gate eligibility being their only governance surface.
 
-**Composition with the read-only gate (§8.3).** Gate ON → `setActiveTools(READ_ONLY_TOOLS)`
-(minus the lazy-owned tools their owner currently hides — below) — no stage filter, preserving every gated carve-out byte-for-byte (the gate-ON
-allowlist is §8.3's) — with ONE named exception: the isolated `objective-refine` stage selects
-its own explicit gate-ON allowlist `REFINEMENT_READ_ONLY_TOOLS` (`gatedToolsFor(stage)`) for both
-the active set and the `tool_call` backstop, and its own read-only mode-context flavor; the
-refinement draft tool lives in `PERK_TOOLS` but never in `READ_ONLY_TOOLS`, so no other gated
-stage gains it (§8.68). Gate OFF + known stage → a **subtractive filter over the reconciliation
+**Composition with the read-only gate (§8.3).** Gate ON → `setActiveTools(gatedToolsFor(stage))`
+(minus the lazy-owned tools their owner currently hides — below), the same view backing the
+`tool_call` backstop and the stage's read-only context flavor — the refinement stage is an
+ordinary formula case (its least-privilege selection follows its tools' policies, §8.68), and no
+other stage's view carries the refinement draft writer. Gate OFF + known stage → a **subtractive filter over the reconciliation
 baseline `snapshot ∪ admitted`** (lazy-owned names excepted — their membership is the owner's
 live selection, below) — the one shared pre-engagement snapshot (the host's active
 starting set, never `getAllTools()`) plus every name the registry census recorded beside it never
 saw that a gate-OFF reconciliation has since seen active. Admission is sticky: perk's own filtering
-(a stage list, the gate) never evicts an admitted name, so navigating back to an admitting stage or
+(a stage diet, the gate) never evicts an admitted name, so navigating back to an admitting stage or
 to a no-stage branch restores it; a late tool its owner deactivated before perk saw it active is
-never admitted; a tool inactive at snapshot time is never re-activated. Non-perk names pass
-through; scoped names survive only when the stage's list carries them. The rule "the gate never
+never admitted; a tool inactive at snapshot time is never re-activated. Non-scoped names pass
+through; scoped names survive only when the stage's diet carries them. The rule "the gate never
 widens a stage's set and vice versa" holds: engaging the gate only ever narrows, and stage scoping
 never adds a tool. Both concerns share ONE snapshot + census + admitted set, taken on first
 engagement of either; neither engaged → restore the baseline and forget it. Gate ON does no
-admission bookkeeping. Accepted residual: a late tool outside the gate-ON allowlist is deactivated
+admission bookkeeping. Accepted residual: a late tool outside the gated view is deactivated
 by the `resources_discover` re-apply (schema-invisible from the first turn) and, never seen active
-by a gate-OFF reconciliation, is not restored at gate exit. The worktree family
-(implement/submit/address/land/learn) is deliberately **one shared
-PR-loop list** — any PR-loop warm command works in any worktree session (warm doors inject
-guidance naming their companion tool; a per-stage cut would dead-end e.g. `/land` run inside the
-implement session). The reconcile trio (`reconcile_objective`/`add_objective_node`/
-`objective_node`) rides the worktree family in addition to the three objective stages: `/land`
-auto-drives the objective-reconcile pass inside the current worktree session and the manual
-`/objective-reconcile` gesture is registered globally — both inject guidance naming all three;
-`objective_node` likewise rides all three objective stages (the guidance's node-description
-reconcile). The draft-review doors' companions (`start_draft_review_wave` /
-`collect_draft_review_wave` / `push_annotations` — §8.23's `/plan-review-browser` +
-`/objective-review-browser`) ride the
-three plan-family stage lists (`plan`/`save`/`objective-plan` — gate-OFF coverage: after
-`approvalSave` exits the gate mid-flow, late collects/pushes must not dead-end; the
-drive-coverage guard forces this the moment the guidance names them) AND the two objective
-stage lists (`objective-author`/`objective-save` — the same gate-OFF coverage after
-`objectiveApprovalSave` exits the gate mid-flow), with `plan_review` joining those two lists
-too (the objective door's guidance names it — in both objective stages it routes to the
-objective review arm; drive-coverage) AND `READ_ONLY_TOOLS`
-(plan-authoring sessions run GATED, so the companions must be reachable while read-only:
-`push_annotations` only POSTs findings to the door-primed local plannotator server — no
-worktree writes, the `fetch_content` cache-write precedent class — and the wave pair spawns the
-read-only `perk.draft-reviewer` over the already-carved-in delegation family). The scout
-launcher `run_scout_wave` (§8.70) joins `PERK_TOOLS`, `READ_ONLY_TOOLS`, and exactly the three
-AUTHORING stage lists — `plan` / `objective-plan` / `objective-author` — and no other (not
-`save`, `objective-save`, the gist stages, `audit`, `stack-review`, the refinement row, or the
-worktree family). The library writer launcher `run_librarian` (§8.75(l)) joins `PERK_TOOLS`,
-`READ_ONLY_TOOLS` (the parent stays gated; only its child writes, only the gitignored library),
-the same three authoring lists and the ONE shared worktree list (so `submit`/`land` carry it by
-the family's one-shared-list rule — accepted and pinned) and no other; the `objective-author`
-and `objective-save` lists therefore differ by exactly these two names.
+by a gate-OFF reconciliation, is not restored at gate exit.
 
 **Lazy-owned tools and their loaders.** pi-subagents and pi-web-access each hide their heavy
 tools until the model calls a **lazy loader** — a borrowed tool that activates its package's
@@ -7531,23 +7636,23 @@ loader — an older version, or its host-probe fallback — owns nothing lazily,
 ordinary snapshot/allowlist behavior (nothing could re-enable a tool perk stripped). A
 lazy-owned tool's ACTIVATION is its owner's decision; perk owns only its ELIGIBILITY (mode/stage).
 At EVERY reconciliation (gate ON and OFF) a lazy-owned name's membership is its owner's current
-selection (the live active set): the gate-ON allowlist is a
+selection (the live active set): the gated view is a
 ceiling (installed only while the owner has it selected); the gate-OFF baseline drops snapshot
 members the owner has since hidden and keeps ones the owner has since enabled; and the stage
 filter still applies over that baseline (an owner-enabled `subagent` is stripped in a stage whose
-list excludes it, e.g. `objective-plan`, `gist-save`). Owner selection shapes only the INSTALLED
-set: the gate's `tool_call` backstop still checks the full allowlist, so lazy hiding is never an
+diet excludes it, e.g. `objective-plan`, `gist-save`). Owner selection shapes only the INSTALLED
+set: the gate's `tool_call` backstop still checks full eligibility, so lazy hiding is never an
 authorization boundary. perk never re-activates or restores a
 lazy-owned tool — Pi's transcript restore (which runs before `session_tree` handlers) and the
 owner's recorded-selection replay on `session_start`/`session_tree` do; perk only keeps or (by
 stage) strips. A loader has exactly the eligibility of the tools it enables — it rides the same
-family constant (pinned in `toolGating.test.ts`: in `READ_ONLY_TOOLS`,
-`REFINEMENT_READ_ONLY_TOOLS` and every stage list, the loader is present iff all its tools are).
+family row (pinned in `toolGating.test.ts`: in every gated view and every stage diet, the loader
+is present iff all its tools are).
 The one `tool_call` backstop stage scoping has: a loader call outside its eligibility is refused
 with a stage-naming reason — `perk read-only mode: <loader> is blocked (its tools — <tools> — are
 not allowlisted in the gated <stage> session).` (or `… in this gated session).` when unscoped)
 under the gate, and `perk stage scoping: <loader> is blocked (its tools — <tools> — are not
-available in the <stage> stage).` gate-OFF in a known stage whose list excludes it; an unscoped
+available in the <stage> stage).` gate-OFF in a known stage whose diet excludes it; an unscoped
 or unknown-stage session never refuses. The refusal exists because the owner re-advertises its
 loader every turn in its own `before_agent_start`, which runs AFTER perk's handler (extension
 order), so schema removal cannot hide it; the enabled tool itself remains under the fail-open
@@ -7568,9 +7673,9 @@ children).
 unknown stage id (version skew), or any lookup miss → no filtering. Absent tool names
 are inert (`setActiveTools` ignores unknown names). There is no `tool_call` backstop for stage
 scoping except the lazy-loader refusal above (schema removal is the same structural
-lever the gate's allowlist uses; the full read-only tool-call allowlist and bash argument check
-remain the gate's job) and no
-config surface for the map (the §8.39 non-interference posture; fail-open on unknown ids covers
+lever the gate's view uses; the full read-only tool-call eligibility check and bash argument
+check remain the gate's job) and no
+config surface for the policies (the §8.39 non-interference posture; fail-open on unknown ids covers
 version skew). **Bare-session zero-change guarantee:** a session that never engages either
 concern gets **zero `setActiveTools` calls** — bare warm sessions stay byte-identical.
 
@@ -8932,7 +9037,7 @@ rebuilt workflow-state, derives the one acceptable path
 `runScratchDir(run_id)/harvest-manifest.json`, requires the param to be absolute and
 realpath-identical to it, and then reads the derived path, never the param. A session with no
 run-scoped manifest is refused `bad_state` — the structural binding justifying the tool's
-`READ_ONLY_TOOLS` carve-in (§8.3).
+gate-allowed posture (§8.3).
 
 **The analyst wave (`run_harvest_wave`).** The flow-scoped wave tool
 (`extension/pi/v1/learning/harvest.ts` + `extension/learning/harvest.ts` on the report-wave
@@ -8978,8 +9083,8 @@ and a deterministic post-pass stamps each opportunity `pointer_status:
 "resolved"|"unresolved"` — the path segment before the first `::`, judged by lexical
 containment + existence on the checkout only (grounding stays the parent's mandatory pointer
 re-read). `[models.subagents] harvest-analyst` rides the wave as the workflow-level model
-default. Census: `PERK_TOOLS` + `READ_ONLY_TOOLS`, deliberately NO `STAGE_TOOLS`/drive
-coverage (harvest is cold-only and gate-on; the gate-ON set ignores stage lists). The seed
+default. Policy (§8.40): stages `objective-author` (the borrowed stage, declared explicitly),
+gate-allowed, kind `orchestration`; no drive coverage (harvest is cold-only and gate-on). The seed
 teaches the fallback state table and names the tool for multi-lane manifests.
 
 **The partition rule** (by reference to `perk/learn/harvest.py`): group by
@@ -9494,8 +9599,8 @@ scratch, workflow-state linkage is the standard session marker, and an explicit 
 target another absolute path), doors
 cold-local-only, `run_id` mint. `command: audit judge` is a label — the dedicated door lives in
 **perk-dev**, so `audit` joins `DEDICATED_STAGES` (no generic `perk audit` launcher) and there is
-no `shared/bindings.yaml` entry (`binding_trigger=None`). Tool censuses: §8.40's tables carry the
-`STAGE_TOOLS["audit"]` row and the `PERK_TOOLS`/`READ_ONLY_TOOLS` growth; §8.3 carries the
+no `shared/bindings.yaml` entry (`binding_trigger=None`). Tool policy: `run_audit_wave` is
+eligible in exactly `audit` with a carve-out posture (§8.40); §8.3 carries the
 `audit_bundle_dir` write binding.
 
 **The judge door** (`perk-dev audit judge`, the seeded-door pipeline; the perk-dev root group
@@ -9948,7 +10053,7 @@ skill pointer): resolve the objective, preview first (`dry_run: true`), present 
 cascade/classification/land plan to the human, act via the typed tools ONLY on explicit
 human approval, follow the human's stated continue/abort intent. **Gate-on posture**: the
 three driving commands soft-refuse under the read-only gate (notify + inject nothing;
-headless stderr mirror) — the mutating stack tools never join `READ_ONLY_TOOLS`. **Five
+headless stderr mirror) — the mutating stack tools are gate-blocked everywhere. **Five
 separately-typed tools** (strict tri-state decode via `toolParams.ts` — refuse the whole
 call on any malformed field; non-terminating; no broad action enum):
 `objective_stack_status {objective?}`; `objective_stack_sync {objective?, base?, dry_run?,
@@ -9964,9 +10069,9 @@ mutating call additionally require `confirm: true` (soft-refused `confirmation_r
 otherwise); report/dry-run argv pass neither conclusion flag nor `--yes`. **Objective
 inference** everywhere: explicit param/argument → workflow `active_objective` → plan-ref
 `objective_id` → a soft `no_objective` fail naming the fix; the warm layer always passes the
-resolved objective explicitly to the cold door. **Gating census**: the five tools join
-`PERK_TOOLS` and the worktree-family stage lists (`WORKTREE_STAGE_TOOLS` — explicit repair
-from implement/address sessions and §8.52's converged workflow); the three drive rows join
+resolved objective explicitly to the cold door. **Tool policy**: the five tools are catalogued
+with stages `WORKTREE_STAGES` (explicit repair from implement/address sessions and §8.52's
+converged workflow), gate-blocked; the three drive rows join
 the drive-coverage guard. No registry stage is added — the warm commands are
 globally-registered doors/drivers (the `ready` non-stage pattern).
 
@@ -11071,9 +11176,8 @@ sync/recover; injects `prompts/stages/objective-land.md` + the binding suffix: p
 first via `objective_stack_status` + `objective_stack_land {dry_run: true}`, present the
 plan or blockers, act ONLY on explicit human approval, report `pending`/
 `unexpected_enqueued` as unresolved and STOP — never loop retries; conclusion routes to
-`/objective-recover`). Census: the tool joins
-`PERK_TOOLS` and the worktree-family stage lists; the drive row joins the drive-coverage
-guard; envelopes render leniently (render-only DATA).
+`/objective-recover`). Tool policy: catalogued with stages `WORKTREE_STAGES`, gate-blocked
+(§8.40); the drive row joins the drive-coverage guard; envelopes render leniently (render-only DATA).
 
 **The reconcile drive.** `driveStackReconcile` (the `decideStackReconcile` gate + the
 mint-only sanitized-evidence snapshot in `delivery/stackReconcile.ts`; the render + injection
@@ -11736,8 +11840,8 @@ universe is EMPTY (a keep-heavy corpus still gets angle findings/uncertainties).
 `runScratchDir(run_id)/dream-manifest.json` (`DREAM_MANIFEST_FILENAME`) — the manifest read
 AND the bundle write are both derived from the claimed run, so no caller-supplied path exists
 (the `run_audit_wave` no-aimable-writer posture, BOTH sides) — the structural boundary
-justifying the `READ_ONLY_TOOLS` carve-in (§8.3), beside `PERK_TOOLS`; deliberately NO
-`STAGE_TOOLS`/drive coverage (cold-only, gate-on — the harvest census posture). The pre-launch
+justifying its carve-out posture (§8.3); stages `objective-author` (the borrowed stage), no
+drive coverage (cold-only, gate-on — the harvest posture). The pre-launch
 refusal ladder (each arm before any spawn): no claimed run ⇒ `bad_state`; no run-scoped dream
 manifest ⇒ `bad_state` (the structural refusal outside a dream launch); unparseable JSON ⇒
 `bad_input`; `decodeDreamManifest(raw, manifestPath)` refusal ⇒ `bad_input`;
@@ -12036,7 +12140,7 @@ re-render deterministic. On success the parts cross to the Python save door thro
 run-scoped transfer file and are durably persisted as the report companion in §8.64; no new
 cold-door flag exists.
 No new ok-details fields on either tool (the visible review bundle and the normal ok results
-already carry the signal). `STAGE_TOOLS`/`READ_ONLY_TOOLS` are untouched: `objective_draft`
+already carry the signal). The tool policies are untouched: `objective_draft`
 stays read-only-safe (the dream arm only READS run scratch; the marker rides the ordinary
 session-entry channel), `objective_save` stays gate-excluded.
 
@@ -12299,7 +12403,7 @@ it validates the evidence vocabulary (both diff-range endpoints — the stamped 
 stamp's `parent_checkpoint_sha` — against `journal.is_full_head_sha`), resolves the **borrowed
 `objective-save` stage descriptor** (the documented non-stage-factory borrow: `mode: read-write`,
 `worktree: none` → the main checkout, `cold_local: true`; no new registry stage, no
-`DEDICATED_STAGES`/`STAGE_TOOLS` row, no GC-terminal change), renders the shared seed template
+`DEDICATED_STAGES` row or tool-policy change, no GC-terminal change), renders the shared seed template
 `prompts/stages/objective-reconcile-ready.md` (string-only variables: `objective`, `node`,
 `plan`, `pr`, `parent_checkpoint`, `stamped_head`, `read_clause` — evidence interpolates only
 after validation and is framed as untrusted DATA), then emits the worker output with a
@@ -12769,7 +12873,7 @@ than the resolved store refuses `invalid_input` at the service before any read.
 run-id policy, NO predecessor/successor edges (never connected to the executable plan graph).
 Requires `github.objective`; reads `github.objective`, `github.comments`; writes
 `github.comments` (the approved or human-authorized comment save), `session.workflow-state`,
-`cache.session-data`, `cache.scratch`. It is in `DEDICATED_STAGES`, the `STAGE_TOOLS` census and
+`cache.session-data`, `cache.scratch`. It is in `DEDICATED_STAGES`, the tool matrix (§8.40) and
 both planes' registry pins; no new registry state-key vocabulary.
 
 **The two transfer artifacts** (`perk/objective/refinement/authoring.py` owns the Python side;
@@ -12907,21 +13011,20 @@ snapshots):
   never another full context copy. Readers (`resumeRefinementDraft`) classify `valid` /
   `absent` / `no-context` / `mismatch` / `refused`; corruption, orphan pointers, fork/wrong-run
   data and a context mismatch never fall back to plans or any other artifact.
-- **Gating** (§8.40): `PERK_TOOLS` gains only `objective_refinement_draft` — never
-  `READ_ONLY_TOOLS` (existing gated stages never gain it). The refinement stage has ONE explicit
-  gate-ON selection, `REFINEMENT_READ_ONLY_TOOLS` (read/grep/find/ls/bash, `ask_user_question`,
-  `plan_review`, `objective_refinement_draft`, the web/Linear-read/FFF research families — no
-  `objective_node`, no other draft or save tool, no delegation spawn surface, no new bash
-  allowance), used by BOTH the active set (`gatedToolsFor(stage)`) and the `tool_call` backstop
-  (recomputed per observation, so a late foreign activation is still blocked); gate-OFF scopes
-  `STAGE_TOOLS["objective-refine"]` (`ask_user_question`, the draft, `plan_review`, research —
-  no PR-loop or model-save tools). Read-only mode has a refinement **flavor**: the template
-  `contexts/read-only.md` is parameterized (`writer`, `artifact`) with defaults preserving every
-  other stage's bytes; the refinement flavor names `objective_refinement_draft` under the
-  distinct dedup marker `[READ-ONLY REFINEMENT MODE]` (not a superstring of `[READ-ONLY
-  MODE]`, so neither flavor masks the other's once-per-branch scan); with the gate ON only the
-  current flavor's injected block survives in model context (a stale `plan_draft`-only block is
-  dropped; user content is untouched), with the gate OFF both flavors strip.
+- **Gating** (§8.40): the catalog gains `objective_refinement_draft` (stages `objective-refine`,
+  a carve-out). The refinement stage's gated view is an ordinary formula case — read/grep/find/
+  ls/bash, `ask_user_question`, `plan_review`, `objective_refinement_draft`, the web/Linear-read/
+  FFF research families, plus the stage-blind mode-over-stage set (inert here: the refinement
+  review arm reads only the refinement draft) — no `objective_node`, no other stage's draft or
+  save tool, no delegation spawn surface or child-side engine tools, no new bash allowance; the
+  same formula backs the active set and the `tool_call` backstop (recomputed per observation, so a
+  late foreign activation is still blocked). Gate-OFF the diet is `ask_user_question`, the draft,
+  `plan_review` and research — no PR-loop or model-save tools. Read-only mode renders the
+  `(stage objective-refine)` flavor of the one marker family (§8.3), naming
+  `objective_refinement_draft` as the stage's bounded writer; with the gate ON only the current
+  flavor's injected block survives in model context (a stale flavor — including a resumed
+  pre-migration `[READ-ONLY REFINEMENT MODE]` block, detection-only — is dropped; user content is
+  untouched), with the gate OFF every flavor strips.
 - **Refusals** (`refinementStageRefusal`, `wrong_stage`, independent of the gate): the
   `objective_node`, `plan_save`, `objective_save`, `gist_save` tools; the `/plan-save`,
   `/objective-save`, `/gist-save`, `/objective-plan`, `/implement-here` commands; the plan and
@@ -13170,11 +13273,11 @@ carries none of the spawn-level facts below.
    details only, never prose. No retry, never a throw.
 5. **Model.** `subagentModel(cwd, "scout")` at execute time rides the wave as the workflow-level
    `model` default (absent ⇒ no `model` key; the def's frontmatter model applies).
-6. **Exposure.** `run_scout_wave` joins `PERK_TOOLS`, `READ_ONLY_TOOLS` (§8.3 — reachable in every
-   gated stage except `objective-refine`, whose `REFINEMENT_READ_ONLY_TOOLS` excludes it on the
-   `explore_objective_node` precedent) and exactly the `plan` / `objective-plan` /
-   `objective-author` `STAGE_TOOLS` lists (§8.40). There is **no in-tool stage refusal** — the
-   gate is the one authority for the refinement exclusion. Spawn-level facts: every lane renders
+6. **Exposure.** `run_scout_wave`'s policy (§8.40): stages exactly `plan` / `objective-plan` /
+   `objective-author` (`AUTHORING_STAGES`), gate-allowed (§8.3), kind `orchestration` (so
+   `model-only`) — eligible gate-ON and gate-OFF in exactly those three stages, never
+   `objective-refine`. There is **no in-tool stage refusal** — the policy is the one authority
+   for the stage exclusion. Spawn-level facts: every lane renders
    with the constant `perk.parent-restrictions/1 {readOnly: true}` packet + `worktree: false`, and
    the spawn carries `context: "fresh"`, `mission: false`, the wave acceptance (`REPORT_ROLES`
    pins `perk.scout` among the spawned report agents).
@@ -14346,9 +14449,9 @@ shared transport `extension/pi/v1/foregroundDelegation.ts`, the snapshot policy
   `{action: "refresh-docs", slug}` (closed; a strict decoder refuses control characters, fields
   over 2,048 characters, a non-http(s) URL, an off-grammar slug, a blank or spaced prefix and
   `refresh-docs` with `url`/`scope_prefix` as `bad_input`); sequential, non-terminating, in-session
-  single flight (`busy`). Stage placement: `READ_ONLY_TOOLS` (§8.3's carve-in — the parent stays
-  gated), `PERK_TOOLS`, the `plan` / `objective-plan` / `objective-author` lists and the shared
-  worktree list (submit/land carry it by the one-shared-list rule), never refinement.
+  single flight (`busy`). Policy (§8.40): stages `AUTHORING_STAGES` ∪ `WORKTREE_STAGES`
+  (submit/land carry it through the worktree family), a carve-out (§8.3 — the parent stays
+  gated), kind `orchestration`; never refinement.
 - *One cancellation signal.* The execute slot ∪ `ctx.signal`, threaded through `prepare`, `list`
   (as the cold-door `ctx.signal`) and the dispatch.
 - *The flow, in order* (every arm a typed soft failure): decode → single flight → already-aborted

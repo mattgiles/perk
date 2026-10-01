@@ -232,7 +232,11 @@ Show, set (`<id>`), or clear (`clear`) the active objective and its session budg
 Start the objective plan factory: select the next node and author a bounded plan. Pass an objective
 id (otherwise the active objective) and optional `--node ID`. If neither an argument nor an active
 objective exists, the command refuses and points to `/objective-plan <id>` or `/objective <id>`.
-The command enters the read-only gate before driving the factory turn. After the `objective_node`
+The command records the `objective-plan` stage on the session and enters the read-only gate,
+scoped to that stage's tools, before driving the factory turn. It refuses inside a worktree session
+(implement, submit, address, land, learn) — the stage claim would hijack that session's plan
+binding; run `perk objective plan <id>` from the repo root or start a fresh session instead. After
+the `objective_node`
 planning transition the factory reads the node's advisory DATA with
 `perk objective node-engagement N --node <id> --json` and pages a present refinement from its file
 pointer (dated untrusted DATA, re-verified against the live tree). Paired tools:

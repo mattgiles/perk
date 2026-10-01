@@ -130,7 +130,8 @@ retired `@tombell/pi-plan` borrow emitted free-form prose — both must terminat
 
 **Consumed contract.** The read-only tool-gate primitive (`extension/toolGating.ts`
 `registerToolGating`: the `ToolGating` API `enter`/`exit`/`isActive`/`syncFromState`, the
-`READ_ONLY_TOOLS` allowlist, the `tool_call` destructive/safe backstop, the `perk:mode-context`
+per-stage gated view derived from the tool catalog (`extension/substrate/toolPolicy.ts`), the
+`tool_call` destructive/safe backstop, the `perk:mode-context`
 injection). `isPlanModeActive` reads the gate's own `mode === "read-only"` field. The gate is the
 **shared substrate** (Generalization 2) — composed, not owned.
 
@@ -241,7 +242,8 @@ Per the repo's anti-fiction rule, the following belong to **Node 1.3** and are o
 - **Plan seam:** `extension/planMode.ts` (`registerPlanMode`, `PLAN_CONTEXT_TYPE`,
   `PLAN_AUTHORING_CONTEXT`, `planContextContent`), `extension/planSave.ts` (`registerPlanSave`,
   `savePlan`, `isPlanModeActive`, `extractPlanMarkdown`, `PlanSaveDetails`), `extension/toolGating.ts`
-  (`registerToolGating`, `ToolGating`, `READ_ONLY_TOOLS`, `isReadOnlyBashCommand`), `extension/cache.ts`
+  (`registerToolGating`, `ToolGating`; the gated view now derives from `substrate/toolPolicy.ts`
+  `gatedToolsFor`, the bash verdict lives in `substrate/readOnlyBash.ts`), `extension/cache.ts`
   (`PlanRef`, `planRefPath`/`readPlanRef`/`writePlanRef`), `perk/plan.py` (`PlanRef` — the canonical
   twin), `extension/objectiveAuthor.ts` (`OBJECTIVE_AUTHOR_STAGE`, the coupling break),
   `extension/index.ts` (the registration order, gate shared).

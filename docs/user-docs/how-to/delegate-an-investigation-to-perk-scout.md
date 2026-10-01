@@ -10,8 +10,9 @@ sidebarGroup: "Core workflow"
 
 `run_scout_wave` is a blocking fan-out of 1–6 self-contained read-only briefs to fresh `perk.scout`
 lanes: one lane per brief, one engine-validated report per brief, returned to the session that
-asked. It is active in `/plan`, `/objective-plan` and objective-author sessions (it is also
-reachable in perk's other read-only sessions, except `/objective-refine`). You ask the agent; the
+asked. It is active in `/plan`, `/objective-plan` and objective-author sessions (and in a
+read-only session with no stage), but not in other stages' sessions — gist, worktree, audit or
+`/objective-refine`. You ask the agent; the
 agent writes the briefs and calls the tool.
 
 **Prerequisite:** the perk extension package is installed — it ships the `perk.scout` definition,
