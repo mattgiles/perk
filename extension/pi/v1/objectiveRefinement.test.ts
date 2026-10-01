@@ -1580,16 +1580,20 @@ test("cold claim: an objective-refine handoff imports the run-scratch transfer o
       (await h.emitToolCall("objective_node", { objective: "7", node: "1.1" }))?.block,
       true,
     );
-    assert.equal((await h.emitToolCall("plan_draft", { plan: "p" }))?.block, true);
+    // Another stage's draft writer stays out; plan_draft is mode-over-stage (inert here).
+    assert.equal((await h.emitToolCall("objective_draft", { prose: "p" }))?.block, true);
     assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, true);
     const injected = await h.emitBeforeAgentStart();
     const mode = injected.find((m) => m.customType === "perk:mode-context");
     assert.ok(
-      String(mode?.content).includes("[READ-ONLY REFINEMENT MODE]"),
+      String(mode?.content).includes("[READ-ONLY MODE] (stage objective-refine)"),
       "the refinement flavor",
     );
     assert.ok(
-      String(mode?.content).includes("objective_refinement_draft is the sole sanctioned write"),
+      String(mode?.content).includes(
+        "- `objective_refinement_draft` is a sanctioned bounded write: the working-refinement",
+      ),
+      "the stage's one bounded writer is named",
     );
     assert.ok(
       injected.some((m) => m.customType === "perk:objective-refinement-context"),
@@ -1736,7 +1740,7 @@ test("warm /objective-refine (harness): an idle unbound session with an active o
     assert.equal(sent.length, 1, "one driven flow turn");
     assert.match(sent[0] ?? "", /perk objective refine flow/);
     assert.equal(await h.emitToolCall("objective_refinement_draft", { markdown: "m" }), undefined);
-    assert.equal((await h.emitToolCall("plan_draft", { plan: "p" }))?.block, true);
+    assert.equal((await h.emitToolCall("gist_draft", { prose: "p" }))?.block, true);
     assert.equal((await h.emitToolCall("edit", { path: "x" }))?.block, true);
     // The flavored contexts: the refinement mode flavor, the refinement grounding context, the
     // plannotator REFINEMENT adapter flavor; plan mode and the plan/objective/gist flavors defer.
@@ -1745,7 +1749,7 @@ test("warm /objective-refine (harness): an idle unbound session with an active o
     assert.ok(types.includes("perk:objective-refinement-context"), types.join(","));
     assert.equal(types.includes("perk:plan-context"), false, "plan mode defers");
     const mode = injected.find((m) => m.customType === "perk:mode-context");
-    assert.ok(String(mode?.content).includes("[READ-ONLY REFINEMENT MODE]"));
+    assert.ok(String(mode?.content).includes("[READ-ONLY MODE] (stage objective-refine)"));
     const bridge = injected.filter((m) => m.customType === "perk:plan-adapter-plannotator");
     assert.equal(bridge.length, 1, "exactly one plannotator bridge flavor");
     assert.ok(String(bridge[0]?.content).includes("[REFINEMENT ADAPTER: PLANNOTATOR]"));
