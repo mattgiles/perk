@@ -760,7 +760,7 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 # re-verify of the guidance. Distinct from the settings pin (`init.SUBAGENTS_PACKAGE`, what
 # consumers install, converged by `settings-wiring`): the two facts coincide today but move
 # independently.
-_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.70.1"
+_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.73.1"
 
 # The first pi-subagents release perk's report waves cannot drive (it removed the
 # `workflowScript` RPC `spawn` parameter perk sends).

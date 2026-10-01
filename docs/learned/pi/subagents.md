@@ -542,9 +542,8 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   coverage on `ok`); a rejected call reports a validation summary, the missing-call error only
   when the tool was never called; the RPC gained `cost`; the Pi 0.87 fork-context repair ships
   (`context_edit` handling in `src/shared/fork-context.ts` / `pruned-fork.ts`) — perk children
-  still spawn `context: "fresh"` for isolation. By owner decision the guidance baseline stays
-  0.70.1, so `subagent-compat` warns by design; the full re-verify, browser-door live leg
-  included, is owed.
+  still spawn `context: "fresh"` for isolation. By owner decision the guidance baseline stayed
+  0.70.1 at this re-read (`subagent-compat` warned by design) until the 0.73.1 re-verify moved it.
 - **0.72.x / 0.73.x (2026-09) — source re-read at 0.73.1; consumers pinned** — 0.72.0 takes
   TypeBox from Pi instead of bundling it (the host-SDK bridge census already carries `typebox`)
   and stops blocking startup on global agent discovery; 0.73.0 adds `failureKind` to a failed
@@ -600,13 +599,14 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
 - **Re-verify at each bump.** A new installed version silently re-asserts every engine fact here:
   follow `docs/developers/pi-subagents-reverify.md` (source re-read, `just ci`, a live report wave
   from a read-write session, the constant bump + its test pin, an archive record). Body version
-  numbers are event stamps, never currency claims. Guidance baseline (doctor constant): 0.70.1
-  (`docs/design/archive/pi-subagents-0.70.1-reverify.md` — stamped on the source re-read + the
-  doctor, scout-lane and offline conflict-engine halves of the leg; the browser-door half is owed
-  from the owner's post-submit `/pr-review-browser` run, as it was for 0.68.0). The baseline was
+  numbers are event stamps, never currency claims. Guidance baseline (doctor constant): 0.73.1
+  (`docs/design/archive/pi-subagents-0.73.1-reverify.md` — stamped on the source re-read, the
+  doctor, scout-lane and offline conflict-engine halves, and both browser-door waves: the owner's
+  `/pr-review-browser` on the change's PR on the Pi 0.99.2 host, and the planning session's
+  `/plan-review-browser` accepted by the owner with its 0.87.1-host caveat). The baseline was
   deliberately NOT moved at the 0.71.0 source re-read (owner decision); the 0.73.1 re-verify
-  (`docs/design/archive/pi-subagents-0.73.1-reverify.md`) moves it only once every half of its
-  live leg — doctor, scout wave, both browser waves — passes. Last source re-read of the mechanics
+  moved it from 0.70.1 only once every half of its live leg — doctor, scout wave, both browser
+  waves — had passed. Last source re-read of the mechanics
   in this doc: the installed 0.73.1 (compiled `src/**/*.js`; body paths name the upstream `.ts`
   modules, whose anchors survive compilation) — provenance, not a currency promise.
 

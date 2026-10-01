@@ -8,10 +8,10 @@ the evidence for moving `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` from `0.70.1` to 
 template is [`pi-subagents-0.70.1-reverify.md`](pi-subagents-0.70.1-reverify.md); the procedure is
 `docs/developers/pi-subagents-reverify.md`.
 
-**Verdict: PENDING** — the source re-read, the offline halves, the doctor half and the scout wave
-PASS on the Pi 0.99.2 host. Open: the PR-door browser wave (the owner's `/pr-review-browser` on
-this change's PR) and the owner's confirmation of the plan-door half. The stamp moves only when
-every half passes (owner decision: no owed half).
+**Verdict: PASS** — the source re-read, the offline halves, the doctor half, the scout wave and
+the PR-door browser wave pass on the Pi 0.99.2 host; the owner accepted the plan-door half from
+the planning session with its 0.87.1-host caveat. Every half passed (owner decision: no owed
+half), so `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` moved from `0.70.1` to `0.73.1` in this change.
 
 ## The matrix
 
@@ -121,7 +121,7 @@ The 0.71.0 → 0.73.1 `CHANGELOG.md` deltas and their perk meaning:
 Run from the implement session relaunched on the Pi 0.99.2 host, with the worktree-local
 `.pi/npm` at pi-subagents 0.73.1. Every half is required.
 
-- **Doctor half — PASS.** `uv run perk doctor --verbose` on the 0.99.2 host, before the stamp
+- **Doctor half — PASS.** `uv run perk doctor --verbose` on the 0.99.2 host. Before the stamp
   moved:
 
   ```
@@ -133,7 +133,12 @@ Run from the implement session relaunched on the Pi 0.99.2 host, with the worktr
   `settings-wiring` is ok on the pinned entry once `.pi/settings.json` regained the trailing newline
   a hand edit on `main` had dropped (pre-existing drift, repaired in this change). The remaining
   `config: config missing — .perk/local.toml` fail is the worktree environment — the per-user,
-  gitignored overlay exists in the main checkout and is not materialized into worktrees.
+  gitignored overlay exists in the main checkout and is not materialized into worktrees. After
+  the stamp moved:
+
+  ```
+  ✓ subagent-compat: pi-subagents 0.73.1 — the guidance-verified version — report-only — the install is pinned by settings-wiring (npm:pi-subagents@0.73.1)
+  ```
 - **Scout wave — PASS.** Under the owner's `/plan` toggle on the 0.99.2 host (the implement stage
   scopes `run_scout_wave` off), one `run_scout_wave` with two `perk.scout` briefs completed **2/2**
   with validated `structured_output` reports. The workflow-completion notice capped its return
@@ -141,12 +146,16 @@ Run from the implement session relaunched on the Pi 0.99.2 host, with the worktr
   collected both full reports from that file, as the source re-read predicted.
 - **Conflict delegation — PASS (offline engine suite).**
   `extension/pi/v1/delivery/conflictResolverEngine.test.ts` (18 cases) passes on the 0.99.2 dist.
-- **Plan-door browser wave — PENDING owner confirmation.** The planning session's
+- **Plan-door browser wave — PASS (owner-accepted, host caveat).** The planning session's
   `/plan-review-browser` draft-review wave ran on pi-subagents 0.73.1 to 4/4 lanes on the Pi 0.87.1
-  host; the plan takes it as the plan-door half with that host caveat, for owner confirmation at
-  review.
-- **PR-door browser wave — PENDING.** The owner's `/pr-review-browser` on this change's PR (0.99.2
-  host) to N/N with `perk:*` annotations posted.
+  host. The owner accepted it as the plan-door half at review: the engine version is the one
+  pinned here, and only the Pi host differed.
+- **PR-door browser wave — PASS.** The owner's `/pr-review-browser` on this change's PR (#2642,
+  active mode, Pi 0.99.2 host): `start_review_wave` accepted 4/4 post-preflight lanes
+  (claimed-intent, correctness, tests, plus the automatic ponytail lane) and `collect_review_wave`
+  returned `complete: true`, 4/4 covered, no failures; the four `replace: true` pushes posted five
+  `perk:*` annotations with none held. The owner then platform-posted a COMMENT review carrying
+  all five as inline comments (perk posted nothing). Detail in the baseline record's leg 7.
 
 ## Falsified planning-time assumptions
 
