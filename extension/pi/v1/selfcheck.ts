@@ -279,7 +279,11 @@ export interface BranchContextCensus {
   /**
    * `custom_message` entries whose customType starts with `perk:`, sorted by customType. `copies`
    * is HISTORICAL (every copy on the branch, compacted or context-edited ones included); `live` is
-   * the count of that customType in the current context projection (`null` = the read failed).
+   * the count of that customType in Pi's current context projection (`null` = the read failed).
+   * The projection is read BEFORE extension `context` filters run, so `live` is an upper bound on
+   * what the next model request carries: a filter can still drop a projected copy (perk's own
+   * gate strips every `perk:mode-context` once the gate is off, and agent-scratch keeps one
+   * current copy). A command cannot run that filter chain, so the census does not simulate it.
    */
   perkContexts: { customType: string; copies: number; totalChars: number; live: number | null }[];
   /** `custom_message` entries without the `perk:` prefix (borrowed packages). */
@@ -305,8 +309,8 @@ function contentChars(content: unknown): number {
 }
 
 /**
- * The live context projection for the census, or `null` when the read throws — the census is
- * report-only, so a failed read renders `live=?` instead of failing the command.
+ * The pre-filter context projection for the census, or `null` when the read throws — the census
+ * is report-only, so a failed read renders `live=?` instead of failing the command.
  */
 export function readLiveProjection(
   source: ContextProjectionSource,
@@ -363,8 +367,8 @@ export function branchContextCensus(
  * Render the census as a fixed multi-line block. The line grammar (the `census:` /
  * `append-system-prompt:` / `context-files:` / `skills:` / `tools:` / `per source:` / `branch:` /
  * `perk contexts:` / `native sdk bridge:` keys) is stable — the closing audit diffs against these
- * exact keys; each `perk contexts:` row appends a `live=<n>` token (`?` when the projection read
- * failed) after its historical `×copies (chars)`. The bridge block carries `describeBridge`, the
+ * exact keys; each `perk contexts:` row appends a `live=<n>` token — the pre-filter projection
+ * count (`?` when the projection read failed) — after its historical `×copies (chars)`. The bridge block carries `describeBridge`, the
  * host entry (or `-`) and the root paths — identifiers only.
  */
 export function renderCensus(
