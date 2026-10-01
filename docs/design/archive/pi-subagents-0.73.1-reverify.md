@@ -133,8 +133,11 @@ Run from the implement session relaunched on the Pi 0.99.2 host, with the worktr
   a hand edit on `main` had dropped (pre-existing drift, repaired in this change). The remaining
   `config: config missing — .perk/local.toml` fail is the worktree environment — the per-user,
   gitignored overlay exists in the main checkout and is not materialized into worktrees.
-- **Scout wave — PENDING.** One `run_scout_wave` with ≥ 2 briefs to N/N validated reports, under
-  the owner-driven `/plan` toggle (the implement stage scopes `run_scout_wave` off).
+- **Scout wave — PASS.** Under the owner's `/plan` toggle on the 0.99.2 host (the implement stage
+  scopes `run_scout_wave` off), one `run_scout_wave` with two `perk.scout` briefs completed **2/2**
+  with validated `structured_output` reports. The workflow-completion notice capped its return
+  preview and pointed at `status.json` (`workflow.value`) — the 0.73.0 cap — while perk's tool
+  collected both full reports from that file, as the source re-read predicted.
 - **Conflict delegation — PASS (offline engine suite).**
   `extension/pi/v1/delivery/conflictResolverEngine.test.ts` (18 cases) passes on the 0.99.2 dist.
 - **Plan-door browser wave — PENDING owner confirmation.** The planning session's

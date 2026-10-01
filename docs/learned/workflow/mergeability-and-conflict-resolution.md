@@ -234,9 +234,10 @@ inheritance) no longer fails closed at dispatch. Mitigations are the package-shi
 `agents/conflict-resolver.md` (discovered by pi-subagents as `source: "package"`),
 `tests/test_subagent_agents.py::test_native_child_profile` (the closed per-role profile census),
 and doctor `subagent-engine` (which also `warn`s on a leftover legacy `.pi/agents/perk/`
-directory). Protocol drift on the unpinned engine is
-**silent** at dispatch: no `started` ack → `cancel` → the grace window → a **retained lock** that
-needs human recovery; the doctor `subagent-compat` version `warn` is the only early signal.
+directory). Protocol drift on the engine (pinned for consumers, but moved deliberately at each
+pin bump) is **silent** at dispatch: no `started` ack → `cancel` → the grace window → a
+**retained lock** that needs human recovery; the doctor `subagent-compat` version `warn` is the
+only early signal.
 
 ## The worktree-scoped execution lock
 
