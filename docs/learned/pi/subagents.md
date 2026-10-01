@@ -542,9 +542,18 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   coverage on `ok`); a rejected call reports a validation summary, the missing-call error only
   when the tool was never called; the RPC gained `cost`; the Pi 0.87 fork-context repair ships
   (`context_edit` handling in `src/shared/fork-context.ts` / `pruned-fork.ts`) — perk children
-  still spawn `context: "fresh"` for isolation. By owner decision the guidance baseline stays
-  0.70.1, so `subagent-compat` warns by design; the full re-verify, browser-door live leg
-  included, is owed.
+  still spawn `context: "fresh"` for isolation. By owner decision the guidance baseline stayed
+  0.70.1 at this re-read (`subagent-compat` warned by design) until the 0.73.1 re-verify moved it.
+- **0.72.x / 0.73.x (2026-09) — source re-read at 0.73.1; consumers pinned** — 0.72.0 takes
+  TypeBox from Pi instead of bundling it (the host-SDK bridge census already carries `typebox`)
+  and stops blocking startup on global agent discovery; 0.73.0 adds `failureKind` to a failed
+  workflow's `status.workflow` (perk's aggregate reader ignores it), caps the foreground workflow
+  *display* text at 200 KB / 5000 lines while `status.json`'s `workflow.value` stays uncut (perk
+  collects from there), and rejects a misspelled literal agent name before any child starts;
+  0.73.1 sends the advertised-agent catalog as an `advertised_subagents` prompt section instead of
+  rewriting the system prompt. 2026-10-01: perk pinned consumers to 0.73.1 because 0.74.0 removed
+  the `workflowScript` RPC spawn parameter (record:
+  `docs/design/archive/pi-subagents-0.73.1-reverify.md`).
 - **2026-09 — `simplifier`** — the def landed dormant (#2557) and flipped live (#2561); the census
   site list grew to the realized set above. Size watch: this doc is ~46 KB — a split is due at the
   next dream pass.
@@ -578,25 +587,28 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   `src/runs/{foreground,background,shared}/`, `src/intercom/`, `src/extension/rpc.ts`,
   `src/workflows/{scripted-workflow,workflow-child-summary}.ts`,
   `src/shared/{artifacts,types,fork-context,pruned-fork}.ts`, `CHANGELOG.md`. The package is
-  deliberately **unpinned** — and an unpinned `npm:` source does NOT refresh at launch: pi's
-  `installedNpmMatchesConfiguredVersion` accepts any installed version for an unranged source
-  (installs a missing package, never refreshes an installed one); the guidance baseline is the
-  doctor constant
+  **pinned** to `npm:pi-subagents@0.73.1` (`SUBAGENTS_PACKAGE`, reconciled forward by
+  `settings-wiring`): pi's `installedNpmMatchesConfiguredVersion` accepts any installed version for
+  an unranged source (installs a missing package, never refreshes an installed one) but reinstalls a
+  ranged source that no longer matches, so the pin both protects a fresh install from 0.74.0 (which
+  removed the `workflowScript` RPC spawn parameter perk's waves send) and walks a 0.74.0 install
+  back; the guidance baseline is the doctor constant
   `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` (`src/perk/convergence/doctor/checks.py`, pinned by
   `tests/test_doctor.py::test_subagent_compat_verified_version_stamp_is_pinned`), and `perk doctor`'s
   `subagent-compat` warns whenever the installed version differs from it.
 - **Re-verify at each bump.** A new installed version silently re-asserts every engine fact here:
   follow `docs/developers/pi-subagents-reverify.md` (source re-read, `just ci`, a live report wave
   from a read-write session, the constant bump + its test pin, an archive record). Body version
-  numbers are event stamps, never currency claims. Guidance baseline (doctor constant): 0.70.1
-  (`docs/design/archive/pi-subagents-0.70.1-reverify.md` — stamped on the source re-read + the
-  doctor, scout-lane and offline conflict-engine halves of the leg; the browser-door half is owed
-  from the owner's post-submit `/pr-review-browser` run, as it was for 0.68.0). The baseline was
-  deliberately NOT moved at the 0.71.0 source re-read (owner decision): `perk doctor`'s
-  `subagent-compat` warns by design until the full re-verify runs for 0.71.0, whose browser-door
-  live leg is owed. Last source re-read of the mechanics in this doc: the installed 0.71.0
-  (compiled `src/**/*.js`; body paths name the upstream `.ts` modules, whose anchors survive
-  compilation) — provenance, not a currency promise.
+  numbers are event stamps, never currency claims. Guidance baseline (doctor constant): 0.73.1
+  (`docs/design/archive/pi-subagents-0.73.1-reverify.md` — stamped on the source re-read, the
+  doctor, scout-lane and offline conflict-engine halves, and both browser-door waves: the owner's
+  `/pr-review-browser` on the change's PR on the Pi 0.99.2 host, and the planning session's
+  `/plan-review-browser` accepted by the owner with its 0.87.1-host caveat). The baseline was
+  deliberately NOT moved at the 0.71.0 source re-read (owner decision); the 0.73.1 re-verify
+  moved it from 0.70.1 only once every half of its live leg — doctor, scout wave, both browser
+  waves — had passed. Last source re-read of the mechanics
+  in this doc: the installed 0.73.1 (compiled `src/**/*.js`; body paths name the upstream `.ts`
+  modules, whose anchors survive compilation) — provenance, not a currency promise.
 
 ## Cross-references
 

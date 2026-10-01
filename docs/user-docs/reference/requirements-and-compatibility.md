@@ -18,7 +18,7 @@ remote execution.
 | `git` | Required | perk uses git repositories, branches, commits, and worktrees. No minimum git version is enforced. |
 | `gh` | Version 2.48.0 or newer, authenticated | A GitHub account is mandatory for the GitHub workflow. perk reaches GitHub only through the authenticated GitHub CLI; it does not make raw GitHub HTTPS requests. Exhaustive issue reads use `gh api --slurp` (gh 2.48.0); an older gh fails those reads loudly rather than silently truncating. |
 | `node` | Version 22 or newer | This is the one tool-version gate in the environment check. The Pi extension relies on Node's native TypeScript type stripping. |
-| `pi` | Version 0.87.0 or newer | Pi is the agent harness perk launches. 0.87.0 is the supported minimum: the extension's context-evidence leaf, `/btw`'s side-session seeding, and its thread summarization use Pi's `buildSessionProjection()` session projection and `ModelRegistry.streamSimple`, both added in 0.87.0. perk still enforces no Pi version gate — on an older Pi the extension's hooks fail (`buildSessionProjection is not a function`) and perk's owned guidance is not injected, so upgrade Pi rather than expecting a typed refusal. |
+| `pi` | Version 0.99.2 or newer | Pi is the agent harness perk launches. 0.99.2 is the supported minimum: perk is built and verified against it (`docs/design/archive/pi-0.99.2-baseline-verification.md`), and it carries Pi's fix that lets a saved default model on a natively registered provider take effect at startup. Below 0.87.0 perk breaks outright: the extension's context-evidence leaf, `/btw`'s side-session seeding, and its thread summarization use Pi's `buildSessionProjection()` session projection and `ModelRegistry.streamSimple`, both added in 0.87.0. perk enforces no Pi version gate — on an older Pi the extension's hooks fail (`buildSessionProjection is not a function`) and perk's owned guidance is not injected, so upgrade Pi rather than expecting a typed refusal. |
 | `skills` | Required | perk uses the skills CLI to synchronize its workflow skills. perk does not enforce a separate skills version gate. |
 | `cloc` | Required | `perk pr submit` and `perk pr stats` count the PR's change stats with it. No version gate is enforced. A missing `cloc` fails `perk init` / `perk doctor` like any required tool, but submit degrades to an "unavailable" note in the PR body rather than failing. |
 
@@ -112,18 +112,15 @@ The perk CLI and the `@mgiles/perk` Pi extension are expected to have matching v
 mismatch produces a soft, non-fatal launch warning. `perk doctor --fix` reconverges the
 repo-managed package pin and reinstalls the matching extension.
 
-`pi-subagents` deliberately remains unpinned. `perk doctor` probes the installed package for
-the orchestration surfaces perk needs; incompatibility warns loudly but does not fail the
-doctor run or offer a fix. This is an early-warning check rather than a version gate.
-pi-subagents 0.70.1 is the guidance baseline: `subagent-compat` warns on any other installed
-version. The baseline is **source-verified** — perk's engine guidance was re-read against the
-installed 0.70.1 package, `perk doctor` and a read-only `perk.scout` lane were exercised on it —
-while the live browser-wave half of its re-verification is recorded as owed (see
-`docs/design/archive/pi-subagents-0.70.1-reverify.md`); treat it as the version perk's guidance
-matches, not as a promise that every interactive flow was driven on it. perk's report definitions
-no longer carry the `completionGuard` field that pi-subagents removed in 0.70.1, so a 0.68–0.70.0
-engine may fail a report lane whose task text reads as implementation work — upgrade pi-subagents
-rather than re-adding the field.
+`pi-subagents` is pinned to 0.73.1: `perk init` writes `npm:pi-subagents@0.73.1` into
+`.pi/settings.json` and rewrites an existing unpinned or differently pinned entry in place, and
+`perk doctor` reports such an entry as `settings-wiring` drift that `perk doctor --fix` repairs (Pi
+then installs the pinned version at the next launch). The pin exists because pi-subagents 0.74.0
+removed the `workflowScript` RPC spawn parameter perk's report waves send, so every perk wave
+fails on 0.74.0 or newer until perk migrates. Separately, `perk doctor`'s `subagent-compat` check
+compares the installed version with the version perk's engine guidance was last re-verified
+against (currently 0.73.1, see `docs/design/archive/pi-subagents-0.73.1-reverify.md`) and warns
+on any other version; it is an early-warning check that never fails the doctor run.
 
 Plannotator 0.27.16 or newer is required by the stack review browser (`/stack-review-browser`,
 `perk objective stack review`), which opens Plannotator's static-patch mode over the pinned

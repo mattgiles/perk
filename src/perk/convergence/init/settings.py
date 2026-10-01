@@ -86,13 +86,20 @@ def _perk_npm_entry() -> str:
 # `@dietrichgebert/ponytail` is the borrowed *review-lane context source*. It is the sole
 # filtered-borrow exception: `_reconcile_ponytail_entry` keeps all four Pi resource classes
 # disabled in ordinary sessions while exact review-agent paths opt one skill into one lane.
+# `pi-subagents` is the one VERSION-CARRYING borrow: pi-subagents 0.74.0 removed the
+# `workflowScript` RPC `spawn` parameter perk's report waves send, so consumers stay on 0.73.1
+# until the wave-RPC migration lands. A pinned spec is reconciled forward like perk's own entry
+# (`_merge_static_packages`); Pi reinstalls a ranged npm source whose installed version no longer
+# matches, so the pin also walks a 0.74.0 install back. The doctor `subagent-compat` stamp
+# records what perk's guidance was verified against — a distinct fact that coincides today.
+SUBAGENTS_PACKAGE = "npm:pi-subagents@0.73.1"
 PONYTAIL_PACKAGE = "npm:@dietrichgebert/ponytail"
 PONYTAIL_NPM_NAME = "@dietrichgebert/ponytail"
 PACKAGE_RESOURCE_FILTERS = ("extensions", "skills", "prompts", "themes")
 
 BORROWED_PACKAGES = [
     "npm:@tombell/pi-diff",
-    "npm:pi-subagents",
+    SUBAGENTS_PACKAGE,
     "npm:@ff-labs/pi-fff",
     "npm:@juicesharp/rpiv-ask-user-question",
     "npm:@juicesharp/rpiv-todo",
@@ -122,6 +129,15 @@ def _npm_name(entry: str) -> str | None:
     spec = entry[len("npm:") :]
     at = spec.rfind("@")
     return spec[:at] if at > 0 else spec  # at == 0 is a scope's leading @
+
+
+def _npm_version(entry: str) -> str | None:
+    """``npm:@scope/name@1.2.3`` -> ``1.2.3``; ``None`` for an unversioned or non-npm spec."""
+    if not entry.startswith("npm:"):
+        return None
+    spec = entry[len("npm:") :]
+    at = spec.rfind("@")
+    return spec[at + 1 :] if at > 0 else None  # at == 0 is a scope's leading @
 
 
 def _git_identity(entry: str) -> str | None:
@@ -171,29 +187,29 @@ def _merge_static_packages(
 ) -> tuple[list[object], list[str], list[str]]:
     """Merge the static perk+borrowed package set; returns (packages, added, updated).
 
-    Append-merges the borrowed/npm/local entries (dedup by identity) AND reconciles perk's own
-    `npm:@mgiles/perk` **version pin** *forward*. Presence is computed by **identity across ALL
+    Append-merges the borrowed/npm/local entries (dedup by identity) AND reconciles every
+    **version-carrying** desired npm spec *forward* — perk's own `npm:@mgiles/perk@<version>` and
+    the pinned borrow (`SUBAGENTS_PACKAGE`). Presence is computed by **identity across ALL
     entry forms** (string entries and object-form `{ "source": <spec>, **filter }` entries alike,
     via :func:`_entry_spec`) — pi's `pi config -l` flow rewrites entries to object form to filter
     resources, and an unrecognized object-form entry would otherwise be duplicate-appended as a
-    string (latent settings corruption). When perk's own npm identity already exists but the spec
-    differs from the desired pin (e.g. a stale `npm:@mgiles/perk@0.0.0`), the canonical entry is
-    **rewritten in place** (list position preserved): a string entry has its list slot replaced;
-    an object-form entry has only its ``source`` rewritten, **preserving the user's filter keys
-    byte-for-byte**. When both forms share perk's identity (the corruption the string-only bug
-    produced), the object-form entry is canonical (it carries user data perk cannot reconstruct —
-    the filters) and the duplicates are dropped. Invariant 2 holds in its re-worded form: perk
-    never *creates* an object-form entry for its own package; it may update the ``source`` pin
-    inside a user-created one. Only perk's own identity is version-reconciled — borrowed npm
-    packages (`BORROWED_PACKAGES`) are unpinned and stay **append-only** (never
-    version-reconciled), distinguished by comparing the entry's `_npm_name` identity to
-    `_npm_name(NPM_PACKAGE)`. A user's own packages are never in ``desired`` and stay
-    append-only/untouched. Idempotent: once at the desired pin, the entry equals it → no change.
+    string (latent settings corruption). When a pinned identity already exists but the spec
+    differs from the desired pin (e.g. a stale `npm:@mgiles/perk@0.0.0`, or an unversioned
+    `npm:pi-subagents`), the canonical entry is **rewritten in place** (list position preserved):
+    a string entry has its list slot replaced; an object-form entry has only its ``source``
+    rewritten, **preserving the user's filter keys byte-for-byte**. When both forms share the
+    identity (the corruption the string-only bug produced), the object-form entry is canonical (it
+    carries user data perk cannot reconstruct — the filters) and the duplicates are dropped.
+    Invariant 2 holds in its re-worded form: perk never *creates* an object-form entry for a
+    pinned package; it may update the ``source`` pin inside a user-created one. Version-carrying
+    desired specs are version-reconciled forward (the desired spec's `_npm_version` is not
+    ``None``); unversioned borrowed specs stay **append-only** (never version-reconciled). A
+    user's own packages are never in ``desired`` and stay append-only/untouched. Idempotent: once
+    at the desired pin, the entry equals it → no change.
     """
     specs = [s for s in map(_entry_spec, packages) if s is not None]
     have_local = {s for s in specs if not s.startswith(("npm:", "git:"))}
     have_npm = {n for n in map(_npm_name, specs) if n}
-    perk_npm_identity = _npm_name(NPM_PACKAGE)
 
     added: list[str] = []
     updated: list[str] = []
@@ -202,8 +218,8 @@ def _merge_static_packages(
             name = _npm_name(want)
             if name is None:
                 continue
-            if name == perk_npm_identity and name in have_npm:
-                updated.extend(_reconcile_perk_entry(packages, want, name))
+            if _npm_version(want) is not None and name in have_npm:
+                updated.extend(_reconcile_pinned_entry(packages, want, name))
                 continue
             if name in have_npm:
                 continue
@@ -278,16 +294,17 @@ def _reconcile_ponytail_entry(packages: list[object]) -> tuple[list[object], lis
     return packages, changes
 
 
-def _reconcile_perk_entry(packages: list[object], want: str, name: str) -> list[str]:
-    """Reconcile perk's own already-present identity to the desired pin; returns the fragments.
+def _reconcile_pinned_entry(packages: list[object], want: str, name: str) -> list[str]:
+    """Reconcile an already-present pinned identity to the desired spec; returns the fragments.
 
-    Mutates ``packages`` in place. Canonical = the first **object-form** match when one exists
-    (it carries the user's filter keys, which perk cannot reconstruct), else the first match. A
-    string canonical has its list slot rewritten; an object canonical has only its ``source``
-    rewritten (filters preserved byte-for-byte — Invariant 2's re-worded form: perk never
-    *creates* an object-form entry for its own package, it only updates the pin inside a
-    user-created one). Every other entry sharing the identity — string or object — is dropped,
-    collapsing the duplicates the old string-only presence bug produced.
+    Serves perk's own entry and any version-carrying borrow. Mutates ``packages`` in place.
+    Canonical = the first **object-form** match when one exists (it carries the user's filter
+    keys, which perk cannot reconstruct), else the first match. A string canonical has its list
+    slot rewritten; an object canonical has only its ``source`` rewritten (filters preserved
+    byte-for-byte — Invariant 2's re-worded form: perk never *creates* an object-form entry for a
+    pinned package, it only updates the pin inside a user-created one). Every other entry sharing
+    the identity — string or object — is dropped, collapsing the duplicates the old string-only
+    presence bug produced.
     """
     matches = [
         (i, entry, spec)

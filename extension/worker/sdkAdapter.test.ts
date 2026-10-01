@@ -1,15 +1,29 @@
 // Fully-offline coverage for the private SDK adapter's owned helpers: the SDK→perk event
 // translation (translateEvent), the drive-session handle's bind/rebind structural contract, and
 // the model/auth resolution pair (resolveAuth over the nominal selection; resolveWorkerModel
-// with the injected stub runtime — deterministic, no ModelRuntime.create host reads). The
-// seam-side policy fold and the drive orchestration are covered in stageExecution.test.ts.
+// with the injected stub runtime — deterministic, no ModelRuntime.create host reads), plus the
+// native-provider saved-credential case over a REAL hermetic ModelRuntime (in-memory credential
+// store, no models.json). The seam-side policy fold and the drive orchestration are covered in
+// stageExecution.test.ts.
 
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import {
+  createAgentSession,
+  DefaultResourceLoader,
+  ModelRuntime,
+  SessionManager,
+  SettingsManager,
+} from "@earendil-works/pi-coding-agent";
+import { loadSdkPiAi } from "../testing/harness.ts";
 import {
   createDriveSession,
   type DriveEvent,
   type DriveSessionLike,
+  type DriveTurn,
   resolveAuth,
   resolveWorkerModel,
   type StageEvent,
@@ -198,6 +212,125 @@ test("createDriveSession: abort is idempotent — repeated trips launch exactly 
   await handle.dispose();
 });
 
+// --- the turn-boundary gate over the agent's finishTurn ------------------------------------------
+
+/** A fake agent whose `finishTurn` is the session's own hook (records calls, returns `inner`). */
+function gatedSession(inner: unknown): {
+  session: FakeSession & { agent: { finishTurn?(turn: DriveTurn, signal?: AbortSignal): unknown } };
+  innerCalls: DriveTurn[];
+  sessionHook: (turn: DriveTurn) => unknown;
+} {
+  const innerCalls: DriveTurn[] = [];
+  const sessionHook = (turn: DriveTurn): unknown => {
+    innerCalls.push(turn);
+    return inner;
+  };
+  const session = Object.assign(new FakeSession(() => {}), { agent: { finishTurn: sessionHook } });
+  return { session, innerCalls, sessionHook };
+}
+
+const usageTurn = (input: number, output: number): DriveTurn => ({
+  message: { role: "assistant", usage: { input, output, reasoning: 99 } },
+});
+
+test("createDriveSession: the gate runs the session's finishTurn first, then ends the run on the seam's verdict", async () => {
+  const { session, innerCalls } = gatedSession(undefined);
+  const asked: number[] = [];
+  const handle = createDriveSession(
+    { session, dispose() {} },
+    () => {},
+    (turn) => {
+      asked.push(turn.freshTokens);
+      return turn.freshTokens >= 10;
+    },
+  );
+  await handle.bind();
+  const finishTurn = session.agent.finishTurn;
+  assert.ok(finishTurn);
+  assert.equal(
+    await finishTurn(usageTurn(2, 3)),
+    undefined,
+    "below the verdict: normal scheduling",
+  );
+  assert.deepEqual(await finishTurn(usageTurn(4, 6)), { action: "end" });
+  assert.deepEqual(asked, [5, 10], "fresh tokens = input + output (reasoning excluded)");
+  assert.equal(innerCalls.length, 2, "the session's own hook (the turn_end boundary) always runs");
+  await handle.dispose();
+});
+
+test("createDriveSession: an earlier `end` decision stands and a `continue` survives a false verdict", async () => {
+  const ended = gatedSession({ action: "end" });
+  let asked = 0;
+  const h1 = createDriveSession(
+    { session: ended.session, dispose() {} },
+    () => {},
+    () => {
+      asked += 1;
+      return false;
+    },
+  );
+  await h1.bind();
+  assert.deepEqual(await ended.session.agent.finishTurn?.(usageTurn(1, 1)), { action: "end" });
+  assert.equal(asked, 0, "the verdict is not consulted once the run already ends");
+  await h1.dispose();
+
+  const continued = gatedSession({ action: "continue" });
+  const h2 = createDriveSession(
+    { session: continued.session, dispose() {} },
+    () => {},
+    () => false,
+  );
+  await h2.bind();
+  assert.deepEqual(await continued.session.agent.finishTurn?.(usageTurn(1, 1)), {
+    action: "continue",
+  });
+  await h2.dispose();
+});
+
+test("createDriveSession: dispose and rebind restore the session's own finishTurn", async () => {
+  const first = gatedSession(undefined);
+  const second = gatedSession(undefined);
+  const runtime: { session: DriveSessionLike; dispose(): void } = {
+    session: first.session,
+    dispose() {},
+  };
+  const handle = createDriveSession(
+    runtime,
+    () => {},
+    () => true,
+  );
+  await handle.bind();
+  assert.notEqual(first.session.agent.finishTurn, first.sessionHook, "installed on bind");
+  runtime.session = second.session;
+  assert.equal(await handle.rebindIfReplaced(), true);
+  assert.equal(
+    first.session.agent.finishTurn,
+    first.sessionHook,
+    "the replaced session is restored",
+  );
+  assert.notEqual(second.session.agent.finishTurn, second.sessionHook, "the replacement is gated");
+  await handle.dispose();
+  assert.equal(second.session.agent.finishTurn, second.sessionHook, "dispose restores it");
+});
+
+test("createDriveSession: no verdict or no agent leaves the session untouched", async () => {
+  const { session, sessionHook } = gatedSession(undefined);
+  const ungated = createDriveSession({ session, dispose() {} }, () => {});
+  await ungated.bind();
+  assert.equal(session.agent.finishTurn, sessionHook, "no verdict → no wrapper");
+  await ungated.dispose();
+
+  const agentless = new FakeSession(() => {});
+  const handle = createDriveSession(
+    { session: agentless, dispose() {} },
+    () => {},
+    () => true,
+  );
+  await handle.bind();
+  assert.equal("agent" in agentless, false, "an agentless (fake) session is never patched");
+  await handle.dispose();
+});
+
 // --- resolveAuth over the nominal selection — the model pick is deferred to the SDK --------------
 
 function snapshotRuntime(
@@ -291,4 +424,108 @@ test("resolveWorkerModel: '' ≡ omitted (the documented bare `--model` CLI tole
   assert.equal(r.selection.thinkingLevel, undefined);
   assert.equal(r.selection.modelRuntime, runtime);
   assert.equal(r.warning, undefined);
+});
+
+// --- resolveAuth over a REAL ModelRuntime — the native-provider saved-credential case ------------
+//
+// Each runtime is built inline so nothing sits between `registerNativeProvider` and the first
+// snapshot read. On Pi ≤ 0.99.1 `registerNativeProvider` set no provisional entry, so initial
+// model selection could read an unconfigured snapshot and fall back or warn (upstream #9962);
+// Pi 0.99.2 marks a provider with a stored credential configured synchronously
+// (`markProvisionallyConfigured`). The faux provider carries TWO models so a saved non-first
+// default is distinguishable from the first-available fallback.
+
+async function twoModelFaux() {
+  const piAi = await loadSdkPiAi();
+  const faux = piAi.fauxProvider({ models: [{ id: "faux-1" }, { id: "faux-2" }] });
+  const providerId = faux.provider.id;
+  const [first, second] = faux.models.map((model) => model.id);
+  assert.ok(first && second && first !== second, "the faux provider exposes two distinct models");
+  return { piAi, faux, providerId, first, second };
+}
+
+type NativeProvider = Parameters<ModelRuntime["registerNativeProvider"]>[0];
+
+async function runtimeOver(
+  piAi: Awaited<ReturnType<typeof loadSdkPiAi>>,
+  storedCredentialFor: string | undefined,
+): Promise<ModelRuntime> {
+  const store = new piAi.InMemoryCredentialStore();
+  if (storedCredentialFor !== undefined) {
+    await store.modify(storedCredentialFor, async () => ({ type: "api_key", key: "test-key" }));
+  }
+  const runtime = await ModelRuntime.create({
+    credentials: store,
+    modelsPath: null,
+    refreshOnCreate: false,
+  });
+  // Populates the snapshot's `storedProviders` from the credential store.
+  await runtime.refresh({ allowNetwork: false });
+  return runtime;
+}
+
+function availableIds(runtime: ModelRuntime, providerId: string): string[] {
+  return runtime
+    .getAvailableSnapshot()
+    .filter((model) => model.provider === providerId)
+    .map((model) => model.id);
+}
+
+test("resolveAuth (real runtime): a stored-credential native provider is configured synchronously on registration", async () => {
+  const { piAi, faux, providerId, first, second } = await twoModelFaux();
+  const runtime = await runtimeOver(piAi, providerId);
+  runtime.registerNativeProvider(faux.provider as NativeProvider);
+  // Synchronous reads — no await between registration and the snapshot.
+  assert.deepEqual(availableIds(runtime, providerId), [first, second]);
+  assert.equal(runtime.hasConfiguredAuth(providerId), true);
+  const selection = new WorkerModelSelection(runtime);
+  assert.equal(await resolveAuth(selection), selection, "no no_model fail-fast");
+});
+
+test("resolveAuth (real runtime) control: without a stored credential the provider is available only after the async refresh", async () => {
+  const { piAi, faux, providerId, first, second } = await twoModelFaux();
+  const runtime = await runtimeOver(piAi, undefined);
+  runtime.registerNativeProvider(faux.provider as NativeProvider);
+  assert.deepEqual(availableIds(runtime, providerId), [], "not available synchronously");
+  assert.equal(runtime.hasConfiguredAuth(providerId), false);
+  await runtime.refresh({ allowNetwork: false });
+  assert.deepEqual(availableIds(runtime, providerId), [first, second]);
+});
+
+test("initial model selection (real runtime): a saved non-first default is honoured; no default falls back to the first", async () => {
+  const { piAi, faux, providerId, first, second } = await twoModelFaux();
+  const runtime = await runtimeOver(piAi, providerId);
+  runtime.registerNativeProvider(faux.provider as NativeProvider);
+  const dir = mkdtempSync(join(tmpdir(), "perk-sdk-adapter-"));
+  const sessionFor = async (settings: Parameters<typeof SettingsManager.inMemory>[0]) => {
+    const settingsManager = SettingsManager.inMemory(settings);
+    // Never reloaded: a fresh DefaultResourceLoader is empty by construction, and
+    // createAgentSession reloads only a loader it builds itself.
+    const resourceLoader = new DefaultResourceLoader({ cwd: dir, agentDir: dir, settingsManager });
+    const { session } = await createAgentSession({
+      cwd: dir,
+      agentDir: dir,
+      modelRuntime: runtime,
+      settingsManager,
+      sessionManager: SessionManager.inMemory(dir),
+      resourceLoader,
+    });
+    return session;
+  };
+  const sessions: { dispose(): void }[] = [];
+  try {
+    const withDefault = await sessionFor({ defaultProvider: providerId, defaultModel: second });
+    sessions.push(withDefault);
+    const withoutDefault = await sessionFor({});
+    sessions.push(withoutDefault);
+    assert.deepEqual([withDefault.model?.provider, withDefault.model?.id], [providerId, second]);
+    assert.deepEqual(
+      [withoutDefault.model?.provider, withoutDefault.model?.id],
+      [providerId, first],
+      "the control arm takes the first-available fallback",
+    );
+  } finally {
+    for (const session of sessions) session.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

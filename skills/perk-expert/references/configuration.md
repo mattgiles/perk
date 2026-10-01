@@ -92,6 +92,15 @@ machine-local store behind the one-line post-upgrade notice (the `perk release-n
 the max perk version this user has run interactively. Self-healing (missing/garbled content is
 silently re-recorded) and safe to delete; no doctor check or init convergence touches it.
 
+**The perk-managed `.pi/settings.json` slice pins pi-subagents.** The borrowed set is unpinned
+except `npm:pi-subagents@0.73.1`: pi-subagents 0.74.0 removed the `workflowScript` RPC spawn
+parameter perk's report waves send, so `perk init` writes the pinned spec and rewrites an existing
+unpinned or differently pinned entry in place (an object-form entry keeps its filter keys; only
+`source` changes); `perk doctor` reports such an entry as `settings-wiring` drift and `perk doctor
+--fix` repairs it. Pi reinstalls the pinned version at the next launch. The doctor
+`subagent-compat` stamp (`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`) records what perk's guidance was
+verified against — a separate fact from this pin.
+
 **The perk-managed `.pi/settings.json` slice keeps a load order.** Besides converging the
 `packages` set (perk's pinned entry, the borrowed set, the provider-selected packages), `perk init`
 and `perk doctor --fix` keep perk's own entry **ahead of** `npm:pi-subagents` and

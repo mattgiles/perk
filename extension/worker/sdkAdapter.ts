@@ -68,6 +68,19 @@ export interface DriveSessionLike {
    * `no_extension_tools`) instead of burning the budget on a tool-less session.
    */
   extensionRunner?: { getAllRegisteredTools(): { definition: { name: string } }[] };
+  /**
+   * Optional (presence-gated): the agent whose `finishTurn` hook the handle wraps so a turn cap
+   * ends the run AT the cap. Pi's agent loop never re-checks the abort signal between turns, so
+   * an abort fired on the cap's `turn_end` still starts one more turn; `{ action: "end" }` from
+   * `finishTurn` is the loop's own "no further request" decision. Method syntax keeps the
+   * structural check bivariant against pi-agent-core's `FinishTurn`.
+   */
+  agent?: { finishTurn?(turn: DriveTurn, signal?: AbortSignal): unknown };
+}
+
+/** The slice of pi-agent-core's `AgentTurnContext` the turn gate reads. */
+export interface DriveTurn {
+  message?: DriveEvent["message"];
 }
 
 /** The runtime surface (structurally satisfied by pi's `AgentSessionRuntime`). */
@@ -134,11 +147,7 @@ function toolErrorMessage(event: DriveEvent): string {
  * retry off — audit §B #4).
  */
 export function translateEvent(event: DriveEvent): StageEvent | null {
-  if (event.type === "turn_end") {
-    const usage = event.message?.usage;
-    const freshTokens = usage ? Math.max(0, usage.input ?? 0) + Math.max(0, usage.output ?? 0) : 0;
-    return { kind: "turn_ended", freshTokens };
-  }
+  if (event.type === "turn_end") return { kind: "turn_ended", freshTokens: freshTokensOf(event) };
   if (event.type === "tool_execution_end") {
     const details = detailsOf(event.result);
     const ok = typeof details?.ok === "boolean" ? details.ok === true : !event.isError;
@@ -159,6 +168,19 @@ export function translateEvent(event: DriveEvent): StageEvent | null {
   }
   return null;
 }
+
+/** A turn's fresh-work tokens (`input + output`; see `StageEvent.turn_ended.freshTokens`). */
+function freshTokensOf(turn: DriveTurn): number {
+  const usage = turn.message?.usage;
+  return usage ? Math.max(0, usage.input ?? 0) + Math.max(0, usage.output ?? 0) : 0;
+}
+
+/**
+ * The seam's turn-boundary verdict, asked once per finished turn BEFORE its `turn_end`: `true`
+ * ends the run there (no next turn starts). Receives the turn's fresh-work tokens — the same sum
+ * the following `turn_ended` event carries — so the seam can decide on the post-turn counters.
+ */
+export type EndRunAfterTurn = (turn: { freshTokens: number }) => boolean;
 
 // --- the drive-session handle --------------------------------------------------------------------
 
@@ -184,24 +206,48 @@ function headlessBinding(): {
  * Rebinding unsubscribes the prior raw listener first so events are never double-counted. The
  * handle is private to the confined pair (seam ↔ adapter); the seam's fake-session injection
  * seam (`deps.createRuntime` returning `DriveRuntimeLike`) is unchanged.
+ *
+ * `endRunAfterTurn` (optional) is installed as a wrapper over the bound agent's `finishTurn` —
+ * after the session's own hook (which dispatches the extension `turn_end` boundary), so an
+ * earlier `end` decision always stands — and removed on rebind and dispose. A session that
+ * exposes no `agent` (the seam's fakes) skips the gate; the seam's abort still stops it.
  */
 export function createDriveSession(
   runtime: DriveRuntimeLike,
   listener: (event: StageEvent) => void,
+  endRunAfterTurn?: EndRunAfterTurn,
 ) {
   const binding = headlessBinding();
   let bound: DriveSessionLike = runtime.session;
   let unsubscribe: (() => void) | null = null;
+  let uninstallGate: (() => void) | null = null;
   let retainedAbort: Promise<void> | null = null;
   const rawListener = (event: DriveEvent): void => {
     const translated = translateEvent(event);
     if (translated !== null) listener(translated);
   };
 
+  function installGate(target: DriveSessionLike): (() => void) | null {
+    const agent = target.agent;
+    if (!endRunAfterTurn || !agent) return null;
+    const previous = agent.finishTurn;
+    const gate = async (turn: DriveTurn, signal?: AbortSignal): Promise<unknown> => {
+      const decision = await previous?.call(agent, turn, signal);
+      if ((decision as { action?: unknown } | undefined)?.action === "end") return decision;
+      return endRunAfterTurn({ freshTokens: freshTokensOf(turn) }) ? { action: "end" } : decision;
+    };
+    agent.finishTurn = gate;
+    return () => {
+      if (agent.finishTurn === gate) agent.finishTurn = previous;
+    };
+  }
+
   async function bindTo(target: DriveSessionLike): Promise<void> {
     if (unsubscribe) unsubscribe();
+    uninstallGate?.();
     await target.bindExtensions(binding);
     unsubscribe = target.subscribe(rawListener);
+    uninstallGate = installGate(target);
     bound = target;
   }
 
@@ -266,6 +312,8 @@ export function createDriveSession(
         console.error(`perk worker: listener unsubscribe threw — ${String(err)}`);
       }
       unsubscribe = null;
+      uninstallGate?.();
+      uninstallGate = null;
       try {
         await runtime.dispose();
       } catch (err) {

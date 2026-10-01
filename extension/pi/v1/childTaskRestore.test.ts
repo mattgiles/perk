@@ -369,12 +369,16 @@ test("acceptance latch (idle): an executed report ends restoring; a rejected one
 // pre-request estimate counts it once, so a threshold between the two compacts only AFTER a
 // request. Summarization requests (Pi issues a history and a split-turn-prefix summary here —
 // the read-only context injection follows the task) are answered by a router, so the script
-// counts only the lane's own model turns.
+// counts only the lane's own model turns. Both carry Pi's summarization system prompt; the
+// transcript framing differs (`<conversation>` for history, `# Conversation` for the turn prefix
+// since Pi 0.99), so the router keys on the shared system prompt.
 const LONG_TASK = `Task: Angle: grounding\n\n<untrusted_draft>\n${"a draft line\n".repeat(9500)}</untrusted_draft>`;
 const CONTEXT_WINDOW = 120_000;
 const RESERVE_TOKENS = 60_000;
 
 type FauxContext = { messages: { role: string; content?: unknown }[] };
+
+const SUMMARIZATION_SYSTEM_MARKER = "You are a context summarization assistant.";
 type LaneTurn = (context: FauxContext) => ReturnType<typeof fauxAssistantMessage>;
 
 async function laneWithPostRunCompaction(turns: LaneTurn[]) {
@@ -399,7 +403,7 @@ async function laneWithPostRunCompaction(turns: LaneTurn[]) {
   let summaries = 0;
   let unexpected = 0;
   const route = (context: FauxContext) => {
-    if (JSON.stringify(context.messages).includes("<conversation>")) {
+    if (JSON.stringify(context.messages).includes(SUMMARIZATION_SYSTEM_MARKER)) {
       summaries++;
       return fauxAssistantMessage([fauxText("summary: the lane reviewed the draft")]);
     }

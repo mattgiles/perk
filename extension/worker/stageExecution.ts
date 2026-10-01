@@ -542,6 +542,21 @@ export async function runStage(
     handle?.abort();
   }
 
+  // The turn-boundary gate: a turn that reaches the cap ends the run at its own boundary, so no
+  // next turn starts (Pi's loop does not re-check the abort signal between turns). The following
+  // `turn_ended` still folds the counters and trips the watchdog, which records the verdict and
+  // aborts the session's post-run continuation. A run already tripped ends at the next boundary.
+  const endRunAfterTurn = (turn: { freshTokens: number }): boolean => {
+    if (settled) return false;
+    if (terminationReason !== "natural") return true;
+    const after = {
+      ...counters,
+      turns: counters.turns + 1,
+      tokens: counters.tokens + turn.freshTokens,
+    };
+    return budgetTripped(after, opts.budget);
+  };
+
   const onSignal = (): void => trip("abort");
 
   try {
@@ -563,7 +578,7 @@ export async function runStage(
       }
       runtime = await defaultCreateRuntime(opts.worktree, resolved);
     }
-    handle = createDriveSession(runtime, listener);
+    handle = createDriveSession(runtime, listener, endRunAfterTurn);
     await handle.bind();
     bound = true;
 

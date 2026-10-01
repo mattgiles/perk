@@ -92,6 +92,12 @@ purely by what you pass: `cwd = worktree` (so project `.pi/settings.json` packag
 out). Do **not** try to hand-build a loader for the runtime factory — that's the read-only path's
 shape, not this one.
 
+**SDK sessions load none of Pi's CLI built-in extensions.** Since Pi 0.99 the CLI loads
+`codemode`, `tool_search` and MCP as `builtin:<name>` extensions; an SDK-constructed session
+(this runtime-factory path, bare `createAgentSession`) loads them only when the caller supplies
+their factories through `extensionFactories` (the package's SDK guide, `sdk.md`). The worker and
+`/btw` supply none, so neither surface gains those tools by construction.
+
 ## A pi SDK pin bump is a session-construction migration audit, not a "verified non-break"
 
 pi 0.84 replaced the `AuthStorage`/`ModelRegistry` session-creation inputs with ONE async
@@ -239,7 +245,8 @@ alphabetically and so surfaced the *oldest* model — dated history, not the liv
 workflow-level story is in `docs/learned/workflow/remote-runner.md`).
 
 The correct shape: pass `model: undefined` to `createAgentSessionFromServices`/`createAgentSession`.
-That engages the SDK's **own initial-model resolution** — settings `defaultModel` → pi's curated
+That engages the SDK's **own initial-model resolution** (`findInitialModel`) — the saved settings
+`defaultProvider`/`defaultModel` (only when that provider `hasConfiguredAuth`) → pi's curated
 per-provider defaults → first available — which picks a current-generation model. Mechanism fact:
 the package root exports the CLI/scope resolvers (`resolveCliModel`,
 `resolveModelScopeWithDiagnostics`) but NOT `findInitialModel` / `defaultModelPerProvider`
@@ -248,11 +255,34 @@ remains the only sanctioned route to the initial-model chain. The explicit `--mo
 resolves through `resolveCliModel` (fuzzy matching, `provider/pattern`, `:thinking` — parity with
 interactive launch; `resolveWorkerModel` in `extension/worker/sdkAdapter.ts`); keep the
 zero-available-models fail-fast unchanged — only the *default* defers to the SDK.
+Because the chain ends in a first-available fallback, a one-model fixture cannot tell "honoured
+the saved default" from "fell back" — pin a saved default with a NON-first model beside a
+no-default control (`sdkAdapter.test.ts`, the native-provider saved-credential section).
 
 Landed shape: `extension/worker/sdkAdapter.ts` (`resolveAuth` returns `model: undefined` unless
 explicit; `sdkAdapter.test.ts` pins it). Because the SDK may have picked the model, the worker logs
 `perk worker: model <provider>/<id>` **post-creation** — read the pick off `session.model`, don't
 recompute it.
+
+### Native-provider availability at initial model selection
+
+Since Pi 0.99.2 `ModelRuntime.registerNativeProvider` marks the provider configured
+**synchronously** (`markProvisionallyConfigured`) when the runtime's snapshot already lists a
+stored credential for it (`storedProviders`, rebuilt from the credential store by the async
+`refresh()`) or its config carries a configured key — so a `getAvailableSnapshot()` /
+`hasConfiguredAuth()` read right after registration (what initial model selection does) sees
+its models. Earlier dists set no provisional entry: the provider became available only after
+the registration's own fire-and-forget `refresh({ allowNetwork: false })` settled, so initial
+selection could read an unconfigured snapshot and fall back or warn. A provider with neither a
+stored credential nor a configured key still becomes available only through that async
+refresh (the path `fauxModelRuntime` relies on). Pinned in `sdkAdapter.test.ts` against a real
+`ModelRuntime`, with a credential-less control.
+
+Production ORDER caveat: `runStage` calls `resolveAuth` (the `no_model` fail-fast over
+`getAvailableSnapshot()`) on the adapter-minted runtime BEFORE `defaultCreateRuntime` loads
+extension resources — so a provider an extension registers at load is not in the worker's
+snapshot at `resolveAuth` time. The pins above exercise an already-registered runtime, not
+that order.
 
 ## One real prompt turn is load-bearing when observing `hasUI`-keyed tool reconciliation
 
@@ -329,6 +359,12 @@ the corrections are the durable knowledge.
     (`extension/worker/stageExecution.ts`) fails fast instead).
 - **Injected `eventSink` and the default NDJSON file sink are mutually exclusive per drive** — to
   assert both the in-process stream and the on-disk NDJSON, drive the scenario twice.
+- **A faux script that must answer Pi's compaction requests keys on the summarization system
+  prompt, not the transcript framing.** The history summary wraps the transcript in
+  `<conversation>`; since 0.99 the split-turn-prefix summary uses a `# Conversation` heading, so
+  a `<conversation>`-keyed router miscounts the turn-prefix request as a model turn. Both share
+  `SUMMARIZATION_SYSTEM_PROMPT` (`dist/core/compaction/utils.js`), which the faux provider sees
+  as a `system` message (`extension/pi/v1/childTaskRestore.test.ts`).
 
 Process notes that held up: `git init -q` the temp worktree so the resource loader's ancestor
 skills-walk stops there; save/restore every mutated `process.env` key in `finally` (the hermetic
@@ -420,7 +456,8 @@ check the root export list before importing a Pi type by name; mirror/derive dee
 
 - `@earendil-works/pi-coding-agent` dist —
   `dist/core/{agent-session,agent-session-services,sdk}.{js,d.ts}`,
-  `dist/core/{model-registry,model-runtime,settings-manager}.js`, `dist/core/model-resolver.d.ts`,
+  `dist/core/{model-registry,model-runtime,model-resolver,settings-manager,session-manager,resource-loader}.js`,
+  `dist/core/model-resolver.d.ts`, the package's SDK guide (`sdk.md`),
   `dist/core/compaction/compaction.js`, `dist/modes/rpc/*`, and the nested `@earendil-works/pi-ai`
   (`package.json` `exports`, `dist/compat.d.ts`) — at the version `package.json` `devDependencies`
   pins. The `@earendil-works/*` devDependency pins move in lockstep (the set
@@ -431,11 +468,15 @@ check the root export list before importing a Pi type by name; mirror/derive dee
   section above): re-read every `createAgentSession` / `createAgentSessionServices` call site AND
   every dist-scoped fact here against the newly *installed* dist (resolved per
   `toolchain/worktree-node-modules.md`), correct or date what changed. Last full re-verification:
-  the `0.87.0` dist (the `createAgentSession` initial-state read from `buildSessionContext()`, the
-  request-time `_installAgentRequestProjection` rebuild, `ModelRegistry.streamSimple`, and the
-  provider-facing `TranscriptContext` — tool declarations ride system-message deltas, so a faux
-  provider reads the model-visible census with `getCurrentTools(context.messages)`) — provenance,
-  not a currency promise; the pin is.
+  the `0.99.2` dist — every call site above (`sdkAdapter.ts`, `harness.ts`, `btw.ts`,
+  `contextEvidence.ts`) needed no migration; newly recorded: `registerNativeProvider`'s
+  synchronous stored-credential configuration, SDK sessions loading no CLI built-ins,
+  `findInitialModel`'s auth-gated saved default and first-available fallback, the worker's
+  `resolveAuth`-before-extension-load order, and the turn-prefix summary's `# Conversation`
+  framing; re-confirmed: the `createAgentSession` initial-state read from `buildSessionContext()`,
+  the request-time `_installAgentRequestProjection` rebuild, `ModelRegistry.streamSimple` and its
+  private `runtime` field, and the provider-facing `TranscriptContext` (`getCurrentTools`). The
+  prior full pass was the `0.87.0` dist — provenance, not a currency promise; the pin is.
 
 ## Cross-references
 

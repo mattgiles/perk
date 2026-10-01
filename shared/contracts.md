@@ -2857,11 +2857,15 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   `workflow_artifacts.py`); the self-repo still wires `..`. `_merge_static_packages` rewrites perk's
   own `packages` entry **in place** (list position preserved) when its `@mgiles/perk` identity already
   exists but the full spec differs from the desired pin — so a stale `npm:@mgiles/perk@0.0.0` is
-  reconciled to `@{__version__}` (extra string duplicates of that identity collapse to one). Only
-  perk's own npm identity is version-reconciled; borrowed npm packages normally stay
-  unpinned/append-only (distinguished by `_npm_name` identity vs `_npm_name(NPM_PACKAGE)`), and a
-  user's other packages are never in the desired set so they stay untouched/append-only. The one
-  managed-filter exception is `npm:@dietrichgebert/ponytail`: desired settings always carry one
+  reconciled to `@{__version__}` (extra string duplicates of that identity collapse to one).
+  perk's own identity and any **version-carrying** desired borrowed spec (today
+  `npm:pi-subagents@0.73.1` — `SUBAGENTS_PACKAGE`, pinned because pi-subagents 0.74.0 removed the
+  `workflowScript` RPC `spawn` parameter perk's report waves send) are version-reconciled
+  forward through the same in-place rewrite (`_reconcile_pinned_entry`, selected by the desired
+  spec carrying an `_npm_version`), so an existing consumer's unversioned or stale-pinned entry is
+  `settings-wiring` drift that `perk init` converges and `doctor --fix` repairs; unversioned
+  borrowed specs stay append-only, and a user's other packages are never in the desired set so
+  they stay untouched/append-only. The one managed-filter exception is `npm:@dietrichgebert/ponytail`: desired settings always carry one
   object entry with `extensions`/`skills`/`prompts`/`themes: []`. Reconciliation chooses the first
   object donor else first match, preserves its exact source pin, non-filter metadata, position
   relative to unrelated entries, forces all four filters empty, converts a string donor, and drops
@@ -3421,7 +3425,7 @@ ignores the keys (the documented fail-safe posture, pinned by test on both plane
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
 `_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
-`npm:pi-subagents`, `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
+`npm:pi-subagents@0.73.1` (the one version-pinned borrow, §8.6a), `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
 perk injects **no** pi-fff search mode at either spawn site (local `_exec_pi`, remote
 `_spawn_worker`): pi-fff runs under its own precedence (CLI flag → `PI_FFF_MODE` → `pi-fff.json`
 → its additive `tools-and-ui` default, which keeps pi's builtin `find`/`grep` beside
@@ -3676,7 +3680,12 @@ The drive terminates on the **first** of:
    `ctx.signal`-aware shelled tools `submit`/`finalize_address`/`run_ci`): the watchdog →
    `budget_exhausted`/`budget`; the external `signal` → `aborted`/`external_abort` — an abort
    observed at the entry or pre-prompt sample returns `aborted`/`external_abort` directly (zero
-   turns; no `session.abort()` is fired on an idle session).
+   turns; no `session.abort()` is fired on an idle session). A **turn cap ends the run at the
+   cap**: Pi's agent loop does not re-check the abort signal between turns, so the adapter wraps
+   the agent's `finishTurn` hook (after the session's own) and returns `{ action: "end" }` for
+   the turn whose post-turn counters trip the budget (or any turn after a trip) — no next turn
+   starts and no provider request follows, so `budget.turns` never exceeds `maxTurns`. A session
+   without an `agent` (a test fake) relies on the abort alone.
 4. **Post-acceptance model error** (with retry off, an assistant `message_end` with
    `stopReason:"error"`) → `failed`/`model_error`.
 

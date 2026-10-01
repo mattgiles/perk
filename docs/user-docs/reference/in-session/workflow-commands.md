@@ -466,7 +466,11 @@ each resolution into the draft, removes the section, and only then requests revi
 
 Verify that converged context reached the live prompt, then report identifier/count/byte censuses
 for the append prompt, context files, skill catalog, active tool definitions grouped by source, and
-perk branch context. `perk doctor` checks disk; `/perk-selfcheck` checks prompt delivery. It also
+perk branch context — each injected context type's historical copies on the branch beside a
+`live=<n>` count of the copies in Pi's current context projection (after compaction and context
+edits; `?` if that read fails). `live=` is counted before extension `context` filters run, so it
+is an upper bound on what the next model request carries — a filter can still drop a projected
+copy (perk drops its read-only mode guidance once `/plan` is off, for instance). `perk doctor` checks disk; `/perk-selfcheck` checks prompt delivery. It also
 reports the host SDK bridge state — `bridge=<state>` in the summary line and a `native sdk bridge:`
 census block naming the SDK entry and the bridged package roots (see
 [Host SDK bridge](../requirements-and-compatibility.md#host-sdk-bridge)). It is report-only and

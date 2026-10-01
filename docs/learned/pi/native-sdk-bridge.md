@@ -21,6 +21,13 @@ Pi's `VIRTUAL_MODULES`/alias map and resolve `@earendil-works/*` from `node_modu
 package shares the host SDK. Measured effect (n=1 — re-measure, never copy;
 `docs/design/archive/perk-startup-baseline.md`): SDK modules outside the host root 2,799 → 0.
 
+> **Update (2026-10-01):** re-verified against pi-coding-agent 0.99.2 (jiti 2.7.0 as installed):
+> the npm build's extension loader still hands jiti `{ alias: getAliases() }`
+> (`dist/core/extensions/loader.js::loadExtensionModule`; virtual modules only for compiled/bundled
+> builds), so compiled-`.js` entries still bypass the alias map; the census drift guard passes
+> against the installed pi-subagents 0.73.1 / pi-web-access 0.33.0
+> (`docs/design/archive/pi-0.99.2-baseline-verification.md`).
+
 ## Pi package load order and the `perk init` ordering rule
 
 Pi loads `packages` sequentially in project-settings array order (all package resources share one

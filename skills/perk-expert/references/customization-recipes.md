@@ -236,9 +236,10 @@ stays active for the packages it already serves, and this copy installed none.
 
 ## Keep pi-subagents out of user-scope settings (`subagent-package-scope`)
 
-perk converges `npm:pi-subagents` into the **project** `.pi/settings.json` on purpose: the engine
-is a per-repo borrow perk's `perk.*` agent definitions and wave RPC ride on, so it belongs beside
-the other project packages `perk init` manages. A second `npm:pi-subagents` in your **user-scope**
+perk converges `npm:pi-subagents@0.73.1` (pinned — 0.74.0 breaks perk's report waves) into the
+**project** `.pi/settings.json` on purpose: the engine is a per-repo borrow perk's `perk.*` agent
+definitions and wave RPC ride on, so it belongs beside the other project packages `perk init`
+manages. A second `npm:pi-subagents` in your **user-scope**
 pi settings (`settings.json` in the launch-precedence agent dir — `PI_CODING_AGENT_DIR` →
 `[pi] agent_dir` → `~/.pi/agent`; typically the result of a global `pi install npm:pi-subagents`)
 is harmless to pi's package loading (it dedupes by identity, project wins) but not to perk's waves.
