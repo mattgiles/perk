@@ -35,11 +35,13 @@ import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/session
 import { digestSessionData } from "../../substrate/sessionData.ts";
 import { readSessionPointers } from "../../substrate/sessionPointers.ts";
 import { readOnlyContext, type ToolGating } from "../../substrate/toolGating.ts";
+import { gatedToolsFor, toolMatrix } from "../../substrate/toolPolicy.ts";
 import type { BranchEntry, EntrySink } from "../../substrate/workflowState.ts";
 import { rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
 import {
   fakePerk,
+  gitInit,
   loadPerkSession,
   plantSession,
   scaffoldRepo,
@@ -48,6 +50,7 @@ import {
 import { approvalSave, decodePlanDraftParams, decodePlanSaveParams } from "./plan.ts";
 import { implementHereGuidance } from "./planReview.ts";
 import { PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE } from "./providers/plannotator.ts";
+import { PLANNOTATOR_REVIEW_COMMAND } from "./providers/plannotatorHandoff.ts";
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
@@ -1862,6 +1865,86 @@ test("/implement-here: a seeded node claim refuses; gate stays on, nothing injec
     );
     assert.equal(h.workflowState().mode, "read-only", "the gate stays on");
     assert.equal(injected.length, 0, "nothing injected");
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- the /plan flow is completable wherever the toggle lands (mode-over-stage) ------------------
+
+/** The scan universe's names a text mentions (the prompt guard's match rule). */
+function namedTools(text: string): string[] {
+  return Object.entries(toolMatrix().tools)
+    .filter(([, entry]) => entry.owner !== "builtin")
+    .map(([name]) => name)
+    .filter((name) =>
+      (name.includes("_") ? new RegExp(`\\b${name}\\b`) : new RegExp(`\`${name}\``)).test(text),
+    );
+}
+
+test("gated worktree session: /plan → plan_review → reviewer wave names only gated-eligible tools, companions unblocked", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
+  gitInit(cwd, { dirty: false });
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "config.toml"), '[providers]\nplan = "plannotator-plan"\n');
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    extraExtensions: [
+      (pi) => {
+        // A fake plannotator: presence, the handshake, then an immediate deny (no browser).
+        pi.registerCommand(PLANNOTATOR_REVIEW_COMMAND, {
+          description: "fake plannotator (presence probe target)",
+          handler: async () => {},
+        });
+        pi.events.on("plannotator:request", (data) => {
+          const req = data as { respond?: (r: unknown) => void };
+          req.respond?.({ status: "handled", result: { status: "pending", reviewId: "rev-wt" } });
+          setTimeout(() => {
+            pi.events.emit("plannotator:review-result", {
+              reviewId: "rev-wt",
+              approved: false,
+              feedback: "worktree deny",
+            });
+          }, 0);
+        });
+      },
+    ],
+  });
+  try {
+    await h.invokeCommand("plan");
+    assert.equal(h.workflowState().mode, "read-only");
+    assert.equal(h.workflowState().stage, "implement", "the toggle is a pure mode gesture");
+    const written = await h.invokeTool("plan_draft", { plan: "# A plan in a worktree\n" });
+    assert.equal((written.details as { ok?: boolean }).ok, true, "the draft landed");
+    const result = await h.invokeTool(
+      "plan_review",
+      {},
+      {
+        ui: {
+          select: async (_title: string, options: string[]) =>
+            options.find((o) => /reviewer wave/.test(o)),
+          input: async () => undefined,
+        },
+      },
+    );
+    assert.equal((result.details as { status?: string }).status, "wave_launched");
+    const named = namedTools(String(result.content[0]?.text));
+    const companions = ["start_draft_review_wave", "collect_draft_review_wave", "push_annotations"];
+    for (const name of companions) assert.ok(named.includes(name), `the guidance names ${name}`);
+    const gated = new Set(gatedToolsFor("implement"));
+    assert.deepEqual(
+      named.filter((name) => !gated.has(name)),
+      [],
+      "every tool the wave guidance names is in the implement stage's gated view",
+    );
+    for (const name of companions) {
+      assert.notEqual((await h.emitToolCall(name, {}))?.block, true, `${name} is not blocked`);
+    }
+    // Let the fake's deny route through the door's background task before disposing.
+    for (let i = 0; i < 40 && !h.notifies.some((n) => /DENIED/.test(n)); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
   } finally {
     h.dispose();
   }

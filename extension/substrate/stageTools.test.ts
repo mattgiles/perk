@@ -23,6 +23,7 @@ import { PLAN_AUTHORING_CONTEXT } from "../authoring/plan/prose.ts";
 import { REFINEMENT_CONTEXT } from "../authoring/refinement/prose.ts";
 import { prReviewGuidance } from "../pi/v1/codeReview/automated.ts";
 import { stackReviewGuidance } from "../pi/v1/codeReview/stack.ts";
+import { prReviewTerminalGuidance } from "../pi/v1/codeReview/terminal.ts";
 import { isPlanGuidanceStage } from "../pi/v1/contextInjection.ts";
 import {
   commitAndCompactContinuation,
@@ -35,6 +36,7 @@ import {
   syncConflictResolutionGuidance,
 } from "../pi/v1/delivery/stackSync.ts";
 import { draftAndCompactContinuation, draftAndCompactGuidance } from "../pi/v1/draftCompact.ts";
+import { gistSaveGuidance } from "../pi/v1/gist.ts";
 import { simplifyGuidance } from "../pi/v1/simplify.ts";
 import { retainedDispatch } from "../testing/fakeConflictResolver.ts";
 import {
@@ -54,6 +56,7 @@ import {
   dietUniverse,
   FFF_SEARCH_TOOLS,
   FOREIGN_TOOL_POLICY,
+  GIST_STAGES,
   gatedToolsFor,
   isEligible,
   LINEAR_MUTATING_TOOLS,
@@ -1455,6 +1458,18 @@ const DRIVE_COVERAGE: readonly {
     drive: "stages/simplify.md (/simplify-objective)",
     landings: rw(["objective-author", "objective-save"]),
     text: () => simplifyGuidance({ subject: "objective", intensity: "ultra", nodeScoped: false }),
+  },
+  {
+    // The draftless /gist-save fallback exits the gate first; the save tool is the gist pair's.
+    drive: "stages/gist-save.md (/gist-save)",
+    landings: rw(GIST_STAGES),
+    text: () => gistSaveGuidance("Test gist"),
+  },
+  {
+    drive: "stages/pr-review-terminal/local.md",
+    landings: rw(WORKTREE_STAGES),
+    text: () => prReviewTerminalGuidance({ mode: "local", worktree: "/tmp/wt", baseSha: "abc123" }),
+    namesNoTools: true,
   },
   {
     drive: "stages/objective-save.md",
