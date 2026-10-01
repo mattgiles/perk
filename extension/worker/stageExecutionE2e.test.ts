@@ -115,7 +115,7 @@ async function runDrive(opts: {
     const argv = opts.captureArgv
       ? readFileSync(argvFile, "utf8").trim().split("\n").filter(Boolean)
       : [];
-    return { outcome, events, cwd, runId, argv };
+    return { outcome, events, cwd, runId, argv, providerCalls: reg.callCount() };
   } finally {
     // No global registry teardown needed: the faux provider lives on the per-run ModelRuntime.
     for (const [key, value] of savedEnv) {
@@ -406,7 +406,7 @@ test("e2e: EXTERNAL-ABORT — a mid-drive abort ends the real session → aborte
 
 test("e2e: BUDGET — the turn cap trips the watchdog on the real session → budget_exhausted/budget", async () => {
   const maxTurns = 1;
-  const { outcome, events } = await runDrive({
+  const { outcome, events, providerCalls } = await runDrive({
     stage: "implement",
     responses: [
       fauxAssistantMessage([fauxToolCall("read", { path: ".pi/settings.json" })], {
@@ -422,11 +422,11 @@ test("e2e: BUDGET — the turn cap trips the watchdog on the real session → bu
   assert.equal(outcome.status, "budget_exhausted");
   assert.equal(outcome.terminal_signal, "budget");
   assert.equal(outcome.error?.type, "budget");
-  // The watchdog trips on the cap's turn_end, but Pi's agent loop does not re-check the signal
-  // between turns: the next turn starts, its stream ends `aborted`, and that turn still emits a
-  // turn_end the counters record — so the real runtime reports cap + 1 (a FakeSession stops at
-  // the cap). The guarantee is that nothing past the cap executes.
-  assert.equal(outcome.budget.turns, maxTurns + 1);
+  // Pi's agent loop does not re-check the abort signal between turns, so an abort on the cap's
+  // turn_end alone would still start one more turn. The finishTurn gate ends the run AT the cap:
+  // the counters stop there and the scripted second response is never requested.
+  assert.equal(outcome.budget.turns, maxTurns);
+  assert.equal(providerCalls, maxTurns, "no provider request past the cap");
   const tools = events.flatMap((e) => (e.kind === "tool_outcome" ? [e.tool] : []));
   assert.deepEqual(tools, ["read"], "no tool past the cap executed");
   assertMonotonicSeq(events);

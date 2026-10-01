@@ -3680,7 +3680,12 @@ The drive terminates on the **first** of:
    `ctx.signal`-aware shelled tools `submit`/`finalize_address`/`run_ci`): the watchdog →
    `budget_exhausted`/`budget`; the external `signal` → `aborted`/`external_abort` — an abort
    observed at the entry or pre-prompt sample returns `aborted`/`external_abort` directly (zero
-   turns; no `session.abort()` is fired on an idle session).
+   turns; no `session.abort()` is fired on an idle session). A **turn cap ends the run at the
+   cap**: Pi's agent loop does not re-check the abort signal between turns, so the adapter wraps
+   the agent's `finishTurn` hook (after the session's own) and returns `{ action: "end" }` for
+   the turn whose post-turn counters trip the budget (or any turn after a trip) — no next turn
+   starts and no provider request follows, so `budget.turns` never exceeds `maxTurns`. A session
+   without an `agent` (a test fake) relies on the abort alone.
 4. **Post-acceptance model error** (with retry off, an assistant `message_end` with
    `stopReason:"error"`) → `failed`/`model_error`.
 

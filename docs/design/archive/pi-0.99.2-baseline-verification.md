@@ -57,7 +57,8 @@ abort and budget over a `FakeSession`; `extension/worker/stageExecutionE2e.test.
 on the REAL 0.99.2 runtime with the faux provider: an external abort fired on the first
 `tool_outcome` → `aborted` / `external_abort`, monotonic `seq`, the scripted `submit` never runs;
 a `maxTurns: 1` budget → `budget_exhausted` / `budget`, no tool past the cap executes, and
-`outcome.budget.turns` is **cap + 1** (below). `extension/worker/sdkAdapter.test.ts` adds the
+`outcome.budget.turns` equals the cap with exactly one provider request — after the review fix
+below (the first real-runtime run read **cap + 1**). `extension/worker/sdkAdapter.test.ts` adds the
 native-provider saved-credential case over a real `ModelRuntime` (synchronous availability +
 `hasConfiguredAuth` + `resolveAuth` non-null; a credential-less control available only after the
 async refresh; a saved non-first default `faux-2` honoured beside a no-default control selecting
@@ -111,18 +112,25 @@ release; its read-only gate blocks them like any unlisted tool (tool-policy work
   activation rules are later work).
 - **Consumers pinned to pi-subagents 0.73.1** — the pi-subagents record's decision; it lands here
   because a fresh consumer install on 0.74.0 would break every perk wave on the new baseline.
-- **The real-runtime budget count is recorded, not changed.** The watchdog trips on the cap's
-  `turn_end`, but Pi's agent loop does not re-check the abort signal between turns: the next turn
-  starts, its stream ends `aborted`, and that turn still emits a `turn_end` the counters record —
-  so `RunOutcome.budget.turns` reads cap + 1 on the real runtime (a `FakeSession` stops at the cap).
-  No tool past the cap executes. The e2e test pins the observed count.
+- **The turn cap now ends the run at the cap (changed at review).** The watchdog trips on the
+  cap's `turn_end`, but Pi's agent loop does not re-check the abort signal between turns: the
+  next turn started (`prepareNextTurn` — where threshold auto-compaction can run —
+  `prepareRequest`, then a provider stream call on the aborted signal that ended `aborted`) and
+  its `turn_end` made `RunOutcome.budget.turns` read cap + 1, where a `FakeSession` stops at the
+  cap. The first draft recorded that count; the PR review asked for prevention instead. The
+  drive-session handle now wraps the agent's documented `finishTurn` hook (after the session's
+  own, which dispatches the extension `turn_end` boundary) and returns `{ action: "end" }` for the
+  turn whose post-turn counters trip the budget — the loop's own "no further request" decision.
+  The e2e test pins `turns === maxTurns` and one faux provider call; with the gate removed it
+  reads 2 for both (contracts §8.11's terminal-signal rule 3 carries the semantics).
 
 ## Falsified planning-time assumptions
 
 - "Only `selfcheck.test.ts::fakeTool` breaks under tsc" — `tools/prose-map/selector.ts`'s
   exhaustive `ToolDefinition` policy registry also failed (by design: a new SDK field forces a
   policy decision).
-- "The budget trip reports `turns` equal to the cap" — the real runtime reports cap + 1 (above).
+- "The budget trip reports `turns` equal to the cap" — the real runtime reported cap + 1 until
+  the `finishTurn` gate (above).
 - The full `node:test` suite was expected green after the type repairs; the split-turn-prefix
   summary's new `# Conversation` framing broke one faux router.
 

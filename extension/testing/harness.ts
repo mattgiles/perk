@@ -472,6 +472,8 @@ export async function fauxModelRuntime(options: { contextWindow?: number } = {})
   modelRuntime: ModelRuntime;
   getModel(): unknown;
   setResponses(responses: unknown[]): void;
+  /** Provider stream calls so far — counted even for a request whose signal was already aborted. */
+  callCount(): number;
 }> {
   const piAi = await loadSdkPiAi();
   // `faux-1` is the faux provider's default model id; only the window is overridden.
@@ -492,6 +494,7 @@ export async function fauxModelRuntime(options: { contextWindow?: number } = {})
     modelRuntime,
     getModel: () => faux.getModel(),
     setResponses: (responses) => faux.setResponses(responses as never),
+    callCount: () => faux.state.callCount,
   };
 }
 

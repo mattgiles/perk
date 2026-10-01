@@ -23,6 +23,7 @@ import {
   createDriveSession,
   type DriveEvent,
   type DriveSessionLike,
+  type DriveTurn,
   resolveAuth,
   resolveWorkerModel,
   type StageEvent,
@@ -208,6 +209,125 @@ test("createDriveSession: abort is idempotent — repeated trips launch exactly 
   handle.abort();
   handle.abort();
   assert.equal(session.abortCalls, 1, "later aborts are no-ops once one is retained");
+  await handle.dispose();
+});
+
+// --- the turn-boundary gate over the agent's finishTurn ------------------------------------------
+
+/** A fake agent whose `finishTurn` is the session's own hook (records calls, returns `inner`). */
+function gatedSession(inner: unknown): {
+  session: FakeSession & { agent: { finishTurn?(turn: DriveTurn, signal?: AbortSignal): unknown } };
+  innerCalls: DriveTurn[];
+  sessionHook: (turn: DriveTurn) => unknown;
+} {
+  const innerCalls: DriveTurn[] = [];
+  const sessionHook = (turn: DriveTurn): unknown => {
+    innerCalls.push(turn);
+    return inner;
+  };
+  const session = Object.assign(new FakeSession(() => {}), { agent: { finishTurn: sessionHook } });
+  return { session, innerCalls, sessionHook };
+}
+
+const usageTurn = (input: number, output: number): DriveTurn => ({
+  message: { role: "assistant", usage: { input, output, reasoning: 99 } },
+});
+
+test("createDriveSession: the gate runs the session's finishTurn first, then ends the run on the seam's verdict", async () => {
+  const { session, innerCalls } = gatedSession(undefined);
+  const asked: number[] = [];
+  const handle = createDriveSession(
+    { session, dispose() {} },
+    () => {},
+    (turn) => {
+      asked.push(turn.freshTokens);
+      return turn.freshTokens >= 10;
+    },
+  );
+  await handle.bind();
+  const finishTurn = session.agent.finishTurn;
+  assert.ok(finishTurn);
+  assert.equal(
+    await finishTurn(usageTurn(2, 3)),
+    undefined,
+    "below the verdict: normal scheduling",
+  );
+  assert.deepEqual(await finishTurn(usageTurn(4, 6)), { action: "end" });
+  assert.deepEqual(asked, [5, 10], "fresh tokens = input + output (reasoning excluded)");
+  assert.equal(innerCalls.length, 2, "the session's own hook (the turn_end boundary) always runs");
+  await handle.dispose();
+});
+
+test("createDriveSession: an earlier `end` decision stands and a `continue` survives a false verdict", async () => {
+  const ended = gatedSession({ action: "end" });
+  let asked = 0;
+  const h1 = createDriveSession(
+    { session: ended.session, dispose() {} },
+    () => {},
+    () => {
+      asked += 1;
+      return false;
+    },
+  );
+  await h1.bind();
+  assert.deepEqual(await ended.session.agent.finishTurn?.(usageTurn(1, 1)), { action: "end" });
+  assert.equal(asked, 0, "the verdict is not consulted once the run already ends");
+  await h1.dispose();
+
+  const continued = gatedSession({ action: "continue" });
+  const h2 = createDriveSession(
+    { session: continued.session, dispose() {} },
+    () => {},
+    () => false,
+  );
+  await h2.bind();
+  assert.deepEqual(await continued.session.agent.finishTurn?.(usageTurn(1, 1)), {
+    action: "continue",
+  });
+  await h2.dispose();
+});
+
+test("createDriveSession: dispose and rebind restore the session's own finishTurn", async () => {
+  const first = gatedSession(undefined);
+  const second = gatedSession(undefined);
+  const runtime: { session: DriveSessionLike; dispose(): void } = {
+    session: first.session,
+    dispose() {},
+  };
+  const handle = createDriveSession(
+    runtime,
+    () => {},
+    () => true,
+  );
+  await handle.bind();
+  assert.notEqual(first.session.agent.finishTurn, first.sessionHook, "installed on bind");
+  runtime.session = second.session;
+  assert.equal(await handle.rebindIfReplaced(), true);
+  assert.equal(
+    first.session.agent.finishTurn,
+    first.sessionHook,
+    "the replaced session is restored",
+  );
+  assert.notEqual(second.session.agent.finishTurn, second.sessionHook, "the replacement is gated");
+  await handle.dispose();
+  assert.equal(second.session.agent.finishTurn, second.sessionHook, "dispose restores it");
+});
+
+test("createDriveSession: no verdict or no agent leaves the session untouched", async () => {
+  const { session, sessionHook } = gatedSession(undefined);
+  const ungated = createDriveSession({ session, dispose() {} }, () => {});
+  await ungated.bind();
+  assert.equal(session.agent.finishTurn, sessionHook, "no verdict → no wrapper");
+  await ungated.dispose();
+
+  const agentless = new FakeSession(() => {});
+  const handle = createDriveSession(
+    { session: agentless, dispose() {} },
+    () => {},
+    () => true,
+  );
+  await handle.bind();
+  assert.equal("agent" in agentless, false, "an agentless (fake) session is never patched");
   await handle.dispose();
 });
 
