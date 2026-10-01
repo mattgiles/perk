@@ -120,8 +120,19 @@ The 0.71.0 → 0.73.1 `CHANGELOG.md` deltas and their perk meaning:
 Run from the implement session relaunched on the Pi 0.99.2 host, with the worktree-local
 `.pi/npm` at pi-subagents 0.73.1. Every half is required.
 
-- **Doctor half — PENDING.** `perk doctor`: the `subagent-compat` row reads 0.73.1 (warn until the
-  stamp moves); `settings-wiring` ok on the pinned entry.
+- **Doctor half — PASS.** `uv run perk doctor --verbose` on the 0.99.2 host, before the stamp
+  moved:
+
+  ```
+  ⚠ subagent-compat: pi-subagents 0.73.1 installed — perk's guidance was verified against 0.70.1 — npm:pi-subagents@0.73.1 is the settings pin (settings-wiring); … 0.74.0+ is known incompatible (it removed the workflowScript RPC spawn parameter perk's waves send)
+  ✓ subagent-package-scope: pi-subagents configured in project scope only — report-only — the user-scope file is operator-owned
+  ✓ ponytail-compat: Ponytail review skills compatible — …
+  ```
+
+  `settings-wiring` is ok on the pinned entry once `.pi/settings.json` regained the trailing newline
+  a hand edit on `main` had dropped (pre-existing drift, repaired in this change). The remaining
+  `config: config missing — .perk/local.toml` fail is the worktree environment — the per-user,
+  gitignored overlay exists in the main checkout and is not materialized into worktrees.
 - **Scout wave — PENDING.** One `run_scout_wave` with ≥ 2 briefs to N/N validated reports, under
   the owner-driven `/plan` toggle (the implement stage scopes `run_scout_wave` off).
 - **Conflict delegation — PASS (offline engine suite).**

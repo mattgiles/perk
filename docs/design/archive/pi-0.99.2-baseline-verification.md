@@ -23,7 +23,7 @@ change's PR (leg 7). Every leg must read PASS before merge; OWED is not an admis
 | Root dist on disk | `node_modules/@earendil-works/pi-coding-agent/package.json` 0.99.2; nested `pi-coding-agent/node_modules/@earendil-works/{pi-ai,pi-agent-core,pi-tui,pi-mcp,pi-codemode,chord,pi-telemetry}` 0.99.2; nested + top-level `typebox` 1.3.27; jiti 2.7.0 | each package's own `package.json`, read after `npm install` (never `npm ls` alone) |
 | `npm ls` agreement gate | every resolved copy of pi-coding-agent / pi-ai / pi-tui / pi-agent-core at 0.99.2, typebox at 1.3.27 | `npm ls @earendil-works/pi-coding-agent @earendil-works/pi-ai @earendil-works/pi-tui @earendil-works/pi-agent-core typebox` |
 | Lockfile | new transitive `pi-mcp`, `pi-codemode`, `quickjs-wasi`, nested `openai`; no incidental `"peer": true` / bin-path rewrites | `package-lock.json` diff |
-| Host `pi` | 0.87.1 before the upgrade; 0.99.2 for the live ledger (PENDING) | `pi --version` |
+| Host `pi` | 0.87.1 before the upgrade; 0.99.2 for the live ledger | `pi --version` (0.99.2 after the owner's `npm install -g` and the session relaunch) |
 | `node` | v26.3.0 | `node --version` |
 | pi-subagents | 0.73.1 (pinned) | `.pi/npm/node_modules/pi-subagents/package.json` |
 | pi-web-access | 0.33.0 | `.pi/npm/node_modules/pi-web-access/package.json` |
@@ -80,23 +80,27 @@ typechecks; `DefaultResourceLoaderOptions` is still not root-exported.
 
 | Leg | Driver | Procedure | Observation | Verdict |
 |---|---|---|---|---|
-| 1 Cold + warm launch | implementer (+ owner toggles `/plan`) | `tests/test_native_sdk_bridge_live.py` on the 0.99.2 `pi`; the relaunched session (cold); `/perk-selfcheck`; `/plan` on → off | — | PENDING |
+| 1 Cold + warm launch | implementer (+ owner toggles `/plan`) | `tests/test_native_sdk_bridge_live.py` on the 0.99.2 `pi`; the relaunched session (cold); `/perk-selfcheck`; `/plan` on → off | `tests/test_native_sdk_bridge_live.py` passes on the 0.99.2 PATH `pi` (`bridge=installed`, both consumer roots, both suppliers registering tools, no load failure); this implement session was relaunched cold on the 0.99.2 host with perk's tools, the read-write stage scoping and the borrowed suppliers live. `/plan` toggle: PENDING | PENDING |
 | 2 `/reload`, `/tree`, `/resume` | owner | `/reload` → `/perk-selfcheck` (bridge `reused`, `live=1`, gate unchanged); `/tree` away and back → `/perk-selfcheck`; quit + `perk resume` → `/perk-selfcheck` | — | PENDING |
 | 3 Context edits + compaction | owner + implementer | `/compact`, one ordinary turn, `/perk-selfcheck`: guidance `live=1` while historical `×copies` ≥ 2 | — | PENDING |
 | 4 `/btw` seed + summary | owner | two-turn `/btw` over main-context facts; "Inject summary into main chat" lands as a user turn | — | PENDING |
 | 5 Worker success / cancel / budget | implementer | offline real-runtime e2e tier (above) | success, external abort and budget trip pass on the real 0.99.2 SDK runtime | PASS |
 | 6 Report waves | owner + implementer | `/plan` on → `run_scout_wave` ≥ 2 briefs → N/N → `/plan` off; parent `bridge=installed` | — | PENDING |
 | 7 Browser-review lifecycle | owner | `/pr-review-browser` on this PR: readiness, wave marker, N/N lanes, `perk:*` annotation POST/DELETE, decision correlation | — | PENDING |
-| 8 Suppliers + bridge identity | implementer | `/perk-selfcheck` (`bridge=installed`, both roots, `specifiers=8`, suppliers loaded, no load errors); `web_enable` → `fetch_content`; Plannotator commands listed | — | PENDING |
+| 8 Suppliers + bridge identity | implementer | `/perk-selfcheck` (`bridge=installed`, both roots, `specifiers=8`, suppliers loaded, no load errors); `web_enable` → `fetch_content`; Plannotator commands listed | Headless `pi --approve --mode json -p /perk-selfcheck` on the 0.99.2 host: `selfcheck — 3.9.0: ok; shared=ok; ambient=reached (append=5359c); agents=reached (files=1); bridge=installed`; `native sdk bridge: installed (roots=2, specifiers=8)`, host `…/node_modules/@earendil-works/pi-coding-agent/dist/index.js`, roots `.pi/npm/node_modules/pi-subagents` + `pi-web-access`; per-source rows `npm:pi-subagents@0.73.1=3`, `npm:pi-web-access=1`, no `Failed to load extension`. In this session `web_enable` enabled `web_search`/`source_check`/`fetch_content`/`get_search_content`; `fetch_content` of `https://en.wikipedia.org/wiki/Node.js` returned the article (the first try, `https://example.com/`, was refused by pi-web-access's "content appears incomplete" heuristic — a too-short page, not a load fault). A `-e` command probe lists Plannotator's `plannotator-plan-mode`, `plannotator-review`, `plannotator-annotate`, `plannotator-last` and `skill:plannotator` | PASS |
 | 9 Theme / TUI | owner | footer/status/widgets readable under the default theme | — | PENDING |
 
 ## Pi 0.99 built-ins observed
 
-From the installed dist (live observation PENDING): the CLI registers `builtin:llama.cpp`,
-`builtin:codemode`, `builtin:tool-search` and `builtin:mcp`
-(`dist/extensions/index.js::builtInExtensions`); `codemode` and `tool_search` register with
-`defaultActive: false` — present in `getAllTools()`, absent from `getActiveTools()` unless
-`--tools` / `defaultTools` / MCP activates them. perk neither enables nor manages them in this
+The CLI registers `builtin:llama.cpp`, `builtin:codemode`, `builtin:tool-search` and
+`builtin:mcp` (`dist/extensions/index.js::builtInExtensions`); `codemode` and `tool_search`
+register with `defaultActive: false`. Observed live on the 0.99.2 host with a throwaway `pi -e`
+probe in this checkout (`getAllTools()` against `getActiveTools()`): `codemode` and
+`tool_search` are registered, **inactive**, exposure `model-only`, source `builtin`; the `/llama`
+and `/mcp` commands are registered (source `builtin`). `/perk-selfcheck`'s census reported
+`tools: 52 active / 65 registered` headless; its `builtin=4` per-source row counts Pi's active core
+tools (`read`, `bash`, `edit`, `write`), since the built-in extensions share the `builtin` source
+label. perk neither enables nor manages them in this
 release; its read-only gate blocks them like any unlisted tool (tool-policy work is later nodes).
 
 ## Decisions
