@@ -7,13 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of 90c8151 -->
+<!-- As of f03b171 -->
+
+## [3.9.0] - 2026-10-01
 
 ### Fixed
 
-- Reviewer and analyst lanes that hit Pi's compaction mid-run get their task — including the inline draft or diff — restored byte-for-byte, and cannot file a report until it is back in context; a lane that has already reported is never restarted by a later compaction. Previously a compacted reviewer reconstructed quotes from a summary, producing findings anchored to text that was never in the draft. (aed3758)
-- Write-capable sessions on Linux hosts with the Debian/Ubuntu default umask (`002`) no longer refuse agent scratch, session-data writes (plan drafts, `run_ci` reports, cold-door input staging), and strict artifact reads when the `.perk/` tree is `0775`. Previously every such session warned `could not provision scratch` on each turn, and `/plan-save` failed with `refusing a group/world-writable run-scratch path`. Symlinked or non-directory components in the run path are still refused. (f127659)
-- perk's browser review doors now honor Plannotator's own port selection — `PLANNOTATOR_PORT` (a single port or a range) and the `19432` remote default — instead of picking a random port, so remote sessions reach every review through an SSH tunnel or a tailnet; see the new how-to, How to review in the browser from a remote machine. (c7cf4d9)
+- Restore reviewer and analyst tasks, including the full draft or diff, after Pi compacts their context. Reports wait until the task is restored, preventing findings based on reconstructed quotes. Later compaction does not restart a lane that has already reported.
+- Allow scratch and session-data access on Linux hosts using the default Debian/Ubuntu umask (`002`), including `.perk/` directories with `0775` permissions. This fixes repeated `could not provision scratch` warnings and `/plan-save` failures. Symlinked or non-directory components in the run path are still refused.
+- Honor Plannotator's port selection in browser review doors: `PLANNOTATOR_PORT` accepts a single port or a range, and remote sessions default to `19432`. Reviews can now be reached through an SSH tunnel or a tailnet; see [How to review in the browser from a remote machine](docs/user-docs/how-to/review-in-the-browser-from-a-remote-machine.md).
 
 ## [3.8.0] - 2026-09-28
 
