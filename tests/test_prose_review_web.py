@@ -162,6 +162,7 @@ def _copy_catalog_root(destination: Path) -> Path:
         "AGENTS.md",
         "docs/design/prose-prompt-map.yaml",
         "docs/learned/clusters.yaml",
+        "shared/fixtures/tool-matrix.json",
     )
     directories = (
         "prompts",
