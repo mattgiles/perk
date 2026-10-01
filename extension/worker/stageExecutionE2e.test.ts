@@ -394,7 +394,10 @@ test("e2e: EXTERNAL-ABORT — a mid-drive abort ends the real session → aborte
   const tools = events.flatMap((e) => (e.kind === "tool_outcome" ? [e.tool] : []));
   assert.deepEqual(tools, ["read"], "the drive stopped before the scripted submit");
   // Asserted here, not in the sink: the emitter swallows a throwing sink by design.
-  assert.ok(events.some((e) => e.kind === "tool_outcome" && e.ok), "the read executed");
+  assert.ok(
+    events.some((e) => e.kind === "tool_outcome" && e.ok),
+    "the read executed",
+  );
   assert.equal(events.at(-1)?.kind, "run_finished");
   assertMonotonicSeq(events);
 });
