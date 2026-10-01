@@ -21,102 +21,15 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { render } from "./prompts.ts";
 import { readOnlyBashVerdict } from "./readOnlyBash.ts";
+import {
+  BORROWED_TOOLS,
+  FFF_SEARCH_TOOLS,
+  LINEAR_READ_TOOLS,
+  SUBAGENT_CHILD_TOOLS,
+  SUBAGENT_TOOLS,
+  WEB_RESEARCH_TOOLS,
+} from "./toolPolicy.ts";
 import { branchCarries, branchOf, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
-
-/**
- * The `web` seam providers' research tools: the UNION of all known web-provider tool names,
- * enumerated statically and inert when the package is absent (the plan_review precedent —
- * setActiveTools simply has nothing to enable). None mutate the repo — fetch_content's
- * GitHub-clone path (and source_check's page fetches) write only to their own cache outside the
- * worktree, morally equivalent to the already-allowlisted curl. perk does NOT normalize names, so
- * all three providers' divergent names are listed: pi-web-access (its four default tools
- * web_search/source_check/fetch_content/get_search_content, plus its lazy loader `web_enable` —
- * see LAZY_TOOL_LOADERS; `code_search` is not registered by any current version and is kept as an
- * inert static name for version tolerance), @ollama/pi-web-search (ollama_web_search/
- * ollama_web_fetch), and @juicesharp/rpiv-web-tools (web_search shared, web_fetch). All register
- * at load time; `web_enable` registers only when pi-web-access's dynamic-tools probe passes (an
- * inert name otherwise).
- */
-export const WEB_RESEARCH_TOOLS: readonly string[] = [
-  "web_search",
-  "code_search",
-  "fetch_content",
-  "get_search_content",
-  "source_check",
-  "web_enable",
-  "ollama_web_search",
-  "ollama_web_fetch",
-  "web_fetch",
-];
-
-/**
- * pi-mono-linear's read-only tools (the [issues] backend = "linear" selection): none mutate
- * Linear or the repo. Foreign names are inert when the package is absent (the pi-web-access
- * precedent above). The mutating/sensitive tools live in LINEAR_MUTATING_TOOLS and are
- * deliberately excluded from the read-only gate AND from every stage list. All 25 register at
- * load time (verified against the upstream pi-mono-extensions source).
- */
-export const LINEAR_READ_TOOLS: readonly string[] = [
-  "linear_whoami",
-  "linear_workspace_metadata",
-  "linear_list_teams",
-  "linear_get_team",
-  "linear_list_users",
-  "linear_get_user",
-  "linear_list_issues",
-  "linear_get_issue",
-  "linear_search_issues",
-  "linear_list_my_issues",
-  "linear_list_projects",
-  "linear_get_project",
-  "linear_list_issue_statuses",
-  "linear_get_issue_status",
-  "linear_list_labels",
-  "linear_list_cycles",
-  "linear_list_documents",
-  "linear_get_document",
-  "linear_list_comments",
-];
-
-/**
- * pi-mono-linear's mutating/sensitive tools — in the borrowed census so every stage session
- * sheds their schemas, and in NO stage list: Linear mutations are the Python plane's job
- * (`linear_configure_auth` even writes ~/.pi/agent/auth.json). Bare/unscoped sessions keep
- * full access.
- */
-export const LINEAR_MUTATING_TOOLS: readonly string[] = [
-  "linear_create_issue",
-  "linear_update_issue",
-  "linear_create_comment",
-  "linear_upload_file",
-  "linear_upload_file_to_issue_comment",
-  "linear_configure_auth",
-];
-
-/**
- * pi-subagents' delegation family. `subagent`/`wait` register at load time; the parent supervisor
- * tool `subagent_supervisor` registers during pi-subagents' own `session_start` — AFTER perk's
- * sync (perk is the first `packages` entry) — and is admitted by the `resources_discover`
- * re-apply as a late registrant (see `baseline`): inside the diet at launch, kept where a stage
- * list carries it. `subagents_enable` is pi-subagents' lazy loader (see LAZY_TOOL_LOADERS): it
- * registers at load time when the host supports dynamic tools; pi-subagents hides `subagent` in
- * its own `session_start`/`session_tree` handlers on a message-less branch (or replays the
- * transcript's recorded `toolsAdded`/`toolsRemoved`), and re-adds the loader to the active set
- * and `selectedTools` in its own `before_agent_start` — which runs AFTER perk's handlers
- * (extension order), so perk can refuse the loader but never hide it. `intercom` is the separate
- * pi-intercom bridge's tool name — a static census entry, inert unless that package is present.
- * Child-side tools (`structured_output`, `contact_supervisor`) are out of scope for the STAGE
- * census — spawned children stay stage-unscoped by design (§8.40 adopt-never-impersonates) — but
- * they DO ride READ_ONLY_TOOLS, because the read-only gate IS inherited by adopted children (see
- * SUBAGENT_CHILD_TOOLS).
- */
-export const SUBAGENT_TOOLS: readonly string[] = [
-  "subagent",
-  "subagents_enable",
-  "wait",
-  "subagent_supervisor",
-  "intercom",
-];
 
 /**
  * Borrowed lazy-activation loaders → the tools each one activates (contracts.md §8.40). While
@@ -172,113 +85,6 @@ export function lazyLoaderRefusalReason(loader: string, scope: LazyLoaderRefusal
   }
   return `perk stage scoping: ${loader} is blocked (its tools — ${tools} — are not available in the ${scope.stage} stage).`;
 }
-
-/**
- * pi-subagents' CHILD-side engine tools. `structured_output` and `contact_supervisor` register
- * inside spawned child sessions through the engine's prompt runtime / native supervisor bridge.
- * Absent tools are inert in gated parents (`setActiveTools` ignores unknown names). A gated
- * ADOPTED child (mode inherited via the `adopt` arm, contracts.md §8.3) must keep them active:
- *  - `structured_output` is the engine-REQUIRED completion call when the launch carries an
- *    `outputSchema` — stripping it makes the child physically unable to finish and fails the
- *    run with `structuredOutputFailed`;
- *  - `contact_supervisor` is the child→parent supervisor door. Perk's OWN waves never carry it
- *    (every wave spawns with the intercom bridge off — `WAVE_INTERCOM_BRIDGE` — so it is simply
- *    absent there), but this allowlist governs EVERY gated adopted child, including an ad-hoc
- *    `subagent` spawn from a gated session whose bridge is still active: stripping the tool
- *    there would leave the child unable to make a `need_decision` ask while the parent keeps
- *    `subagent_supervisor` to answer it. Gate membership is inertness-safe, never a grant.
- * Native wakes need no wait-tool widening in this census.
- * None mutates the repo (`structured_output` writes only the engine's capture file among the
- * child artifacts under the session directory — pi-subagents ≥ 0.66.0; `pi/subagents.md`
- * § "Child artifacts and wave cleanup"). Census decision, recorded: these names deliberately
- * join NEITHER PERK_TOOLS nor BORROWED_TOOLS — the stage-filter universe never sees them
- * because children are stage-unscoped by design (adopt never impersonates a stage), so gate
- * membership is their only governance surface.
- */
-export const SUBAGENT_CHILD_TOOLS: readonly string[] = ["structured_output", "contact_supervisor"];
-
-/**
- * @ff-labs/pi-fff's search tools. BOTH mode name-sets are enumerated (static names, inert
- * when absent — the code_search version-tolerance precedent): pi-fff's own default is the
- * additive tools-and-ui mode (fffind/ffgrep [+ fff-multi-grep when enabled upstream]) beside
- * pi's builtin find/grep; perk injects no mode (pi-fff's CLI flag → `PI_FFF_MODE` →
- * `pi-fff.json` precedence decides). The override name-set (multi_grep; find/grep already
- * allowlisted/pass-through) stays enumerated for an operator `PI_FFF_MODE=override` opt-in.
- * All register at load time. Frecency/history state lives under ~/.pi/agent/fff/ — outside
- * the worktree (the fetch_content cache-write precedent), so the read-only bar holds.
- */
-export const FFF_SEARCH_TOOLS: readonly string[] = [
-  "fffind",
-  "ffgrep",
-  "fff-multi-grep",
-  "multi_grep",
-];
-
-/**
- * @plannotator/pi-extension's plan-phase tools. Both register at LOAD time; plannotator strips
- * them in its OWN `session_start` (the idle-phase `stripPlanningOnlyTools`), which runs AFTER
- * perk's first-engagement snapshot (perk is the first `packages` entry, so its `session_start`
- * sync fires first). Enumeration is therefore load-bearing, not cosmetic: an un-enumerated name
- * sits in the snapshot as a non-scoped passthrough, and the `resources_discover` re-apply
- * re-installs `snapshot ∪ admitted` over plannotator's strip — restoring the tool to every
- * gate-OFF stage session. Perk never drives plannotator's plan phases (the adapter bridges
- * `plan_review` to its event API), so both are dead weight there: in the census, in NO stage
- * list. Bare/unscoped sessions are untouched.
- */
-export const PLANNOTATOR_PHASE_TOOLS: readonly string[] = [
-  "plannotator_submit_plan",
-  "plannotator_mark_done",
-];
-
-/**
- * The enumerated borrowed-package tool census (contracts.md §8.40): every foreign tool name perk
- * wires — via `BORROWED_PACKAGES`, a provider package, or the linear issue backend — joins the
- * scoped universe beside PERK_TOOLS. Same static-name posture as READ_ONLY_TOOLS: names are
- * inert when the package is absent, and un-enumerated foreign names always pass through every
- * stage filter (fail-open — enumeration here is diet-completeness, not correctness).
- *
- * Audit records (the per-package census):
- *  - Registration timing: every census name registers at load time EXCEPT pi-subagents'
- *    `subagent_supervisor` (SUBAGENT_TOOLS — session_start; admitted at `resources_discover`).
- *  - Foreign `setActiveTools` owners: plannotator's phase machinery and @tombell/pi-plan's plan
- *    mode run their OWN toggles — perk re-applies only at its reconciliation points (the rebuilds
- *    + the startup `resources_discover` re-apply), so a toggle between them wins (fail-open) and
- *    every reconciliation re-installs perk's set over it, admitted late tools included (§8.40).
- *  - Zero-tool packages: @tombell/pi-diff (commands only), the footer providers, and the hunk
- *    review CLI (not a Pi package) register nothing — nothing to enumerate.
- *  - Single-governance rule: a name is governed ONCE — it lives in exactly one census. perk
- *    registers no same-named `ask_user_question` anymore (the first-party tool is deleted), so
- *    the name lives HERE, in the borrowed census, not in PERK_TOOLS (hygiene-tested).
- *    Registration timing nuance: @juicesharp/rpiv-ask-user-question registers the tool at load
- *    time, then a `hasUI`-keyed reconcile strips/restores it — headless sessions carry no
- *    `ask_user_question` schema at all.
- *  - @ff-labs/pi-fff (FFF_SEARCH_TOOLS): registration timing load-time (both modes); no
- *    `setFooter` (only a keyed optional-chained `setStatus`); zero bundled skills.
- *  - Lazy owners (LAZY_TOOL_LOADERS): pi-subagents and pi-web-access each hide their heavy
- *    tools behind a loader and replay the selection on `session_start`/`session_tree` — with
- *    DIFFERENT rules. pi-subagents: recorded declarations → replay; no messages → hide;
- *    messages without declarations → keep the current state; its `before_agent_start` edits
- *    `selectedTools` AND the active set. pi-web-access: declarations → replay; no messages →
- *    hide; messages without declarations → enable ALL its tools; its `before_agent_start` only
- *    re-adds the loader to the active set. perk's single answer to both: owner-selected
- *    membership at every reconciliation (`ownerSelected`) + the loader refusal in `tool_call`.
- */
-export const BORROWED_TOOLS: readonly string[] = [
-  ...WEB_RESEARCH_TOOLS,
-  ...LINEAR_READ_TOOLS,
-  ...LINEAR_MUTATING_TOOLS,
-  ...SUBAGENT_TOOLS,
-  ...FFF_SEARCH_TOOLS,
-  // @juicesharp/rpiv-todo (required borrow) — registers at load; its checklist overlay is
-  // `hasUI`-gated (headless-safe).
-  "todo",
-  // @juicesharp/rpiv-ask-user-question (required borrow) — registers at load; strips itself
-  // headlessly (!hasUI reconcile).
-  "ask_user_question",
-  // @plannotator/pi-extension's phase tools — see PLANNOTATOR_PHASE_TOOLS for the
-  // registration-timing fact that makes enumerating every one of them load-bearing.
-  ...PLANNOTATOR_PHASE_TOOLS,
-];
 
 /**
  * Tools available while read-only mode is active (mirrors plan-mode's PLAN_MODE_TOOLS).
