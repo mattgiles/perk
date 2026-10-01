@@ -357,13 +357,27 @@ export function enumerateSelectorSites(
     sites.push(...recordSites);
   }
 
-  function visit(node: ts.Node): void {
+  /**
+   * The ToolDefinition literal of a tool registration: a raw `<receiver>.registerTool(definition)`
+   * or the perk seam `registerPerkTool(pi, definition, policy)` (the policy argument is not a
+   * ToolDefinition and is never scanned).
+   */
+  function registrationDefinition(node: ts.CallExpression): ts.Expression | undefined {
     if (
-      ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
       node.expression.name.text === "registerTool"
     ) {
-      const argument = node.arguments[0];
+      return node.arguments[0];
+    }
+    if (ts.isIdentifier(node.expression) && node.expression.text === "registerPerkTool") {
+      return node.arguments[1];
+    }
+    return undefined;
+  }
+
+  function visit(node: ts.Node): void {
+    if (ts.isCallExpression(node)) {
+      const argument = registrationDefinition(node);
       if (argument !== undefined && ts.isObjectLiteralExpression(argument)) {
         const nameMember = firstProperty(argument, "name");
         const name = nameMember === null ? null : staticString(propertyInitializer(nameMember));

@@ -140,9 +140,18 @@ test("formatToolArgs truncates the salient argument per tool", () => {
   assert.equal(formatToolArgs("read", null), "");
 });
 
-test("sideSessionTools mirrors perk's read-only gate (the gate-mirror invariant)", () => {
-  assert.deepEqual(sideSessionTools(true), ["read"]);
-  assert.deepEqual(sideSessionTools(false), ["read", "bash", "edit", "write"]);
+test("sideSessionTools mirrors perk's builtin posture rows (the gate-mirror invariant)", () => {
+  // Read-only: the plainly-allowed builtins only — bash's verdict cannot run in a foreign session.
+  assert.deepEqual(sideSessionTools(true), ["read", "grep", "find", "ls"]);
+  assert.deepEqual(sideSessionTools(false), [
+    "read",
+    "grep",
+    "find",
+    "ls",
+    "bash",
+    "edit",
+    "write",
+  ]);
 });
 
 test("renderToolCallLines uses the §5-conformed themed glyphs (✓ success / ▸ accent / ✗ error)", () => {
@@ -417,7 +426,7 @@ test("btw retries scratch availability; a controller floor invalidates the side 
   readOnly = true;
   await handler("read-only question", ctx);
   assert.equal(resolutions, 3, "floor-backed side turns never resolve scratch");
-  assert.deepEqual(observations[3]?.tools, ["read"]);
+  assert.deepEqual(observations[3]?.tools, sideSessionTools(true));
   assert.notEqual(observations[3]?.id, observations[2]?.id, "floor changed the cache key");
   resolutions = 0;
   gating.exit();
@@ -429,7 +438,7 @@ test("btw retries scratch availability; a controller floor invalidates the side 
     observations[3]?.id,
     "effective floor preserves the read-only cache key",
   );
-  assert.deepEqual(observations[4]?.tools, ["read"]);
+  assert.deepEqual(observations[4]?.tools, sideSessionTools(true));
 });
 
 test("liveModelRuntime recovers the live runtime from the real ModelRegistry facade", async () => {

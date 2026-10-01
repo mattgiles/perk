@@ -18,48 +18,48 @@ These tools are registered by perk itself. Command-specific semantics live in
 [Review and authoring](./review-and-authoring.md).
 
 <!-- BEGIN perk tool census -->
-| Family | Tool |
-| --- | --- |
-| Plan authoring | `plan_review` |
-| Plan authoring | `plan_save` |
-| Plan authoring | `plan_draft` |
-| Objective authoring | `objective_save` |
-| Objective workflow | `objective_node` |
-| Objective workflow | `reconcile_objective` |
-| Objective workflow | `add_objective_node` |
-| Objective authoring | `objective_draft` |
-| Gist authoring | `gist_draft` |
-| Gist authoring | `gist_save` |
-| Refinement authoring | `objective_refinement_draft` |
-| Learn lifecycle | `learn` |
-| Learn lifecycle | `run_learn_wave` |
-| Developer analysis | `run_audit_wave` |
-| Learn factories | `run_harvest_wave` |
-| Learn factories | `run_dream_wave` |
-| PR lifecycle | `land` |
-| Automated review | `post_pr_review` |
-| PR lifecycle | `ready` |
-| Address loop | `classify_review_feedback` |
-| Address loop | `finalize_address` |
-| Objective workflow | `explore_objective_node` |
-| Read-only investigation | `run_scout_wave` |
-| Library | `run_librarian` |
-| Automated review | `run_pr_review_wave` |
-| Human PR review | `submit_pr_review` |
-| Human PR review | `start_review_wave` |
-| Human PR review | `collect_review_wave` |
-| Browser review | `push_annotations` |
-| Human PR review | `open_stack_review` |
-| Draft review | `start_draft_review_wave` |
-| Draft review | `collect_draft_review_wave` |
-| Verification | `run_ci` |
-| PR lifecycle | `submit` |
-| PR lifecycle | `resolve_submit_conflicts` |
-| Stacked delivery | `objective_stack_status` |
-| Stacked delivery | `objective_stack_sync` |
-| Stacked delivery | `objective_stack_adopt` |
-| Stacked delivery | `objective_stack_recover` |
-| Stacked delivery | `objective_stack_land` |
+| Family | Tool | Kind | Under the gate |
+| --- | --- | --- | --- |
+| Plan authoring | `plan_review` | terminal | allowed, mode-over-stage |
+| Plan authoring | `plan_save` | terminal | blocked |
+| Plan authoring | `plan_draft` | action | carve-out, mode-over-stage |
+| Objective authoring | `objective_save` | terminal | blocked |
+| Objective workflow | `objective_node` | action | carve-out |
+| Objective workflow | `reconcile_objective` | action | blocked |
+| Objective workflow | `add_objective_node` | action | blocked |
+| Objective authoring | `objective_draft` | action | carve-out |
+| Gist authoring | `gist_draft` | action | carve-out |
+| Gist authoring | `gist_save` | terminal | blocked |
+| Refinement authoring | `objective_refinement_draft` | action | carve-out |
+| Learn lifecycle | `learn` | terminal | blocked |
+| Learn lifecycle | `run_learn_wave` | orchestration | blocked |
+| Developer analysis | `run_audit_wave` | orchestration | carve-out |
+| Learn factories | `run_harvest_wave` | orchestration | allowed |
+| Learn factories | `run_dream_wave` | orchestration | carve-out |
+| PR lifecycle | `land` | terminal | blocked |
+| Automated review | `post_pr_review` | action | blocked |
+| PR lifecycle | `ready` | terminal | blocked |
+| Address loop | `classify_review_feedback` | orchestration | blocked |
+| Address loop | `finalize_address` | terminal | blocked |
+| Objective workflow | `explore_objective_node` | orchestration | allowed |
+| Read-only investigation | `run_scout_wave` | orchestration | allowed |
+| Library | `run_librarian` | orchestration | carve-out |
+| Automated review | `run_pr_review_wave` | orchestration | blocked |
+| Human PR review | `submit_pr_review` | action | blocked |
+| Human PR review | `start_review_wave` | orchestration | blocked |
+| Human PR review | `collect_review_wave` | action | blocked |
+| Browser review | `push_annotations` | action | allowed, mode-over-stage |
+| Human PR review | `open_stack_review` | interactive | blocked |
+| Draft review | `start_draft_review_wave` | orchestration | allowed, mode-over-stage |
+| Draft review | `collect_draft_review_wave` | action | allowed, mode-over-stage |
+| Verification | `run_ci` | action | blocked |
+| PR lifecycle | `submit` | terminal | blocked |
+| PR lifecycle | `resolve_submit_conflicts` | orchestration | blocked |
+| Stacked delivery | `objective_stack_status` | query | blocked |
+| Stacked delivery | `objective_stack_sync` | orchestration | blocked |
+| Stacked delivery | `objective_stack_adopt` | action | blocked |
+| Stacked delivery | `objective_stack_recover` | action | blocked |
+| Stacked delivery | `objective_stack_land` | action | blocked |
 <!-- END perk tool census -->
 
 The terminating subset ends the current turn on its success path: `plan_save`, `objective_save`,

@@ -4,11 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { loadRegistry } from "../../../extension/substrate/registry.ts";
-import {
-  BORROWED_TOOLS,
-  PERK_TOOLS,
-  SUBAGENT_CHILD_TOOLS,
-} from "../../../extension/substrate/toolGating.ts";
+import { BORROWED_TOOLS, SUBAGENT_CHILD_TOOLS } from "../../../extension/substrate/toolPolicy.ts";
 import { loadPerkSession, scaffoldRepo } from "../../../extension/testing/harness.ts";
 
 // Source/runtime guard for the split in-session reference. The docs own prose; runtime owns
@@ -19,6 +15,9 @@ const userDocsDir = fileURLToPath(new URL("../../user-docs/", import.meta.url));
 const hubPath = path.join(userDocsDir, "reference/in-session.md");
 const toolsPath = path.join(userDocsDir, "reference/in-session/model-tools.md");
 const stagesPath = path.join(userDocsDir, "reference/in-session/stages-and-doors.mdx");
+const matrixPath = fileURLToPath(
+  new URL("../../../shared/fixtures/tool-matrix.json", import.meta.url),
+);
 
 function read(file) {
   return fs.readFileSync(file, "utf8");
@@ -133,7 +132,24 @@ test("marked command and perk-tool censuses equal a default perk-only harness se
       registeredPerkTools,
       "documented perk tools must equal the live perk-only non-builtin registrations",
     );
-    assertSetEqual(documentedPerkTools, PERK_TOOLS, "documented perk tools must equal PERK_TOOLS");
+    const matrix = JSON.parse(read(matrixPath));
+    const catalogued = Object.entries(matrix.tools)
+      .filter(([, entry]) => entry.owner === "perk")
+      .map(([name]) => name);
+    assertSetEqual(
+      documentedPerkTools,
+      catalogued,
+      "documented perk tools must equal the tool catalog (shared/fixtures/tool-matrix.json)",
+    );
+    for (const cells of dataRows(perkToolRegion, "perk tool census")) {
+      assert.equal(cells.length, 4, "perk tool census: Family | Tool | Kind | Under the gate");
+      const [, toolCell, kind, gate] = cells;
+      const name = toolCell.match(/`([^`]+)`/)?.[1];
+      const entry = matrix.tools[name];
+      assert.equal(kind, entry.kind, `${name}: Kind drift against the tool matrix`);
+      const expectedGate = `${entry.gated}${entry.mode_over_stage ? ", mode-over-stage" : ""}`;
+      assert.equal(gate, expectedGate, `${name}: Under-the-gate drift against the tool matrix`);
+    }
     assert.ok(
       documentedPerkTools.includes("resolve_submit_conflicts"),
       "single-use foreground tool must be documented",

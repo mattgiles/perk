@@ -1,5 +1,6 @@
 /** Structural discovery of perk-owned TypeScript prose that can shape a model turn. */
 
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
@@ -46,13 +47,6 @@ export interface TypeScriptCatalog {
   candidates: DiscoveredCandidate[];
   governed_tools: string[];
   tool_field_issues: ToolFieldIssue[];
-}
-
-function staticString(node: ts.Expression | null): string | null {
-  if (node !== null && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))) {
-    return node.text;
-  }
-  return null;
 }
 
 function normalizedPath(root: string, fileName: string): string {
@@ -169,31 +163,26 @@ function scanSource(
   return { candidates, toolFieldIssues };
 }
 
-function governedTools(program: ts.Program): string[] {
-  const names: string[] = [];
-  for (const sourceFile of program.getSourceFiles()) {
-    if (sourceFile.isDeclarationFile) {
-      continue;
-    }
-    function visit(node: ts.Node): void {
-      if (
-        ts.isVariableDeclaration(node) &&
-        ts.isIdentifier(node.name) &&
-        node.name.text === "PERK_TOOLS" &&
-        node.initializer !== undefined &&
-        ts.isArrayLiteralExpression(node.initializer)
-      ) {
-        for (const element of node.initializer.elements) {
-          const value = staticString(element);
-          if (value !== null) {
-            names.push(value);
-          }
-        }
-      }
-      ts.forEachChild(node, visit);
-    }
-    visit(sourceFile);
+/**
+ * The governed tool census: the perk-owned names of the tool catalog's committed golden matrix
+ * (`shared/fixtures/tool-matrix.json`). Fails closed when the matrix is absent or malformed.
+ */
+function governedTools(root: string): string[] {
+  const matrixPath = path.join(root, "shared", "fixtures", "tool-matrix.json");
+  const matrix: unknown = JSON.parse(readFileSync(matrixPath, "utf-8"));
+  const tools =
+    matrix !== null && typeof matrix === "object" && "tools" in matrix ? matrix.tools : null;
+  if (tools === null || typeof tools !== "object") {
+    throw new Error(`${matrixPath}: no tools map`);
   }
+  const names = Object.entries(tools as Record<string, unknown>)
+    .filter(
+      ([, entry]) =>
+        entry !== null &&
+        typeof entry === "object" &&
+        (entry as { owner?: unknown }).owner === "perk",
+    )
+    .map(([name]) => name);
   return [...new Set(names)].sort();
 }
 
@@ -222,7 +211,7 @@ export function scanRepository(root: string): TypeScriptCatalog {
   const candidates = sourceScans
     .flatMap((result) => result.candidates)
     .sort((left, right) => left.id.localeCompare(right.id));
-  const governed_tools = governedTools(program);
+  const governed_tools = governedTools(root);
   const governedSet = new Set(governed_tools);
   const tool_field_issues = sourceScans
     .flatMap((result) => result.toolFieldIssues)

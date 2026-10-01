@@ -7,12 +7,21 @@ import test from "node:test";
 import { scanRepository, type TypeScriptCatalog } from "./catalog.ts";
 import { TOOL_FIELD_POLICIES, validateToolFieldPolicies } from "./selector.ts";
 
-async function scanFixture(source: string): Promise<TypeScriptCatalog> {
+/** Scan one fixture source in a temp root whose minimal tool matrix governs `governed`. */
+async function scanFixture(governed: string[], source: string): Promise<TypeScriptCatalog> {
   const root = await mkdtemp(path.join(tmpdir(), "perk-prose-map-"));
   try {
     const extension = path.join(root, "extension");
     await mkdir(extension);
     await writeFile(path.join(extension, "sample.ts"), source, "utf-8");
+    const fixtures = path.join(root, "shared", "fixtures");
+    await mkdir(fixtures, { recursive: true });
+    const tools = Object.fromEntries(governed.map((name) => [name, { owner: "perk" }]));
+    await writeFile(
+      path.join(fixtures, "tool-matrix.json"),
+      JSON.stringify({ tools: { ...tools, foreign_tool: { owner: "foreign" } } }),
+      "utf-8",
+    );
     return scanRepository(root);
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -31,8 +40,9 @@ test("the production tool field policy is valid and blank exclusions fail closed
 });
 
 test("discovers every governed ToolDefinition field without changing logical fragments", async () => {
-  const catalog = await scanFixture(`
-export const PERK_TOOLS: readonly string[] = ["demo"];
+  const catalog = await scanFixture(
+    ["demo"],
+    `
 
 export function install(pi: any): void {
   pi.registerTool({
@@ -57,7 +67,8 @@ export function install(pi: any): void {
   });
   pi.sendUserMessage("Continue with the bounded thing.");
 }
-`);
+`,
+  );
 
   assert.deepEqual(catalog.governed_tools, ["demo"]);
   assert.deepEqual(catalog.tool_field_issues, []);
@@ -100,8 +111,9 @@ export function install(pi: any): void {
 });
 
 test("promptGuidelines identifiers and shorthand stay one field-level fragment", async () => {
-  const catalog = await scanFixture(`
-export const PERK_TOOLS: readonly string[] = ["identifier", "shorthand"];
+  const catalog = await scanFixture(
+    ["identifier", "shorthand"],
+    `
 const GUIDELINES = ["Stay bounded."];
 const promptGuidelines = GUIDELINES;
 
@@ -115,7 +127,8 @@ export function install(pi: any): void {
     promptGuidelines,
   });
 }
-`);
+`,
+  );
 
   assert.deepEqual(catalog.tool_field_issues, []);
   for (const name of ["identifier", "shorthand"]) {
@@ -132,8 +145,9 @@ export function install(pi: any): void {
 });
 
 test("only governed registrations report unclassified fields", async () => {
-  const catalog = await scanFixture(`
-export const PERK_TOOLS: readonly string[] = ["governed"];
+  const catalog = await scanFixture(
+    ["governed"],
+    `
 
 export function install(pi: any): void {
   pi.registerTool({
@@ -147,7 +161,8 @@ export function install(pi: any): void {
     promptEpilogue: "New model-facing prose.",
   });
 }
-`);
+`,
+  );
 
   assert.deepEqual(
     catalog.candidates
@@ -168,8 +183,9 @@ export function install(pi: any): void {
 });
 
 test("opaque members use all-member indexes while static computed names are inventoried", async () => {
-  const catalog = await scanFixture(`
-export const PERK_TOOLS: readonly string[] = ["opaque"];
+  const catalog = await scanFixture(
+    ["opaque"],
+    `
 const spreadFields = {};
 const dynamicField = "promptEpilogue";
 
@@ -184,7 +200,8 @@ export function install(pi: any): void {
     ["promptSnippet"]: "Known computed prose.",
   });
 }
-`);
+`,
+  );
 
   assert.deepEqual(catalog.tool_field_issues, [
     {
@@ -220,9 +237,53 @@ export function install(pi: any): void {
   );
 });
 
+test("registerPerkTool registrations: governed by the matrix's perk names, the policy never scanned", async () => {
+  const catalog = await scanFixture(
+    ["seam_governed"],
+    `
+export function install(pi: any): void {
+  registerPerkTool(
+    pi,
+    { name: "seam_governed", description: "Known prose.", promptEpilogue: "New prose." },
+    { stages: [], gated: { carveOut: "a write" }, kind: "action", promptEpilogue: "policy" },
+  );
+  registerPerkTool(
+    pi,
+    { name: "seam_outside", description: "Known prose.", promptEpilogue: "New prose." },
+    { stages: [], gated: "allowed", kind: "query" },
+  );
+}
+`,
+  );
+
+  assert.deepEqual(
+    catalog.governed_tools,
+    ["seam_governed"],
+    "foreign matrix rows are not governed",
+  );
+  assert.deepEqual(
+    catalog.candidates
+      .filter((candidate) => candidate.kind === "typescript-tool")
+      .map((candidate) => candidate.id)
+      .sort(),
+    ["typescript-tool:seam_governed", "typescript-tool:seam_outside"],
+  );
+  assert.deepEqual(catalog.tool_field_issues, [
+    {
+      kind: "unclassified",
+      field: "promptEpilogue",
+      reason: "unclassified-field",
+      tool: "seam_governed",
+      path: "extension/sample.ts",
+      selector: "tool:seam_governed.promptEpilogue",
+    },
+  ]);
+});
+
 test("an unknown governed field reports independently when no candidate can be emitted", async () => {
-  const catalog = await scanFixture(`
-export const PERK_TOOLS: readonly string[] = ["empty"];
+  const catalog = await scanFixture(
+    ["empty"],
+    `
 
 export function install(pi: any): void {
   pi.registerTool({
@@ -230,7 +291,8 @@ export function install(pi: any): void {
     promptEpilogue: "The only possible prose.",
   });
 }
-`);
+`,
+  );
 
   assert.equal(
     catalog.candidates.some((candidate) => candidate.id === "typescript-tool:empty"),
