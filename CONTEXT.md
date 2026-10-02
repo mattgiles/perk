@@ -99,8 +99,9 @@ _Avoid_: mode switch, plan stage (for the toggle)
 **Own-names-only activation**:
 perk's activation rule: at every reconciliation point it installs the live active set with only
 its own names replaced — the eligible always-declared perk tools plus the live eligible deferred
-ones — and never activates or deactivates a foreign tool; a session whose live set already matches
-gets no install.
+ones — and never activates or deactivates a foreign tool (of the builtins, the read-only gate only
+suspends `codemode` and restores it at release); a session whose live set already matches gets no
+install.
 _Avoid_: snapshot restore, baseline, admitted set, perk-owned allowlist
 
 **Provenance posture**:

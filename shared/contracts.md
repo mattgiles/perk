@@ -747,9 +747,10 @@ perk's own tools for the stage's **gated view** `gatedToolsFor(stage)` (§8.40 o
 activation — every catalogued perk tool eligible in the stage whose gate posture is not `blocked`,
 plus the mode-over-stage set; an unscoped or unknown-stage session gets every perk tool the mode
 allows) and **presents** every other tool through the `perk_stage` loadout host: each declared
-tool the formula makes ineligible under the gate — `edit`/`write`/`codemode`, a `never` or
+tool the formula makes ineligible under the gate — `edit`/`write`, a `never` or
 `unknown`-provenance foreign tool, an out-of-stage foreign row — is hidden from the model
-(declaration and prompt snippet), while staying active as its owner left it. The read-only bar each non-blocked posture meets: `ask_user_question` and
+(declaration and prompt snippet), while staying active as its owner left it; the one exception,
+`codemode`, is switched off for the gate's duration and restored at release (§8.40). The read-only bar each non-blocked posture meets: `ask_user_question` and
 `plan_review` mutate nothing; the `plan_draft`/`objective_draft`/`gist_draft`/
 `objective_refinement_draft` session-data carve-outs write one fixed artifact in the run-scoped
 session data dir; `objective_node` delegates a bounded node transition to the canonical Python
@@ -787,8 +788,8 @@ writes); and `run_dream_wave` (the gated learn-dream session's wave call: NO par
 manifest read AND its one write, the fixed-name run-scratch bundle beside that manifest, are both
 derived from the claimed run's manifest path, §8.61 — the no-aimable-writer posture on both
 sides) — perk's own names installed via `pi.setActiveTools` only when they must change (perk
-never activates or deactivates a foreign tool; §8.40), the rest presented by the host's hidden
-declarations; (2) rejects at `tool_call` **every** name not registered in this session — a
+never activates or deactivates a foreign tool, and of the builtins only suspends `codemode`;
+§8.40), the rest presented by the host's hidden declarations; (2) rejects at `tool_call` **every** name not registered in this session — a
 catalogued perk name included — and every registered tool the formula makes ineligible there
 (`isEligible(name, provenance, stage, "read-only")`), including `plan_save`, delivery and
 unknown/late foreign mutators, even when installation or presentation failed. This backstop applies to all
@@ -7540,9 +7541,11 @@ seam providers' packages, minus the known tool-less set — ponytail, `@tombell/
 `source: "builtin"`): the core tools `read`/`grep`/`find`/`ls` `allowed`, `bash` `verdict`
 (allowed under the gate subject to `readOnlyBashVerdict`, §8.3), `edit`/`write` `blocked`; the
 CLI's builtin extensions `tool_search` `allowed` (a search is a read — what it activates is
-governed by the posture table and the reconciliation) and `codemode` `blocked` (its description
-embeds the callable direct tools' schemas, `edit`/`write` included in mode `only`; blocked ⇒
-hidden under the gate, and the backstop blocks a scripted `edit`). Builtins are never
+governed by the posture table and the reconciliation) and `codemode` `blocked` and
+**suspended under the gate** (`suspendedUnderGate` — its description embeds the callable direct
+tools' schemas, `edit`/`write` included in mode `only`, and in mode `only` its own loadout hook
+hides every callable direct tool, so a hidden-but-active codemode would leave a gated session
+without `read`, `bash` or perk's direct tools; the gate switches it off instead — below). Builtins are never
 stage-scoped and sit outside the prompt-guard scan universe. `/btw` derives its side-session
 tools from the `registrar: core` rows (read-only → the plainly `allowed` ones; read-write → all).
 The catalog migration's enumerated deltas landed with the derived views; its parity bridge is
@@ -7582,16 +7585,25 @@ never activates a deferred tool itself. The reconciliation points: `syncFromStat
 `exit`, the `resources_discover` re-apply (Pi fires it after every extension's `session_start` —
 where startup-late registrants such as pi-subagents' `subagent_supervisor` meet the landing; a
 no-op when nothing changed), and `before_agent_start` (ahead of the read-only context injection,
-gated or not, inside its own `try/catch` that reports and continues — so a tool activated between
-requests meets the landing before the model is asked again). `apply(nextActive, nextStage)`
+gated or not, inside its own `try/catch` that reports and continues). Pi emits
+`before_agent_start` once when a prompt starts — not between the model requests of one prompt's
+tool loop — so a tool activated during a prompt meets the landing when the NEXT prompt starts;
+within a prompt only the host's per-request hiding applies (hidden is not deactivated, and the
+read-write diet has no call-time backstop). `apply(nextActive, nextStage)`
 latches the in-memory gate ON before any fallible read (fail-closed, §8.3), sets the stage and the
 **presented mode** (`read-only` iff the gate or the floor holds) BEFORE the install, installs, and
 releases the gate only after a successful install; a throwing install reverts the presented mode
 to the effective restriction and rethrows. When the presented mode flips but no perk name changes,
 perk reinstalls the live set unchanged — only while the loadout host is active — so Pi rebuilds
-the prompt's snippet map for the new presentation. **Zero-call guarantee:** a session whose live
-set already matches gets no `setActiveTools` call; a bare session (no stage, read-write, no floor,
-default registration — every perk tool active) gets none at all.
+the prompt's snippet map for the new presentation. **The gate's one non-perk exception:** before
+reconciling, a builtin row marked `suspendedUnderGate` (only `codemode`, matched with
+`source: "builtin"` — a foreign namesake is governed by its provenance) is switched off while the
+presented mode is read-only, and the gate remembers it; when the presentation turns read-write
+it is switched back on if still registered and inactive (`suspensionStep`, pure). The memo is
+updated only after a successful install. **Zero-call guarantee:** a session whose live set
+already matches, with no suspension to apply or release and no presented-mode flip, gets no
+`setActiveTools` call; a bare session (no stage, read-write, no floor, default registration —
+every perk tool active) gets none at all.
 
 **The exclusion contract.** Pi's `--tools`/`--exclude-tools` (the SDK's `tools`/`excludeTools`)
 are REGISTRY filters: a filtered-out tool is not registered, absent from `getAllTools()`, and its
@@ -7600,9 +7612,9 @@ are REGISTRY filters: a filtered-out tool is not registered, absent from `getAll
 a child definition's `tools:` allowlist (plus the engine's additions such as `structured_output`)
 as exactly that filter, so every perk report child (`tools: read, grep, find, ls, bash`) registers
 NO perk tool — nothing to install, nothing to present; the floor's backstop still applies (§8.3).
-Every other absence of a registered, eligible perk tool from the active set — a foreign
-extension's `setActiveTools` — is undone by the next reconciliation: perk's own activation is
-policy-owned. (`defaultTools` and its `-name` modifiers shape only Pi's own startup set: on Pi
+Every other absence of a registered, eligible, always-declared perk tool from the active set — a
+foreign extension's `setActiveTools` — is undone by the next reconciliation: perk's own activation
+is policy-owned (a deferred perk tool is never re-activated — only the host activates one). (`defaultTools` and its `-name` modifiers shape only Pi's own startup set: on Pi
 0.99.2 every extension tool joins the startup active set regardless, so a `-name` modifier has no
 effect on an extension tool, perk's or foreign.) Foreign activation is never touched either way.
 **The absent host:** where a registry filter leaves out `perk_stage` (an allowlisted child,
@@ -7682,8 +7694,8 @@ is never absent. Residual: on a pre-change transcript where a later handler does
 `selectedTools`, perk's deactivation of an ineligible deferred tool takes effect one request later
 — its declaration is hidden throughout. `tool_search` activates its matches through
 `setActiveTools` outside perk's other points; the host's hook runs inside that install, so an
-ineligible match is hidden on the very next request and deactivated by the next
-`before_agent_start`. **Resume/fork (host behaviour):** Pi 0.99.2 always passes an initial active
+ineligible match is hidden on the very next request and deactivated when the next prompt starts
+(`before_agent_start`). **Resume/fork (host behaviour):** Pi 0.99.2 always passes an initial active
 set at construction, so a resumed or forked session starts from the defaults plus
 registration-activated tools; the transcript's declared loadout is restored only by `/tree`
 navigation (which runs before `session_tree` handlers). perk preserves what the host restored (the
@@ -7694,9 +7706,9 @@ perk never replays it.
 callable set (mode `only`: every callable direct tool, `edit`/`write` included; mode `on`: the
 `codemode`/`deferred`-exposure tools); other hooks' hidden declarations do not reach that list.
 In a read-write stage session with codemode active, its description may therefore name diet-hidden
-foreign tools — accepted, presentation-only. Under the gate codemode is itself blocked and hidden,
-so no gated request carries that list; a nested `ctx.executeTool()` still goes through the
-`tool_call` backstop (`parentToolCallId`).
+foreign tools — accepted, presentation-only. Under the gate codemode is suspended (above), so no
+gated request carries that list; a nested `ctx.executeTool()` from any gate-allowed tool still
+goes through the `tool_call` backstop (`parentToolCallId`).
 
 **Fail postures.** Stage scoping is **fail-open** where the gate is fail-closed: no stage, an
 unknown stage id (version skew), or any lookup miss → no diet. Presentation is fail-open (a broken

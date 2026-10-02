@@ -316,17 +316,24 @@ export const SYNTHETIC_PATH_TOOL_POLICY: Readonly<Record<string, ForeignPosture>
   "<inline:pi-subagents:prompt-runtime>": "child-engine",
 };
 
+/** A builtin's row: its gate posture, its registrar, and whether the gate suspends it. */
+export type BuiltinRow = {
+  gated: BuiltinPosture;
+  registrar: "core" | "extension";
+  suspendedUnderGate?: true;
+};
+
 /**
  * Pi's builtin tools (provenance `source: "builtin"`), never stage-scoped. `registrar: "core"`
  * are the core tools; `extension` the CLI's builtin extensions. `bash` runs under the gate only
  * through `readOnlyBashVerdict`. `tool_search` is a read (what it activates is governed by this
- * table and the reconciliation). `codemode` is blocked: its description embeds the callable
- * direct tools' schemas (`edit`/`write` included), so blocked ⇒ hidden under the gate, and the
- * backstop already blocks a scripted `edit`.
+ * table and the reconciliation). `codemode` is blocked AND suspended under the gate — the one
+ * non-perk tool the gate ever deactivates: its description embeds the callable direct tools'
+ * schemas (`edit`/`write` included), and in mode `only` its own loadout hook hides every callable
+ * direct tool, so a hidden-but-active codemode would leave a gated session without `read`, `bash`
+ * or perk's direct tools. The gate switches it off instead and back on at release.
  */
-export const BUILTIN_TOOL_POLICY: Readonly<
-  Record<string, { gated: BuiltinPosture; registrar: "core" | "extension" }>
-> = {
+export const BUILTIN_TOOL_POLICY: Readonly<Record<string, BuiltinRow>> = {
   read: { gated: "allowed", registrar: "core" },
   grep: { gated: "allowed", registrar: "core" },
   find: { gated: "allowed", registrar: "core" },
@@ -335,7 +342,7 @@ export const BUILTIN_TOOL_POLICY: Readonly<
   edit: { gated: "blocked", registrar: "core" },
   write: { gated: "blocked", registrar: "core" },
   tool_search: { gated: "allowed", registrar: "extension" },
-  codemode: { gated: "blocked", registrar: "extension" },
+  codemode: { gated: "blocked", registrar: "extension", suspendedUnderGate: true },
 };
 
 const BUILTIN_NAMES: readonly string[] = Object.keys(BUILTIN_TOOL_POLICY);
@@ -489,9 +496,7 @@ export function reconcileTarget(
     return policy.declared !== "deferred" || active.has(name) ? [name] : [];
   });
   const target = [...foreign, ...perk];
-  const targetSet = new Set(target);
-  const unchanged = targetSet.size === active.size && [...active].every((n) => targetSet.has(n));
-  return unchanged ? null : target;
+  return sameNames(target, live.active) ? null : target;
 }
 
 /**
@@ -512,6 +517,43 @@ export function hiddenDeclarationsFor(
     if (!isEligible(name, infos.get(name), stage, mode)) hidden.push(name);
   }
   return hidden;
+}
+
+/** Whether the read-only gate suspends this tool: a builtin-sourced row marked suspended. */
+export function gateSuspends(name: string, provenance: Provenance | undefined): boolean {
+  if (provenance?.source !== "builtin" || !Object.hasOwn(BUILTIN_TOOL_POLICY, name)) return false;
+  return BUILTIN_TOOL_POLICY[name]?.suspendedUnderGate === true;
+}
+
+/**
+ * The gate's suspension step, applied to the live active set before `reconcileTarget`: presenting
+ * read-only removes every active suspended builtin (remembering it); presenting read-write
+ * restores what the gate suspended earlier, when still registered and inactive, and forgets the
+ * memo. `suspended` is the memo to keep once the install succeeds.
+ */
+export function suspensionStep(
+  live: { active: readonly string[]; infos: ReadonlyMap<string, Provenance> },
+  mode: Mode,
+  suspended: readonly string[],
+): { active: string[]; suspended: string[] } {
+  if (mode === "read-only") {
+    const now = live.active.filter((name) => gateSuspends(name, live.infos.get(name)));
+    return {
+      active: live.active.filter((name) => !now.includes(name)),
+      suspended: [...new Set([...suspended, ...now])],
+    };
+  }
+  const restore = suspended.filter(
+    (name) => gateSuspends(name, live.infos.get(name)) && !live.active.includes(name),
+  );
+  return { active: [...live.active, ...restore], suspended: [] };
+}
+
+/** Whether two name lists hold the same names (order-insensitive). */
+export function sameNames(a: readonly string[], b: readonly string[]): boolean {
+  const left = new Set(a);
+  const right = new Set(b);
+  return left.size === right.size && [...left].every((name) => right.has(name));
 }
 
 // --- the golden matrix --------------------------------------------------------------------------

@@ -8,9 +8,12 @@
 // Three terms, kept apart:
 //  - ACTIVATION is own-names-only: at every reconciliation point perk installs
 //    `reconcileTarget` — the live active set with perk's own names replaced by the eligible ones —
-//    and never activates or deactivates a foreign tool. A session whose live set needs no change
-//    gets NO `setActiveTools` call (a bare session — no stage, read-write, no floor, default
-//    registration — gets none at all).
+//    and never activates or deactivates a foreign tool. The one non-perk exception is a builtin
+//    the gate suspends (codemode: hidden-but-active, its own hook would hide every direct tool),
+//    switched off while presenting read-only and back on at release (`suspensionStep`). A session
+//    whose live set needs no change and whose presented mode does not flip gets NO
+//    `setActiveTools` call (a bare session — no stage, read-write, no floor, default registration
+//    — gets none at all).
 //  - PRESENTATION is the loadout host's (`perk_stage`, registered by index.ts through
 //    `registerLoadoutHost`): its `prepareLoadout` hides every declared tool ineligible in the
 //    landing (by provenance — `hiddenDeclarationsFor`), so the gate and the diet reach foreign
@@ -22,8 +25,10 @@
 // The reconciliation points: `syncFromState` (session_start, session_tree, the doors' stage
 // syncs), `enter`, `exit`, the `resources_discover` re-apply (after every extension's
 // session_start — late registrants), and `before_agent_start` (ahead of the mode-context
-// injection, so a tool activated between requests — a `tool_search` hit — meets the policy
-// before the next request). The presented mode LEADS each install: the host's hook runs inside
+// injection; Pi emits it once when a prompt starts, so a tool activated during the previous
+// prompt — a `tool_search` hit — meets the policy before the next prompt's first request; within
+// a prompt only the host's per-request hiding applies). The presented mode LEADS each install:
+// the host's hook runs inside
 // the install, and Pi rebuilds the prompt's snippet map from that run, so a gate exit restores
 // edit/write's snippets in the same install.
 //
@@ -34,7 +39,7 @@
 // `setActiveTools`) is undone by the next reconciliation — perk's own activation is
 // policy-owned. Composition limit: codemode builds its description from the unfiltered callable
 // set, so in a read-write stage session it may name diet-hidden tools; under the gate codemode is
-// itself hidden.
+// suspended.
 //
 // Substrate only: the gate-ENTRY consumers are perk-owned plan mode (`pi/v1/plan.ts`: `/plan`,
 // `--plan`, `Ctrl+Alt+P`), the warm `/objective-plan` factory (`pi/v1/objectivePlanning.ts`) and
@@ -58,6 +63,8 @@ import {
   normalizeStage,
   type Provenance,
   reconcileTarget,
+  sameNames,
+  suspensionStep,
 } from "./toolPolicy.ts";
 import { branchCarries, branchOf, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
@@ -163,6 +170,9 @@ export function registerToolGating(
   // The mode the loadout host presents. Leads every install (so the hook run inside the install
   // already sees it); on a failed install it falls back to the settled gate.
   let presentedMode: Mode = "read-write";
+  // The builtins the gate switched off (codemode), restored when the presentation turns
+  // read-write. Updated only after a successful install.
+  let suspended: string[] = [];
 
   function hasFloor(): boolean {
     try {
@@ -179,9 +189,10 @@ export function registerToolGating(
    * Reconcile perk's own tools for a (gate, stage) landing (contracts.md §8.40). The in-memory
    * gate latches ON before any fallible read (fail-closed) and is released only after a
    * successful install. The presented mode and stage lead the install; an install happens only
-   * when perk's names must change — or when the presented mode flips under an active host, so Pi
-   * rebuilds the prompt's snippet map for the new presentation (a gate exit restores edit/write's
-   * snippets even when no perk name changed).
+   * when perk's names must change or a suspended builtin must be switched off or back on — or
+   * when the presented mode flips under an active host, so Pi rebuilds the prompt's snippet map
+   * for the new presentation (a gate exit restores edit/write's snippets even when no perk name
+   * changed).
    */
   function apply(nextActive: boolean, nextStage: string | null): void {
     if (nextActive) active = true;
@@ -191,15 +202,19 @@ export function registerToolGating(
     presentedMode = effective ? "read-only" : "read-write";
     try {
       const live = pi.getActiveTools();
-      const target = reconcileTarget(
-        { active: live, registered: pi.getAllTools().map((t) => t.name) },
-        stageId,
-        presentedMode,
-      );
-      if (target !== null) pi.setActiveTools(target);
+      const infos = provenanceMap();
+      const step = suspensionStep({ active: live, infos }, presentedMode, suspended);
+      const target =
+        reconcileTarget(
+          { active: step.active, registered: [...infos.keys()] },
+          stageId,
+          presentedMode,
+        ) ?? step.active;
+      if (!sameNames(target, live)) pi.setActiveTools(target);
       else if (presentedMode !== previousMode && live.includes(LOADOUT_HOST_NAME)) {
         pi.setActiveTools(live);
       }
+      suspended = step.suspended;
     } catch (error) {
       presentedMode = isActive() ? "read-only" : "read-write";
       throw error;
@@ -213,6 +228,11 @@ export function registerToolGating(
   pi.on("resources_discover", async () => {
     apply(active, stageId);
   });
+
+  /** Every registered tool's provenance, by name. */
+  function provenanceMap(): Map<string, Provenance> {
+    return new Map(pi.getAllTools().map((t) => [t.name, t.sourceInfo] as const));
+  }
 
   /** The registered tool's provenance, or undefined when the name is not registered here. */
   function registeredProvenance(name: string): Provenance | undefined {
@@ -263,13 +283,14 @@ export function registerToolGating(
   });
 
   pi.on("before_agent_start", async (_event, ctx) => {
-    // Reconcile before every request, gated or not: a tool activated since the last point (a
-    // `tool_search` hit) meets the landing before the model is asked again. Pi treats the live
-    // loadout as authoritative unless a later handler edits `selectedTools` explicitly.
+    // Reconcile as each prompt starts, gated or not: a tool activated since the last point (a
+    // `tool_search` hit during the previous prompt) meets the landing before this prompt's first
+    // request. Pi treats the live loadout as authoritative unless a later handler edits
+    // `selectedTools` explicitly.
     try {
       apply(active, stageId);
     } catch (error) {
-      console.error(`perk: tool reconciliation failed before the request — ${error}`);
+      console.error(`perk: tool reconciliation failed before the prompt — ${error}`);
     }
     // Inject the hidden read-only mode context while active (display:false → not in transcript).
     if (!isActive()) return;
@@ -340,13 +361,10 @@ export function registerToolGating(
     isActive,
     prepareLoadout(loadout: ToolLoadout): ToolLoadoutChanges {
       try {
-        const infos = new Map<string, Provenance>(
-          pi.getAllTools().map((t) => [t.name, t.sourceInfo] as const),
-        );
         return {
           hiddenDeclarations: hiddenDeclarationsFor(
             loadout.declared.map((t) => t.name),
-            infos,
+            provenanceMap(),
             stageId,
             presentedMode,
           ),

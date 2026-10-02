@@ -227,9 +227,12 @@ stage-by-tool result is committed as `shared/fixtures/tool-matrix.json`.
 
 Perk applies all of this in three separate ways. **Activation:** perk switches on and off only
 its own tools — at every session start and tree navigation, when the gate turns on or off, after
-every extension has started, and before each model request — and never activates or deactivates
-a foreign or builtin tool. **Presentation:** `perk_stage` hides every ineligible tool's declaration
-(and its prompt-snippet line) from the model; a hidden tool stays active and callable.
+every extension has started, and when each new prompt starts (not between the model requests
+inside one prompt) — and never activates or deactivates a foreign or builtin tool, with one
+exception: under the read-only gate perk switches `codemode` off, and back on when the gate turns
+off. **Presentation:** before every model request, `perk_stage` hides every ineligible tool's
+declaration (and its prompt-snippet line) from the model; a hidden tool stays active and
+callable.
 **Enforcement:** under the read-only gate the tool-call check below blocks every ineligible call,
 whatever the model was shown.
 
@@ -247,9 +250,11 @@ nested call can end the turn or open a human surface.
 Effective read-only gating is the existing workflow mode **or** a captured runner restriction
 floor. Perk activates the stage's own tools that are eligible read-only there and hides every
 other ineligible declaration: `edit` and `write` stay active but are not declared to the model
-(their prompt-snippet lines disappear too, and return when the gate turns off), `codemode` is
-hidden (its description would list the write tools' schemas), and so are `never` and
-unknown-provenance foreign tools. Each stage therefore sees its own tools: an `objective-refine`
+(their prompt-snippet lines disappear too, and return when the gate turns off), and so are
+`never` and unknown-provenance foreign tools. `codemode` is switched off while the gate is on and
+back on when it turns off: its description would list the write tools' schemas, and in `only`
+mode it hides every direct tool itself, so a hidden-but-active codemode would leave the session
+without `read`, `bash` or perk's tools. Each stage therefore sees its own tools: an `objective-refine`
 session, for instance, gets read/research/question, `plan_review`, `objective_refinement_draft`
 and the mode-over-stage set — no node claim, no objective or gist draft, no save tool, no
 delegation. Because the `/plan` flow's tools are mode-over-stage, `plan_draft` is reachable there
@@ -365,13 +370,14 @@ delegation and the checklist.
 The diet is presentation for foreign tools: a `subagent` the model enabled in a `plan` session
 stays active but is not declared to the model, and a late-registering tool (the delegation
 supervisor) is shown or hidden by its posture the moment it appears. A deferred perk tool that
-`tool_search` activates stays while it is eligible and is switched off before the next request
-where it is not (it is hidden immediately). Pi restores such activations only when you navigate
+`tool_search` activates stays while it is eligible; where it is not, it is hidden from the very
+next request and switched off when the next prompt starts (until then it stays callable — the
+read-write diet has no call-time check). Pi restores such activations only when you navigate
 the session tree, not on resume or fork; perk keeps what Pi restored and adds nothing.
 
 One composition limit: `codemode` writes its own description from every callable tool, so in a
 read-write stage session with codemode active, that description may name a tool the diet hides.
-This affects only what the model reads; under the gate codemode itself is hidden and blocked.
+This affects only what the model reads; under the gate codemode is switched off.
 
 Pi owns its builtins (`read`, `edit`, `write`, `bash`, `grep`, `find`, and related host tools); this
 reference does not redefine them. Stage scoping is fail-open at compatibility boundaries: a bare

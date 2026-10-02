@@ -254,6 +254,10 @@ test("false cannot clear inherited read-only; ordinary parents use the same back
   await assertBackstop(h);
   h.fail("toolset");
   assert.throws(() => h.gate.syncFromState("read-write", undefined));
+  // Immediately after the failed release — before any later point could repair it — the host
+  // still presents the gate: the writers stay hidden while enforcement holds.
+  for (const name of ["edit", "write", "foreign_mutator"])
+    assert.ok(h.hidden().includes(name), `${name} still hidden after the failed release`);
   await quietly(() => assertBackstop(h));
   h.fail(undefined);
   h.gate.exit();
@@ -807,4 +811,42 @@ test("a mode flip that changes no perk name reinstalls the live set under an act
   bare.gate.enter();
   bare.gate.exit();
   assert.deepEqual(bare.installs, []);
+});
+
+test("codemode is suspended under the gate and restored at release; a never-active or foreign codemode is untouched", () => {
+  const codemode: FakeTool = { name: "codemode", source: "builtin", path: "builtin:codemode" };
+  const registry = [...defaultRegistry(), codemode];
+  const h = gateFixture(() => false, {
+    registry,
+    active: [...defaultActive(defaultRegistry()), "codemode"],
+  });
+  h.gate.syncFromState("read-write", "implement");
+  assert.ok(h.active().includes("codemode"), "read-write leaves it as the user had it");
+  h.gate.enter();
+  assert.ok(!h.active().includes("codemode"), "switched off under the gate");
+  // A failed release keeps it off and the memo intact.
+  h.fail("toolset");
+  assert.throws(() => h.gate.exit());
+  h.fail(undefined);
+  assert.ok(!h.active().includes("codemode"));
+  h.gate.exit();
+  assert.ok(h.active().includes("codemode"), "switched back on at release");
+  h.gate.exit();
+  assert.equal(h.active().filter((n) => n === "codemode").length, 1, "restored once");
+
+  // Registered but never active: the gate has nothing to suspend or restore.
+  const idle = gateFixture(() => false, { registry, active: defaultActive(defaultRegistry()) });
+  idle.gate.enter();
+  idle.gate.exit();
+  assert.ok(!idle.active().includes("codemode"));
+
+  // A foreign tool named codemode is governed by its provenance, never suspended.
+  const namesake: FakeTool = { name: "codemode", source: "npm:fake-codemode@1.0.0", path: "/x" };
+  const foreign = gateFixture(() => false, {
+    registry: [...defaultRegistry(), namesake],
+    active: [...defaultActive(defaultRegistry()), "codemode"],
+  });
+  foreign.gate.enter();
+  assert.ok(foreign.active().includes("codemode"));
+  assertForeignInvariance(foreign);
 });

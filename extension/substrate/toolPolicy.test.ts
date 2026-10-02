@@ -14,6 +14,7 @@ import {
   derivePiMetadata,
   GIST_STAGES,
   gatedToolsFor,
+  gateSuspends,
   hiddenDeclarationsFor,
   isEligible,
   isPerkTool,
@@ -34,7 +35,9 @@ import {
   reconcileTarget,
   recordPerkTool,
   SYNTHETIC_PATH_TOOL_POLICY,
+  sameNames,
   stageToolsFor,
+  suspensionStep,
   type ToolPolicy,
   toolMatrix,
   validateToolPolicy,
@@ -570,4 +573,45 @@ test("toolMatrix: perk + builtin rows, the postures section, sorted eligibility,
       .filter((n) => n !== "tt_deferred")
       .sort(),
   );
+});
+
+test("gate suspension: only the builtin-sourced codemode; suspended while read-only, restored at release when still registered", () => {
+  assert.equal(gateSuspends("codemode", BUILTIN("codemode")), true);
+  assert.equal(gateSuspends("codemode", pkg("npm:some-codemode")), false, "a foreign namesake");
+  assert.equal(gateSuspends("codemode", undefined), false);
+  for (const name of ["edit", "write", "tool_search", "read"])
+    assert.equal(gateSuspends(name, BUILTIN(name)), false, name);
+  const infos = new Map<string, Provenance>([
+    ["codemode", BUILTIN("codemode")],
+    ["edit", BUILTIN("edit")],
+  ]);
+  // Read-only: switched off and remembered (a memo accumulates).
+  assert.deepEqual(suspensionStep({ active: ["edit", "codemode"], infos }, "read-only", []), {
+    active: ["edit"],
+    suspended: ["codemode"],
+  });
+  assert.deepEqual(suspensionStep({ active: ["edit"], infos }, "read-only", ["codemode"]), {
+    active: ["edit"],
+    suspended: ["codemode"],
+  });
+  // Read-write: restored only from the memo, only while still registered, never duplicated.
+  assert.deepEqual(suspensionStep({ active: ["edit"], infos }, "read-write", ["codemode"]), {
+    active: ["edit", "codemode"],
+    suspended: [],
+  });
+  assert.deepEqual(suspensionStep({ active: ["edit"], infos }, "read-write", []), {
+    active: ["edit"],
+    suspended: [],
+  });
+  assert.deepEqual(
+    suspensionStep({ active: ["edit", "codemode"], infos }, "read-write", ["codemode"]),
+    { active: ["edit", "codemode"], suspended: [] },
+  );
+  assert.deepEqual(
+    suspensionStep({ active: ["edit"], infos: new Map() }, "read-write", ["codemode"]),
+    { active: ["edit"], suspended: [] },
+    "an unregistered codemode is not restored",
+  );
+  assert.equal(sameNames(["a", "b"], ["b", "a", "a"]), true);
+  assert.equal(sameNames(["a"], ["a", "b"]), false);
 });

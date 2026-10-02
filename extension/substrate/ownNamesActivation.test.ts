@@ -7,6 +7,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { before, type TestContext, test } from "node:test";
 import {
   fauxAssistantMessage,
@@ -294,7 +295,7 @@ async function staged(
 
 // --- 1. search-then-reconcile ---------------------------------------------------------------------
 
-test("search-then-reconcile (A): an eligible tool_search activation survives every point; an ineligible one is hidden at once and deactivated before the next request", async () => {
+test("search-then-reconcile (A): an eligible tool_search activation survives every point; an ineligible one is hidden at once and deactivated when the next prompt starts", async () => {
   {
     const rt = await recordingRuntime();
     const h = await staged("implement", "read-write", {
@@ -339,12 +340,15 @@ test("search-then-reconcile (A): an eligible tool_search activation survives eve
       await h.session.prompt("find the ledger tool");
       assert.ok(
         h.session.getActiveToolNames().includes(DEFERRED_WORKTREE),
-        "the search activated it",
+        "the search activated it; it stays active for the rest of this prompt",
       );
       assert.ok(!rt.last().tools.includes(DEFERRED_WORKTREE), "hidden on the very next request");
       rt.census();
       await h.session.prompt("census");
-      assert.ok(!h.session.getActiveToolNames().includes(DEFERRED_WORKTREE), "deactivated");
+      assert.ok(
+        !h.session.getActiveToolNames().includes(DEFERRED_WORKTREE),
+        "deactivated when the next prompt started",
+      );
       assert.ok(!rt.last().tools.includes(DEFERRED_WORKTREE));
       await h.invokeCommand("plan");
       assert.equal(
@@ -359,7 +363,7 @@ test("search-then-reconcile (A): an eligible tool_search activation survives eve
 
 // --- 2. search-then-tree/resume/fork (host behaviour bounds perk's) -----------------------------
 
-test("search-then-tree/resume/fork (A): /tree restores it and perk keeps it (or drops it in an ineligible stage); a resume or fork starts without it and perk never re-activates it", async (t) => {
+test("search-then-tree/resume/fork (A): a resume or fork from the eligible searched leaf starts without it and perk never re-activates it; /tree restores it and perk keeps it (or drops it in an ineligible stage)", async (t) => {
   const installs = recordPerkInstalls(t);
   const cwd = scaffoldRepo();
   const file = plantSession(cwd, [{ stage: "implement", mode: "read-write" }]);
@@ -371,13 +375,49 @@ test("search-then-tree/resume/fork (A): /tree restores it and perk keeps it (or 
     extraExtensions: [toolSearch(), deferredFixtures],
     env: { PERK_RUN_ID: undefined },
   };
+  const searched = await loadAt(cwd, { ...opts, sessionManager: SessionManager.open(file) });
+  let leaf: string;
+  try {
+    searched.session.setActiveToolsByName([
+      ...searched.session.getActiveToolNames(),
+      "tool_search",
+    ]);
+    rt.callThenStop("tool_search", { query: "worktree ledger" });
+    await searched.session.prompt("find the ledger tool");
+    assert.ok(searched.session.getActiveToolNames().includes(DEFERRED_WORKTREE));
+    const id = searched.session.sessionManager.getLeafId();
+    assert.ok(id !== null);
+    leaf = id;
+  } finally {
+    searched.dispose();
+  }
+  assert.ok(existsSync(file) && readFileSync(file, "utf8").includes(DEFERRED_WORKTREE));
+
+  // Resume and fork land on the searched leaf, in implement — where the tool is ELIGIBLE, so
+  // perk would keep it had the host restored it: its absence is the host's, not perk's filter.
+  for (const manager of [SessionManager.open(file), SessionManager.forkFrom(file, cwd)]) {
+    installs.length = 0;
+    const resumed = await loadAt(cwd, { ...opts, sessionManager: manager });
+    try {
+      assert.equal(resumed.workflowState().stage, "implement");
+      assert.ok(!resumed.session.getActiveToolNames().includes(DEFERRED_WORKTREE));
+      rt.census();
+      await resumed.session.prompt("census");
+      assert.ok(!resumed.session.getActiveToolNames().includes(DEFERRED_WORKTREE));
+      assert.ok(installs.length > 0, "the recorder sees perk's startup install (non-vacuous)");
+      assert.deepEqual(
+        installs.filter((names) => names.includes(DEFERRED_WORKTREE)),
+        [],
+        "perk never installs it",
+      );
+    } finally {
+      resumed.dispose();
+    }
+  }
+
+  // /tree navigation is where the host restores the declared loadout.
   const h = await loadAt(cwd, { ...opts, sessionManager: SessionManager.open(file) });
   try {
-    h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "tool_search"]);
-    rt.callThenStop("tool_search", { query: "worktree ledger" });
-    await h.session.prompt("find the ledger tool");
-    const leaf = h.session.sessionManager.getLeafId();
-    assert.ok(leaf !== null);
     const [planted] = h.entryIds() as [string];
     await h.navigateTo(planted);
     await h.navigateTo(leaf);
@@ -392,24 +432,6 @@ test("search-then-tree/resume/fork (A): /tree restores it and perk keeps it (or 
     assert.ok(!h.session.getActiveToolNames().includes(DEFERRED_WORKTREE), "dropped in plan");
   } finally {
     h.dispose();
-  }
-  assert.ok(existsSync(file) && readFileSync(file, "utf8").includes(DEFERRED_WORKTREE));
-  for (const manager of [SessionManager.open(file), SessionManager.forkFrom(file, cwd)]) {
-    installs.length = 0;
-    const resumed = await loadAt(cwd, { ...opts, sessionManager: manager });
-    try {
-      assert.ok(!resumed.session.getActiveToolNames().includes(DEFERRED_WORKTREE));
-      await resumed.navigateTo((resumed.entryIds() as [string])[0]);
-      assert.ok(!resumed.session.getActiveToolNames().includes(DEFERRED_WORKTREE));
-      assert.ok(installs.length > 0, "the recorder sees perk's startup install (non-vacuous)");
-      assert.deepEqual(
-        installs.filter((names) => names.includes(DEFERRED_WORKTREE)),
-        [],
-        "perk never installs it",
-      );
-    } finally {
-      resumed.dispose();
-    }
   }
 });
 
@@ -894,9 +916,9 @@ test("registry filters (A): an allowlisted child registers no perk tool and gets
   }
 });
 
-// --- 12. codemode under the gate ------------------------------------------------------------------
+// --- 12. codemode under the gate + real nested execution ------------------------------------------
 
-test("codemode (A): under the gate its declaration (and the edit schema it embeds) never reaches the request, and neither codemode nor a nested edit can run", async () => {
+test("codemode (A): the gate suspends it — its edit-bearing description never reaches a gated request and the direct tools stay declared — and restores it at release", async () => {
   const rt = await recordingRuntime();
   const h = await staged("implement", "read-only", {
     headful: false,
@@ -909,17 +931,103 @@ test("codemode (A): under the gate its declaration (and the edit schema it embed
     assert.ok(h.session.getActiveToolNames().includes("codemode"));
     rt.census();
     await h.session.prompt("census");
-    assert.ok(!rt.last().tools.includes("codemode"), "codemode hidden under the gate");
-    assert.ok(!JSON.stringify(rt.last().declared).includes("oldText"), "no edit schema declared");
+    assert.ok(!h.session.getActiveToolNames().includes("codemode"), "suspended under the gate");
+    const gated = rt.last();
+    assert.ok(!gated.tools.includes("codemode"));
+    assert.ok(!JSON.stringify(gated.declared).includes("oldText"), "no edit schema declared");
+    for (const name of ["read", "bash", "plan_draft"])
+      assert.ok(gated.tools.includes(name), `${name} stays declared under the gate`);
     assert.match((await blocked(h, "codemode")) ?? "", /tool not allowlisted/);
-    const nested = await h.session.extensionRunner.emitToolCall({
-      type: "tool_call",
-      toolCallId: "nested-edit",
-      parentToolCallId: "call-codemode",
-      toolName: "edit",
-      input: { path: "x", edits: [] },
-    } as never);
-    assert.equal((nested as { block?: boolean } | undefined)?.block, true, "a scripted edit");
+
+    await h.invokeCommand("plan");
+    assert.equal(h.workflowState().mode, "read-write");
+    assert.ok(h.session.getActiveToolNames().includes("codemode"), "restored at release");
+    rt.census();
+    await h.session.prompt("census");
+    assert.ok(rt.last().tools.includes("codemode"), "declared again read-write");
+  } finally {
+    h.dispose();
+  }
+});
+
+/** A gate-allowed test perk tool that writes `target` through Pi's nested-execution API. */
+function nestedWriter(
+  target: string,
+  outcomes: { isError: boolean; text: string }[],
+): InlineExtension {
+  return {
+    name: "perk-nested-writer",
+    factory: (pi) => {
+      registerPerkTool(
+        pi,
+        {
+          name: NESTED_WRITER,
+          label: NESTED_WRITER,
+          description: "Write the fixture file through a nested call.",
+          parameters: { type: "object", additionalProperties: false, properties: {} } as never,
+          async execute(_id, _params, _signal, _onUpdate, ctx) {
+            const outcome = await ctx.executeTool("write", { path: target, content: "nested\n" });
+            const result = outcome.result as { content: { type: string; text?: string }[] };
+            const text = result.content.map((c) => c.text ?? "").join("");
+            outcomes.push({ isError: outcome.isError, text });
+            return { content: [{ type: "text" as const, text: "probed" }], details: {} };
+          },
+        },
+        { stages: ["implement"], gated: "allowed", kind: "action" },
+      );
+    },
+  };
+}
+
+const NESTED_WRITER = "fixture_nested_writer";
+
+test("nested execution (A): a write reached through ctx.executeTool meets the read-only backstop with its parent call id; read-write, the same write lands", async () => {
+  const rt = await recordingRuntime();
+  const outcomes: { isError: boolean; text: string }[] = [];
+  const runId = "01OWNNESTED";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "implement" } });
+  const target = join(cwd, "nested-target.txt");
+  const h = await loadAt(cwd, {
+    headful: false,
+    model: rt.reg.getModel(),
+    modelRuntime: rt.reg.modelRuntime,
+    env: { PERK_RUN_ID: runId },
+    extraExtensions: [nestedWriter(target, outcomes)],
+  });
+  const runner = h.session.extensionRunner;
+  const seen: { toolName: string; parentToolCallId?: string; block?: boolean }[] = [];
+  const emit = runner.emitToolCall.bind(runner);
+  runner.emitToolCall = async (event) => {
+    const result = await emit(event);
+    seen.push({
+      toolName: event.toolName,
+      parentToolCallId: (event as { parentToolCallId?: string }).parentToolCallId,
+      block: (result as { block?: boolean } | undefined)?.block,
+    });
+    return result;
+  };
+  try {
+    rt.callThenStop(NESTED_WRITER, {});
+    await h.session.prompt("write through the probe");
+    assert.equal(outcomes.length, 1, "the probe ran (it is gate-allowed)");
+    assert.equal(outcomes[0]?.isError, true);
+    assert.match(
+      outcomes[0]?.text ?? "",
+      /perk read-only mode: write is blocked \(file modifications disabled\)/,
+    );
+    assert.deepEqual(
+      seen.filter((e) => e.toolName === "write"),
+      [{ toolName: "write", parentToolCallId: `call-${NESTED_WRITER}`, block: true }],
+    );
+    assert.equal(existsSync(target), false, "nothing written under the gate");
+
+    // The read-write control: the same nested write executes once the gate is released.
+    await h.invokeCommand("plan");
+    assert.equal(h.workflowState().mode, "read-write");
+    rt.callThenStop(NESTED_WRITER, {});
+    await h.session.prompt("write through the probe again");
+    assert.equal(outcomes[1]?.isError, false, outcomes[1]?.text);
+    assert.equal(readFileSync(target, "utf8"), "nested\n");
   } finally {
     h.dispose();
   }
