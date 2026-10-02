@@ -10,6 +10,10 @@
 //
 // The loadout host (`perk_stage`) is the one other registrant here: the only tool allowed a
 // `prepareLoadout` hook, which presents the session's stage/mode loadout by hiding declarations.
+//
+// The discovery cohort's re-registration lives here too (`deferDiscoveryFamily`): a definition can
+// only be replaced by the extension that registered it, so the seam retains what each activation
+// registered (keyed by that activation's own `pi`) and re-registers exactly that, deferred.
 
 import type {
   ExtensionAPI,
@@ -20,8 +24,10 @@ import type {
 import { structureResult } from "../substrate/result.ts";
 import {
   derivePiMetadata,
+  discoveryFamily,
   LOADOUT_HOST_NAME,
   type POLICY_OWNED_FIELDS,
+  perkToolPolicy,
   REGISTRY_STAGE_IDS,
   recordPerkTool,
   type ToolPolicy,
@@ -35,6 +41,13 @@ export type PerkToolDefinition<
 > = Omit<ToolDefinition<TParams, TDetails>, (typeof POLICY_OWNED_FIELDS)[number]>;
 
 /**
+ * What each activation registered through the seam, keyed by that activation's own `pi` —
+ * ownership is the activation, never the name: a second bound session in the same process has its
+ * own `pi` and its own map, and a tool another extension registered is never re-registered here.
+ */
+const RETAINED = new WeakMap<ExtensionAPI, Map<string, ToolDefinition>>();
+
+/**
  * Register a perk tool: validate + catalog its policy, then register with the derived metadata
  * and an `execute` whose returned result carries the derived structured fields.
  */
@@ -46,11 +59,49 @@ export function registerPerkTool<TParams extends ToolDefinition["parameters"], T
   validateToolPolicy(definition.name, definition, policy, REGISTRY_STAGE_IDS);
   recordPerkTool(definition.name, policy);
   const { execute } = definition;
-  pi.registerTool({
+  const registered = {
     ...definition,
     ...derivePiMetadata(policy),
-    execute: async (...args) => structureResult(await execute(...args)),
-  });
+    execute: async (...args: Parameters<typeof execute>) => structureResult(await execute(...args)),
+  } as ToolDefinition;
+  pi.registerTool(registered);
+  let owned = RETAINED.get(pi);
+  if (owned === undefined) {
+    owned = new Map();
+    RETAINED.set(pi, owned);
+  }
+  owned.set(definition.name, registered);
+}
+
+/**
+ * Re-register the discovery-pilot family `exposure: "deferred"` in THIS activation's registry:
+ * each catalogued `declared: "deferred"` name this `pi` registered and the host still has. Pi's
+ * `registerTool` replaces by name within the owning extension and keeps the tool in the active set
+ * (the gating controller's one-time deactivation removes it). A member the registry already
+ * reports deferred is skipped, so a re-emitted `session_start` re-registers nothing; a per-name
+ * failure is reported and skipped. Returns the family names now deferred, in catalog order.
+ */
+export function deferDiscoveryFamily(pi: ExtensionAPI): string[] {
+  const owned = RETAINED.get(pi);
+  if (owned === undefined) return [];
+  const exposures = new Map(pi.getAllTools().map((t) => [t.name, t.exposure] as const));
+  const deferred: string[] = [];
+  for (const name of discoveryFamily()) {
+    const retained = owned.get(name);
+    const policy = perkToolPolicy(name);
+    if (retained === undefined || policy === undefined || !exposures.has(name)) continue;
+    if (exposures.get(name) === "deferred") {
+      deferred.push(name);
+      continue;
+    }
+    try {
+      pi.registerTool({ ...retained, ...derivePiMetadata(policy, { cohort: true }) });
+      deferred.push(name);
+    } catch (error) {
+      console.error(`perk: could not defer ${name} — ${error}`);
+    }
+  }
+  return deferred;
 }
 
 /**

@@ -5,7 +5,7 @@
 // (`toolPolicy.ts`); this module owns the controller, the mode-context injection and the
 // `tool_call` backstop. The bash verdict lives in `readOnlyBash.ts`.
 //
-// Three terms, kept apart:
+// Four terms, kept apart:
 //  - ACTIVATION is own-names-only: at every reconciliation point perk installs
 //    `reconcileTarget` — the live active set with perk's own names replaced by the eligible ones —
 //    and never activates or deactivates a foreign tool. The one non-perk exception is a builtin
@@ -21,6 +21,16 @@
 //    prompt snippets drop out of the request, their guidelines do not. Fail-open.
 //  - ENFORCEMENT is the read-only `tool_call` backstop: under the gate, edit/write, an
 //    unregistered name, an ineligible tool and an unsafe bash command are blocked. Fail-closed.
+//  - THE DISCOVERY COHORT: a session whose host has Pi's builtin `tool_search` registered and
+//    active at `session_start` joins it (index.ts: `deferDiscoveryFamily` re-registers the pilot
+//    family deferred, then `joinDiscoveryCohort`). The next install deactivates the family once
+//    (still ONE perk install at startup); thereafter a family member is kept exactly while it is
+//    active and eligible (`reconcileTarget`'s third term, cohort-only). Priming
+//    (`primeDeferred`) is the one perk-initiated activation of a deferred tool: a warm door or a
+//    wave launcher activates the members its carrier names. Every other session is a
+//    nonparticipant and keeps today's always-declared loadout. Resets: resume/fork start from the
+//    host's defaults (a primed or searched member is gone); `/reload` re-runs the factory, which
+//    re-joins and re-deactivates; `/tree` restores the transcript's loadout and perk keeps it.
 //
 // The reconciliation points: `syncFromState` (session_start, session_tree, the doors' stage
 // syncs), `enter`, `exit`, the `resources_discover` re-apply (after every extension's
@@ -56,8 +66,10 @@ import { render } from "./prompts.ts";
 import { readOnlyBashVerdict } from "./readOnlyBash.ts";
 import {
   carveOutWritersFor,
+  discoveryFamily,
   hiddenDeclarationsFor,
   isEligible,
+  isPerkTool,
   LOADOUT_HOST_NAME,
   type Mode,
   normalizeStage,
@@ -151,6 +163,21 @@ export interface ToolGating {
    * backstop still enforces).
    */
   prepareLoadout(loadout: ToolLoadout): ToolLoadoutChanges;
+  /**
+   * Join the discovery cohort with the family `deferDiscoveryFamily` re-registered deferred: the
+   * next reconciliation removes those names from the live set once, as part of its one install.
+   * Idempotent per activation (a second call is a no-op); installs nothing itself.
+   */
+  joinDiscoveryCohort(family: readonly string[]): void;
+  /**
+   * Primed activation: activate the deferred family members among `names` that are registered,
+   * eligible in the presented landing and not yet active, in catalog order; returns them. A no-op
+   * (`[]`, no install) outside the cohort. Never throws — a failure is reported and returns `[]`
+   * (presentation is fail-open: the model can still `tool_search`; enforcement is untouched).
+   */
+  primeDeferred(names: readonly string[]): string[];
+  /** The selfcheck read: whether this session joined the cohort, and the whole family if so. */
+  discovery(): { cohort: boolean; family: readonly string[] };
 }
 
 function isReadOnlyMode(mode: string | undefined): boolean {
@@ -173,6 +200,10 @@ export function registerToolGating(
   // The builtins the gate switched off (codemode), restored when the presentation turns
   // read-write. Updated only after a successful install.
   let suspended: string[] = [];
+  // Whether this activation joined the discovery cohort, and the family the next install must
+  // deactivate once (cleared only after a successful install).
+  let cohort = false;
+  let pendingDeferral: string[] = [];
 
   function hasFloor(): boolean {
     try {
@@ -204,17 +235,21 @@ export function registerToolGating(
       const live = pi.getActiveTools();
       const infos = provenanceMap();
       const step = suspensionStep({ active: live, infos }, presentedMode, suspended);
+      const deferring = new Set(pendingDeferral.filter(isPerkTool));
+      const joined = step.active.filter((name) => !deferring.has(name));
       const target =
         reconcileTarget(
-          { active: step.active, registered: [...infos.keys()] },
+          { active: joined, registered: [...infos.keys()] },
           stageId,
           presentedMode,
-        ) ?? step.active;
+          cohort,
+        ) ?? joined;
       if (!sameNames(target, live)) pi.setActiveTools(target);
       else if (presentedMode !== previousMode && live.includes(LOADOUT_HOST_NAME)) {
         pi.setActiveTools(live);
       }
       suspended = step.suspended;
+      pendingDeferral = [];
     } catch (error) {
       presentedMode = isActive() ? "read-only" : "read-write";
       throw error;
@@ -359,6 +394,34 @@ export function registerToolGating(
       apply(false, stageId);
     },
     isActive,
+    joinDiscoveryCohort(family: readonly string[]): void {
+      if (cohort) return;
+      cohort = true;
+      pendingDeferral = [...family];
+    },
+    primeDeferred(names: readonly string[]): string[] {
+      if (!cohort) return [];
+      try {
+        const wanted = new Set(names);
+        const live = pi.getActiveTools();
+        const registered = new Set(pi.getAllTools().map((t) => t.name));
+        const targets = discoveryFamily().filter(
+          (name) =>
+            wanted.has(name) &&
+            registered.has(name) &&
+            isEligible(name, undefined, stageId, presentedMode) &&
+            !live.includes(name),
+        );
+        if (targets.length > 0) pi.setActiveTools([...live, ...targets]);
+        return targets;
+      } catch (error) {
+        console.error(`perk: priming failed — ${error}`);
+        return [];
+      }
+    },
+    discovery() {
+      return { cohort, family: cohort ? discoveryFamily() : [] };
+    },
     prepareLoadout(loadout: ToolLoadout): ToolLoadoutChanges {
       try {
         return {

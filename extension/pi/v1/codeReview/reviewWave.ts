@@ -545,6 +545,11 @@ export function installReviewWaveBindings(
         return executeCollectReviewWave(state, wave, ctx, { annotations, stackPin });
       },
     },
-    { stages: [...WORKTREE_STAGES, "stack-review"], gated: "blocked", kind: "action" },
+    {
+      stages: [...WORKTREE_STAGES, "stack-review"],
+      gated: "blocked",
+      kind: "action",
+      declared: "deferred",
+    },
   );
 }

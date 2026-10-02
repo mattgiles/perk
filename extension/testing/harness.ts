@@ -1200,10 +1200,17 @@ export const toolSearch = (): InlineExtension => ({
   builtin: true,
 });
 
-/** A ToolGating fake recording exits; `active` is the isActive snapshot. */
-export function fakeGating(active: boolean): ToolGating & { exits: number } {
+/**
+ * A ToolGating fake recording exits and every `primeDeferred` call (the door tests assert a door
+ * primes exactly its constant); `active` is the isActive snapshot. It reports a nonparticipant
+ * session: priming activates nothing and the cohort join is a no-op.
+ */
+export function fakeGating(
+  active: boolean,
+): ToolGating & { exits: number; primes: (readonly string[])[] } {
   const g = {
     exits: 0,
+    primes: [] as (readonly string[])[],
     syncFromState() {},
     enter() {},
     exit() {
@@ -1211,6 +1218,12 @@ export function fakeGating(active: boolean): ToolGating & { exits: number } {
     },
     isActive: () => active,
     prepareLoadout: () => ({}),
+    joinDiscoveryCohort() {},
+    primeDeferred(names: readonly string[]): string[] {
+      g.primes.push([...names]);
+      return [];
+    },
+    discovery: () => ({ cohort: false, family: [] as readonly string[] }),
   };
   return g;
 }

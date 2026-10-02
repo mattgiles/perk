@@ -437,6 +437,7 @@ export function registerDraftReviewWaveTools(
       gated: "allowed",
       modeOverStage: true,
       kind: "action",
+      declared: "deferred",
     },
   );
 }

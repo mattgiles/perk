@@ -225,6 +225,7 @@ export function installStackStatusBindings(pi: ExtensionAPI): void {
       stages: [...WORKTREE_STAGES],
       gated: "blocked",
       kind: "query",
+      declared: "deferred",
       result: {
         properties: {
           objective: {

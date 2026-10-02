@@ -37,7 +37,13 @@ export const LOADOUT_HOST_NAME = "perk_stage";
 export type ToolKind = "terminal" | "interactive" | "orchestration" | "query" | "action" | "host";
 /** A tool's posture under the read-only gate; `carveOut` names its one bounded write, in prose. */
 export type GatePosture = "allowed" | "blocked" | { carveOut: string };
-/** How the tool is declared to the model: always, or deferred (discoverable, never activated). */
+/**
+ * How the tool is declared to the model: always, or deferred — a discovery-pilot family member.
+ * A deferred tool registers `direct` like every other tool; in a discovery-cohort session it is
+ * re-registered `exposure: "deferred"` at `session_start`, deactivated once, and thereafter
+ * declared only while a door or launcher primes it or the host (`tool_search`, a `/tree`
+ * restore) activates it.
+ */
 export type Declared = "always" | "deferred";
 /** The session's gate mode (the workflow-state `mode` field). */
 export type Mode = "read-only" | "read-write";
@@ -60,7 +66,10 @@ export type ToolPolicy = {
   /** A mode gesture needs it regardless of stage (the `/plan` toggle's flow). Default false. */
   modeOverStage?: boolean;
   kind: ToolKind;
-  /** Reserved for the discovery pilot; default "always". */
+  /**
+   * `deferred` = a discovery-pilot family member (see `Declared`); default "always". Requires
+   * kind query/action and a gate posture of allowed or blocked.
+   */
   declared?: Declared;
   /**
    * `kind: query` only (required there, refused elsewhere): the success details' schema, from
@@ -203,12 +212,17 @@ export function deriveOutputSchema(result: QueryResultSchema): object {
 
 /**
  * Derive the Pi `exposure` + `annotations` (+ `outputSchema` for a query) for a policy — never
- * hand-set on a definition.
+ * hand-set on a definition. `exposure` is `deferred` only for a family member re-registered
+ * inside the discovery cohort (`cohort: true`); registration and the golden matrix derive without
+ * it, so every family member registers `direct`.
  */
-export function derivePiMetadata(policy: ToolPolicy): PiToolMetadata {
+export function derivePiMetadata(
+  policy: ToolPolicy,
+  options: { cohort?: boolean } = {},
+): PiToolMetadata {
   const exposure = MODEL_ONLY_KINDS.has(policy.kind)
     ? "model-only"
-    : policy.declared === "deferred"
+    : policy.declared === "deferred" && options.cohort === true
       ? "deferred"
       : "direct";
   return {
@@ -246,6 +260,11 @@ export function validateToolPolicy(
   if (policy.declared === "deferred" && MODEL_ONLY_KINDS.has(policy.kind)) {
     fail(
       `declared: "deferred" requires kind query or action — a ${policy.kind} tool is model-only, and a model-only tool can never be script-callable (exposure is one enum)`,
+    );
+  }
+  if (policy.declared === "deferred" && typeof policy.gated === "object") {
+    fail(
+      'declared: "deferred" requires gated allowed or blocked — the read-only context names carve-out writers, and an undeclared writer would dead-end',
     );
   }
   if (policy.kind === "query" && policy.result === undefined) {
@@ -516,12 +535,39 @@ export function isEligible(
 }
 
 /**
- * The eligible always-declared perk tools for a (stage, mode) landing, in catalog order —
- * deferred tools are never activated by perk.
+ * The eligible perk tools perk activates for a (stage, mode) landing, in catalog order. Inside the
+ * discovery cohort (`cohort`) a family member is excluded — only priming or the host activates
+ * it; outside it every eligible perk tool is always-declared.
  */
-export function perkToolsFor(stage: string | null | undefined, mode: Mode): string[] {
+export function perkToolsFor(
+  stage: string | null | undefined,
+  mode: Mode,
+  cohort = false,
+): string[] {
   return [...CATALOG].flatMap(([name, policy]) =>
-    policy.declared !== "deferred" && isEligible(name, undefined, stage, mode) ? [name] : [],
+    (policy.declared !== "deferred" || !cohort) && isEligible(name, undefined, stage, mode)
+      ? [name]
+      : [],
+  );
+}
+
+/** The discovery-pilot family: every catalogued `declared: "deferred"` name, in catalog order. */
+export function discoveryFamily(): string[] {
+  return [...CATALOG].flatMap(([name, policy]) => (policy.declared === "deferred" ? [name] : []));
+}
+
+/**
+ * Whether a session's host qualifies for the discovery cohort: Pi's BUILTIN `tool_search` is
+ * registered (`infos` maps each registered name to its provenance) and active. A foreign
+ * namesake never qualifies — the posture table classifies by provenance, never by name.
+ */
+export function isDiscoveryHost(
+  infos: ReadonlyMap<string, Provenance>,
+  active: readonly string[],
+): boolean {
+  return (
+    postureFor("tool_search", infos.get("tool_search")).owner === "builtin" &&
+    active.includes("tool_search")
   );
 }
 
@@ -542,7 +588,7 @@ export function carveOutWritersFor(
 ): { name: string; carveOut: string }[] {
   const writers: { name: string; carveOut: string }[] = [];
   for (const [name, policy] of CATALOG) {
-    if (typeof policy.gated !== "object" || policy.declared === "deferred") continue;
+    if (typeof policy.gated !== "object") continue;
     if (isEligible(name, undefined, stage, "read-only")) {
       writers.push({ name, carveOut: policy.gated.carveOut });
     }
@@ -556,21 +602,25 @@ export function carveOutWritersFor(
  * The active set perk installs for a (stage, mode) landing, or null when the live set already
  * equals it (order-insensitive) — so a session whose live set needs no change gets no install:
  *   (live active − perk-owned) ∪ eligible-always-perk ∪ (live active ∩ eligible-deferred-perk)
- * Foreign names keep their live order and membership (perk never activates or deactivates one);
- * perk names follow in catalog order. Only REGISTERED perk names count: a catalogued name the host
- * did not register (a vacated provider tool, a host registry filter) is never installed.
+ * The third term applies only inside the discovery cohort (`cohort`): there a family member is
+ * kept exactly while it is active (primed or host-activated) and eligible; outside it every
+ * eligible perk tool is always-declared. Foreign names keep their live order and membership (perk
+ * never activates or deactivates one); perk names follow in catalog order. Only REGISTERED perk
+ * names count: a catalogued name the host did not register (a vacated provider tool, a host
+ * registry filter) is never installed.
  */
 export function reconcileTarget(
   live: { active: readonly string[]; registered: readonly string[] },
   stage: string | null | undefined,
   mode: Mode,
+  cohort = false,
 ): string[] | null {
   const registered = new Set(live.registered);
   const active = new Set(live.active);
   const foreign = live.active.filter((name) => !CATALOG.has(name));
   const perk = [...CATALOG].flatMap(([name, policy]) => {
     if (!registered.has(name) || !isEligible(name, undefined, stage, mode)) return [];
-    return policy.declared !== "deferred" || active.has(name) ? [name] : [];
+    return policy.declared !== "deferred" || !cohort || active.has(name) ? [name] : [];
   });
   const target = [...foreign, ...perk];
   return sameNames(target, live.active) ? null : target;

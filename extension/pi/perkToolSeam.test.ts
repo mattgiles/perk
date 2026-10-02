@@ -18,6 +18,7 @@ import {
 } from "../substrate/toolPolicy.ts";
 import { fauxModelRuntime, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
+  deferDiscoveryFamily,
   LOADOUT_HOST_POLICY,
   type PerkToolDefinition,
   registerLoadoutHost,
@@ -187,7 +188,7 @@ test("registration-time rejections: deferred model-only kinds, policy-owned fiel
   assert.deepEqual(perkToolPolicy("seam_dup"), policy);
 });
 
-test("a deferred query registers with exposure deferred and stays out of both activation views", () => {
+test("a deferred query registers direct (the registered default) and rides both activation views outside the cohort", () => {
   const { pi, captured } = capturingPi();
   registerPerkTool(
     pi,
@@ -200,9 +201,97 @@ test("a deferred query registers with exposure deferred and stays out of both ac
       result: { properties: {} },
     },
   );
-  assert.equal(captured[0]?.exposure, "deferred");
-  assert.ok(!gatedToolsFor("plan").includes("seam_deferred_query"));
-  assert.ok(!(stageToolsFor("plan") ?? []).includes("seam_deferred_query"));
+  assert.equal(captured[0]?.exposure, "direct");
+  assert.ok(gatedToolsFor("plan").includes("seam_deferred_query"));
+  assert.ok((stageToolsFor("plan") ?? []).includes("seam_deferred_query"));
+});
+
+test("a deferred carve-out writer is refused at the seam", () => {
+  const { pi, captured } = capturingPi();
+  assert.throws(
+    () =>
+      registerPerkTool(pi, fakeDefinition("seam_deferred_carve", { content: [], details: {} }), {
+        stages: ["plan"],
+        gated: { carveOut: "the draft file" },
+        kind: "action",
+        declared: "deferred",
+      }),
+    /perk tool policy: seam_deferred_carve — declared: "deferred" requires gated allowed or blocked — the read-only context names carve-out writers, and an undeclared writer would dead-end/,
+  );
+  assert.equal(captured.length, 0);
+  assert.equal(isPerkTool("seam_deferred_carve"), false);
+});
+
+/**
+ * A stub `pi` with a live-ish registry: `registerTool` replaces by name and `getAllTools` reports
+ * each registered definition's exposure (Pi's own shape), optionally failing one name.
+ */
+function registryPi(failing?: string): {
+  pi: ExtensionAPI;
+  registrations: Captured[];
+} {
+  const registry = new Map<string, Captured>();
+  const registrations: Captured[] = [];
+  const pi = {
+    registerTool(def: Captured) {
+      if (def.name === failing && def.exposure === "deferred") throw new Error("host refused");
+      registrations.push(def);
+      registry.set(def.name as string, def);
+    },
+    getAllTools: () =>
+      [...registry.values()].map((def) => ({ name: def.name, exposure: def.exposure ?? "direct" })),
+  } as unknown as ExtensionAPI;
+  return { pi, registrations };
+}
+
+test("deferDiscoveryFamily: re-registers this activation's own family members deferred, once; another activation's pi re-registers nothing; a per-name failure is skipped", () => {
+  const family = ["seam_family_a", "seam_family_b"];
+  const result = { content: [{ type: "text" as const, text: "x" }], details: {} };
+  const member: ToolPolicy = {
+    stages: ["implement"],
+    gated: "blocked",
+    kind: "action",
+    declared: "deferred",
+  };
+  const own = registryPi();
+  for (const name of family) registerPerkTool(own.pi, fakeDefinition(name, result), member);
+  registerPerkTool(own.pi, fakeDefinition("seam_family_plain", result), {
+    ...member,
+    declared: "always",
+  });
+  // A second activation in the same process: it registered nothing through the seam, so the
+  // family is not its to re-register.
+  const other = registryPi();
+  assert.deepEqual(deferDiscoveryFamily(other.pi), []);
+  assert.equal(other.registrations.length, 0);
+
+  const before = own.registrations.length;
+  assert.deepEqual(deferDiscoveryFamily(own.pi), family);
+  const redone = own.registrations.slice(before);
+  assert.deepEqual(
+    redone.map((def) => [def.name, def.exposure]),
+    family.map((name) => [name, "deferred"]),
+  );
+  // The retained definition is re-registered: the same wrapped execute, only the exposure differs.
+  const first = own.registrations.find((def) => def.name === "seam_family_a");
+  assert.equal(redone[0]?.execute, first?.execute);
+  // A re-emitted session_start: already deferred → nothing re-registered, same names returned.
+  assert.deepEqual(deferDiscoveryFamily(own.pi), family);
+  assert.equal(own.registrations.length, before + family.length);
+
+  // A failing name is reported and skipped; the rest still defer.
+  const flaky = registryPi("seam_family_a");
+  for (const name of family) registerPerkTool(flaky.pi, fakeDefinition(name, result), member);
+  const errors: unknown[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => errors.push(args.join(" "));
+  try {
+    assert.deepEqual(deferDiscoveryFamily(flaky.pi), ["seam_family_b"]);
+  } finally {
+    console.error = original;
+  }
+  assert.equal(errors.length, 1);
+  assert.match(String(errors[0]), /^perk: could not defer seam_family_a — Error: host refused$/);
 });
 
 test("a live session: results gain only structuredContent (= details) and isError (ok === false, else the tool's own flag); exposure is derived", async () => {

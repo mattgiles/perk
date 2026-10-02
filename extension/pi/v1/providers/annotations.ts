@@ -1174,6 +1174,7 @@ export function installAnnotationBindings(pi: ExtensionAPI, state: AnnotationSta
       gated: "allowed",
       modeOverStage: true,
       kind: "action",
+      declared: "deferred",
     },
   );
 }

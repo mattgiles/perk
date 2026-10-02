@@ -14,7 +14,7 @@ import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createDraftReviewWaveState } from "./authoring/review/draftContext.ts";
 import { createHunkFeedbackReceiver, type HunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
-import { registerLoadoutHost } from "./pi/perkTool.ts";
+import { deferDiscoveryFamily, registerLoadoutHost } from "./pi/perkTool.ts";
 import { registerBashScanTimeout } from "./pi/v1/bashScanTimeout.ts";
 import { registerChildTaskRestore } from "./pi/v1/childTaskRestore.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
@@ -111,6 +111,7 @@ import { perkVersion, sharedDir, versionStamp } from "./substrate/resources.ts";
 import { isCanonicalRunId, mintRunId } from "./substrate/runId.ts";
 import { captureSessionPointer, recordRunSession } from "./substrate/sessionPointers.ts";
 import { registerToolGating } from "./substrate/toolGating.ts";
+import { isDiscoveryHost } from "./substrate/toolPolicy.ts";
 import {
   branchOf,
   rebuildWorkflowState,
@@ -530,6 +531,20 @@ export default function perk(
     // arms settle. Fail-closed on the gate: if the sync throws, leave it as-is (a failed sync
     // never opens it).
     const toolScope = sessionStartToolScope(identity);
+    // The discovery cohort join (contracts.md §8.40 "The discovery pilot"), BEFORE the first sync
+    // so the family's one-time deactivation rides that sync's single install. Only a host with
+    // Pi's builtin `tool_search` registered and active qualifies; every other session stays a
+    // nonparticipant. A failure leaves the session a nonparticipant.
+    try {
+      if (!gating.discovery().cohort) {
+        const infos = new Map(pi.getAllTools().map((t) => [t.name, t.sourceInfo] as const));
+        if (isDiscoveryHost(infos, pi.getActiveTools())) {
+          gating.joinDiscoveryCohort(deferDiscoveryFamily(pi));
+        }
+      }
+    } catch (error) {
+      console.error(`perk: discovery cohort join failed — ${error}`);
+    }
     try {
       gating.syncFromState(toolScope.mode, toolScope.stage);
     } catch (error) {
@@ -886,5 +901,5 @@ export default function perk(
   // `/perk-selfcheck` — the session-wiring verifier (turned from a liveness ping into a real check
   // that the converged ambient index reached `appendSystemPrompt` and the managed `AGENTS.md` block
   // reached `contextFiles`). doctor checks disk; selfcheck checks the prompt.
-  registerSelfcheck(pi, { version, sharedOk, bridge });
+  registerSelfcheck(pi, { version, sharedOk, bridge, discovery: () => gating.discovery() });
 }

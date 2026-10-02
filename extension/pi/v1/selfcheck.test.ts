@@ -427,6 +427,7 @@ test("renderCensus: full block pins the line grammar", () => {
       reused: true,
       detail: "",
     },
+    { cohort: true, family: ["collect_review_wave", "push_annotations"] },
   );
   assert.equal(
     block,
@@ -438,6 +439,7 @@ test("renderCensus: full block pins the line grammar", () => {
       "  skills: 28 visible + 3 hidden; prompt-section=13800c",
       "  tools: 24 active / 41 registered; schemas=61234c; guidelines=2400c; snippets=800c",
       "    per source: builtin=20 (50000c); perk=4 (11234c)",
+      "  discovery: cohort (family: collect_review_wave, push_annotations)",
       "  branch: 142 entries; binding-header-copies=2",
       "    perk contexts: perk:binding-context ×1 (900c) live=1; perk:mode-context ×3 (14400c) live=?; other custom_message ×0 (0c)",
       `  native sdk bridge: installed (roots=2, specifiers=${NATIVE_SDK_CENSUS.length}, reused)`,
@@ -465,6 +467,7 @@ test("renderCensus: custom base prompt, empty surfaces → none/omitted segments
       bindingHeaderCopies: 0,
     },
     { ...NO_BRIDGE, state: "failed:host-entry", detail: "no entry" },
+    { cohort: false, family: [] },
   );
   assert.equal(
     block,
@@ -475,6 +478,7 @@ test("renderCensus: custom base prompt, empty surfaces → none/omitted segments
       "  context-files: 0 file(s), 0c",
       "  skills: 0 visible + 0 hidden; prompt-section=0c",
       "  tools: 0 active / 0 registered; schemas=0c; guidelines=0c; snippets=0c",
+      "  discovery: nonparticipant",
       "  branch: 3 entries; binding-header-copies=0",
       "    perk contexts: none; other custom_message ×1 (12c)",
       "  native sdk bridge: failed:host-entry — no entry",

@@ -13,10 +13,12 @@ import {
   carveOutWritersFor,
   deriveOutputSchema,
   derivePiMetadata,
+  discoveryFamily,
   GIST_STAGES,
   gatedToolsFor,
   gateSuspends,
   hiddenDeclarationsFor,
+  isDiscoveryHost,
   isEligible,
   isPerkTool,
   LOADOUT_HOST_NAME,
@@ -88,10 +90,23 @@ test("derivePiMetadata: terminal/interactive/orchestration/host are model-only; 
     exposure: "model-only",
     annotations: { readOnlyHint: true },
   });
+  for (const kind of ["terminal", "interactive", "orchestration", "host"] as const) {
+    assert.deepEqual(derivePiMetadata({ ...base, kind, gated: "blocked" }, { cohort: true }), {
+      exposure: "model-only",
+    });
+  }
   for (const kind of ["query", "action"] as const) {
     assert.deepEqual(derivePiMetadata({ ...base, kind, gated: "blocked" }), { exposure: "direct" });
-    assert.deepEqual(derivePiMetadata({ ...base, kind, gated: "blocked", declared: "deferred" }), {
-      exposure: "deferred",
+    assert.deepEqual(derivePiMetadata({ ...base, kind, gated: "blocked" }, { cohort: true }), {
+      exposure: "direct",
+    });
+    // A family member registers direct; only the cohort re-registration derives `deferred`.
+    const member = { ...base, kind, gated: "blocked", declared: "deferred" } as const;
+    assert.deepEqual(derivePiMetadata(member), { exposure: "direct" });
+    assert.deepEqual(derivePiMetadata(member, { cohort: false }), { exposure: "direct" });
+    assert.deepEqual(derivePiMetadata(member, { cohort: true }), { exposure: "deferred" });
+    assert.deepEqual(derivePiMetadata({ ...member, declared: "always" }, { cohort: true }), {
+      exposure: "direct",
     });
   }
   assert.deepEqual(derivePiMetadata({ ...base, kind: "action", gated: "allowed" }), {
@@ -267,6 +282,26 @@ test("validateToolPolicy: refuses the host kind, unknown stages, deferred model-
     () => validateToolPolicy("vp_carve", {}, { ...ok, gated: { carveOut: " " } }, REGISTRY_IDS),
     /a carve-out must name its bounded write/,
   );
+  // A deferred carve-out writer would be named by the read-only context while undeclared.
+  assert.throws(
+    () =>
+      validateToolPolicy(
+        "vp_def_carve",
+        {},
+        {
+          ...ok,
+          kind: "action",
+          result: undefined,
+          gated: { carveOut: "one file" },
+          declared: "deferred",
+        },
+        REGISTRY_IDS,
+      ),
+    /perk tool policy: vp_def_carve — declared: "deferred" requires gated allowed or blocked — the read-only context names carve-out writers, and an undeclared writer would dead-end/,
+  );
+  for (const gated of ["allowed", "blocked"] as const) {
+    validateToolPolicy("vp_def_ok", {}, { ...ok, gated, declared: "deferred" }, REGISTRY_IDS);
+  }
   recordPerkTool("vp_dup", ok);
   validateToolPolicy(
     "vp_dup",
@@ -510,9 +545,19 @@ test("the posture table: rows, their packages, and per-posture eligibility", () 
   ]);
 });
 
-test("deferred tools are never in an activation view; the diet is undefined when unscoped", () => {
-  assert.ok(!gatedToolsFor("plan").includes("tt_deferred"));
-  assert.ok(!(stageToolsFor("plan") ?? []).includes("tt_deferred"));
+test("a deferred tool rides every activation view outside the cohort and none inside it; the diet is undefined when unscoped", () => {
+  assert.ok(gatedToolsFor("plan").includes("tt_deferred"));
+  assert.ok((stageToolsFor("plan") ?? []).includes("tt_deferred"));
+  for (const mode of ["read-only", "read-write"] as const) {
+    assert.ok(perkToolsFor("plan", mode).includes("tt_deferred"), mode);
+    assert.ok(perkToolsFor("plan", mode, false).includes("tt_deferred"), mode);
+    assert.ok(!perkToolsFor("plan", mode, true).includes("tt_deferred"), mode);
+    assert.deepEqual(
+      perkToolsFor("plan", mode, true),
+      perkToolsFor("plan", mode).filter((n) => n !== "tt_deferred"),
+      `${mode}: the cohort view drops only the family`,
+    );
+  }
   assert.ok(gatedToolsFor("plan").includes("tt_over"));
   assert.equal(stageToolsFor(null), undefined);
   assert.equal(stageToolsFor("no-such-stage"), undefined);
@@ -573,17 +618,36 @@ test("reconcileTarget: null when nothing changes; foreign names keep their live 
       );
     }
   }
-  // The deferred third term: kept only while live AND eligible; never activated.
-  const planned = reconcileTarget({ active: ["tt_deferred"], registered }, "plan", "read-write");
+  // The deferred third term, inside the cohort: kept only while live AND eligible; never
+  // activated.
+  const planned = reconcileTarget(
+    { active: ["tt_deferred"], registered },
+    "plan",
+    "read-write",
+    true,
+  );
   assert.ok(planned?.includes("tt_deferred"));
-  const notLive = reconcileTarget({ active: [], registered }, "plan", "read-write");
+  const notLive = reconcileTarget({ active: [], registered }, "plan", "read-write", true);
   assert.ok(notLive !== null && !notLive.includes("tt_deferred"));
   const ineligible = reconcileTarget(
     { active: ["tt_deferred"], registered },
     "implement",
     "read-write",
+    true,
   );
   assert.ok(ineligible !== null && !ineligible.includes("tt_deferred"));
+  // Outside the cohort a family member is always-declared: installed whenever eligible.
+  for (const cohort of [undefined, false]) {
+    const outside = reconcileTarget({ active: [], registered }, "plan", "read-write", cohort);
+    assert.ok(outside?.includes("tt_deferred"), String(cohort));
+    const dropped = reconcileTarget(
+      { active: ["tt_deferred"], registered },
+      "implement",
+      "read-write",
+      cohort,
+    );
+    assert.ok(dropped !== null && !dropped.includes("tt_deferred"), String(cohort));
+  }
   // A catalogued name the host never registered is never installed and never forces an install.
   const partial = ["read", "tt_allowed"];
   assert.equal(
@@ -710,12 +774,36 @@ test("toolMatrix: perk + builtin rows, the postures section, sorted eligibility,
     );
     assert.ok(row["read-write"].includes("edit") && row["read-write"].includes("codemode"));
   }
+  // Outside the cohort a family member is eligible like any tool; its row reads the registered
+  // default (`direct`).
+  assert.deepEqual(m.eligible.unscoped?.["read-write"], Object.keys(m.tools).sort());
+  assert.equal(m.tools.tt_deferred?.owner, "perk");
   assert.deepEqual(
-    m.eligible.unscoped?.["read-write"],
-    Object.keys(m.tools)
-      .filter((n) => n !== "tt_deferred")
-      .sort(),
+    m.tools.tt_deferred?.owner === "perk"
+      ? [m.tools.tt_deferred.declared, m.tools.tt_deferred.exposure]
+      : [],
+    ["deferred", "direct"],
   );
+});
+
+test("discoveryFamily: the catalogued deferred names, in catalog order", () => {
+  assert.deepEqual(
+    discoveryFamily(),
+    perkToolNames().filter((n) => perkToolPolicy(n)?.declared === "deferred"),
+  );
+  assert.ok(discoveryFamily().includes("tt_deferred"));
+  assert.ok(!discoveryFamily().includes("tt_allowed"));
+});
+
+test("isDiscoveryHost: only Pi's builtin tool_search, registered and active", () => {
+  const builtin = new Map<string, Provenance>([["tool_search", BUILTIN("tool_search")]]);
+  assert.equal(isDiscoveryHost(builtin, ["read", "tool_search"]), true);
+  assert.equal(isDiscoveryHost(builtin, ["read"]), false, "an inactive builtin");
+  assert.equal(isDiscoveryHost(new Map(), ["tool_search"]), false, "an unregistered name");
+  for (const foreign of [pkg("npm:some-search@1.0.0"), OTHER_INLINE]) {
+    const namesake = new Map<string, Provenance>([["tool_search", foreign]]);
+    assert.equal(isDiscoveryHost(namesake, ["tool_search"]), false, "a foreign namesake");
+  }
 });
 
 test("gate suspension: only the builtin-sourced codemode; suspended while read-only, restored at release when still registered", () => {

@@ -855,7 +855,7 @@
       "registrar": "extension"
     },
     "collect_draft_review_wave": {
-      "declared": "always",
+      "declared": "deferred",
       "exposure": "direct",
       "gated": "allowed",
       "kind": "action",
@@ -870,7 +870,7 @@
       ]
     },
     "collect_review_wave": {
-      "declared": "always",
+      "declared": "deferred",
       "exposure": "direct",
       "gated": "blocked",
       "kind": "action",
@@ -1084,7 +1084,7 @@
       ]
     },
     "objective_stack_status": {
-      "declared": "always",
+      "declared": "deferred",
       "exposure": "direct",
       "gated": "blocked",
       "kind": "query",
@@ -1207,7 +1207,7 @@
       ]
     },
     "push_annotations": {
-      "declared": "always",
+      "declared": "deferred",
       "exposure": "direct",
       "gated": "allowed",
       "kind": "action",
