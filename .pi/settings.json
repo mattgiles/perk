@@ -22,6 +22,9 @@
       "themes": []
     }
   ],
+  "defaultTools": [
+    "+tool_search"
+  ],
   "subagents": {
     "disableBuiltins": true
   },
