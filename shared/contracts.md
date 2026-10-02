@@ -3619,6 +3619,38 @@ seeded default is user-ownable after the seed — including it would misclassify
 survives init/doctor; a user-global `/settings` change does **not** durably override the project
 key (pi merges project settings over global).
 
+**`defaultTools` discovery convergence (init-owned):** perk seeds `"+tool_search"` into the
+project `.pi/settings.json` `defaultTools` list **seed-when-unnamed** — the fourth convergence
+shape, the list-valued variant of seed-when-absent: the guard is the presence of an entry naming
+`tool_search` in any of Pi's three forms (`tool_search`, `+tool_search`, `-tool_search`), and the
+seed *appends* (the operator's entries keep their order and text; perk never rewrites, reorders
+or removes one). An absent key becomes `["+tool_search"]`. The invariant: the seed never changes
+what the operator's list resolves to beyond adding `tool_search` — so a present-but-**empty**
+list (Pi's "no builtin tools" selection, which a nonempty modifier-only list would silently turn
+into the four defaults) and an ill-typed value (present, not an array) are left untouched and are
+not drift; discovery on an empty selection is the operator's plain `["tool_search"]`.
+Python-plane-only (Pi consumes `settings.json` at startup; the extension never reads it — the
+cohort is keyed on host capability at `session_start`), composed inside `_converge_settings`
+(`perk/convergence/init/settings.py::_converge_discovery`), so it rides the `settings-wiring`
+`ManagedConvergence`: an absent key or a nonempty list naming no `tool_search` is
+`settings-wiring` drift (`fail`, detail `defaultTools: +tool_search`, remediation
+`perk doctor --fix`). **Excluded** from the desired/observed managed-state settings portions for
+the `tuiMode` reason (an opted-out repo would otherwise classify `locally-modified` forever).
+**The opt-out** is a committed `"-tool_search"` entry in the same project list (Pi applies project
+modifiers after user-scope ones, so a user-global `-tool_search` cannot override a project
+`+tool_search` — the durable opt-out is the project entry; Pi has no project-local settings
+layer). **Activation asymmetry:** a seeded entry applies at the next launch or `/reload` (reload
+activates names newly added to `defaultTools`); the opt-out applies only at a new launch
+(`/reload` keeps removed names active, so `tool_search` stays on and perk re-joins the cohort at
+`session_start`). **Accepted layering consequence:** over a user-scope `[]` with no project key,
+the seeded modifier-only list resolves to the four defaults plus `tool_search` (Pi appends a
+modifier-only project list to the inherited one); perk converges only the project file (user
+scope is per machine), and that operator's per-repo remedy is a committed project `[]`. The
+resolved-selection effect is pinned on both planes by `shared/fixtures/default-tools-seed.json`
+(`tests/test_init_idempotent.py` pins the JSON delta;
+`extension/substrate/discoveryPilot.test.ts` measures the resolved selection on the real host).
+See §8.40 **Native discovery** for the cohort the entry feeds.
+
 > **Interactive save discipline (`/plan-save` is FALLBACK-ONLY on every interactive path —
 > perk-plan included):** the review-first discipline — keep the working draft current with
 > `plan_draft`, call `plan_review` when decision-complete, and an approval **auto-saves** via
@@ -7511,7 +7543,7 @@ derived metadata and the derived result fields (**Structured results**, below). 
 | `gated` | `allowed` · `blocked` · `{ carveOut: "<prose>" }` | its posture under the read-only gate; a carve-out names its one bounded write |
 | `modeOverStage` | boolean (default false) | a mode gesture needs it regardless of stage |
 | `kind` | `terminal` · `interactive` · `orchestration` · `query` · `action` · `host` | what the tool IS — `terminal` if it can return `terminate: true`; `interactive` if it opens a human surface and hands off without terminating; `orchestration` if it spawns children, a wave or a foreground child/resolver; `query` for a pure read; else `action` (a trust/confirm dialog does not change the kind); `host` is reserved for the loadout host (below) |
-| `declared` | `always` (default) · `deferred` | `deferred` marks a discovery-pilot family member (**The discovery pilot**, below); it requires kind `query`/`action` and `gated` `allowed`/`blocked` |
+| `declared` | `always` (default) · `deferred` | `deferred` marks a discovery-pilot family member (**Native discovery**, below); it requires kind `query`/`action` and `gated` `allowed`/`blocked` |
 | `result` | `{ properties, required? }` (JSON-Schema property objects) | `kind: query` only — required there, refused on every other kind: the SUCCESS details' properties beyond `ok`, from which the seam derives `outputSchema` |
 
 Registration refuses (`perk tool policy: <name> — …`): `kind: host` (`the loadout host registers
@@ -7635,7 +7667,7 @@ containing `_` matches as a bare word; a single-word name (`submit`, `ready`, `l
 matches only backtick-quoted — an unquoted single-word mention is an accepted, recorded miss.
 TS (`extension/substrate/stageTools.test.ts`, `DRIVE_COVERAGE`): every warm drive/door/context
 row with its `(stage, mode)` landings, eligibility from the live formula. **The deferred rule:** a
-carrier naming a `declared: deferred` tool must be primed (**The discovery pilot**, below) — each
+carrier naming a `declared: deferred` tool must be primed (**Native discovery**, below) — each
 row carries its primer's exported constant (`primes`), and the guard asserts two-way that every
 named deferred tool is primed and every prime is a deferred tool the carrier names; the two wave
 launchers' own description + guidelines are rows (they name their collector), and a census pins
@@ -7811,12 +7843,16 @@ foreign `annotations.readOnlyHint` is never a grant. Today the gate-eligible que
 suspension stands; un-suspension waits for a gate-allowed `kind: query` tool and is its own
 change, never a side effect.
 
-**The discovery pilot (opt-in).** The **discovery cohort** is the sessions whose host has Pi's
-builtin `tool_search` registered and active at `session_start` (`isDiscoveryHost(infos, active)`
-— the posture table's builtin row; a foreign namesake never qualifies). The opt-in is a
-hand-written `defaultTools: ["+tool_search"]` entry in a repo's tracked `.pi/settings.json` (this
-repo carries one); `perk init` never writes, orders or removes it, and the managed
-`settings-wiring` portion never sees the key. The **pilot family** is the catalogued
+**Native discovery (the converged default).** The **discovery cohort** is the sessions whose host
+has Pi's builtin `tool_search` registered and active at `session_start`
+(`isDiscoveryHost(infos, active)` — the posture table's builtin row; a foreign namesake never
+qualifies). The entry that activates it is `defaultTools: ["+tool_search"]` in a repo's tracked
+`.pi/settings.json`, init-converged seed-when-unnamed (§8.10 **`defaultTools` discovery
+convergence**): `perk init` appends it when no entry names `tool_search`, `perk doctor` reports its
+absence as `settings-wiring` drift and `--fix` appends it, and the key stays outside the managed
+`settings-wiring` portion. An opted-out repo commits `"-tool_search"` (effective at the next
+launch — `/reload` keeps an active `tool_search` active, so the session re-joins); an explicit
+empty selection (`[]`) is likewise left alone and is a nonparticipant. The **pilot family** is the catalogued
 `declared: deferred` names (`discoveryFamily()`, catalog order): `objective_stack_status`,
 `collect_review_wave`, `collect_draft_review_wave`, `push_annotations` — each optional (opened
 only by a primed carrier), self-guarding outside its flow (`no_objective`, the pending-wave guard,
@@ -7845,8 +7881,8 @@ primer that runs BEFORE the carrier reaches the model, with an exported constant
 | `start_review_wave` | `REVIEW_LAUNCH_PRIMES` = `collect_review_wave` | on a successful launch (reachable without a door) |
 | `start_draft_review_wave` | `DRAFT_LAUNCH_PRIMES` = `collect_draft_review_wave` | on a successful launch (covers a resume between door and launch) |
 
-A failed launch primes nothing. **Nonparticipants by construction:** a session without the opt-in
-or with a foreign namesake, the headless worker (its runtime loads no `tool_search` factory),
+A failed launch primes nothing. **Nonparticipants by construction:** a session of an opted-out
+repo (or one whose selection is empty) or with a foreign namesake, the headless worker (its runtime loads no `tool_search` factory),
 `/btw`'s side session (`sideSessionTools` carries no extension builtin) and every spawned report
 child (it registers no perk tool) keep the always-declared loadout — every family member stays
 `direct`, and a nonparticipant census request is byte-identical to the pre-pilot one. **Resets:**

@@ -119,9 +119,11 @@ _Avoid_: snapshot restore, baseline, admitted set, perk-owned allowlist
 **Discovery cohort**:
 The sessions in which perk re-registers the pilot family (`declared: deferred`) deferred and
 switches it off once: those where Pi's builtin `tool_search` is registered and active at
-`session_start` (the opt-in `defaultTools: ["+tool_search"]`). The headless worker, `/btw` and any
-session without the opt-in are nonparticipants by construction and keep every perk tool declared.
-_Avoid_: pilot sessions, tool_search sessions
+`session_start` (the init-converged `defaultTools: ["+tool_search"]`; opt-out `-tool_search`,
+effective at the next launch). The headless worker, `/btw` and any session of a repo that opted
+out or keeps an empty `defaultTools` selection (or whose `tool_search` is a foreign namesake) are
+nonparticipants by construction and keep every perk tool declared.
+_Avoid_: pilot sessions, tool_search sessions, opt-in
 
 **Door-primed activation**:
 A warm door (or a wave launcher) activating the deferred perk tools its carrier names, at the

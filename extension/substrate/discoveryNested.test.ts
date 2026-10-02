@@ -1,4 +1,4 @@
-// The discovery pilot's nested-execution leg (contracts.md §8.40 "The discovery pilot"): in a
+// The discovery pilot's nested-execution leg (contracts.md §8.40 "Native discovery"): in a
 // discovery-cohort session a deferred, INACTIVE family member stays callable through Pi's
 // nested-execution API (`ctx.executeTool`), its call is recorded on the parent tool result, and
 // the read-only backstop still governs it. Driven through REAL bound AgentSessions (Mode A, fully

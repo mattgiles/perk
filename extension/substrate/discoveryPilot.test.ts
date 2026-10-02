@@ -1,6 +1,6 @@
-// The native-discovery pilot (contracts.md §8.40 "The discovery pilot"), driven through REAL
+// Native discovery (contracts.md §8.40 "Native discovery"), driven through REAL
 // bound AgentSessions (Mode A, fully offline) with Pi's real builtin `tool_search` loaded. A
-// cohort session opts in with `defaultTools: ["+tool_search"]`; a nonparticipant session loads
+// cohort session carries the converged `defaultTools: ["+tool_search"]`; a nonparticipant loads
 // the SAME extension set without it, so the registries are identical and only activation differs.
 // The nested-execution probe lives in its own file (`discoveryNested.test.ts`) so its fixture
 // registration never enters this process's census.
