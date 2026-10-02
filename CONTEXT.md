@@ -78,15 +78,17 @@ _Avoid_: PERK_TOOLS, perk tool list, tool census (for perk's own tools)
 **Policy descriptor**:
 A perk tool's registration-time record — the stages it belongs to, its gate posture (`allowed`,
 `blocked`, or a **carve-out** naming its one bounded write), whether it is mode-over-stage, and its
-kind (`terminal` / `interactive` / `orchestration` / `query` / `action`; the first three are
-declared model-only).
+kind (`terminal` / `interactive` / `orchestration` / `query` / `action`, plus `host` reserved for
+the loadout host; the first three and `host` are declared model-only).
 _Avoid_: tool config, tool metadata, tool flags
 
 **Eligibility formula**:
 The one rule deciding whether a tool may be active in a (stage, mode) landing:
 `(stage ∈ stages ∧ (read-write ∨ not gate-blocked)) ∨ (read-only ∧ mode-over-stage)`, an unscoped or
-unknown stage being eligible for everything the mode allows. Its read-only result is a stage's
-**gated view**; its read-write result over the scoped universe is the **stage diet**.
+unknown stage being eligible for everything the mode allows. Over perk's own tools its read-only
+result is a stage's **gated view** and its read-write result the **stage diet** — the perk-side
+activation views; a foreign tool's eligibility (by its provenance posture) is presented, never
+installed.
 _Avoid_: gate-ON allowlist, READ_ONLY_TOOLS, STAGE_TOOLS, stage list
 
 **Mode gesture**:
@@ -94,16 +96,25 @@ A session action that changes the mode but records no stage — the `/plan` togg
 flow needs are mode-over-stage, so the flow completes wherever the gesture lands.
 _Avoid_: mode switch, plan stage (for the toggle)
 
-**Lazy loader**:
-A borrowed package's tool that activates that package's other tools on demand — `subagents_enable`,
-`web_enable`; perk gives it the eligibility of the tools it enables and refuses a call to it
-elsewhere.
-_Avoid_: enable tool, activation tool, meta-tool
+**Own-names-only activation**:
+perk's activation rule: at every reconciliation point it installs the live active set with only
+its own names replaced — the eligible always-declared perk tools plus the live eligible deferred
+ones — and never activates or deactivates a foreign tool; a session whose live set already matches
+gets no install.
+_Avoid_: snapshot restore, baseline, admitted set, perk-owned allowlist
 
-**Lazy-owned tool**:
-A borrowed tool whose activation its owner toggles through a registered lazy loader; perk applies
-its mode/stage eligibility but takes its membership from the owner's live selection.
-_Avoid_: hidden tool, deferred tool, heavy tool
+**Provenance posture**:
+How a foreign tool is governed — by who registered it (Pi's `sourceInfo`: a package spec, an exact
+synthetic path, or the builtin registrar), never by its name: `research`, `universal`,
+`delegation`, `never` or `child-engine`, with `unknown` (passes every diet, blocked under the gate)
+for anything else.
+_Avoid_: borrowed census, foreign tool list, lazy loader, lazy-owned tool
+
+**Loadout host**:
+The always-active, never-declared perk tool `perk_stage` whose `prepareLoadout` hides every declared
+tool ineligible in the session's (stage, mode) landing — presentation only; the read-only
+`tool_call` backstop stays the enforcement.
+_Avoid_: stage tool, gate tool, presenter
 
 ### Read-only bash gate
 

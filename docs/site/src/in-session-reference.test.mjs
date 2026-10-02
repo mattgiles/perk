@@ -4,7 +4,10 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { loadRegistry } from "../../../extension/substrate/registry.ts";
-import { BORROWED_TOOLS, SUBAGENT_CHILD_TOOLS } from "../../../extension/substrate/toolPolicy.ts";
+import {
+  PACKAGE_TOOL_POLICY,
+  SYNTHETIC_PATH_TOOL_POLICY,
+} from "../../../extension/substrate/toolPolicy.ts";
 import { loadPerkSession, scaffoldRepo } from "../../../extension/testing/harness.ts";
 
 // Source/runtime guard for the split in-session reference. The docs own prose; runtime owns
@@ -163,37 +166,46 @@ test("marked command and perk-tool censuses equal a default perk-only harness se
   }
 });
 
-test("marked borrowed and spawned-child censuses equal their exported authorities", () => {
+test("marked foreign posture table and Linear exception equal the provenance-posture authority", () => {
   const source = read(toolsPath);
-  const borrowed = oneCodeNamePerRow(
-    markedRegion(
-      source,
-      "<!-- BEGIN borrowed tool census -->",
-      "<!-- END borrowed tool census -->",
-      "borrowed tool census",
-    ),
-    "borrowed tool census",
+  const region = markedRegion(
+    source,
+    "<!-- BEGIN foreign posture table -->",
+    "<!-- END foreign posture table -->",
+    "foreign posture table",
   );
-  const children = oneCodeNamePerRow(
-    markedRegion(
-      source,
-      "<!-- BEGIN child tool census -->",
-      "<!-- END child tool census -->",
-      "child tool census",
-    ),
-    "child tool census",
-  );
-  for (const known of ["web_search", "linear_create_issue", "subagent", "todo"]) {
-    assert.ok(borrowed.includes(known), `borrowed tool census: known anchor ${known} missing`);
-  }
-  assert.ok(children.includes("structured_output"), "child tool census: known anchor missing");
-  assert.ok(children.includes("contact_supervisor"), "child tool census: supervisor missing");
-  assert.ok(!children.includes("subagent_wait") && !children.includes("bg_wait"));
-  assertSetEqual(borrowed, BORROWED_TOOLS, "documented borrowed tools must equal BORROWED_TOOLS");
+  const matrix = JSON.parse(read(matrixPath));
+  const rows = matrix.postures;
+  const documented = dataRows(region, "foreign posture table").map((cells, index) => {
+    assert.equal(cells.length, 4, `foreign posture table row ${index + 1}: four columns`);
+    const [provenanceCell, posture, , gate] = cells;
+    const provenance = provenanceCell.match(/^`([^`]+)`$/)?.[1];
+    assert.ok(provenance !== undefined, `foreign posture table row ${index + 1}: one provenance`);
+    const row = rows.packages[provenance] ?? rows.paths[provenance];
+    assert.ok(row !== undefined, `${provenance}: no posture row`);
+    assert.equal(posture.split(" ")[0], row.posture, `${provenance}: Posture drift`);
+    assert.equal(gate, row.gated, `${provenance}: Under-the-gate drift`);
+    return provenance;
+  });
+  assert.equal(new Set(documented).size, documented.length, "foreign posture table: duplicate");
   assertSetEqual(
-    children,
-    SUBAGENT_CHILD_TOOLS,
-    "documented child tools must equal SUBAGENT_CHILD_TOOLS",
+    documented,
+    [...Object.keys(PACKAGE_TOOL_POLICY), ...Object.keys(SYNTHETIC_PATH_TOOL_POLICY)],
+    "documented provenance rows must equal PACKAGE_TOOL_POLICY ∪ SYNTHETIC_PATH_TOOL_POLICY",
+  );
+  const linear = oneCodeNamePerRow(
+    markedRegion(
+      source,
+      "<!-- BEGIN linear exception -->",
+      "<!-- END linear exception -->",
+      "linear exception",
+    ),
+    "linear exception",
+  );
+  assertSetEqual(
+    linear,
+    PACKAGE_TOOL_POLICY["npm:pi-mono-linear"]?.except?.names ?? [],
+    "documented Linear exception names must equal the package row's except list",
   );
 });
 
