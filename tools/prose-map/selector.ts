@@ -278,6 +278,34 @@ function collectDescriptions(
   }
 }
 
+/**
+ * The schema descriptions of a perk query policy's inline `result.properties` — model-facing like
+ * a `parameters` schema's (the seam composes them into the tool's `outputSchema`, which codemode
+ * renders into script declarations). Only inline literals are read; an identifier-valued policy
+ * or `result` is not resolved.
+ */
+function policyResultFragments(
+  policy: ts.Expression | undefined,
+  toolName: string,
+): ToolFragmentSite[] {
+  if (policy === undefined || !ts.isObjectLiteralExpression(policy)) {
+    return [];
+  }
+  const resultMember = firstProperty(policy, "result");
+  const result = resultMember === null ? null : propertyInitializer(resultMember);
+  if (result === null || !ts.isObjectLiteralExpression(result)) {
+    return [];
+  }
+  const fragments: ToolFragmentSite[] = [];
+  for (const member of properties(result, "properties")) {
+    const value = propertyInitializer(member);
+    if (value !== null) {
+      collectDescriptions(value, "result.properties", toolName, fragments);
+    }
+  }
+  return fragments;
+}
+
 function toolFragments(object: ts.ObjectLiteralExpression, toolName: string): ToolFragmentSite[] {
   const fragments: ToolFragmentSite[] = [];
   for (const [field, policy] of Object.entries(TOOL_FIELD_POLICIES)) {
@@ -360,7 +388,7 @@ export function enumerateSelectorSites(
   /**
    * The ToolDefinition literal of a tool registration: a raw `<receiver>.registerTool(definition)`
    * or the perk seam `registerPerkTool(pi, definition, policy)` (the policy argument is not a
-   * ToolDefinition and is never scanned).
+   * ToolDefinition; only its query `result` schema is scanned — `policyResultFragments`).
    */
   function registrationDefinition(node: ts.CallExpression): ts.Expression | undefined {
     if (
@@ -382,7 +410,11 @@ export function enumerateSelectorSites(
         const nameMember = firstProperty(argument, "name");
         const name = nameMember === null ? null : staticString(propertyInitializer(nameMember));
         if (name !== null) {
-          const fragments = toolFragments(argument, name);
+          const policy = ts.isIdentifier(node.expression) ? node.arguments[2] : undefined;
+          const fragments = [
+            ...toolFragments(argument, name),
+            ...policyResultFragments(policy, name),
+          ];
           addRecord(
             {
               kind: "tool-registration",

@@ -314,6 +314,55 @@ registerPerkTool(
   );
 });
 
+test("the registerPerkTool seam: a query policy's inline result.properties descriptions are schema fragments", () => {
+  const source = `
+registerPerkTool(
+  pi,
+  { name: "lookup", description: "a query" },
+  {
+    stages: [],
+    gated: "allowed",
+    kind: "query",
+    description: "policy prose is never scanned",
+    result: {
+      properties: {
+        objective: { type: "string", description: "the objective id" },
+        status: { type: "object", properties: { n: { description: "nested" } } },
+      },
+      required: ["objective", "status"],
+    },
+  },
+);
+registerPerkTool(pi, { name: "act", description: "an action" }, { stages: [], gated: "allowed", kind: "action" });
+const RESULT = { properties: { x: { description: "via an identifier" } } };
+registerPerkTool(pi, { name: "indirect" }, { stages: [], gated: "allowed", kind: "query", result: RESULT });`;
+  assert.equal(
+    focus(source, "tool:lookup.result.properties.objective.description"),
+    '"the objective id"',
+  );
+  assert.equal(
+    focus(source, "tool:lookup.result.properties.status.properties.n.description"),
+    '"nested"',
+  );
+  const sf = ts.createSourceFile("query.ts", source, ts.ScriptTarget.Latest, true);
+  const fragments = Object.fromEntries(
+    enumerateSelectorSites(sf).records.flatMap((record) =>
+      record.kind === "tool-registration"
+        ? [[record.name, record.fragments.map((fragment) => fragment.id)]]
+        : [],
+    ),
+  );
+  assert.deepEqual(fragments, {
+    lookup: [
+      "description",
+      "result.properties.objective.description",
+      "result.properties.status.properties.n.description",
+    ],
+    act: ["description"],
+    indirect: [],
+  });
+});
+
 test("numeric static keys, array indexes, duplicate keys, and registrations never guess", () => {
   const source = `
 pi.registerTool({
