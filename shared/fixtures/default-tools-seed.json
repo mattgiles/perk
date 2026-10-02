@@ -1,0 +1,95 @@
+{
+  "description": "The `defaultTools` discovery seed (contracts.md §8.10 \"`defaultTools` discovery convergence\"): each case pairs a project `.pi/settings.json` `defaultTools` value (`live`; omitted = key absent) with what `perk init` / `perk doctor --fix` converges it to (`converged`, byte-equal JSON) and whether the seed fired (`seeded` — the `defaultTools: +tool_search` change fragment). `host_check` marks the cases whose values are string arrays the real-host lane loads (extension/substrate/discoveryPilot.test.ts measures the resolved selection: seeded ⇒ after = before + tool_search, untouched ⇒ after = before); the rest are Python-only (tests/test_init_idempotent.py). Test-only — read at runtime by neither plane.",
+  "cases": [
+    {
+      "case": "absent",
+      "converged": ["+tool_search"],
+      "seeded": true,
+      "host_check": true
+    },
+    {
+      "case": "modifier list",
+      "live": ["+codemode", "-bash", "+powershell"],
+      "converged": ["+codemode", "-bash", "+powershell", "+tool_search"],
+      "seeded": true,
+      "host_check": true
+    },
+    {
+      "case": "plain-name list",
+      "live": ["read", "bash", "grep"],
+      "converged": ["read", "bash", "grep", "+tool_search"],
+      "seeded": true,
+      "host_check": true
+    },
+    {
+      "case": "non-string member",
+      "live": ["+codemode", 7],
+      "converged": ["+codemode", 7, "+tool_search"],
+      "seeded": true,
+      "host_check": false
+    },
+    {
+      "case": "empty selection",
+      "live": [],
+      "converged": [],
+      "seeded": false,
+      "host_check": true
+    },
+    {
+      "case": "enable vote",
+      "live": ["+tool_search"],
+      "converged": ["+tool_search"],
+      "seeded": false,
+      "host_check": true
+    },
+    {
+      "case": "enable vote first, never reordered",
+      "live": ["+tool_search", "+codemode"],
+      "converged": ["+tool_search", "+codemode"],
+      "seeded": false,
+      "host_check": true
+    },
+    {
+      "case": "opt-out",
+      "live": ["-tool_search"],
+      "converged": ["-tool_search"],
+      "seeded": false,
+      "host_check": true
+    },
+    {
+      "case": "opt-out with other entries",
+      "live": ["-tool_search", "+codemode"],
+      "converged": ["-tool_search", "+codemode"],
+      "seeded": false,
+      "host_check": true
+    },
+    {
+      "case": "plain vote",
+      "live": ["read", "tool_search"],
+      "converged": ["read", "tool_search"],
+      "seeded": false,
+      "host_check": true
+    },
+    {
+      "case": "ill-typed string",
+      "live": "+tool_search",
+      "converged": "+tool_search",
+      "seeded": false,
+      "host_check": false
+    },
+    {
+      "case": "ill-typed null",
+      "live": null,
+      "converged": null,
+      "seeded": false,
+      "host_check": false
+    },
+    {
+      "case": "ill-typed object",
+      "live": {},
+      "converged": {},
+      "seeded": false,
+      "host_check": false
+    }
+  ]
+}

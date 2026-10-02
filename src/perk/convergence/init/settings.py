@@ -97,6 +97,13 @@ PONYTAIL_PACKAGE = "npm:@dietrichgebert/ponytail"
 PONYTAIL_NPM_NAME = "@dietrichgebert/ponytail"
 PACKAGE_RESOURCE_FILTERS = ("extensions", "skills", "prompts", "themes")
 
+# Pi's builtin `tool_search` registers inactive and joins a session's startup tool set only through
+# `defaultTools` (or `--tools`); perk's warm stage sessions earn their discovery-cohort savings
+# (contracts §8.40) only when the project settings name it. The entry is Pi's `+name` modifier
+# grammar verbatim — Pi tests `startsWith("+")` and slices the name exactly (no trimming).
+DISCOVERY_TOOL = "tool_search"
+DISCOVERY_DEFAULT_TOOLS_ENTRY = f"+{DISCOVERY_TOOL}"
+
 BORROWED_PACKAGES = [
     "npm:@tombell/pi-diff",
     SUBAGENTS_PACKAGE,
@@ -428,6 +435,8 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     models_changes = _converge_models(root, settings)
     # Converge the borrowed pi-subagents engine's builtin suppression (same composition).
     subagents_changes = _converge_subagents(settings)
+    # Seed Pi's native tool discovery when no `defaultTools` entry names it (same composition).
+    discovery_changes = _converge_discovery(settings)
     # Seed pi's fullscreen TUI mode when absent (same composition).
     tui_changes = _converge_tui_mode(settings)
     new_text = json.dumps(settings, indent=2) + "\n"
@@ -447,6 +456,7 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     parts.extend(compaction_changes)
     parts.extend(models_changes)
     parts.extend(subagents_changes)
+    parts.extend(discovery_changes)
     parts.extend(tui_changes)
     return [f".pi/settings.json: {'; '.join(parts)}" if parts else ".pi/settings.json: normalized"]
 
@@ -549,6 +559,59 @@ def _converge_tui_mode(settings: dict[str, object]) -> list[str]:
         return []
     settings["tuiMode"] = "fullscreen"
     return ["tuiMode: fullscreen"]
+
+
+def _names_discovery_tool(entry: object) -> bool:
+    """Whether a `defaultTools` entry names `tool_search` in any of Pi's three forms.
+
+    Plain (`tool_search`), enable (`+tool_search`) and disable (`-tool_search`) all count — each
+    is the operator's vote. Non-string entries never match (Pi's `getDefaultTools` drops them).
+    """
+    return isinstance(entry, str) and entry in (
+        DISCOVERY_TOOL,
+        DISCOVERY_DEFAULT_TOOLS_ENTRY,
+        f"-{DISCOVERY_TOOL}",
+    )
+
+
+def _converge_discovery(settings: dict[str, object]) -> list[str]:
+    """Append `+tool_search` to `settings["defaultTools"]` when no entry names it.
+
+    Seed-when-unnamed — the list-valued variant of `_converge_tui_mode`'s seed-when-absent: the
+    guard is the presence of the tool's *name* in any of Pi's three entry forms
+    (:func:`_names_discovery_tool`), and the seed appends rather than sets. The invariant: the
+    seed never changes what the operator's list resolves to beyond adding `tool_search`, and perk
+    never rewrites, reorders or removes an operator's entry. Hence the arms:
+
+    - key absent → `["+tool_search"]` (a modifier-only list inherits the user-scope selection, or
+      Pi's four defaults, and adds the tool);
+    - present but not a list → untouched, not drift (outside Pi's schema; no vote is readable);
+    - present and empty → untouched, not drift: Pi resolves `[]` to *no* builtin tools, while a
+      nonempty modifier-only list starts from the four defaults — appending would switch on
+      `read`/`bash`/`edit`/`write` too (discovery there is the operator's plain
+      `["tool_search"]`);
+    - nonempty and some entry names the tool → untouched: the operator's vote stands, whichever
+      sign (`-tool_search` is the opt-out, effective at the next launch — `/reload` keeps an
+      active tool active);
+    - otherwise → append at the end, every existing entry kept in place (Pi applies plain names
+      first, then modifiers in order, so the position never changes the resolved set).
+
+    Excluded from the managed-state desired/observed portions for the `tuiMode` reason — see
+    `managed_state._settings_portion`. Python-plane-only: Pi consumes `settings.json` at startup;
+    the extension never reads it (the cohort is keyed on host capability at `session_start`).
+    The change fragment is naturally delta-gated: it only fires when the entry was written.
+    """
+    if "defaultTools" not in settings:
+        settings["defaultTools"] = [DISCOVERY_DEFAULT_TOOLS_ENTRY]
+        return [f"defaultTools: {DISCOVERY_DEFAULT_TOOLS_ENTRY}"]
+    existing = settings["defaultTools"]
+    if not isinstance(existing, list) or not existing:
+        return []
+    entries: list[object] = list(existing)
+    if any(_names_discovery_tool(entry) for entry in entries):
+        return []
+    settings["defaultTools"] = [*entries, DISCOVERY_DEFAULT_TOOLS_ENTRY]
+    return [f"defaultTools: {DISCOVERY_DEFAULT_TOOLS_ENTRY}"]
 
 
 @dataclass(frozen=True)
