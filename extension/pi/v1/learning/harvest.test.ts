@@ -148,13 +148,13 @@ test("census: run_harvest_wave is catalogued and eligible in exactly the borrowe
   // The seeded session borrows the objective-author stage with mode read-only: the tool is
   // eligible under the gate there (its one bounded read/write is bound to the claimed run, so no
   // caller-supplied path exists), and in no other stage's gated view or diet.
-  assert.ok(isEligible("run_harvest_wave", "objective-author", "read-only"));
+  assert.ok(isEligible("run_harvest_wave", undefined, "objective-author", "read-only"));
   for (const stage of REGISTRY_STAGE_IDS) {
     const inDiet = stageToolsFor(stage)?.includes("run_harvest_wave") === true;
     assert.equal(inDiet, stage === "objective-author", `stage '${stage}' diet`);
     if (stage !== "objective-author") {
       assert.equal(
-        isEligible("run_harvest_wave", stage, "read-only"),
+        isEligible("run_harvest_wave", undefined, stage, "read-only"),
         false,
         `stage '${stage}' gated`,
       );

@@ -358,6 +358,7 @@ function fixture(
     syncFromState(mode: string | undefined, s: string | undefined) {
       synced.push([mode, s]);
     },
+    prepareLoadout: () => ({}),
   } satisfies ToolGating;
   const reviews = createDraftReviewSlot(pi);
   const notARunner = () => false;
@@ -1079,6 +1080,7 @@ function plannotatorArm(
     },
     enter() {},
     syncFromState() {},
+    prepareLoadout: () => ({}),
   } satisfies ToolGating;
   const session = openBranchWorkflowSession(pi, ctx);
   assert.equal(

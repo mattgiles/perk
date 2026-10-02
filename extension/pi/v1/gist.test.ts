@@ -765,6 +765,7 @@ function fakeGating(active: boolean): ToolGating & { exits: number } {
       g.exits += 1;
     },
     isActive: () => active,
+    prepareLoadout: () => ({}),
   };
   return g;
 }

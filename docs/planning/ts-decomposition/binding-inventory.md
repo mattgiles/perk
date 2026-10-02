@@ -273,6 +273,10 @@ where order is load-bearing):
 
 ## 5. Borrowed-tool access (pointer, not a transcription)
 
+> Superseded since: foreign tools are now governed by provenance — `toolPolicy.ts`'s posture
+> table, `shared/contracts.md` §8.40 — and the borrowed census below no longer exists; this
+> section records the stamped commit's state.
+
 The borrowed census is **owned** by `BORROWED_TOOLS` in
 `substrate/toolGating.ts` (`shared/contracts.md` §8.40) — this inventory
 deliberately does not transcribe it a third time. At the stamped commit it

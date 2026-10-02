@@ -29,7 +29,9 @@ import {
   type AgentSession,
   createAgentSession,
   DefaultResourceLoader,
+  type ExtensionAPI,
   type ExtensionUIContext,
+  type InlineExtension,
   ModelRuntime,
   type SessionEntry,
   SessionManager,
@@ -564,6 +566,68 @@ function headfulUIContext(
   } as unknown as ExtensionUIContext;
 }
 
+/**
+ * The one shared fake tool body every fake extension registers (a no-op tool). `defaultActive:
+ * false` registers it inactive (Pi's own opt-out — the tool exists but is not activated on
+ * registration).
+ */
+export function registerFakeTool(
+  pi: ExtensionAPI,
+  name: string,
+  opts: { defaultActive?: boolean; promptSnippet?: string } = {},
+): void {
+  pi.registerTool({
+    name,
+    label: name,
+    description: `fake tool ${name} (test)`,
+    parameters: { type: "object", properties: {} },
+    ...(opts.defaultActive === false ? { defaultActive: false } : {}),
+    ...(opts.promptSnippet !== undefined ? { promptSnippet: opts.promptSnippet } : {}),
+    async execute() {
+      return { content: [{ type: "text", text: "ok" }], details: {} };
+    },
+  });
+}
+
+/**
+ * A fake npm package installed into the session's user-scope package directory before the load:
+ * `<agentDir>/npm/node_modules/<name>/{package.json, extension.js}`, listed verbatim (`spec`) in
+ * `<agentDir>/settings.json` `packages` — so Pi resolves it offline exactly like an installed
+ * borrow and its tools carry real package provenance (`sourceInfo.source === spec`).
+ * `extension` is the ESM source of `extension.js` (`export default function (pi) { … }`).
+ */
+export type FakePackage = { spec: string; name: string; version: string; extension: string };
+
+/** A FakePackage from an `npm:` spec (`npm:name@1.2.3`, `npm:@scope/name@1.2.3`; default 1.0.0). */
+export function fakeNpmPackage(spec: string, extension: string): FakePackage {
+  const body = spec.replace(/^npm:/, "");
+  const at = body.indexOf("@", body.startsWith("@") ? 1 : 0);
+  const name = at === -1 ? body : body.slice(0, at);
+  const version = at === -1 ? "1.0.0" : body.slice(at + 1);
+  return { spec, name, version, extension };
+}
+
+function installFakePackages(agentDir: string, packages: readonly FakePackage[]): void {
+  for (const pkg of packages) {
+    const dir = join(agentDir, "npm", "node_modules", pkg.name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "package.json"),
+      `${JSON.stringify({ name: pkg.name, version: pkg.version, type: "module", pi: { extensions: ["./extension.js"] } }, null, 2)}\n`,
+      "utf8",
+    );
+    writeFileSync(join(dir, "extension.js"), pkg.extension, "utf8");
+  }
+  writeFileSync(
+    join(agentDir, "settings.json"),
+    `${JSON.stringify({ packages: packages.map((pkg) => pkg.spec) }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+/** perk's extension entry by path — the Mode B (provenance-real) load. */
+export const PERK_EXTENSION_PATH = resolve(import.meta.dirname, "..", "index.ts");
+
 function applyEnv(
   overrides: Record<string, string | undefined>,
   saved: Map<string, string | undefined>,
@@ -597,9 +661,25 @@ export async function loadPerkSession(opts: {
   modelRuntime?: ModelRuntime;
   /**
    * Extra extension factories bound AFTER perk (e.g. a fake plannotator registering its
-   * `plannotator-review` command so presence probes see it). Offline like everything here.
+   * `plannotator-review` command so presence probes see it). Offline like everything here. Pi's
+   * full `InlineExtension` shape: a bare factory loads as `<inline:N>` (unknown provenance), a
+   * named one as `<inline:name>`, and `{ name, factory, builtin: true }` through the
+   * `builtin:<name>` path with `source: "builtin"` (the CLI's own tool_search/codemode shape).
    */
-  extraExtensions?: ((pi: Parameters<typeof perk>[0]) => void | Promise<void>)[];
+  extraExtensions?: InlineExtension[];
+  /**
+   * Mode B — provenance-real packages: when set, perk loads by PATH (`additionalExtensionPaths`
+   * — CLI paths load before settings packages, production's perk-first order) instead of the
+   * inline factory, and each fake package is installed into the user-scope package directory
+   * and listed in `<agentDir>/settings.json` (`PI_OFFLINE=1` keeps resolution local). perk then
+   * runs in the extension loader's own module instance: assert only through the live session.
+   * The construction-only perk options (resolverEngine, …) do not apply in this mode.
+   */
+  packages?: readonly FakePackage[];
+  /** Pi's registry allowlist (`createAgentSession({ tools })` — the CLI's `--tools`). */
+  tools?: string[];
+  /** Pi's registry denylist (`createAgentSession({ excludeTools })` — `--exclude-tools`). */
+  excludeTools?: string[];
   /** Construction-only fake lock/config inputs for foreground resolver tests. */
   resolverEngine?: NonNullable<Parameters<typeof perk>[1]>["resolverEngine"];
   /** Construction-only fake native-config input for the librarian writer's engine. */
@@ -616,10 +696,15 @@ export async function loadPerkSession(opts: {
    */
   settings?: {
     compaction?: { enabled?: boolean; reserveTokens?: number; keepRecentTokens?: number };
+    /** Pi's startup active-set preference (`+name`/`-name` modifiers or plain names). */
+    defaultTools?: string[];
+    codemode?: { mode?: "on" | "only" };
   };
 }): Promise<PerkSession> {
   const { cwd, headful = true } = opts;
   const agentDir = mkdtempSync(join(tmpdir(), "perk-agent-"));
+  const modeB = opts.packages !== undefined;
+  if (modeB) installFakePackages(agentDir, opts.packages ?? []);
   const savedEnv = new Map<string, string | undefined>();
   // Sentinels on by default so the lifecycle is observable. PERK_CLIPBOARD_CMD/PERK_TERMINAL_LAUNCH
   // default to "" (disabled) so no harness-driven suite clobbers the dev machine's clipboard or
@@ -640,6 +725,7 @@ export async function loadPerkSession(opts: {
       PERK_TERMINAL_LAUNCH: "",
       PLANNOTATOR_REMOTE: "0",
       PLANNOTATOR_PORT: undefined,
+      ...(modeB ? { PI_OFFLINE: "1" } : {}),
       ...(opts.env ?? {}),
     },
     savedEnv,
@@ -651,28 +737,41 @@ export async function loadPerkSession(opts: {
   const widgets: { slot: string; value: string[] | undefined; placement?: string }[] = [];
   const footers: unknown[] = [];
   const workingIndicators: unknown[] = [];
+  const inlinePerk: InlineExtension[] = modeB
+    ? []
+    : [
+        // Named inline factory: startup/extension-load-error surfaces then say `<inline:perk>`
+        // instead of the positional `<inline:1>`.
+        {
+          name: "perk",
+          factory: (pi) =>
+            perk(pi, {
+              resolverEngine: opts.resolverEngine,
+              librarianEngine: opts.librarianEngine,
+              stackResolutionDelivery: opts.stackResolutionDelivery,
+              feedbackReceiverFactory: opts.feedbackReceiverFactory,
+              nativeSdkBridge: opts.nativeSdkBridge,
+            }),
+        },
+      ];
   const loader = new DefaultResourceLoader({
     cwd,
     agentDir,
     systemPrompt: opts.systemPrompt,
-    // Named inline factory: startup/extension-load-error surfaces then say `<inline:perk>`
-    // instead of the positional `<inline:1>`.
-    extensionFactories: [
-      {
-        name: "perk",
-        factory: (pi) =>
-          perk(pi, {
-            resolverEngine: opts.resolverEngine,
-            librarianEngine: opts.librarianEngine,
-            stackResolutionDelivery: opts.stackResolutionDelivery,
-            feedbackReceiverFactory: opts.feedbackReceiverFactory,
-            nativeSdkBridge: opts.nativeSdkBridge,
-          }),
-      },
-      ...(opts.extraExtensions ?? []),
-    ],
+    ...(modeB ? { additionalExtensionPaths: [PERK_EXTENSION_PATH] } : {}),
+    extensionFactories: [...inlinePerk, ...(opts.extraExtensions ?? [])],
   });
   await loader.reload();
+  if (modeB) {
+    // A path-loaded perk or a fake package that fails to load must fail the fixture, not degrade
+    // silently into a session without it.
+    const { errors } = loader.getExtensions();
+    if (errors.length > 0) {
+      throw new Error(
+        `perk harness: extension load failed \u2014 ${errors.map((e) => `${e.path}: ${e.error}`).join("; ")}`,
+      );
+    }
+  }
   const model =
     (opts.model as ReturnType<typeof getModel> | undefined) ??
     getModel("anthropic", "claude-sonnet-4-5") ??
@@ -683,6 +782,8 @@ export async function loadPerkSession(opts: {
     model,
     ...(opts.modelRuntime !== undefined ? { modelRuntime: opts.modelRuntime } : {}),
     resourceLoader: loader,
+    ...(opts.tools !== undefined ? { tools: opts.tools } : {}),
+    ...(opts.excludeTools !== undefined ? { excludeTools: opts.excludeTools } : {}),
     sessionManager: opts.sessionManager ?? SessionManager.inMemory(cwd),
     settingsManager: SettingsManager.inMemory({
       compaction: { enabled: false },

@@ -10,10 +10,11 @@ drift-guarded by `extension/substrate/toolMatrix.test.ts`).
 Coverage, stated narrowly: the raw seed/fragment/skill SOURCE text (Jinja tags included).
 Dynamic DATA blocks, interpolated runtime values and user transclusions are out of scope.
 
-The match rule is shared with the TS half: the scan universe is the matrix's perk- and
-foreign-owned names (builtins excluded — never stage-scoped, and `read`/`write`/`find` are
-ordinary English); a name containing `_` matches as a bare word, a single-word name only
-backtick-quoted (an unquoted single-word mention is an accepted, recorded miss).
+The match rule is shared with the TS half: the scan universe is the matrix's perk-owned names
+(builtins excluded — never stage-scoped, and `read`/`write`/`find` are ordinary English; foreign
+names are governed by provenance, not by name, so the matrix carries none to scan); a name
+containing `_` matches as a bare word, a single-word name only backtick-quoted (an unquoted
+single-word mention is an accepted, recorded miss).
 """
 
 import json
@@ -125,7 +126,7 @@ WARM_ONLY = frozenset(
 
 
 def _scan_universe() -> list[str]:
-    return sorted(name for name, entry in MATRIX["tools"].items() if entry["owner"] != "builtin")
+    return sorted(name for name, entry in MATRIX["tools"].items() if entry["owner"] == "perk")
 
 
 def _mention(name: str) -> re.Pattern[str]:
@@ -222,9 +223,11 @@ def test_match_rule_representative_cases() -> None:
     assert referenced_tools("when ready, submit the work") == []
     assert referenced_tools("fall back to plan_save") == ["plan_save"]
     assert "plan_save" not in eligible("objective-plan", "read-only")
-    assert referenced_tools("`subagent` and subagent_supervisor") == [
-        "subagent",
-        "subagent_supervisor",
+    assert referenced_tools("`land` and explore_objective_node") == [
+        "explore_objective_node",
+        "land",
     ]
+    # A foreign name is outside the universe whatever its quoting.
+    assert referenced_tools("`subagent` and subagent_supervisor") == []
     assert "read" not in _scan_universe()
     assert "write" not in _scan_universe()

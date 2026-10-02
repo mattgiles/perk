@@ -3,7 +3,9 @@
 // spellings are Ponytail's manifest-declared skill preflight and the host-SDK bridge's consumer
 // install root (`NATIVE_CONSUMER_INSTALL_ROOT` — the bridge verifies consumer roots by manifest
 // identity + whole-path prefix and reads only their `package.json`; every other file imports the
-// constant). A scan over every extension source (tests, testing/, vendor/ alike) pins SPELLINGS —
+// constant). The test harness also spells Pi's user-scope managed layout once: it installs FAKE
+// packages into a throwaway agent dir so their tools carry real package provenance — it builds a
+// fixture, never reads an installed package. A scan over every extension source (tests, testing/, vendor/ alike) pins SPELLINGS —
 // the two forms a human writes when building such a path: a `.pi/npm/node_modules/` literal or
 // `"npm", "node_modules"` segments (imports: bareImportGuard).
 
@@ -20,6 +22,7 @@ const SANCTIONED_ROOT = ".pi/npm/node_modules/@dietrichgebert/ponytail";
 const SANCTIONED: Record<string, string[]> = {
   "waves/ponytail.ts": [SANCTIONED_ROOT],
   "substrate/nativeSdkBridge.ts": [".pi/npm/node_modules/"],
+  "testing/harness.ts": ['"npm", "node_modules"'],
 };
 const VIOLATION_MESSAGE =
   "perk consumes installed packages only through public surfaces — resolve nothing into .pi/npm/node_modules/ (see docs/developers/pi-subagents-reverify.md); the two exceptions are Ponytail's manifest-declared preflight in waves/ponytail.ts and the host-SDK bridge's NATIVE_CONSUMER_INSTALL_ROOT in substrate/nativeSdkBridge.ts (import the constant, never respell the path)";

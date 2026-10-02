@@ -14,6 +14,7 @@ import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createDraftReviewWaveState } from "./authoring/review/draftContext.ts";
 import { createHunkFeedbackReceiver, type HunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
+import { registerLoadoutHost } from "./pi/perkTool.ts";
 import { registerBashScanTimeout } from "./pi/v1/bashScanTimeout.ts";
 import { registerChildTaskRestore } from "./pi/v1/childTaskRestore.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
@@ -210,6 +211,9 @@ export default function perk(
 
   // The read-only tool-gating primitive. Attaches to perk:workflow-state.mode; synced on
   // both session_start AND session_tree below. enter/exit are the surface the gated stages consume.
+  // The loadout host (`perk_stage`) registers right after it: its `prepareLoadout` is the gate's
+  // presentation half (hides every declaration ineligible in the landing), so it reads the
+  // controller's settled stage/mode.
   // The two native-child booleans (§8.3), re-read at every session_start: the runner bit (also the
   // `() => runnerChild` closure every injected authoring/adapter context takes as its fence — the
   // REAL closure, never a constant), and the read-only floor a runner child derives from the
@@ -218,6 +222,7 @@ export default function perk(
   let runnerChild = false;
   let readOnlyFloor = false;
   const gating = registerToolGating(pi, () => readOnlyFloor);
+  registerLoadoutHost(pi, (loadout) => gating.prepareLoadout(loadout));
 
   // The bash scan-timeout guard: always on in every perk session — gated or not, runner children
   // included (the slow gitignore-blind scans were observed in read-write sessions too). The gate's

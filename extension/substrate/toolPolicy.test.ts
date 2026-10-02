@@ -1,35 +1,43 @@
 // The tool catalog's pure policy: stage families, derived Pi metadata, registration-time
-// validation, the eligibility formula and the derived views. Fakes are recorded straight into
-// this process's catalog (node --test isolates each file in its own process), so nothing here
-// leaks into the census/parity/fixture suites.
+// validation, the eligibility formula, the provenance-posture table, own-names-only
+// reconciliation, the loadout host's hidden set and the derived views. Fakes are recorded straight
+// into this process's catalog (node --test isolates each file in its own process), so nothing
+// here leaks into the census/fixture suites.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadRegistry } from "./registry.ts";
 import {
   AUTHORING_STAGES,
-  BORROWED_TOOLS,
   BUILTIN_TOOL_POLICY,
   carveOutWritersFor,
   derivePiMetadata,
-  dietUniverse,
-  FOREIGN_TOOL_POLICY,
   GIST_STAGES,
   gatedToolsFor,
+  gateSuspends,
+  hiddenDeclarationsFor,
   isEligible,
   isPerkTool,
-  LINEAR_MUTATING_TOOLS,
+  LOADOUT_HOST_NAME,
+  type Mode,
+  normalizePackageSpec,
   normalizeStage,
   OBJECTIVE_STAGES,
+  PACKAGE_TOOL_POLICY,
   PLAN_FAMILY_STAGES,
-  PLANNOTATOR_PHASE_TOOLS,
+  POSTURE_ROWS,
+  type Provenance,
   perkToolNames,
   perkToolPolicy,
+  perkToolsFor,
+  postureFor,
   REGISTRY_STAGE_IDS,
+  reconcileTarget,
   recordPerkTool,
-  SUBAGENT_CHILD_TOOLS,
-  SUBAGENT_TOOLS,
+  SYNTHETIC_PATH_TOOL_POLICY,
+  sameNames,
   stageToolsFor,
+  suspensionStep,
   type ToolPolicy,
   toolMatrix,
   validateToolPolicy,
@@ -37,6 +45,16 @@ import {
 } from "./toolPolicy.ts";
 
 const REGISTRY_IDS = loadRegistry().stages.map((s) => s.id);
+
+/** Provenance fixtures, shaped exactly as Pi reports them. */
+const pkg = (source: string): Provenance => ({
+  path: `/agent/npm/node_modules/x/index.js`,
+  source,
+});
+const BUILTIN = (name: string): Provenance => ({ path: `builtin:${name}`, source: "builtin" });
+const ENGINE: Provenance = { path: "<inline:pi-subagents:prompt-runtime>", source: "inline" };
+const OTHER_INLINE: Provenance = { path: "<inline:other>", source: "inline" };
+const SUBAGENTS = pkg("npm:pi-subagents@0.73.1");
 
 test("stage families: every member is a registry id; the worktree family is the five plan-ref consumers", () => {
   assert.deepEqual(REGISTRY_STAGE_IDS, REGISTRY_IDS);
@@ -58,13 +76,17 @@ test("stage families: every member is a registry id; the worktree family is the 
   ]);
 });
 
-test("derivePiMetadata: terminal/interactive/orchestration are model-only; readOnlyHint iff not blocked", () => {
+test("derivePiMetadata: terminal/interactive/orchestration/host are model-only; readOnlyHint iff not blocked", () => {
   const base = { stages: [] } as const;
-  for (const kind of ["terminal", "interactive", "orchestration"] as const) {
+  for (const kind of ["terminal", "interactive", "orchestration", "host"] as const) {
     assert.deepEqual(derivePiMetadata({ ...base, kind, gated: "blocked" }), {
       exposure: "model-only",
     });
   }
+  assert.deepEqual(derivePiMetadata({ ...base, kind: "host", gated: "allowed" }), {
+    exposure: "model-only",
+    annotations: { readOnlyHint: true },
+  });
   for (const kind of ["query", "action"] as const) {
     assert.deepEqual(derivePiMetadata({ ...base, kind, gated: "blocked" }), { exposure: "direct" });
     assert.deepEqual(derivePiMetadata({ ...base, kind, gated: "blocked", declared: "deferred" }), {
@@ -81,9 +103,13 @@ test("derivePiMetadata: terminal/interactive/orchestration are model-only; readO
   );
 });
 
-test("validateToolPolicy: refuses unknown stages, deferred model-only kinds, policy-owned fields and divergent re-registration", () => {
+test("validateToolPolicy: refuses the host kind, unknown stages, deferred model-only kinds, policy-owned fields and divergent re-registration", () => {
   const ok: ToolPolicy = { stages: ["plan"], gated: "allowed", kind: "query" };
   validateToolPolicy("vp_ok", { name: "vp_ok" }, ok, REGISTRY_IDS);
+  assert.throws(
+    () => validateToolPolicy("vp_host", {}, { ...ok, kind: "host" }, REGISTRY_IDS),
+    /perk tool policy: vp_host — the loadout host registers through registerLoadoutHost/,
+  );
   assert.throws(
     () => validateToolPolicy("vp_bad", {}, { ...ok, stages: ["nope"] }, REGISTRY_IDS),
     /perk tool policy: vp_bad — unknown stage id "nope"/,
@@ -150,52 +176,195 @@ recordPerkTool("tt_deferred", {
 recordPerkTool("tt_unscoped", { stages: [], gated: "blocked", kind: "action" });
 
 test("the formula: stage membership × mode posture, the mode-over-stage term, unscoped and unknown stages", () => {
-  const rows: [string, string | null, "read-only" | "read-write", boolean][] = [
+  const rows: [string, Provenance | undefined, string | null, Mode, boolean][] = [
     // stage member, read-write → eligible whatever the posture
-    ["tt_blocked", "implement", "read-write", true],
-    ["tt_allowed", "plan", "read-write", true],
+    ["tt_blocked", undefined, "implement", "read-write", true],
+    ["tt_allowed", undefined, "plan", "read-write", true],
     // stage member, read-only → only when not blocked
-    ["tt_blocked", "implement", "read-only", false],
-    ["tt_allowed", "plan", "read-only", true],
-    ["tt_carve", "objective-refine", "read-only", true],
+    ["tt_blocked", undefined, "implement", "read-only", false],
+    ["tt_allowed", undefined, "plan", "read-only", true],
+    ["tt_carve", undefined, "objective-refine", "read-only", true],
     // stage non-member → never, save the mode-over-stage term under the gate
-    ["tt_blocked", "plan", "read-write", false],
-    ["tt_allowed", "implement", "read-only", false],
-    ["tt_over", "implement", "read-only", true],
-    ["tt_over", "implement", "read-write", false],
+    ["tt_blocked", undefined, "plan", "read-write", false],
+    ["tt_allowed", undefined, "implement", "read-only", false],
+    ["tt_over", undefined, "implement", "read-only", true],
+    ["tt_over", undefined, "implement", "read-write", false],
     // unscoped → every tool the mode allows
-    ["tt_blocked", null, "read-write", true],
-    ["tt_blocked", null, "read-only", false],
-    ["tt_allowed", null, "read-only", true],
-    ["tt_unscoped", null, "read-write", true],
-    ["tt_unscoped", "plan", "read-write", false],
+    ["tt_blocked", undefined, null, "read-write", true],
+    ["tt_blocked", undefined, null, "read-only", false],
+    ["tt_allowed", undefined, null, "read-only", true],
+    ["tt_unscoped", undefined, null, "read-write", true],
+    ["tt_unscoped", undefined, "plan", "read-write", false],
     // the mode-over-stage term scopes known stages only: unscoped is the mode rule alone
-    ["tt_over_blocked", "implement", "read-only", true],
-    ["tt_over_blocked", null, "read-only", false],
-    ["tt_over_blocked", "no-such-stage", "read-only", false],
-    ["tt_over_blocked", null, "read-write", true],
-    ["tt_over", null, "read-only", true],
+    ["tt_over_blocked", undefined, "implement", "read-only", true],
+    ["tt_over_blocked", undefined, null, "read-only", false],
+    ["tt_over_blocked", undefined, "no-such-stage", "read-only", false],
+    ["tt_over_blocked", undefined, null, "read-write", true],
+    ["tt_over", undefined, null, "read-only", true],
     // an unknown stage id (prototype keys included) is unscoped
-    ["tt_blocked", "no-such-stage", "read-write", true],
-    ["tt_allowed", "constructor", "read-only", true],
-    // builtins: never stage-scoped; edit/write blocked under the gate, bash by verdict
-    ["edit", "implement", "read-write", true],
-    ["edit", "implement", "read-only", false],
-    ["write", null, "read-only", false],
-    ["bash", "plan", "read-only", true],
-    ["read", "objective-refine", "read-only", true],
-    // un-enumerated foreign names: read-write pass-through, blocked under the gate
-    ["some_foreign_tool", "plan", "read-write", true],
-    ["some_foreign_tool", null, "read-only", false],
+    ["tt_blocked", undefined, "no-such-stage", "read-write", true],
+    ["tt_allowed", undefined, "constructor", "read-only", true],
+    // a perk name is classified by the catalog whatever its provenance
+    ["tt_blocked", OTHER_INLINE, "implement", "read-write", true],
+    ["tt_allowed", BUILTIN("tt_allowed"), "implement", "read-only", false],
+    // builtins: never stage-scoped; edit/write/codemode blocked under the gate, bash by verdict
+    ["edit", BUILTIN("edit"), "implement", "read-write", true],
+    ["edit", BUILTIN("edit"), "implement", "read-only", false],
+    ["write", BUILTIN("write"), null, "read-only", false],
+    ["bash", BUILTIN("bash"), "plan", "read-only", true],
+    ["read", BUILTIN("read"), "objective-refine", "read-only", true],
+    ["tool_search", BUILTIN("tool_search"), "plan", "read-only", true],
+    ["codemode", BUILTIN("codemode"), "plan", "read-only", false],
+    ["codemode", BUILTIN("codemode"), "plan", "read-write", true],
+    // unknown provenance: read-write pass-through (every diet), blocked under the gate
+    ["some_foreign_tool", undefined, "plan", "read-write", true],
+    ["some_foreign_tool", undefined, null, "read-only", false],
+    ["some_foreign_tool", OTHER_INLINE, "implement", "read-only", false],
     // deferred tools are eligible (the backstop must not block a host-activated one)
-    ["tt_deferred", "plan", "read-only", true],
+    ["tt_deferred", undefined, "plan", "read-only", true],
   ];
-  for (const [name, stage, mode, expected] of rows) {
-    assert.equal(isEligible(name, stage, mode), expected, `${name} @ ${stage} ${mode}`);
+  for (const [name, provenance, stage, mode, expected] of rows) {
+    assert.equal(
+      isEligible(name, provenance, stage, mode),
+      expected,
+      `${name} (${provenance?.path ?? "no provenance"}) @ ${stage} ${mode}`,
+    );
   }
   assert.equal(normalizeStage("constructor"), null);
   assert.equal(normalizeStage(undefined), null);
   assert.equal(normalizeStage("plan"), "plan");
+});
+
+test("normalizePackageSpec: npm specs lose their version or range, scoped-aware; other strings are returned unchanged", () => {
+  const cases: [string, string][] = [
+    ["npm:pi-subagents@0.73.1", "npm:pi-subagents"],
+    ["npm:pi-subagents", "npm:pi-subagents"],
+    ["npm:name@^1", "npm:name"],
+    ["npm:@scope/name@1.2.3", "npm:@scope/name"],
+    ["npm:@scope/name", "npm:@scope/name"],
+    ["npm:@scope/name@>=1 <2", "npm:@scope/name"],
+    ["builtin", "builtin"],
+    ["inline", "inline"],
+    ["git:github.com/x/y@v1", "git:github.com/x/y@v1"],
+    ["..", ".."],
+  ];
+  for (const [input, expected] of cases) assert.equal(normalizePackageSpec(input), expected, input);
+});
+
+test("postureFor: catalog → exact synthetic path → builtin → package row (with its exception) → unknown", () => {
+  // The catalog wins over any provenance.
+  assert.equal(postureFor("tt_allowed", ENGINE).owner, "perk");
+  assert.equal(postureFor("tt_allowed", undefined).owner, "perk");
+  // The exact synthetic path; another inline path is unknown (never "all inline").
+  assert.deepEqual(postureFor("structured_output", ENGINE), {
+    owner: "foreign",
+    posture: "child-engine",
+    key: "<inline:pi-subagents:prompt-runtime>",
+  });
+  assert.deepEqual(postureFor("structured_output", OTHER_INLINE), { owner: "unknown" });
+  // A builtin-sourced builtin name; an unknown name from the builtin source is unknown (an MCP
+  // bridge registering through a builtin path), and a builtin NAME from a package is the package's.
+  assert.deepEqual(postureFor("codemode", BUILTIN("codemode")), {
+    owner: "builtin",
+    gated: "blocked",
+  });
+  assert.deepEqual(postureFor("mcp_query", BUILTIN("mcp")), { owner: "unknown" });
+  assert.deepEqual(postureFor("read", SUBAGENTS), {
+    owner: "foreign",
+    posture: "delegation",
+    key: "npm:pi-subagents",
+  });
+  // The package row, version-blind; the Linear row's one in-package exception.
+  assert.deepEqual(postureFor("subagent", pkg("npm:pi-subagents@9.9.9")), {
+    owner: "foreign",
+    posture: "delegation",
+    key: "npm:pi-subagents",
+  });
+  assert.equal(postureFor("linear_get_issue", pkg("npm:pi-mono-linear")).owner, "foreign");
+  assert.deepEqual(postureFor("linear_get_issue", pkg("npm:pi-mono-linear@1.0.0")), {
+    owner: "foreign",
+    posture: "research",
+    key: "npm:pi-mono-linear",
+  });
+  for (const name of PACKAGE_TOOL_POLICY["npm:pi-mono-linear"]?.except?.names ?? []) {
+    assert.deepEqual(postureFor(name, pkg("npm:pi-mono-linear")), {
+      owner: "foreign",
+      posture: "never",
+      key: "npm:pi-mono-linear",
+    });
+  }
+  // Unrecognized or absent provenance.
+  assert.deepEqual(postureFor("x", pkg("npm:some-mcp-bridge@1.0.0")), { owner: "unknown" });
+  assert.deepEqual(postureFor("x", undefined), { owner: "unknown" });
+  assert.deepEqual(postureFor("x", { path: "constructor", source: "constructor" }), {
+    owner: "unknown",
+  });
+});
+
+test("the posture table: rows, their packages, and per-posture eligibility", () => {
+  const rows = Object.fromEntries(
+    Object.entries(PACKAGE_TOOL_POLICY).map(([spec, row]) => [spec, row.posture]),
+  );
+  assert.deepEqual(rows, {
+    "npm:pi-web-access": "research",
+    "npm:@ollama/pi-web-search": "research",
+    "npm:@juicesharp/rpiv-web-tools": "research",
+    "npm:@plannotator/pi-extension": "never",
+    "npm:@ff-labs/pi-fff": "research",
+    "npm:@juicesharp/rpiv-ask-user-question": "universal",
+    "npm:pi-subagents": "delegation",
+    "npm:@juicesharp/rpiv-todo": "delegation",
+    "npm:pi-mono-linear": "research",
+  });
+  for (const spec of Object.keys(PACKAGE_TOOL_POLICY))
+    assert.equal(normalizePackageSpec(spec), spec, `${spec} is a normalized key`);
+  assert.deepEqual(SYNTHETIC_PATH_TOOL_POLICY, {
+    "<inline:pi-subagents:prompt-runtime>": "child-engine",
+  });
+  for (const row of Object.values(POSTURE_ROWS))
+    for (const id of row.stages) assert.ok(REGISTRY_IDS.includes(id), `row stage ${id}`);
+
+  const eligible = (provenance: Provenance, name: string, stage: string | null, mode: Mode) =>
+    isEligible(name, provenance, stage, mode);
+  const delegationHome = [...WORKTREE_STAGES, "stack-review"];
+  for (const stage of REGISTRY_IDS) {
+    for (const mode of ["read-only", "read-write"] as const) {
+      const at = `${stage} ${mode}`;
+      // research + universal: everywhere, under the gate too.
+      assert.equal(eligible(pkg("npm:pi-web-access"), "web_search", stage, mode), true, at);
+      assert.equal(
+        eligible(pkg("npm:@juicesharp/rpiv-ask-user-question"), "ask_user_question", stage, mode),
+        true,
+        at,
+      );
+      // delegation: the worktree family + stack-review (gate-allowed there); todo rides it.
+      assert.equal(eligible(SUBAGENTS, "subagent", stage, mode), delegationHome.includes(stage));
+      assert.equal(
+        eligible(pkg("npm:@juicesharp/rpiv-todo"), "todo", stage, mode),
+        delegationHome.includes(stage),
+        at,
+      );
+      // never: no stage; child-engine: every stage (stage-blind — refinement included).
+      assert.equal(eligible(pkg("npm:@plannotator/pi-extension"), "p", stage, mode), false, at);
+      assert.equal(eligible(pkg("npm:pi-mono-linear"), "linear_create_issue", stage, mode), false);
+      assert.equal(eligible(ENGINE, "structured_output", stage, mode), true, at);
+    }
+  }
+  // Unscoped: the mode rule alone — `never` passes read-write and is blocked under the gate.
+  assert.equal(eligible(pkg("npm:@plannotator/pi-extension"), "p", null, "read-write"), true);
+  assert.equal(eligible(pkg("npm:@plannotator/pi-extension"), "p", null, "read-only"), false);
+  assert.equal(eligible(SUBAGENTS, "subagent", null, "read-only"), true);
+  assert.deepEqual(Object.keys(BUILTIN_TOOL_POLICY), [
+    "read",
+    "grep",
+    "find",
+    "ls",
+    "bash",
+    "edit",
+    "write",
+    "tool_search",
+    "codemode",
+  ]);
 });
 
 test("deferred tools are never in an activation view; the diet is undefined when unscoped", () => {
@@ -208,53 +377,120 @@ test("deferred tools are never in an activation view; the diet is undefined when
   assert.deepEqual(gatedToolsFor("no-such-stage"), gatedToolsFor(null));
 });
 
-test("gatedToolsFor: canonical order — builtins, foreign rows in table order, perk tools in catalog order", () => {
-  const view = gatedToolsFor("plan");
-  assert.deepEqual(view.slice(0, 5), ["read", "grep", "find", "ls", "bash"]);
-  const foreignOrder = FOREIGN_TOOL_POLICY.flatMap((r) => r.names).filter((n) => view.includes(n));
-  const perkOrder = perkToolNames().filter((n) => view.includes(n));
-  assert.deepEqual(view, ["read", "grep", "find", "ls", "bash", ...foreignOrder, ...perkOrder]);
+test("the activation views are perk-only, in catalog order", () => {
+  for (const stage of [null, ...REGISTRY_IDS]) {
+    for (const mode of ["read-only", "read-write"] as const) {
+      const view = perkToolsFor(stage, mode);
+      assert.deepEqual(
+        view,
+        perkToolNames().filter((n) => view.includes(n)),
+      );
+    }
+  }
+  assert.deepEqual(gatedToolsFor("plan"), perkToolsFor("plan", "read-only"));
+  assert.deepEqual(stageToolsFor("plan"), perkToolsFor("plan", "read-write"));
+  assert.ok(!gatedToolsFor(null).includes("read"));
 });
 
-test("foreign rows: exactly the borrowed census plus the child-side tools, each name once", () => {
-  const names = FOREIGN_TOOL_POLICY.flatMap((r) => r.names);
-  assert.equal(new Set(names).size, names.length, "a foreign name governed twice");
-  assert.deepEqual(
-    [...names].sort(),
-    [...new Set([...BORROWED_TOOLS, ...SUBAGENT_CHILD_TOOLS])].sort(),
+test("reconcileTarget: null when nothing changes; foreign names keep their live order and membership; the deferred third term; unregistered perk names ignored", () => {
+  const perkAll = perkToolsFor(null, "read-write");
+  const registered = [...perkToolNames(), "read", "edit", "a", "b"];
+  // A bare default registration: every always perk tool active → no install.
+  assert.equal(
+    reconcileTarget({ active: ["read", "edit", ...perkAll], registered }, null, "read-write"),
+    null,
   );
-  for (const row of FOREIGN_TOOL_POLICY) {
-    for (const id of row.stages) assert.ok(REGISTRY_IDS.includes(id), `row stage ${id}`);
+  // Order-insensitive.
+  assert.equal(
+    reconcileTarget(
+      { active: [...perkAll].reverse().concat("edit", "read"), registered },
+      null,
+      "read-write",
+    ),
+    null,
+  );
+  // Foreign invariance over arbitrary live sets, whatever the landing.
+  for (const foreign of [[], ["b", "a"], ["edit", "zz_unregistered"], ["a"]]) {
+    for (const [stage, mode] of [
+      ["plan", "read-only"],
+      ["implement", "read-write"],
+      [null, "read-only"],
+    ] as const) {
+      const live = [...foreign, "tt_blocked"];
+      // null = the live set already is the target.
+      const target = reconcileTarget({ active: live, registered }, stage, mode) ?? live;
+      assert.deepEqual(
+        target.filter((n) => !isPerkTool(n)),
+        foreign,
+      );
+      assert.deepEqual(
+        target.filter(isPerkTool),
+        perkToolsFor(stage, mode),
+        `${stage} ${mode}: the eligible always-declared perk names, catalog order`,
+      );
+    }
   }
-  // The diet universe is the borrowed census + the catalog — child-side tools pass through.
-  for (const name of SUBAGENT_CHILD_TOOLS) assert.ok(!dietUniverse().includes(name));
-  for (const name of BORROWED_TOOLS) assert.ok(dietUniverse().includes(name));
-  // Spot postures.
-  for (const name of [...LINEAR_MUTATING_TOOLS, ...PLANNOTATOR_PHASE_TOOLS]) {
-    for (const stage of REGISTRY_IDS) assert.equal(isEligible(name, stage, "read-write"), false);
-    assert.equal(isEligible(name, null, "read-write"), true);
-    assert.equal(isEligible(name, null, "read-only"), false);
-  }
-  for (const name of SUBAGENT_CHILD_TOOLS) {
-    assert.equal(isEligible(name, "objective-refine", "read-only"), false);
-    assert.equal(isEligible(name, "plan", "read-only"), true);
-  }
-  for (const name of SUBAGENT_TOOLS) {
-    assert.equal(isEligible(name, "stack-review", "read-only"), true);
-    assert.equal(isEligible(name, "plan", "read-only"), false);
-    assert.equal(isEligible(name, "plan", "read-write"), false);
-  }
-  assert.equal(isEligible("todo", "implement", "read-write"), true);
-  assert.equal(isEligible("todo", "implement", "read-only"), false);
-  assert.equal(isEligible("ask_user_question", "objective-refine", "read-only"), true);
-  assert.deepEqual(Object.keys(BUILTIN_TOOL_POLICY), [
-    "read",
-    "grep",
-    "find",
-    "ls",
-    "bash",
+  // The deferred third term: kept only while live AND eligible; never activated.
+  const planned = reconcileTarget({ active: ["tt_deferred"], registered }, "plan", "read-write");
+  assert.ok(planned?.includes("tt_deferred"));
+  const notLive = reconcileTarget({ active: [], registered }, "plan", "read-write");
+  assert.ok(notLive !== null && !notLive.includes("tt_deferred"));
+  const ineligible = reconcileTarget(
+    { active: ["tt_deferred"], registered },
+    "implement",
+    "read-write",
+  );
+  assert.ok(ineligible !== null && !ineligible.includes("tt_deferred"));
+  // A catalogued name the host never registered is never installed and never forces an install.
+  const partial = ["read", "tt_allowed"];
+  assert.equal(
+    reconcileTarget({ active: partial, registered: partial }, "plan", "read-write"),
+    null,
+  );
+  assert.deepEqual(
+    reconcileTarget({ active: ["read"], registered: partial }, "plan", "read-only"),
+    ["read", "tt_allowed"],
+  );
+});
+
+test("hiddenDeclarationsFor: the host always; a bare landing hides nothing else; the gate and the diet hide by provenance", () => {
+  const infos = new Map<string, Provenance>([
+    ["read", BUILTIN("read")],
+    ["edit", BUILTIN("edit")],
+    ["write", BUILTIN("write")],
+    ["codemode", BUILTIN("codemode")],
+    ["tool_search", BUILTIN("tool_search")],
+    ["subagent", SUBAGENTS],
+    ["web_search", pkg("npm:pi-web-access")],
+    ["plannotator_submit_plan", pkg("npm:@plannotator/pi-extension")],
+    ["structured_output", ENGINE],
+    ["bridge_tool", pkg("npm:some-mcp-bridge")],
+    [LOADOUT_HOST_NAME, OTHER_INLINE],
+  ]);
+  const declared = [...infos.keys(), "tt_allowed", "tt_blocked"];
+  assert.deepEqual(hiddenDeclarationsFor(declared, infos, null, "read-write"), [LOADOUT_HOST_NAME]);
+  assert.deepEqual(hiddenDeclarationsFor([], infos, "plan", "read-only"), [LOADOUT_HOST_NAME]);
+  assert.deepEqual(hiddenDeclarationsFor(declared, infos, null, "read-only").sort(), [
+    "bridge_tool",
+    "codemode",
     "edit",
+    LOADOUT_HOST_NAME,
+    "plannotator_submit_plan",
+    "tt_blocked",
     "write",
+  ]);
+  // The plan diet: delegation and the `never` row hidden; research, the engine and the unknown
+  // bridge (it passes every diet) declared.
+  assert.deepEqual(hiddenDeclarationsFor(declared, infos, "plan", "read-write").sort(), [
+    LOADOUT_HOST_NAME,
+    "plannotator_submit_plan",
+    "subagent",
+    "tt_blocked",
+  ]);
+  assert.deepEqual(hiddenDeclarationsFor(declared, infos, "implement", "read-write").sort(), [
+    LOADOUT_HOST_NAME,
+    "plannotator_submit_plan",
+    "tt_allowed",
   ]);
 });
 
@@ -277,7 +513,7 @@ test("catalog: records are frozen copies; lookups are name-exact", () => {
   assert.equal(perkToolPolicy("constructor"), undefined);
 });
 
-test("toolMatrix: owner rows, registry-ordered stages, sorted eligibility, and the unscoped key", () => {
+test("toolMatrix: perk + builtin rows, the postures section, sorted eligibility, and the unscoped key", () => {
   const m = toolMatrix();
   assert.deepEqual(m.stages, REGISTRY_IDS);
   assert.deepEqual(m.tools.tt_carve, {
@@ -291,20 +527,91 @@ test("toolMatrix: owner rows, registry-ordered stages, sorted eligibility, and t
     declared: "always",
     exposure: "direct",
   });
-  assert.deepEqual(m.tools.web_search, { owner: "foreign", stages: "all", gated: "allowed" });
-  assert.deepEqual(m.tools.structured_output, {
-    owner: "foreign",
-    stages: REGISTRY_IDS.filter((id) => id !== "objective-refine"),
+  assert.deepEqual(m.tools.bash, { owner: "builtin", gated: "verdict", registrar: "core" });
+  assert.deepEqual(m.tools.codemode, {
+    owner: "builtin",
+    gated: "blocked",
+    registrar: "extension",
+  });
+  assert.deepEqual(
+    Object.values(m.tools)
+      .map((t) => t.owner)
+      .filter((o) => o !== "perk" && o !== "builtin"),
+    [],
+  );
+  assert.deepEqual(m.postures.packages["npm:pi-subagents"], {
+    posture: "delegation",
+    stages: REGISTRY_IDS.filter((id) => [...WORKTREE_STAGES, "stack-review"].includes(id)),
     gated: "allowed",
   });
-  assert.deepEqual(m.tools.bash, { owner: "builtin", gated: "verdict" });
+  assert.deepEqual(m.postures.packages["npm:pi-mono-linear"]?.except?.posture, "never");
+  assert.deepEqual(m.postures.packages["npm:@plannotator/pi-extension"], {
+    posture: "never",
+    stages: [],
+    gated: "blocked",
+  });
+  assert.deepEqual(m.postures.paths, {
+    "<inline:pi-subagents:prompt-runtime>": {
+      posture: "child-engine",
+      stages: "all",
+      gated: "allowed",
+    },
+  });
+  assert.deepEqual(m.postures.unknown, { stages: "all", gated: "blocked" });
   for (const stage of REGISTRY_IDS) {
     const row = m.eligible[stage];
     assert.ok(row !== undefined);
-    assert.deepEqual(row["read-only"], [...gatedToolsFor(stage)].sort());
-    assert.ok(
-      row["read-write"].includes("edit") && row["read-write"].includes("structured_output"),
+    assert.deepEqual(
+      row["read-only"],
+      [...gatedToolsFor(stage), "read", "grep", "find", "ls", "bash", "tool_search"].sort(),
     );
+    assert.ok(row["read-write"].includes("edit") && row["read-write"].includes("codemode"));
   }
-  assert.deepEqual(m.eligible.unscoped?.["read-write"], Object.keys(m.tools).sort());
+  assert.deepEqual(
+    m.eligible.unscoped?.["read-write"],
+    Object.keys(m.tools)
+      .filter((n) => n !== "tt_deferred")
+      .sort(),
+  );
+});
+
+test("gate suspension: only the builtin-sourced codemode; suspended while read-only, restored at release when still registered", () => {
+  assert.equal(gateSuspends("codemode", BUILTIN("codemode")), true);
+  assert.equal(gateSuspends("codemode", pkg("npm:some-codemode")), false, "a foreign namesake");
+  assert.equal(gateSuspends("codemode", undefined), false);
+  for (const name of ["edit", "write", "tool_search", "read"])
+    assert.equal(gateSuspends(name, BUILTIN(name)), false, name);
+  const infos = new Map<string, Provenance>([
+    ["codemode", BUILTIN("codemode")],
+    ["edit", BUILTIN("edit")],
+  ]);
+  // Read-only: switched off and remembered (a memo accumulates).
+  assert.deepEqual(suspensionStep({ active: ["edit", "codemode"], infos }, "read-only", []), {
+    active: ["edit"],
+    suspended: ["codemode"],
+  });
+  assert.deepEqual(suspensionStep({ active: ["edit"], infos }, "read-only", ["codemode"]), {
+    active: ["edit"],
+    suspended: ["codemode"],
+  });
+  // Read-write: restored only from the memo, only while still registered, never duplicated.
+  assert.deepEqual(suspensionStep({ active: ["edit"], infos }, "read-write", ["codemode"]), {
+    active: ["edit", "codemode"],
+    suspended: [],
+  });
+  assert.deepEqual(suspensionStep({ active: ["edit"], infos }, "read-write", []), {
+    active: ["edit"],
+    suspended: [],
+  });
+  assert.deepEqual(
+    suspensionStep({ active: ["edit", "codemode"], infos }, "read-write", ["codemode"]),
+    { active: ["edit", "codemode"], suspended: [] },
+  );
+  assert.deepEqual(
+    suspensionStep({ active: ["edit"], infos: new Map() }, "read-write", ["codemode"]),
+    { active: ["edit"], suspended: [] },
+    "an unregistered codemode is not restored",
+  );
+  assert.equal(sameNames(["a", "b"], ["b", "a", "a"]), true);
+  assert.equal(sameNames(["a"], ["a", "b"]), false);
 });

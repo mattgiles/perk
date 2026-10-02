@@ -8,12 +8,18 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   gatedToolsFor,
   isPerkTool,
+  LOADOUT_HOST_NAME,
   perkToolPolicy,
   stageToolsFor,
   type ToolPolicy,
 } from "../substrate/toolPolicy.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import { type PerkToolDefinition, registerPerkTool } from "./perkTool.ts";
+import {
+  LOADOUT_HOST_POLICY,
+  type PerkToolDefinition,
+  registerLoadoutHost,
+  registerPerkTool,
+} from "./perkTool.ts";
 
 type Captured = Record<string, unknown>;
 
@@ -171,4 +177,43 @@ test("a live session: terminate and failed results pass through byte-identical; 
   } finally {
     h.dispose();
   }
+});
+
+test("registerLoadoutHost: a catalogued model-only host with the one prepareLoadout; registerPerkTool refuses both", () => {
+  const { pi, captured } = capturingPi();
+  const hook = () => ({ hiddenDeclarations: [LOADOUT_HOST_NAME] });
+  registerLoadoutHost(pi, hook);
+  const [host] = captured;
+  assert.ok(host !== undefined);
+  assert.equal(host.name, LOADOUT_HOST_NAME);
+  assert.equal(host.exposure, "model-only");
+  assert.deepEqual(host.annotations, { readOnlyHint: true });
+  assert.equal(host.prepareLoadout, hook);
+  assert.equal(host.promptSnippet, undefined, "never in the system prompt");
+  assert.equal(host.promptGuidelines, undefined);
+  assert.deepEqual(perkToolPolicy(LOADOUT_HOST_NAME), LOADOUT_HOST_POLICY);
+  assert.equal(isPerkTool(LOADOUT_HOST_NAME), true);
+  // The seam never registers a host or a hook.
+  assert.throws(
+    () =>
+      registerPerkTool(pi, fakeDefinition("seam_host", { content: [], details: {} }), {
+        stages: [],
+        gated: "allowed",
+        kind: "host",
+      }),
+    /the loadout host registers through registerLoadoutHost/,
+  );
+  assert.throws(
+    () =>
+      registerPerkTool(
+        pi,
+        {
+          ...fakeDefinition("seam_hook", { content: [], details: {} }),
+          prepareLoadout: hook,
+        } as never,
+        { stages: [], gated: "allowed", kind: "query" },
+      ),
+    /must not set `prepareLoadout`/,
+  );
+  assert.equal(captured.length, 1);
 });

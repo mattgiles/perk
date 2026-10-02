@@ -1,6 +1,6 @@
 ---
 title: "Model-facing tools"
-description: "The complete guarded census of perk-owned, borrowed-package, and spawned-child tools with their gating and stage-scoping rules."
+description: "The guarded census of perk-owned tools, the provenance posture table for foreign tools, and the gating and stage-scoping rules."
 sidebar:
   order: 3024
 ---
@@ -8,8 +8,8 @@ sidebar:
 # Model-facing tools
 
 A model tool is a typed operation the agent can call. Tool registration is distinct from command
-registration and from stage-door availability. The three marked tables below are guarded against
-the live extension authorities; each row contains exactly one tool name.
+registration and from stage-door availability. The marked tables below are guarded against the
+live extension authorities.
 
 ## Perk-owned tools
 
@@ -60,12 +60,17 @@ These tools are registered by perk itself. Command-specific semantics live in
 | Stacked delivery | `objective_stack_adopt` | action | blocked |
 | Stacked delivery | `objective_stack_recover` | action | blocked |
 | Stacked delivery | `objective_stack_land` | action | blocked |
+| Loadout host | `perk_stage` | host | allowed, mode-over-stage |
 <!-- END perk tool census -->
 
 The terminating subset ends the current turn on its success path: `plan_save`, `objective_save`,
 `gist_save`, `submit`, `ready`, `finalize_address` on full success, `land`, `learn`, and
 `plan_review` when approval completes its save — exactly the tools of kind `terminal`, all
 model-only. Other perk-owned tools are non-terminating.
+
+`perk_stage` is the **loadout host**: a tool with no action, active in every session where it is
+registered and never shown to the model. It exists to hide, before each model request, every
+declared tool that is not eligible in the session's stage and mode (below).
 
 `resolve_submit_conflicts` consumes one unused, verified submit/address conflict authorization.
 It is sequential and non-terminating: only a `resolved` result permits the parent to call canonical
@@ -134,116 +139,102 @@ is collected as an incomplete wave carrying those lanes' reports, with the unfin
 named as failed. Timeout without a completion notification and interrupted sessions are not
 recovered.
 
-## Borrowed-package tools
+## Foreign tools by provenance
 
-Perk enumerates the following package/provider names so stage scoping can remove known foreign
-schemas deterministically. A name can be inert when its package or provider is not loaded.
+Perk governs a foreign tool — one registered by another package or extension — by **who
+registered it**, never by its name. Pi reports each tool's provenance (the package spec it was
+installed from, or the extension's load path), and perk looks that up in a fixed posture table.
+A package's tools need not be enumerated anywhere: a tool a package adds tomorrow is governed by
+its package's row today.
 
-<!-- BEGIN borrowed tool census -->
-| Group | Tool |
-| --- | --- |
-| Web research | `web_search` |
-| Web research | `code_search` |
-| Web research | `fetch_content` |
-| Web research | `get_search_content` |
-| Web research | `source_check` |
-| Web research | `web_enable` |
-| Web research | `ollama_web_search` |
-| Web research | `ollama_web_fetch` |
-| Web research | `web_fetch` |
-| Linear reads | `linear_whoami` |
-| Linear reads | `linear_workspace_metadata` |
-| Linear reads | `linear_list_teams` |
-| Linear reads | `linear_get_team` |
-| Linear reads | `linear_list_users` |
-| Linear reads | `linear_get_user` |
-| Linear reads | `linear_list_issues` |
-| Linear reads | `linear_get_issue` |
-| Linear reads | `linear_search_issues` |
-| Linear reads | `linear_list_my_issues` |
-| Linear reads | `linear_list_projects` |
-| Linear reads | `linear_get_project` |
-| Linear reads | `linear_list_issue_statuses` |
-| Linear reads | `linear_get_issue_status` |
-| Linear reads | `linear_list_labels` |
-| Linear reads | `linear_list_cycles` |
-| Linear reads | `linear_list_documents` |
-| Linear reads | `linear_get_document` |
-| Linear reads | `linear_list_comments` |
-| Linear mutators | `linear_create_issue` |
-| Linear mutators | `linear_update_issue` |
-| Linear mutators | `linear_create_comment` |
-| Linear mutators | `linear_upload_file` |
-| Linear mutators | `linear_upload_file_to_issue_comment` |
-| Linear mutators | `linear_configure_auth` |
-| Delegation | `subagent` |
-| Delegation | `subagents_enable` |
-| Delegation | `wait` |
-| Delegation | `subagent_supervisor` |
-| Delegation | `intercom` |
-| FFF search | `fffind` |
-| FFF search | `ffgrep` |
-| FFF search | `fff-multi-grep` |
-| FFF search | `multi_grep` |
-| Checklist/questionnaire | `todo` |
-| Checklist/questionnaire | `ask_user_question` |
-| Plannotator | `plannotator_submit_plan` |
-| Plannotator | `plannotator_mark_done` |
-<!-- END borrowed tool census -->
+<!-- BEGIN foreign posture table -->
+| Provenance | Posture | Stages | Under the gate |
+| --- | --- | --- | --- |
+| `npm:pi-web-access` | research | every stage | allowed |
+| `npm:@ollama/pi-web-search` | research | every stage | allowed |
+| `npm:@juicesharp/rpiv-web-tools` | research | every stage | allowed |
+| `npm:@ff-labs/pi-fff` | research | every stage | allowed |
+| `npm:pi-mono-linear` | research (its mutators: never — below) | every stage | allowed |
+| `npm:@juicesharp/rpiv-ask-user-question` | universal | every stage | allowed |
+| `npm:pi-subagents` | delegation | the worktree stages and stack-review | allowed |
+| `npm:@juicesharp/rpiv-todo` | delegation | the worktree stages and stack-review | allowed |
+| `npm:@plannotator/pi-extension` | never | none | blocked |
+| `<inline:pi-subagents:prompt-runtime>` | child-engine | every stage | allowed |
+<!-- END foreign posture table -->
 
-`ask_user_question` is registered by the questionnaire package only when an interactive UI is
-available; a headless session carries no schema for it. Web research, Linear reads, and FFF search
-stay available across every known stage. Delegation and the checklist join the worktree-stage
-family. Linear mutators and Plannotator's two phase tools (`plannotator_submit_plan`,
-`plannotator_mark_done`) are intentionally absent from every stage session even though they
-remain enumerated here; Linear mutations stay in perk's canonical Python plane and perk bridges
-review without Plannotator's phase tools. Bare unscoped Pi sessions retain their package-provided
-tools.
+Package rows match the spec without its version (`npm:pi-subagents@0.73.1` is
+`npm:pi-subagents`). **research** tools are external reads (web search and fetch, Linear reads,
+code search) and **universal** is the questionnaire every stage keeps; the two behave the same.
+**delegation** — spawning and supervising subagents, and the implementation checklist — belongs to
+the worktree flow. **never** tools are hidden in every stage session and blocked under the gate:
+perk bridges plan review to Plannotator's event API and never drives its plan phases. The one
+in-package exception is Linear's writers, which are `never` (Linear mutations stay in perk's
+Python plane; `linear_configure_auth` writes your Pi auth file):
 
-**Lazy loaders.** pi-subagents and pi-web-access hide their heavy tools until the model asks for
-them (when the package registers its loader; an older version or a host it cannot verify keeps
-the tools always available, and perk treats them like any other tool): `subagent` appears only after the model calls `subagents_enable`, and `web_search`,
-`source_check`, `fetch_content` and `get_search_content` only after it calls `web_enable`. The
-packages also restore that selection when you navigate the session tree. Perk honors the
-package's selection in every mode — it never re-enables a tool the package hid, and never drops
-one the model enabled where the stage allows it. A loader is available exactly where its tools
-are. Calling a loader where its tools are excluded is refused with a reason naming the stage, for
-example `perk stage scoping: subagents_enable is blocked (its tools — subagent — are not available
-in the gist-save stage).` The package may still advertise the loader there; the refusal is what
-keeps the excluded tools out.
+<!-- BEGIN linear exception -->
+| Tool |
+| --- |
+| `linear_create_issue` |
+| `linear_update_issue` |
+| `linear_create_comment` |
+| `linear_upload_file` |
+| `linear_upload_file_to_issue_comment` |
+| `linear_configure_auth` |
+<!-- END linear exception -->
+
+**Unknown provenance.** A tool from any package or extension without a row — an MCP bridge, an
+ad-hoc extension, a package perk does not install — passes every stage diet but is hidden and
+blocked under the read-only gate. Only the exact paths in the table count: another
+`<inline:…>` extension is unknown.
+
+**perk never deactivates a foreign tool.** A package's own choices stand: the questionnaire
+removes `ask_user_question` in a headless session, pi-subagents hides `subagent` until the model
+calls `subagents_enable` (and restores that selection when you navigate the session tree), and
+perk neither re-enables nor drops either. Where a foreign tool is ineligible, perk only **hides**
+it from the model (below). Pi's `--tools`/`--exclude-tools` remove tools from the session
+altogether: an excluded perk tool is never activated and is refused if called under the gate;
+excluding `perk_stage` turns off the hiding (perk still deactivates its own ineligible tools, and
+the read-only gate still blocks). Any other removal of an eligible perk tool — another
+extension's `setActiveTools` — is undone at perk's next reconciliation.
 
 For package selection, registration timing, and provider fallback behavior, use the
 [Providers reference](../providers-and-backends/providers.md).
 
 ## Spawned-child tools
 
-These engine tools are not parent-stage tools. They exist only in spawned-child contexts and are
-kept reachable when a child adopts a read-only gate. perk's own waves spawn with the pi-subagents
-intercom bridge off, so their children never have `contact_supervisor` (review waves are
-completion-only); their gate eligibility (every stage but `objective-refine`) keeps the
-supervisor door for an ad-hoc gated child whose bridge is active.
-
-<!-- BEGIN child tool census -->
-| Purpose | Tool |
-| --- | --- |
-| Schema-validated completion | `structured_output` |
-| Child-to-parent coordination | `contact_supervisor` |
-<!-- END child tool census -->
+pi-subagents registers its engine tools — `structured_output` (schema-validated completion),
+`contact_supervisor` (child-to-parent coordination) and `wait` — inside every spawned child through
+its prompt runtime, the `<inline:pi-subagents:prompt-runtime>` row above. They are allowed in every
+stage and under an inherited read-only gate, so a gated child can always complete its report.
+perk's own waves spawn with the pi-subagents intercom bridge off, so their children never have
+`contact_supervisor` (review waves are completion-only). perk's report children run with a tool
+allowlist (`read`, `grep`, `find`, `ls`, `bash`), so no perk tool exists in them at all.
 
 ## Gating and stage scoping
 
 Every perk tool registers with a **policy descriptor** — the stages it belongs to, its posture under
 the read-only gate (`allowed`, `blocked`, or a named carve-out — one bounded write), whether a mode
 gesture needs it regardless of stage, and its kind (`terminal`, `interactive`, `orchestration`,
-`query`, `action`). Each tool's Kind and Under-the-gate posture appear in the census above.
+`query`, `action`, or `host` for `perk_stage`). Each tool's Kind and Under-the-gate posture appear in the census above.
 Everything perk installs is derived from those descriptors through one **eligibility formula**: a
 tool is eligible in a session when its stage is one of the tool's stages and the mode allows it
 (read-write always does; read-only does unless the tool is gate-blocked), or when the session is
 read-only and the tool is **mode-over-stage**. A session with no stage (or an unknown one) is
-eligible for every tool the mode allows. Foreign packages' tools get the same treatment through a
-fixed posture table, and Pi's builtins through their own rows (`read`/`grep`/`find`/`ls` allowed,
-`bash` under the read-only verdict, `edit`/`write` blocked). The full stage-by-tool result is
-committed as `shared/fixtures/tool-matrix.json`.
+eligible for every tool the mode allows. Foreign tools get the same treatment through the posture
+table above, and Pi's builtins through their own rows: `read`/`grep`/`find`/`ls` and `tool_search`
+allowed, `bash` under the read-only verdict, `edit`/`write` and `codemode` blocked. The full
+stage-by-tool result is committed as `shared/fixtures/tool-matrix.json`.
+
+Perk applies all of this in three separate ways. **Activation:** perk switches on and off only
+its own tools — at every session start and tree navigation, when the gate turns on or off, after
+every extension has started, and when each new prompt starts (not between the model requests
+inside one prompt) — and never activates or deactivates a foreign or builtin tool, with one
+exception: under the read-only gate perk switches `codemode` off, and back on when the gate turns
+off. **Presentation:** before every model request, `perk_stage` hides every ineligible tool's
+declaration (and its prompt-snippet line) from the model; a hidden tool stays active and
+callable.
+**Enforcement:** under the read-only gate the tool-call check below blocks every ineligible call,
+whatever the model was shown.
 
 The mode-over-stage tools are exactly the `/plan` toggle's flow — `plan_draft`, `plan_review`, and
 the reviewer-wave companions `start_draft_review_wave`, `collect_draft_review_wave` and
@@ -257,21 +248,24 @@ nested call can end the turn or open a human surface.
 ### Structural read-only gate
 
 Effective read-only gating is the existing workflow mode **or** a captured runner restriction
-floor. Perk installs the stage's **gated view** — every tool eligible read-only there — as the
-active set, minus any lazy-loaded tool its package currently hides (a loader is eligible exactly
-where its tools are, so the model can still enable them), and independently checks full
-eligibility at tool-call time. Lazy hiding only shapes the active set; it is not a call-time
-boundary, and a hidden tool the gate allows is not refused when called. Each stage therefore sees
-its own tools: an `objective-refine` session, for instance, gets read/research/question,
-`plan_review`, `objective_refinement_draft` and the mode-over-stage set — no node claim, no
-objective or gist draft, no save tool, no delegation. Because the `/plan` flow's tools are
-mode-over-stage, `plan_draft` is reachable there too and can write a plan draft, but that draft
-can never be reviewed or saved from a refinement session (`plan_review` reviews only the
-refinement draft, and every save command refuses). The hidden guidance names the stage's sanctioned bounded
-writers (its carve-out tools) under a `[READ-ONLY MODE] (stage <id>)` marker, or
-`[READ-ONLY MODE] (unscoped)` in a session with no stage. Every ineligible tool is denied,
-including `edit`, `write`, save/delivery tools and unknown or late-registered foreign
-mutators—even if toolset synchronization failed. Allowlisted `bash` retains a textual command-position sub-allowlist. It first applies the
+floor. Perk activates the stage's own tools that are eligible read-only there and hides every
+other ineligible declaration: `edit` and `write` stay active but are not declared to the model
+(their prompt-snippet lines disappear too, and return when the gate turns off), and so are
+`never` and unknown-provenance foreign tools. `codemode` is switched off while the gate is on and
+back on when it turns off: its description would list the write tools' schemas, and in `only`
+mode it hides every direct tool itself, so a hidden-but-active codemode would leave the session
+without `read`, `bash` or perk's tools. Each stage therefore sees its own tools: an `objective-refine`
+session, for instance, gets read/research/question, `plan_review`, `objective_refinement_draft`
+and the mode-over-stage set — no node claim, no objective or gist draft, no save tool, no
+delegation. Because the `/plan` flow's tools are mode-over-stage, `plan_draft` is reachable there
+too and can write a plan draft, but that draft can never be reviewed or saved from a refinement
+session (`plan_review` reviews only the refinement draft, and every save command refuses). The
+hidden guidance names the stage's sanctioned bounded writers (its carve-out tools) under a
+`[READ-ONLY MODE] (stage <id>)` marker, or `[READ-ONLY MODE] (unscoped)` in a session with no
+stage. Independently of what was shown, every call is checked: a tool not registered in the
+session is refused (`perk read-only mode: <name> is blocked (tool not registered).`), and every
+ineligible tool is denied, including `edit`, `write`, save/delivery tools, `codemode` and unknown
+or late-registered foreign mutators — even if activation or presentation failed. Allowlisted `bash` retains a textual command-position sub-allowlist. It first applies the
 whole-command destructive veto, then walks every command position — after sequencing operators and
 newlines, inside substitutions, after shell keywords/redirections/wrappers, and at `find -exec`/
 `fd -x` — then matches every emitted command against `SAFE_PATTERNS` in
@@ -365,30 +359,31 @@ No packet is never a write grant. `structured_output` and `contact_supervisor` s
 
 ### Stage tool diet
 
-With the gate off and a known stage active, the stage's **diet** — every perk and borrowed tool
-eligible read-write there — subtractively filters the scoped universe (the perk tool catalog plus
-the borrowed-tool census). Each stage receives its own authoring/lifecycle tools plus the research
-family. The five worktree stages — implement, submit, address, land, and learn — share the whole
-PR-loop family so a later warm command cannot dead-end in an earlier worktree session. That shared
-family includes submission, readiness, CI, review/address, land/learn, reconciliation, and
-stack-control operations, plus delegation and the checklist.
+With the gate off and a known stage active, perk activates the stage's **diet** — its own tools
+eligible read-write there — and hides foreign tools whose posture excludes the stage. Each stage
+receives its own authoring/lifecycle tools plus the research family. The five worktree stages —
+implement, submit, address, land, and learn — share the whole PR-loop family so a later warm
+command cannot dead-end in an earlier worktree session. That shared family includes submission,
+readiness, CI, review/address, land/learn, reconciliation, and stack-control operations, plus
+delegation and the checklist.
 
-When perk first engages it records the host's active starting set and the registered-tool census,
-then reconciles at `session_start`, `session_tree`, and once at `resources_discover` (after every
-extension's `session_start` has run). The base is that starting set plus every later-registered
-tool perk has seen active with the gate off — the delegation supervisor tool, which registers late,
-lands inside the diet at launch and is restored when navigation returns to a stage that carries it;
-a late tool its owner deactivated before perk saw it is left alone; a tool inactive at the start is
-never re-activated by perk. A late tool outside the gated view is inactive from the first
-turn and is not restored at gate exit. Lazy-loaded tools follow their package's current selection
-rather than the starting set, and stage exclusion still applies to them: a `subagent` the model
-enabled is still removed in a stage that excludes delegation.
+The diet is presentation for foreign tools: a `subagent` the model enabled in a `plan` session
+stays active but is not declared to the model, and a late-registering tool (the delegation
+supervisor) is shown or hidden by its posture the moment it appears. A deferred perk tool that
+`tool_search` activates stays while it is eligible; where it is not, it is hidden from the very
+next request and switched off when the next prompt starts (until then it stays callable — the
+read-write diet has no call-time check). Pi restores such activations only when you navigate
+the session tree, not on resume or fork; perk keeps what Pi restored and adds nothing.
+
+One composition limit: `codemode` writes its own description from every callable tool, so in a
+read-write stage session with codemode active, that description may name a tool the diet hides.
+This affects only what the model reads; under the gate codemode is switched off.
 
 Pi owns its builtins (`read`, `edit`, `write`, `bash`, `grep`, `find`, and related host tools); this
 reference does not redefine them. Stage scoping is fail-open at compatibility boundaries: a bare
-session, an unknown stage id, and an unenumerated foreign tool are not filtered. Read-only mode is
-the opposite safety posture for worktree mutation: its tool-call backstop fails closed on internal
-errors.
+session (perk changes nothing there — only `perk_stage` is hidden), an unknown stage id, and an
+unknown-provenance tool are not filtered. Read-only mode is the opposite safety posture for
+worktree mutation: its tool-call backstop fails closed on internal errors.
 
 ## Bash scan timeout
 

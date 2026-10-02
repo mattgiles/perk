@@ -18,7 +18,19 @@ import {
 } from "../../authoring/review/subjects.ts";
 import { BINDING_HEADER } from "../../substrate/bindingDelivery.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
-import { gatedToolsFor, REGISTRY_STAGE_IDS } from "../../substrate/toolPolicy.ts";
+import {
+  gatedToolsFor,
+  isEligible,
+  type Provenance,
+  REGISTRY_STAGE_IDS,
+} from "../../substrate/toolPolicy.ts";
+
+/** The questionnaire package's provenance as Pi reports it. */
+const QUESTIONNAIRE: Provenance = {
+  path: "/agent/npm/node_modules/@juicesharp/rpiv-ask-user-question/index.ts",
+  source: "npm:@juicesharp/rpiv-ask-user-question",
+};
+
 import {
   loadPerkSession,
   type PerkSession,
@@ -262,9 +274,14 @@ test("every tool the drive and continuation name is reachable in each of the sub
   for (const subject of SUBJECTS) {
     for (const stage of SUBJECT_LANDINGS[subject]) {
       const allowed = gatedToolsFor(stage);
-      for (const tool of [DRAFT_SUBJECT_WRITERS[subject], "plan_review", "ask_user_question"]) {
+      for (const tool of [DRAFT_SUBJECT_WRITERS[subject], "plan_review"]) {
         assert.ok(allowed.includes(tool), `${subject} @ ${stage}: ${tool} is in the gated view`);
       }
+      // The questionnaire is foreign: eligible by its package's posture row.
+      assert.ok(
+        isEligible("ask_user_question", QUESTIONNAIRE, stage, "read-only"),
+        `${subject} @ ${stage}: ask_user_question is eligible under the gate`,
+      );
     }
   }
 });

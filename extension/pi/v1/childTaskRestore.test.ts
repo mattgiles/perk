@@ -9,7 +9,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
-import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  type InlineExtension,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import {
   structuredOutputHoldReason,
   TASK_RESTORE_MAX_ATTEMPTS,
@@ -21,6 +25,7 @@ import {
   fauxModelRuntime,
   loadPerkSession,
   plantSession,
+  registerFakeTool,
   scaffoldRepo,
 } from "../../testing/harness.ts";
 
@@ -95,8 +100,14 @@ function compactionCount(manager: SessionManager): number {
   return manager.getBranch().filter((entry) => entry.type === "compaction").length;
 }
 
+/**
+ * pi-subagents registers `structured_output` inside every child through its named prompt-runtime
+ * factory — the exact synthetic path the read-only gate's child-engine row allows.
+ */
+const PROMPT_RUNTIME = "pi-subagents:prompt-runtime";
+
 async function session(
-  opts: { floor?: boolean; extraExtensions?: ((pi: ExtensionAPI) => void)[] } = {},
+  opts: { floor?: boolean; extraExtensions?: InlineExtension[] } = {},
 ): Promise<{ h: Harness; manager: SessionManager }> {
   const cwd = scaffoldRepo();
   const manager = SessionManager.inMemory(cwd);
@@ -105,7 +116,9 @@ async function session(
     sessionManager: manager,
     env: opts.floor === false ? {} : runnerPacket,
     headful: false,
-    extraExtensions: opts.extraExtensions,
+    extraExtensions: opts.extraExtensions ?? [
+      { name: PROMPT_RUNTIME, factory: (pi) => registerFakeTool(pi, "structured_output") },
+    ],
   });
   return { h, manager };
 }
@@ -117,8 +130,11 @@ const compacted = (h: Harness) => h.emitLifecycle({ type: "session_compact" });
  * A stand-in for pi-subagents' `structured_output`: `capture` returns its success shape
  * (`terminate: true`), `reject` throws the way a schema rejection does.
  */
-function fakeStructuredOutput(behavior: "capture" | "reject", executions: unknown[]) {
-  return (pi: ExtensionAPI) => {
+function fakeStructuredOutput(
+  behavior: "capture" | "reject",
+  executions: unknown[],
+): InlineExtension {
+  const factory = (pi: ExtensionAPI) => {
     pi.registerTool({
       name: "structured_output",
       label: "Structured Output",
@@ -135,6 +151,7 @@ function fakeStructuredOutput(behavior: "capture" | "reject", executions: unknow
       },
     });
   };
+  return { name: PROMPT_RUNTIME, factory };
 }
 
 // ------------------------------------------------------------------------- the gate + the hook
@@ -307,6 +324,9 @@ test("a floored branch with no user message keeps structured_output allowed", as
     sessionManager: SessionManager.open(file),
     env: runnerPacket,
     headful: false,
+    extraExtensions: [
+      { name: PROMPT_RUNTIME, factory: (pi) => registerFakeTool(pi, "structured_output") },
+    ],
   });
   try {
     assert.equal(await report(h), undefined);

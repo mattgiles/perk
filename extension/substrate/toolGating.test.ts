@@ -1,5 +1,6 @@
-// The tool-gating primitive: pure policy matrix + a live read-only round-trip driven
-// through a REAL bound AgentSession via the harness (fully offline). See toolGating.ts.
+// The tool-gating primitive: own-names-only activation and the read-only backstop over a fake
+// host that records (and applies) every install, plus a live read-only round-trip driven through
+// a REAL bound AgentSession via the harness (fully offline). See toolGating.ts.
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
@@ -7,6 +8,7 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
   SessionManager,
+  type ToolLoadout,
 } from "@earendil-works/pi-coding-agent";
 import {
   loadPerkSession,
@@ -15,23 +17,16 @@ import {
   scaffoldRepo,
 } from "../testing/harness.ts";
 import { ensureToolCatalog } from "../testing/toolCatalog.ts";
+import { readOnlyContext, registerToolGating, renderReadOnlyContext } from "./toolGating.ts";
 import {
-  LAZY_TOOL_LOADERS,
-  lazyLoaderRefusalReason,
-  readOnlyContext,
-  registerToolGating,
-  renderReadOnlyContext,
-} from "./toolGating.ts";
-import {
-  BORROWED_TOOLS,
-  FFF_SEARCH_TOOLS,
   gatedToolsFor,
-  LINEAR_MUTATING_TOOLS,
-  LINEAR_READ_TOOLS,
+  isPerkTool,
+  LOADOUT_HOST_NAME,
+  type Mode,
+  perkToolNames,
+  perkToolPolicy,
   REGISTRY_STAGE_IDS,
-  SUBAGENT_CHILD_TOOLS,
-  stageToolsFor,
-  WEB_RESEARCH_TOOLS,
+  WORKTREE_STAGES,
 } from "./toolPolicy.ts";
 
 // The derived views read the catalog: fill it the way production does before any test runs.
@@ -40,41 +35,71 @@ before(ensureToolCatalog);
 type Hook = (
   event: { toolName?: string; input?: Record<string, unknown>; messages?: unknown[] },
   ctx: ExtensionContext,
-) => Promise<{ block?: boolean; message?: { content: string }; messages?: unknown[] } | undefined>;
+) => Promise<
+  | { block?: boolean; reason?: string; message?: { content: string }; messages?: unknown[] }
+  | undefined
+>;
 
-/** The fake host's default active (and registered) set — no lazy loader, so no lazy-owned tool. */
-const FIXTURE_ACTIVE: readonly string[] = ["read", "write", "plan_save"];
+/** One registered tool as the fake host reports it (`ToolInfo.sourceInfo`'s two load-bearing fields). */
+type FakeTool = { name: string; source: string; path: string };
 
-/**
- * The installed gate-ON set: the allowlist minus the tools of every REGISTERED loader that the
- * owner does not currently have active.
- */
-function expectedGated(list: readonly string[], active: readonly string[], registered = active) {
-  const lazyOwned = new Set(
-    registered.flatMap((name) =>
-      Object.hasOwn(LAZY_TOOL_LOADERS, name) ? [...(LAZY_TOOL_LOADERS[name] ?? [])] : [],
-    ),
-  );
-  return list.filter((name) => !lazyOwned.has(name) || active.includes(name));
+const builtin = (name: string): FakeTool => ({ name, source: "builtin", path: `builtin:${name}` });
+const perkTool = (name: string): FakeTool => ({ name, source: "inline", path: "<inline:perk>" });
+const engine = (name: string): FakeTool => ({
+  name,
+  source: "inline",
+  path: "<inline:pi-subagents:prompt-runtime>",
+});
+const subagents = (name: string): FakeTool => ({
+  name,
+  source: "npm:pi-subagents@0.73.1",
+  path: "/agent/npm/node_modules/pi-subagents/src/extension/index.js",
+});
+
+/** The fake host's foreign registrants: delegation, the child engine, and an unknown inline. */
+const FOREIGN: readonly FakeTool[] = [
+  subagents("subagent"),
+  engine("structured_output"),
+  engine("contact_supervisor"),
+  { name: "foreign_mutator", source: "inline", path: "<inline:3>" },
+];
+
+/** The default registry: Pi's core tools, every catalogued perk tool, and the foreign set. */
+function defaultRegistry(): FakeTool[] {
+  return [
+    ...["read", "bash", "edit", "write", "grep", "find", "ls"].map(builtin),
+    ...perkToolNames().map(perkTool),
+    ...FOREIGN,
+  ];
 }
 
+/** The default live active set: a bare session's — Pi's defaults plus every registrant's tools. */
+function defaultActive(registry: readonly FakeTool[]): string[] {
+  return registry
+    .map((t) => t.name)
+    .filter((name) => !["grep", "find", "ls"].includes(name))
+    .filter((name) => perkToolPolicy(name)?.declared !== "deferred");
+}
+
+/** One recorded install: the names, the live foreign set it replaced, and the host's hidden set. */
+type Install = { names: string[]; liveForeign: string[]; hidden: string[] };
+
 /**
- * The gate's fake host. `initial` is the live active set; `registered` (default: the same names)
- * is the registry census — independent, so an owner can hide a registered tool before perk's
- * first engagement.
+ * The gate's fake host. Installs are recorded AND applied (the live active set follows), and
+ * every install runs the gating's `prepareLoadout` the way Pi runs an active host's hook inside
+ * `setActiveTools` — so each record carries what the host hid at that install. `setActive`
+ * models a foreign owner's own toggle between reconciliations; `register` a late registrant.
  */
 function gateFixture(
   floor: () => boolean,
-  initial: readonly string[] = FIXTURE_ACTIVE,
-  registered: readonly string[] = initial,
+  opts: { registry?: readonly FakeTool[]; active?: readonly string[] } = {},
 ) {
   const hooks = new Map<string, Hook>();
-  // The host's live active set as the owners see it (installs are recorded, not applied, so a
-  // test moves it explicitly to model an owner's toggle between reconciliations).
-  let active: readonly string[] = initial;
+  let registry: FakeTool[] = [...(opts.registry ?? defaultRegistry())];
+  let active: string[] = [...(opts.active ?? defaultActive(registry))];
   let fail: "snapshot" | "census" | "toolset" | "append" | undefined;
   const appends: unknown[] = [];
-  const installed: string[][] = [];
+  const installs: Install[] = [];
   const pi = {
     on: (name: string, hook: Hook) => {
       hooks.set(name, hook);
@@ -85,18 +110,29 @@ function gateFixture(
     },
     getAllTools: () => {
       if (fail === "census") throw new Error("census");
-      return registered.map((name) => ({ name }));
+      return registry.map((t) => ({
+        name: t.name,
+        sourceInfo: { source: t.source, path: t.path },
+      }));
     },
     setActiveTools: (names: string[]) => {
       if (fail === "toolset") throw new Error("toolset");
-      installed.push(names);
+      const liveForeign = active.filter((n) => !isPerkTool(n));
+      active = [...names];
+      const hidden = active.includes(LOADOUT_HOST_NAME) ? hiddenNow() : [];
+      installs.push({ names: [...names], liveForeign, hidden });
     },
     appendEntry: (_type: string, data: unknown) => {
       if (fail === "append") throw new Error("append");
       appends.push(data);
     },
-  } as ExtensionAPI;
+  } as unknown as ExtensionAPI;
   const gate = registerToolGating(pi, floor);
+  const hiddenNow = (): string[] => {
+    const declared = active.map((name) => ({ name }));
+    const loadout = { declared } as unknown as ToolLoadout;
+    return [...(gate.prepareLoadout(loadout).hiddenDeclarations ?? [])].sort();
+  };
   const sessionManager = SessionManager.inMemory("/repo");
   sessionManager.getBranch = () => {
     throw new Error("branch unavailable");
@@ -106,33 +142,71 @@ function gateFixture(
   return {
     gate,
     appends,
-    installed,
+    installs,
+    /** Every installed name list, in order. */
+    installed: () => installs.map((i) => i.names),
+    active: () => [...active],
+    hidden: hiddenNow,
     fail: (value: typeof fail) => {
       fail = value;
     },
     setActive: (names: readonly string[]) => {
-      active = names;
+      active = [...names];
+    },
+    register: (tool: FakeTool, activate = true) => {
+      registry = [...registry, tool];
+      if (activate) active = [...active, tool.name];
     },
     call: (name: string, event: Parameters<Hook>[0] = {}) => hooks.get(name)?.(event, ctx),
   };
 }
 
-async function assertBackstop(h: ReturnType<typeof gateFixture>) {
+type Fixture = ReturnType<typeof gateFixture>;
+
+/** The fixture's active perk names, sorted. */
+function activePerk(h: Fixture): string[] {
+  return h.active().filter(isPerkTool).sort();
+}
+
+/** The registered (default-registry) perk names of a view, sorted — what perk installs. */
+function perkView(view: readonly string[], registry = defaultRegistry()): string[] {
+  const registered = new Set(registry.map((t) => t.name));
+  return view.filter((name) => registered.has(name)).sort();
+}
+
+/** Every recorded install left the live foreign active set exactly as it found it. */
+function assertForeignInvariance(h: Fixture): void {
+  for (const [i, install] of h.installs.entries()) {
+    assert.deepEqual(
+      install.names.filter((n) => !isPerkTool(n)).sort(),
+      [...install.liveForeign].sort(),
+      `install #${i} touched a foreign name`,
+    );
+  }
+}
+
+async function blockOf(h: Fixture, toolName: string, input: Record<string, unknown> = {}) {
+  return h.call("tool_call", { toolName, input });
+}
+
+/**
+ * The gated backstop's verdicts. `readable: false` = the registry read itself is broken: every
+ * classification fails closed, so even the allowed tools are blocked.
+ */
+async function assertBackstop(h: Fixture, opts: { readable?: boolean } = {}) {
   assert.equal(h.gate.isActive(), true);
   for (const toolName of ["edit", "write", "plan_save", "submit", "foreign_mutator"]) {
-    assert.equal((await h.call("tool_call", { toolName, input: {} }))?.block, true, toolName);
+    assert.equal((await blockOf(h, toolName))?.block, true, toolName);
   }
-  assert.equal(
-    (await h.call("tool_call", { toolName: "bash", input: { command: "touch x" } }))?.block,
-    true,
-  );
-  for (const toolName of ["read", ...SUBAGENT_CHILD_TOOLS]) {
-    assert.equal(await h.call("tool_call", { toolName, input: {} }), undefined, toolName);
+  assert.equal((await blockOf(h, "bash", { command: "touch x" }))?.block, true);
+  for (const toolName of ["read", "structured_output", "contact_supervisor"]) {
+    const verdict = await blockOf(h, toolName);
+    if (opts.readable === false) assert.equal(verdict?.block, true, toolName);
+    else assert.equal(verdict, undefined, toolName);
   }
-  assert.equal(
-    await h.call("tool_call", { toolName: "bash", input: { command: "git status" } }),
-    undefined,
-  );
+  const gitStatus = await blockOf(h, "bash", { command: "git status" });
+  if (opts.readable === false) assert.equal(gitStatus?.block, true);
+  else assert.equal(gitStatus, undefined);
   assert.equal((await h.call("before_agent_start"))?.message?.content, readOnlyContext());
   assert.equal(
     await h.call("context", { messages: [{ customType: "perk:mode-context" }] }),
@@ -140,22 +214,36 @@ async function assertBackstop(h: ReturnType<typeof gateFixture>) {
   );
 }
 
+/** Silence the before_agent_start reconciliation's expected error report for one block. */
+async function quietly<T>(run: () => Promise<T>): Promise<T> {
+  const original = console.error;
+  console.error = () => {};
+  try {
+    return await run();
+  } finally {
+    console.error = original;
+  }
+}
+
 test("floor enforces all observations before sync, despite snapshot/census/toolset/append failures", async () => {
   for (const mode of [undefined, "read-write"]) {
     for (const failure of ["snapshot", "census", "toolset", "append"] as const) {
       const h = gateFixture(() => true);
       await assertBackstop(h);
+      // A foreign `setActiveTools` re-activated perk's gate-blocked tools, so the sync must install.
+      h.setActive(defaultActive(defaultRegistry()));
       h.fail(failure);
       assert.throws(() =>
         failure === "append" ? h.gate.enter() : h.gate.syncFromState(mode, undefined),
       );
-      await assertBackstop(h);
+      await quietly(() => assertBackstop(h, { readable: failure !== "census" }));
       h.fail(undefined);
       h.gate.exit();
       assert.deepEqual(h.appends, [], "floor exit never appends read-write");
       h.gate.syncFromState("read-write", undefined);
-      assert.deepEqual(h.installed.at(-1), gatedToolsFor(null));
+      assert.deepEqual(activePerk(h), perkView(gatedToolsFor(null)));
       await assertBackstop(h);
+      assertForeignInvariance(h);
     }
   }
 });
@@ -166,39 +254,46 @@ test("false cannot clear inherited read-only; ordinary parents use the same back
   await assertBackstop(h);
   h.fail("toolset");
   assert.throws(() => h.gate.syncFromState("read-write", undefined));
-  await assertBackstop(h);
+  // Immediately after the failed release — before any later point could repair it — the host
+  // still presents the gate: the writers stay hidden while enforcement holds.
+  for (const name of ["edit", "write", "foreign_mutator"])
+    assert.ok(h.hidden().includes(name), `${name} still hidden after the failed release`);
+  await quietly(() => assertBackstop(h));
   h.fail(undefined);
   h.gate.exit();
   assert.equal(h.gate.isActive(), false);
   assert.deepEqual(h.appends, [{ mode: "read-write" }]);
   for (const toolName of ["write", "foreign_mutator", "plan_save", "submit", "bash"]) {
-    assert.equal(await h.call("tool_call", { toolName, input: { command: "touch x" } }), undefined);
+    assert.equal(await blockOf(h, toolName, { command: "touch x" }), undefined);
   }
+  // A failed install never leaves the presentation open: the host kept presenting the gate.
+  assert.equal(h.installs.at(-1)?.hidden.includes("edit"), false, "the exit presents edit again");
+  assertForeignInvariance(h);
 });
 
-test("a census-read failure on a cold read-only sync stays closed, records no half engagement, and the startup re-apply retakes it", async () => {
-  // No floor: the ordinary cold read-only sync (a `mode: read-only` handoff) whose first
-  // engagement read throws AFTER the snapshot read — the one path where the in-memory gate had
-  // never been engaged, so fail-closed must come from `apply()` itself, not from a prior state.
+test("a census-read failure on a cold read-only sync stays closed, installs nothing, and the startup re-apply retakes it", async () => {
+  // No floor: the ordinary cold read-only sync (a `mode: read-only` handoff) whose registry read
+  // throws inside `apply()` — the in-memory gate latched before the read, so it stays closed.
   const h = gateFixture(() => false);
+  const before = h.active();
   h.fail("census");
   assert.throws(() => h.gate.syncFromState("read-only", undefined));
-  await assertBackstop(h);
-  assert.deepEqual(h.installed, [], "a half-taken engagement installs nothing");
+  await quietly(() => assertBackstop(h, { readable: false }));
+  assert.deepEqual(h.installs, [], "a failed read installs nothing");
   // The `resources_discover` re-apply (Pi reports the throw) does not open the gate either.
   await assert.rejects(() => h.call("resources_discover") ?? Promise.resolve());
-  await assertBackstop(h);
-  assert.deepEqual(h.installed, []);
-  // The failed read recorded nothing: once it succeeds, the same re-apply takes a FRESH
-  // snapshot + census and installs the gated set; the exit then restores that fresh snapshot.
+  assert.deepEqual(h.installs, []);
+  // Once the read succeeds, the same re-apply installs the gated perk subset.
   h.fail(undefined);
   await h.call("resources_discover");
-  assert.deepEqual(h.installed, [gatedToolsFor(null)]);
+  assert.equal(h.installs.length, 1);
+  assert.deepEqual(activePerk(h), perkView(gatedToolsFor(null)));
   await assertBackstop(h);
   h.gate.exit();
   assert.equal(h.gate.isActive(), false);
-  assert.deepEqual(h.installed.at(-1), ["read", "write", "plan_save"]);
+  assert.deepEqual([...h.active()].sort(), [...before].sort(), "the exit restores the bare set");
   assert.deepEqual(h.appends, [{ mode: "read-write" }]);
+  assertForeignInvariance(h);
 });
 
 test("a throwing supplier and malformed bash inputs never open the gate", async () => {
@@ -209,26 +304,14 @@ test("a throwing supplier and malformed bash inputs never open the gate", async 
   await assertBackstop(h);
   h.gate.exit();
   assert.deepEqual(h.appends, []);
-  assert.equal(
-    (await h.call("tool_call", { toolName: "bash", input: { command: Object.create(null) } }))
-      ?.block,
-    true,
-  );
+  assert.equal((await blockOf(h, "bash", { command: Object.create(null) }))?.block, true);
 });
 
-test("gated views: every stage keeps the research families and the mode-over-stage set; never a mutating Linear tool", () => {
+test("gated views (perk-only): every stage keeps the host and the mode-over-stage set; never a gate-blocked perk tool", () => {
   for (const stage of [null, ...REGISTRY_STAGE_IDS]) {
     const view = gatedToolsFor(stage);
     for (const tool of [
-      "read",
-      "grep",
-      "find",
-      "ls",
-      "bash",
-      "ask_user_question",
-      ...WEB_RESEARCH_TOOLS,
-      ...LINEAR_READ_TOOLS,
-      ...FFF_SEARCH_TOOLS,
+      LOADOUT_HOST_NAME,
       // The /plan flow is completable wherever the toggle lands (mode over stage).
       "plan_draft",
       "plan_review",
@@ -238,7 +321,8 @@ test("gated views: every stage keeps the research families and the mode-over-sta
     ]) {
       assert.ok(view.includes(tool), `${String(stage)}: missing ${tool}`);
     }
-    for (const tool of [...LINEAR_MUTATING_TOOLS, "edit", "write", "todo"]) {
+    for (const tool of view) assert.ok(isPerkTool(tool), `${String(stage)}: ${tool} is not perk's`);
+    for (const tool of ["plan_save", "objective_save", "gist_save", "submit", "land", "run_ci"]) {
       assert.ok(!view.includes(tool), `${String(stage)}: ${tool} in the gated view`);
     }
   }
@@ -259,19 +343,6 @@ test("gated views: each stage's carve-ins follow its own tools", () => {
     has("objective-plan", "objective_node") && has("objective-plan", "explore_objective_node"),
   );
   assert.ok(has("implement", "objective_node") && !has("plan", "objective_node"));
-  // Delegation: the worktree family + stack-review only; child-side tools everywhere but refine.
-  assert.ok(
-    has("implement", "subagent") && has("stack-review", "subagent") && !has("plan", "subagent"),
-  );
-  for (const stage of [null, ...REGISTRY_STAGE_IDS]) {
-    for (const tool of SUBAGENT_CHILD_TOOLS) {
-      assert.equal(has(stage, tool), stage !== "objective-refine", `${String(stage)}: ${tool}`);
-    }
-  }
-  // Blocked tools never ride a gated view, even unscoped.
-  for (const tool of ["plan_save", "objective_save", "gist_save", "submit", "land", "run_ci"]) {
-    assert.ok(!has(null, tool), tool);
-  }
 });
 
 test("the read-only context names each stage's carve-out writers and steers GitHub reads", () => {
@@ -438,19 +509,7 @@ test("mode-context is once-only per SELECTED BRANCH: a copy compaction summarize
 
 test("the refinement gated view: the formula keeps the least-privilege selection plus the mode-over-stage set", () => {
   const view = gatedToolsFor("objective-refine");
-  for (const tool of [
-    "read",
-    "grep",
-    "find",
-    "ls",
-    "bash",
-    "ask_user_question",
-    "plan_review",
-    "objective_refinement_draft",
-    ...WEB_RESEARCH_TOOLS,
-    ...LINEAR_READ_TOOLS,
-    ...FFF_SEARCH_TOOLS,
-  ]) {
+  for (const tool of [LOADOUT_HOST_NAME, "plan_review", "objective_refinement_draft"]) {
     assert.ok(view.includes(tool), `missing ${tool}`);
   }
   for (const forbidden of [
@@ -463,11 +522,6 @@ test("the refinement gated view: the formula keeps the least-privilege selection
     "explore_objective_node",
     "run_scout_wave",
     "run_librarian",
-    "subagent",
-    "subagents_enable",
-    ...SUBAGENT_CHILD_TOOLS,
-    "edit",
-    "write",
   ]) {
     assert.equal(view.includes(forbidden), false, forbidden);
   }
@@ -483,24 +537,19 @@ test("gate ON in the refinement stage: the active set, the tool_call backstop an
   const h = gateFixture(() => false);
   // An already-gated session scoped to another stage that then enters refinement.
   h.gate.syncFromState("read-only", "plan");
-  assert.deepEqual(h.installed.at(-1), gatedToolsFor("plan"));
+  assert.deepEqual(activePerk(h), perkView(gatedToolsFor("plan")));
   const planContext = renderReadOnlyContext("plan");
   assert.equal((await h.call("before_agent_start"))?.message?.content, planContext);
-  assert.equal(
-    (await h.call("tool_call", { toolName: "objective_refinement_draft", input: {} }))?.block,
-    true,
-    "the refinement draft is NOT eligible outside the refinement stage",
-  );
-  assert.equal(await h.call("tool_call", { toolName: "plan_draft", input: {} }), undefined);
+  assert.deepEqual(await blockOf(h, "objective_refinement_draft"), {
+    block: true,
+    reason: "perk read-only mode: objective_refinement_draft is blocked (tool not allowlisted).",
+  });
+  assert.equal(await blockOf(h, "plan_draft"), undefined);
 
   h.gate.syncFromState("read-only", "objective-refine");
-  assert.deepEqual(h.installed.at(-1), gatedToolsFor("objective-refine"));
-  assert.equal(
-    await h.call("tool_call", { toolName: "objective_refinement_draft", input: {} }),
-    undefined,
-  );
-  assert.equal(await h.call("tool_call", { toolName: "plan_review", input: {} }), undefined);
-  assert.equal(await h.call("tool_call", { toolName: "read", input: {} }), undefined);
+  assert.deepEqual(activePerk(h), perkView(gatedToolsFor("objective-refine")));
+  for (const toolName of ["objective_refinement_draft", "plan_review", "read", "structured_output"])
+    assert.equal(await blockOf(h, toolName), undefined, toolName);
   for (const toolName of [
     "objective_node",
     "objective_draft",
@@ -515,13 +564,13 @@ test("gate ON in the refinement stage: the active set, the tool_call backstop an
     "foreign_mutator",
   ]) {
     assert.equal(
-      (await h.call("tool_call", { toolName, input: {} }))?.block,
+      (await blockOf(h, toolName))?.block,
       true,
       `${toolName} blocked in the gated refinement stage (late-activation backstop)`,
     );
   }
   assert.equal(
-    (await h.call("tool_call", { toolName: "bash", input: { command: "touch x" } }))?.block,
+    (await blockOf(h, "bash", { command: "touch x" }))?.block,
     true,
     "no new bash allowance",
   );
@@ -555,6 +604,7 @@ test("gate ON in the refinement stage: the active set, the tool_call backstop an
     messages: [stale, current, { role: "user", content: "[READ-ONLY REFINEMENT MODE] echo" }, user],
   });
   assert.deepEqual(off, { messages: [] });
+  assertForeignInvariance(h);
 });
 
 test("a resumed pre-migration refinement block is dropped while gated, never masks the current flavor, and strips on gate exit", async () => {
@@ -626,181 +676,177 @@ test("a resumed pre-migration refinement block is dropped while gated, never mas
 });
 
 // ---------------------------------------------------------------------------
-// Lazy-owned tools and their loaders (contracts.md §8.40): membership follows the owner's live
-// selection; a loader has exactly its tools' eligibility and is refused outside it.
+// Recorded-install proofs (contracts.md §8.40): perk installs only when its own names must change,
+// never touches a foreign name, and its host hides exactly the ineligible declarations.
 // ---------------------------------------------------------------------------
 
-test("gate ON: the allowlist is a ceiling — a lazy-owned tool installs only while its owner has it selected", () => {
-  const withSubagent = [...FIXTURE_ACTIVE, "subagent", "subagents_enable", "web_enable"];
-  const h = gateFixture(() => false, withSubagent);
-  h.gate.syncFromState("read-only", "implement");
-  const installed = h.installed.at(-1) ?? [];
-  assert.deepEqual(installed, expectedGated(gatedToolsFor("implement"), withSubagent));
-  assert.ok(installed.includes("subagent"), "the owner-selected lazy tool is kept");
-  for (const hidden of ["web_search", "source_check", "fetch_content", "get_search_content"]) {
-    assert.ok(
-      !installed.includes(hidden),
-      `the owner-hidden lazy tool is not installed: ${hidden}`,
-    );
-  }
-  for (const loader of Object.keys(LAZY_TOOL_LOADERS)) {
-    assert.ok(installed.includes(loader), `loaders are ordinary allowlisted names: ${loader}`);
-  }
-});
-
-test("no registered loader: an eager owner's tools are ordinary names — the gate restores what a stage stripped", () => {
-  // An older pi-subagents (or the current one's host-probe fallback) registers `subagent`
-  // eagerly and no `subagents_enable`: nothing could re-enable a stripped tool, so the gate-ON
-  // view installs it by name exactly as before lazy ownership existed.
-  const eager = [...FIXTURE_ACTIVE, "subagent", "web_search"];
-  const h = gateFixture(() => false, eager);
-  h.gate.syncFromState("read-only", undefined);
-  assert.deepEqual(h.installed.at(-1), expectedGated(gatedToolsFor(null), eager));
-  // Gate exit into plan strips subagent (the stage excludes delegation); unscoped re-entry
-  // restores it.
-  h.gate.syncFromState("read-write", "plan");
-  const stripped = h.installed.at(-1) ?? [];
-  assert.ok(!stripped.includes("subagent") && stripped.includes("web_search"));
-  h.setActive(stripped);
-  h.gate.syncFromState("read-only", undefined);
-  assert.ok((h.installed.at(-1) ?? []).includes("subagent"), "re-entry restores the eager tool");
-  // The same sequence with the loader registered: the stripped lazy tool stays with its owner.
-  const lazy = [...eager, "subagents_enable"];
-  const owned = gateFixture(() => false, lazy);
-  owned.gate.syncFromState("read-write", "plan");
-  owned.setActive(owned.installed.at(-1) ?? []);
-  owned.gate.syncFromState("read-only", undefined);
-  assert.ok(!(owned.installed.at(-1) ?? []).includes("subagent"), "a lazy tool is never restored");
-});
-
-test("gate OFF baseline: a lazy-owned snapshot member the owner hid is dropped; one it enabled later is kept; the stage filter still applies", () => {
-  const start = [...FIXTURE_ACTIVE, "subagent", "web_search", "subagents_enable", "web_enable"];
-  // source_check is REGISTERED from the start but hidden by its owner, so the census saw it:
-  // it is never admitted, and only the live lazy-owned selection can keep it once enabled.
-  const h = gateFixture(() => false, start, [...start, "source_check"]);
-  h.gate.syncFromState("read-write", "implement");
-  assert.deepEqual(
-    h.installed.at(-1),
-    start.filter((name) => name !== "plan_save"),
-    "the first engagement keeps the owner's selection (the implement filter drops plan_save)",
-  );
-  // Between reconciliations the web owner hides web_search and the model enables source_check.
-  const next = [...FIXTURE_ACTIVE, "subagent", "subagents_enable", "web_enable", "source_check"];
-  h.setActive(next);
-  h.gate.syncFromState("read-write", "implement");
-  const implement = h.installed.at(-1) ?? [];
-  assert.ok(!implement.includes("web_search"), "never restored from the snapshot once hidden");
-  assert.ok(implement.includes("source_check"), "an owner-enabled lazy tool is kept");
-  assert.ok(implement.includes("subagent"));
-  // Stage eligibility is perk's: gist-save excludes the delegation family (loader included).
-  h.gate.syncFromState("read-write", "gist-save");
-  const gist = h.installed.at(-1) ?? [];
-  assert.ok(!gist.includes("subagent"), "an owner-enabled lazy tool is stripped by the stage");
-  assert.ok(!gist.includes("subagents_enable"), "its loader is stripped with it");
-  assert.ok(gist.includes("source_check") && gist.includes("web_enable"));
-  // Leaving every concern restores the baseline under the same owner-selected rule.
+test("bare session: zero installs across every reconciliation point", async () => {
+  const h = gateFixture(() => false);
+  h.gate.syncFromState(undefined, undefined);
+  await h.call("resources_discover");
+  assert.equal(await h.call("before_agent_start"), undefined, "no mode context ungated");
   h.gate.syncFromState("read-write", undefined);
-  assert.deepEqual(h.installed.at(-1), next);
+  assert.deepEqual(h.installs, []);
+  // The host presents the bare landing by hiding only itself.
+  assert.deepEqual(h.hidden(), [LOADOUT_HOST_NAME]);
 });
 
-test("warm gate: a registered tool its owner hid before perk engaged, enabled by its loader, survives gate exit and a perk-only toggle", () => {
-  // Bare session: the owner hid `subagent` in its own session_start, before perk's first
-  // engagement (the warm /plan toggle) — absent from the snapshot, never admitted (the census
-  // saw it).
-  const registered = [...FIXTURE_ACTIVE, "subagent", "subagents_enable"];
-  const hidden = [...FIXTURE_ACTIVE, "subagents_enable"];
-  const h = gateFixture(() => false, hidden, registered);
-  h.gate.enter();
-  assert.ok(!(h.installed.at(-1) ?? []).includes("subagent"), "the gate honors the owner's hiding");
-  const enabled = [...hidden, "subagent"];
-  h.setActive(enabled);
-  h.gate.exit();
-  assert.deepEqual(h.installed.at(-1), enabled, "the gate exit keeps the loader-enabled tool");
-  h.gate.enter();
-  assert.ok((h.installed.at(-1) ?? []).includes("subagent"), "kept under the gate's ceiling");
-  h.gate.exit();
-  assert.deepEqual(h.installed.at(-1), enabled, "and again after a perk-only toggle");
-});
-
-test("the loader refusal: stage-naming reasons under the gate and under stage scoping", async () => {
-  const subagentsGated =
-    "perk read-only mode: subagents_enable is blocked (its tools — subagent — are not allowlisted in the gated objective-refine session).";
-  const subagentsStage =
-    "perk stage scoping: subagents_enable is blocked (its tools — subagent — are not available in the gist-save stage).";
-  const call = async (h: ReturnType<typeof gateFixture>, toolName: string) =>
-    (await h.call("tool_call", { toolName, input: {} })) as
-      | { block?: boolean; reason?: string }
-      | undefined;
-
-  // Gate ON, refinement: the delegation loader is refused by name; the web loader passes.
-  const refine = gateFixture(() => false);
-  refine.gate.syncFromState("read-only", "objective-refine");
-  assert.deepEqual(await call(refine, "subagents_enable"), {
-    block: true,
-    reason: subagentsGated,
+test("foreign invariance: owner deactivation, initially inactive and late registration survive every point", async () => {
+  // `subagent` registered but initially inactive (its owner's choice).
+  const registry = defaultRegistry();
+  const h = gateFixture(() => false, {
+    registry,
+    active: defaultActive(registry).filter((n) => n !== "subagent"),
   });
-  assert.equal(await call(refine, "web_enable"), undefined);
-
-  // Gate ON in a worktree stage and unscoped: the gated view carries both loaders.
-  for (const stage of ["implement", undefined]) {
-    const gated = gateFixture(() => false);
-    gated.gate.syncFromState("read-only", stage);
-    for (const loader of Object.keys(LAZY_TOOL_LOADERS)) {
-      assert.equal(await call(gated, loader), undefined, `${loader} passes gated in ${stage}`);
-    }
-  }
-
-  // Gate OFF, gist-save: stage scoping refuses the delegation loader; the web loader passes.
-  const gist = gateFixture(() => false);
-  gist.gate.syncFromState("read-write", "gist-save");
-  assert.deepEqual(await call(gist, "subagents_enable"), { block: true, reason: subagentsStage });
-  assert.equal(await call(gist, "web_enable"), undefined);
-  assert.equal(await call(gist, "constructor"), undefined, "a prototype key is never a loader");
-
-  // Gate OFF, no stage or an unknown stage: never refused (fail-open).
-  for (const stage of [undefined, "future-stage", "constructor"]) {
-    const open = gateFixture(() => false);
-    open.gate.syncFromState("read-write", stage);
-    for (const loader of Object.keys(LAZY_TOOL_LOADERS)) {
-      assert.equal(await call(open, loader), undefined, `${loader} passes in ${stage}`);
-    }
-  }
-
-  // The unscoped gated wording is unreachable by today's loaders — pinned through the format.
-  assert.equal(
-    lazyLoaderRefusalReason("web_enable", { kind: "gated", stage: null }),
-    "perk read-only mode: web_enable is blocked (its tools — web_search, source_check, fetch_content, get_search_content — are not allowlisted in this gated session).",
-  );
-  assert.equal(
-    lazyLoaderRefusalReason("subagents_enable", { kind: "gated", stage: "objective-refine" }),
-    subagentsGated,
-  );
-  assert.equal(
-    lazyLoaderRefusalReason("subagents_enable", { kind: "stage", stage: "gist-save" }),
-    subagentsStage,
-  );
+  const points = async (stage: string | undefined) => {
+    h.gate.syncFromState("read-write", stage);
+    h.gate.enter();
+    await h.call("resources_discover");
+    await h.call("before_agent_start");
+    h.gate.exit();
+    await h.call("before_agent_start");
+  };
+  await points("implement");
+  assert.ok(!h.active().includes("subagent"), "never activated by perk");
+  // The owner activates it, then deactivates its unknown sibling.
+  h.setActive([...h.active().filter((n) => n !== "foreign_mutator"), "subagent"]);
+  await points("plan");
+  assert.ok(h.active().includes("subagent"), "an ineligible foreign tool is never deactivated");
+  assert.ok(!h.active().includes("foreign_mutator"), "nor is a deactivated one restored");
+  // A late registrant (after perk's sync) meets the landing at resources_discover — untouched.
+  h.register({ name: "subagent_supervisor", source: "npm:pi-subagents@0.73.1", path: "/x" });
+  await points("objective-plan");
+  assert.ok(h.active().includes("subagent_supervisor"));
+  assert.ok(h.installs.length > 0, "the stage changes installed perk's names");
+  assertForeignInvariance(h);
 });
 
-test("LAZY_TOOL_LOADERS: each loader and its tools are borrowed, and a loader's eligibility equals its tools' everywhere", () => {
-  const lists: [string, readonly string[]][] = [
-    ["gatedToolsFor(null)", gatedToolsFor(null)],
-    ...REGISTRY_STAGE_IDS.flatMap((stage): [string, readonly string[]][] => [
-      [`gatedToolsFor(${stage})`, gatedToolsFor(stage)],
-      [`stageToolsFor(${stage})`, stageToolsFor(stage) ?? []],
-    ]),
-  ];
-  assert.ok(Object.keys(LAZY_TOOL_LOADERS).length > 0);
-  for (const [loader, tools] of Object.entries(LAZY_TOOL_LOADERS)) {
-    assert.ok(tools.length > 0, `${loader} enables at least one tool`);
-    for (const name of [loader, ...tools]) {
-      assert.ok(BORROWED_TOOLS.includes(name), `${name} must be in BORROWED_TOOLS`);
-    }
-    for (const [label, list] of lists) {
-      assert.equal(
-        list.includes(loader),
-        tools.every((tool) => list.includes(tool)),
-        `${label}: ${loader} must be eligible exactly where ${tools.join(", ")} are`,
-      );
-    }
+test("the backstop: child-engine names pass under the gate; another inline path, a never-known name and an unregistered perk name are blocked", async () => {
+  const registry = defaultRegistry()
+    .filter((t) => t.name !== "plan_draft")
+    .concat({ name: "other_inline", source: "inline", path: "<inline:other>" });
+  const h = gateFixture(() => false, { registry });
+  h.gate.syncFromState("read-only", "implement");
+  for (const name of ["structured_output", "contact_supervisor"])
+    assert.equal(await blockOf(h, name), undefined, name);
+  assert.deepEqual(await blockOf(h, "other_inline"), {
+    block: true,
+    reason: "perk read-only mode: other_inline is blocked (tool not allowlisted).",
+  });
+  // plan_draft is gate-eligible (mode over stage) but this host never registered it.
+  for (const name of ["never_known_tool", "plan_draft"]) {
+    assert.deepEqual(await blockOf(h, name), {
+      block: true,
+      reason: `perk read-only mode: ${name} is blocked (tool not registered).`,
+    });
   }
+  assert.ok(!h.active().includes("plan_draft"), "an unregistered perk name is never installed");
+});
+
+/**
+ * The declarations the host must hide for the default registry in a landing, by posture (after
+ * the install every active perk name is eligible, so none is hidden).
+ */
+function expectedHidden(stage: string | null, mode: Mode): string[] {
+  const hidden = [LOADOUT_HOST_NAME];
+  if (mode === "read-only") hidden.push("edit", "write", "foreign_mutator");
+  if (stage !== null && ![...WORKTREE_STAGES, "stack-review"].includes(stage)) {
+    hidden.push("subagent");
+  }
+  return hidden.sort();
+}
+
+test("prepareLoadout: the host hides exactly the ineligible declarations per landing", () => {
+  for (const [stage, mode] of [
+    [null, "read-only"],
+    ["implement", "read-write"],
+    ["implement", "read-only"],
+    ["plan", "read-write"],
+    ["plan", "read-only"],
+  ] as const) {
+    const h = gateFixture(() => false);
+    h.gate.syncFromState(mode, stage ?? undefined);
+    // After the install, the live set holds only eligible perk names; the declared set is it.
+    assert.deepEqual(h.hidden(), expectedHidden(stage, mode), `${String(stage)} ${mode}`);
+  }
+});
+
+test("prepareLoadout sees the settled mode inside the install: a gate exit presents edit/write again in the same install", () => {
+  const h = gateFixture(() => false);
+  h.gate.syncFromState("read-write", "implement");
+  h.gate.enter();
+  const entry = h.installs.at(-1);
+  assert.ok(
+    entry?.hidden.includes("edit") && entry.hidden.includes("write"),
+    "hidden under the gate",
+  );
+  h.gate.exit();
+  const exit = h.installs.at(-1);
+  assert.ok(exit !== entry, "the exit installed");
+  assert.equal(exit?.hidden.includes("edit"), false, "edit presented in the exit's own install");
+  assert.equal(exit?.hidden.includes("write"), false);
+  assertForeignInvariance(h);
+});
+
+test("a mode flip that changes no perk name reinstalls the live set under an active host — and never without one", () => {
+  // Only mode-over-stage perk names registered: the gated and read-write perk sets coincide.
+  const flipOnly = (withHost: boolean): Fixture => {
+    const registry = [
+      ...["read", "bash", "edit", "write"].map(builtin),
+      perkTool("plan_draft"),
+      ...(withHost ? [perkTool(LOADOUT_HOST_NAME)] : []),
+    ];
+    return gateFixture(() => false, { registry });
+  };
+  const hosted = flipOnly(true);
+  const live = hosted.active();
+  hosted.gate.enter();
+  assert.deepEqual(hosted.installed(), [live], "the gate entry re-presents the same set");
+  assert.ok(hosted.installs[0]?.hidden.includes("edit"));
+  hosted.gate.exit();
+  assert.equal(hosted.installs.length, 2);
+  assert.equal(hosted.installs[1]?.hidden.includes("edit"), false);
+  // Without a registered host there is nothing to present: no install at all.
+  const bare = flipOnly(false);
+  bare.gate.enter();
+  bare.gate.exit();
+  assert.deepEqual(bare.installs, []);
+});
+
+test("codemode is suspended under the gate and restored at release; a never-active or foreign codemode is untouched", () => {
+  const codemode: FakeTool = { name: "codemode", source: "builtin", path: "builtin:codemode" };
+  const registry = [...defaultRegistry(), codemode];
+  const h = gateFixture(() => false, {
+    registry,
+    active: [...defaultActive(defaultRegistry()), "codemode"],
+  });
+  h.gate.syncFromState("read-write", "implement");
+  assert.ok(h.active().includes("codemode"), "read-write leaves it as the user had it");
+  h.gate.enter();
+  assert.ok(!h.active().includes("codemode"), "switched off under the gate");
+  // A failed release keeps it off and the memo intact.
+  h.fail("toolset");
+  assert.throws(() => h.gate.exit());
+  h.fail(undefined);
+  assert.ok(!h.active().includes("codemode"));
+  h.gate.exit();
+  assert.ok(h.active().includes("codemode"), "switched back on at release");
+  h.gate.exit();
+  assert.equal(h.active().filter((n) => n === "codemode").length, 1, "restored once");
+
+  // Registered but never active: the gate has nothing to suspend or restore.
+  const idle = gateFixture(() => false, { registry, active: defaultActive(defaultRegistry()) });
+  idle.gate.enter();
+  idle.gate.exit();
+  assert.ok(!idle.active().includes("codemode"));
+
+  // A foreign tool named codemode is governed by its provenance, never suspended.
+  const namesake: FakeTool = { name: "codemode", source: "npm:fake-codemode@1.0.0", path: "/x" };
+  const foreign = gateFixture(() => false, {
+    registry: [...defaultRegistry(), namesake],
+    active: [...defaultActive(defaultRegistry()), "codemode"],
+  });
+  foreign.gate.enter();
+  assert.ok(foreign.active().includes("codemode"));
+  assertForeignInvariance(foreign);
 });

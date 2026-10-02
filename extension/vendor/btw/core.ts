@@ -116,14 +116,15 @@ export function formatToolArgs(toolName: string, args: unknown): string {
 }
 
 /**
- * The gate-mirror decision: the side session's builtin toolset derives from perk's builtin
- * posture rows. Read-only → the builtins whose gate posture is plain `allowed` (`bash`'s
+ * The gate-mirror decision: the side session's builtin toolset derives from perk's CORE builtin
+ * posture rows (the builtin extensions — `tool_search`, `codemode` — are not part of a side
+ * session). Read-only → the core builtins whose gate posture is plain `allowed` (`bash`'s
  * `verdict` posture cannot be enforced inside a foreign session, so it is excluded) — preserving
- * perk's structural read-only guarantee; read-write → every builtin.
+ * perk's structural read-only guarantee; read-write → every core builtin.
  */
 export function sideSessionTools(readOnly: boolean): string[] {
   return Object.entries(BUILTIN_TOOL_POLICY)
-    .filter(([, posture]) => !readOnly || posture === "allowed")
+    .filter(([, row]) => row.registrar === "core" && (!readOnly || row.gated === "allowed"))
     .map(([name]) => name);
 }
 
