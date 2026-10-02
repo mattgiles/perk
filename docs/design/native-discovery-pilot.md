@@ -82,7 +82,7 @@ Verbatim from the plan; the status column is filled from the evidence named.
 | D2 | an ineligible search is hidden on the next request, deactivated at the next prompt, blocked under the gate | case 5 | PASS |
 | D3 (live) | in a cohort worktree session on this PR (after the preliminary `/submit` has opened the draft PR), a review door (`/pr-review-browser` or `/pr-review-terminal`) → `start_review_wave` → `collect_review_wave` → `push_annotations`/`submit_pr_review` with every guidance-named tool declared before the model's first call; zero dead-end turns | ledger | PASS (`89a77fcc`, ledger §3) |
 | D4 (live) | in a cohort implement session the model finds `objective_stack_status` through `tool_search` on its first query and the call succeeds | ledger | PASS (`4a83ebb6`, ledger §3; see its caveat) |
-| D5 (live) | the `/plan` toggle in the worktree session → `plan_draft` → `plan_review` → the chooser's "Browser review + reviewer wave" (the `plan_review` wave arm runs `openPlanReviewSurface`; `/plan-review-browser` itself refuses worktree stages, so it is NOT the entry point): `collect_draft_review_wave` and `push_annotations` are declared on the next request and the wave collects — the carried dogfood-gate item | ledger | NOT PASSED (unobserved) |
+| D5 (live) | the `/plan` toggle in the worktree session → `plan_draft` → `plan_review` → the chooser's "Browser review + reviewer wave" (the `plan_review` wave arm runs `openPlanReviewSurface`; `/plan-review-browser` itself refuses worktree stages, so it is NOT the entry point): `collect_draft_review_wave` and `push_annotations` are declared on the next request and the wave collects — the carried dogfood-gate item | ledger | PASS (`54022d2e`, ledger §3) |
 | P1 | nonparticipant preservation — warm sessions without an active builtin `tool_search`, a foreign namesake, the two-session isolation, the headless worker, `/btw` | cases 2, 9, 10 | PASS |
 | P2 | the bare-session zero-call guarantee holds for nonparticipants; a cohort startup is one perk install; a re-emitted `session_start` installs nothing | cases 1, 2 | PASS |
 | P3 | primed activation: no-op outside the cohort; skips ineligible/unregistered; doors and launchers prime exactly their constants; survives every reconciliation point while eligible; resume/fork reset, `/tree` restores | cases 3, 4 + the door tests | PASS |
@@ -164,8 +164,8 @@ no gated codemode path is built and the suspension stands. Un-suspension waits f
 ## 7. Decision
 
 **PENDING.** Offline rows: S1, S2, D1, D2, P1, P2, P3, P5, P6, C1 PASS; P4's offline half PASS.
-Live: D3 and D4 PASS. D5 and P4's render leg are unobserved, so NOT PASSED until the ledger
-records them. On ADOPT: the entry stays committed, the family stays deferred, everything ships, and the
+Live: D3, D4 and D5 PASS. P4's render leg is unobserved, so NOT PASSED until the ledger records
+it. On ADOPT: the entry stays committed, the family stays deferred, everything ships, and the
 follow-up plan is named below. On RETIRE: the pilot-only runtime is reverted as the plan's RETIRE
 end state specifies, keeping case 8 (empty-family form), this record and the evidence.
 
