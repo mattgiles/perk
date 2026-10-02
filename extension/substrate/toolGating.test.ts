@@ -24,6 +24,7 @@ import {
   isEligible,
   isPerkTool,
   LOADOUT_HOST_NAME,
+  type LoadoutPresentation,
   type Mode,
   perkToolNames,
   perkToolsFor,
@@ -133,7 +134,7 @@ function gateFixture(
   const hiddenNow = (): string[] => {
     const declared = active.map((name) => ({ name }));
     const loadout = { declared } as unknown as ToolLoadout;
-    return [...(gate.prepareLoadout(loadout).hiddenDeclarations ?? [])].sort();
+    return [...gate.prepareLoadout(loadout).hiddenDeclarations].sort();
   };
   const sessionManager = SessionManager.inMemory("/repo");
   sessionManager.getBranch = () => {
@@ -771,6 +772,23 @@ test("prepareLoadout: the host hides exactly the ineligible declarations per lan
     // After the install, the live set holds only eligible perk names; the declared set is it.
     assert.deepEqual(h.hidden(), expectedHidden(stage, mode), `${String(stage)} ${mode}`);
   }
+});
+
+test("prepareLoadout presents hidden declarations only \u2014 both arms", async () => {
+  const h = gateFixture(() => false);
+  h.gate.syncFromState("read-only", "implement");
+  const loadout = { declared: h.active().map((name) => ({ name })) } as unknown as ToolLoadout;
+  assert.deepEqual(Object.keys(h.gate.prepareLoadout(loadout)), ["hiddenDeclarations"]);
+  // A census failure inside the hook takes the catch arm: it still only hides (the host itself).
+  h.fail("census");
+  const failed = await quietly(async () => h.gate.prepareLoadout(loadout));
+  assert.deepEqual(failed, { hiddenDeclarations: [LOADOUT_HOST_NAME] });
+});
+
+test("compile-time: a loadout presentation can never carry a description rewrite", () => {
+  // @ts-expect-error \u2014 `descriptions` is forbidden: the host hides, it never rewrites a description.
+  const rewriting: LoadoutPresentation = { hiddenDeclarations: [], descriptions: {} };
+  void rewriting;
 });
 
 test("prepareLoadout sees the settled mode inside the install: a gate exit presents edit/write again in the same install", () => {

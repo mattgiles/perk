@@ -358,7 +358,7 @@ function fixture(
     syncFromState(mode: string | undefined, s: string | undefined) {
       synced.push([mode, s]);
     },
-    prepareLoadout: () => ({}),
+    prepareLoadout: () => ({ hiddenDeclarations: [] }),
     joinDiscoveryCohort() {},
     primeDeferred: () => [],
     discovery: () => ({ cohort: false, family: [] }),
@@ -1083,7 +1083,7 @@ function plannotatorArm(
     },
     enter() {},
     syncFromState() {},
-    prepareLoadout: () => ({}),
+    prepareLoadout: () => ({ hiddenDeclarations: [] }),
     joinDiscoveryCohort() {},
     primeDeferred: () => [],
     discovery: () => ({ cohort: false, family: [] }),

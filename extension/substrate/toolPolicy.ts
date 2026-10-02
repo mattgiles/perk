@@ -649,6 +649,18 @@ export function hiddenDeclarationsFor(
   return hidden;
 }
 
+/**
+ * What the loadout host's `prepareLoadout` returns: hidden declarations, nothing else. The host
+ * presents by hiding and never rewrites a model-facing description — Pi's request-time
+ * `descriptions` substitution would replace a tool's text behind every governed `description`
+ * fragment, out of the prose map's sight, so the type forbids it. Structural (like `Provenance`);
+ * Pi-compatibility is checked where the host registers.
+ */
+export type LoadoutPresentation = {
+  readonly hiddenDeclarations: readonly string[];
+  readonly descriptions?: never;
+};
+
 /** Whether the read-only gate suspends this tool: a builtin-sourced row marked suspended. */
 export function gateSuspends(name: string, provenance: Provenance | undefined): boolean {
   if (provenance?.source !== "builtin" || !Object.hasOwn(BUILTIN_TOOL_POLICY, name)) return false;
