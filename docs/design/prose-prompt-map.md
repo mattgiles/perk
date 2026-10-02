@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **246** canonical source units
-- **1286** logical fragments
+- **248** canonical source units
+- **1290** logical fragments
 - **16** session shapes and **12** assemblies
 - **14** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -66,6 +66,8 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 | --- | --- | --- | --- | --- |
 | `markdown:prompts/commit-and-compact-continuation.md` | `context` | `shipped` | [`prompts/commit-and-compact-continuation.md`](../../prompts/commit-and-compact-continuation.md) · `file` | — |
 | `markdown:prompts/commit-and-compact.md` | `context` | `shipped` | [`prompts/commit-and-compact.md`](../../prompts/commit-and-compact.md) · `file` | — |
+| `markdown:prompts/common/learn-save/cold.md` | `context` | `shipped` | [`prompts/common/learn-save/cold.md`](../../prompts/common/learn-save/cold.md) · `file` | — |
+| `markdown:prompts/common/learn-save/warm.md` | `context` | `shipped` | [`prompts/common/learn-save/warm.md`](../../prompts/common/learn-save/warm.md) · `file` | — |
 | `markdown:prompts/common/resume-advisory.md` | `context` | `shipped` | [`prompts/common/resume-advisory.md`](../../prompts/common/resume-advisory.md) · `file` | — |
 | `markdown:prompts/common/review-wave-yield.md` | `context` | `shipped` | [`prompts/common/review-wave-yield.md`](../../prompts/common/review-wave-yield.md) · `file` | — |
 | `markdown:prompts/contexts/objective-refinement.md` | `context` | `shipped` | [`prompts/contexts/objective-refinement.md`](../../prompts/contexts/objective-refinement.md) · `file` | — |
@@ -91,6 +93,10 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 - `markdown:prompts/commit-and-compact-continuation.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/commit-and-compact.md`
+  - `body` — Document body (`file-body`)
+- `markdown:prompts/common/learn-save/cold.md`
+  - `body` — Document body (`file-body`)
+- `markdown:prompts/common/learn-save/warm.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/common/resume-advisory.md`
   - `body` — Document body (`file-body`)
@@ -823,6 +829,8 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
   - `promptSnippet` — promptSnippet (`tool:objective_stack_status.promptSnippet`)
   - `promptGuidelines.0` — promptGuidelines item 1 (`tool:objective_stack_status.promptGuidelines.0`)
   - `parameters.properties.objective.description` — parameters.properties.objective.description (`tool:objective_stack_status.parameters.properties.objective.description`)
+  - `result.properties.objective.description` — result.properties.objective.description (`tool:objective_stack_status.result.properties.objective.description`)
+  - `result.properties.status.description` — result.properties.status.description (`tool:objective_stack_status.result.properties.status.description`)
 - `typescript-tool:objective_stack_sync`
   - `description` — description (`tool:objective_stack_sync.description`)
   - `promptSnippet` — promptSnippet (`tool:objective_stack_sync.promptSnippet`)
