@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { markerPath, PENDING_LEARN, workflowDir } from "../../../substrate/cache.ts";
-import { dietUniverse, stageToolsFor } from "../../../substrate/toolPolicy.ts";
+import { perkToolNames, stageToolsFor } from "../../../substrate/toolPolicy.ts";
 import { REPORT_DETAIL_TYPE } from "../../../surfaces/surfaces.ts";
 import {
   fakePerk,
@@ -452,13 +452,13 @@ test("driveReconcileAfterLand: idle (/land command) → immediate; streaming (la
 test("driveReconcileAfterLand: every scoped tool the injected guidance names is stage-active", async () => {
   await ensureToolCatalog();
   // The drive lands in the CURRENT worktree session (stage `implement` when `/land` runs
-  // there), so every scoped-universe tool the injected reconcile guidance names must survive
+  // there), so every perk tool the injected reconcile guidance names must survive
   // that stage's filter — or the drive dead-ends.
   const { pi, calls } = spyPi();
   const ctx = { cwd: ".", isIdle: () => true } as unknown as ExtensionContext;
   driveReconcileAfterLand(pi, ctx, OBJECTIVE_DETAILS);
   const content = calls[0]?.content ?? "";
-  const named = dietUniverse().filter((name) => new RegExp(`\\b${name}\\b`).test(content));
+  const named = perkToolNames().filter((name) => new RegExp(`\\b${name}\\b`).test(content));
   assert.ok(named.includes("reconcile_objective"), "sanity: the guidance names the reconcile tool");
   const implementTools = stageToolsFor("implement") ?? [];
   for (const name of named) {

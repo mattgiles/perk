@@ -1,92 +1,65 @@
-// The tool-gating primitive (the keystone). Structural read-only enforcement, NOT
-// prompting. Mirrors pi's authoritative `examples/extensions/plan-mode/` recipe (the
-// `setActiveTools` allowlist + `tool_call` bash sub-allowlist + `before_agent_start` injection
-// (once-only per SELECTED BRANCH: full-branch-scan dedup'd on the marker — historical, so a
-// copy compaction has summarized out of model context still suppresses; enforcement never rode
-// the prose) + `context` strip-when-off) and `preset.ts`'s snapshot-then-restore. The gate attaches to the
-// existing `perk:workflow-state.mode` field (`read-only`/`read-write`) — no new registry stage.
-// Beside the gate lives per-stage active-tool scoping over the diet universe (the tool catalog +
-// the enumerated borrowed-package census), keyed off the workflow-state `stage` field and applied
-// at the same rebuild points (contracts.md §8.40) — fail-open where the gate is fail-closed, save
-// the one refused call: a borrowed lazy loader invoked where the tools it enables are ineligible.
-// Both concerns install views DERIVED from the one eligibility formula (`toolPolicy.ts`); this
-// module owns only the controller, the mode-context injection and the lazy-owner reconciliation.
-// The bash verdict lives in `readOnlyBash.ts`.
+// The tool-gating primitive (the keystone). Structural read-only enforcement, NOT prompting. The
+// gate attaches to the existing `perk:workflow-state.mode` field (`read-only`/`read-write`) — no
+// new registry stage — and lives beside per-stage tool scoping keyed off the workflow-state
+// `stage` field (contracts.md §8.40). Both concerns read the one eligibility formula
+// (`toolPolicy.ts`); this module owns the controller, the mode-context injection and the
+// `tool_call` backstop. The bash verdict lives in `readOnlyBash.ts`.
+//
+// Three terms, kept apart:
+//  - ACTIVATION is own-names-only: at every reconciliation point perk installs
+//    `reconcileTarget` — the live active set with perk's own names replaced by the eligible ones —
+//    and never activates or deactivates a foreign tool. A session whose live set needs no change
+//    gets NO `setActiveTools` call (a bare session — no stage, read-write, no floor, default
+//    registration — gets none at all).
+//  - PRESENTATION is the loadout host's (`perk_stage`, registered by index.ts through
+//    `registerLoadoutHost`): its `prepareLoadout` hides every declared tool ineligible in the
+//    landing (by provenance — `hiddenDeclarationsFor`), so the gate and the diet reach foreign
+//    tools without touching their activation. Hidden tools stay active and callable; their
+//    prompt snippets drop out of the request, their guidelines do not. Fail-open.
+//  - ENFORCEMENT is the read-only `tool_call` backstop: under the gate, edit/write, an
+//    unregistered name, an ineligible tool and an unsafe bash command are blocked. Fail-closed.
+//
+// The reconciliation points: `syncFromState` (session_start, session_tree, the doors' stage
+// syncs), `enter`, `exit`, the `resources_discover` re-apply (after every extension's
+// session_start — late registrants), and `before_agent_start` (ahead of the mode-context
+// injection, so a tool activated between requests — a `tool_search` hit — meets the policy
+// before the next request). The presented mode LEADS each install: the host's hook runs inside
+// the install, and Pi rebuilds the prompt's snippet map from that run, so a gate exit restores
+// edit/write's snippets in the same install.
+//
+// The exclusion contract: Pi's `--tools`/`--exclude-tools` (the SDK's `tools`/`excludeTools`)
+// are registry filters — a filtered-out perk tool is never registered and never installed; a
+// filtered-out host means no presentation at all (enforcement is unchanged). Every other absence
+// of a registered, eligible perk tool from the active set (a `defaultTools` preference, a foreign
+// `setActiveTools`) is undone by the next reconciliation — perk's own activation is
+// policy-owned. Composition limit: codemode builds its description from the unfiltered callable
+// set, so in a read-write stage session it may name diet-hidden tools; under the gate codemode is
+// itself hidden.
 //
 // Substrate only: the gate-ENTRY consumers are perk-owned plan mode (`pi/v1/plan.ts`: `/plan`,
 // `--plan`, `Ctrl+Alt+P`), the warm `/objective-plan` factory (`pi/v1/objectivePlanning.ts`) and
 // the warm `/objective-refine` entry (`pi/v1/objectiveRefinement.ts`); `exit` rides the plan-mode
 // toggle and the save/exit doors. The CI executor (`pi/v1/delivery/ci.ts`) never touches the gate.
-// The allowlist-restore is wired into the existing `session_start`/`session_tree` rebuild points
-// plus one `resources_discover` re-apply.
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  ToolLoadout,
+  ToolLoadoutChanges,
+} from "@earendil-works/pi-coding-agent";
 import { render } from "./prompts.ts";
 import { readOnlyBashVerdict } from "./readOnlyBash.ts";
 import {
   carveOutWritersFor,
-  dietUniverse,
-  gatedToolsFor,
+  hiddenDeclarationsFor,
   isEligible,
+  LOADOUT_HOST_NAME,
+  type Mode,
   normalizeStage,
-  stageToolsFor,
+  type Provenance,
+  reconcileTarget,
 } from "./toolPolicy.ts";
 import { branchCarries, branchOf, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
-
-/**
- * Borrowed lazy-activation loaders → the tools each one activates (contracts.md §8.40). While
- * the loader is registered, a lazy-owned tool's ACTIVATION is its owner's decision — the owner
- * hides it until the model calls the loader, and replays the recorded selection on navigation;
- * perk owns only its ELIGIBILITY (mode/stage). Each loader rides the same family constant as the tools it enables, so its
- * eligibility equals theirs everywhere (pinned). Look entries up with `Object.hasOwn` first: a
- * tool named like a prototype key must not match.
- */
-export const LAZY_TOOL_LOADERS: Readonly<Record<string, readonly string[]>> = {
-  subagents_enable: ["subagent"],
-  web_enable: ["web_search", "source_check", "fetch_content", "get_search_content"],
-};
-
-/**
- * The tools lazy-owned in this session: those of every loader currently REGISTERED (active or
- * not). An owner that registers its tools eagerly and no loader — an older version, or its
- * host-probe fallback — owns nothing lazily: nothing could re-enable a tool perk stripped, so its
- * tools keep the ordinary snapshot/allowlist behavior.
- */
-function lazyOwnedBy(registered: Iterable<string>): ReadonlySet<string> {
-  const owned = new Set<string>();
-  for (const name of registered) {
-    if (!Object.hasOwn(LAZY_TOOL_LOADERS, name)) continue;
-    for (const tool of LAZY_TOOL_LOADERS[name] ?? []) owned.add(tool);
-  }
-  return owned;
-}
-
-/** The live tool state one install reads: the active set + the tools lazy-owned right now. */
-type LiveSelection = { active: ReadonlySet<string>; lazyOwned: ReadonlySet<string> };
-
-/**
- * Owner-selected membership: drop a lazy-owned name unless its owner currently has it active.
- * Every other name passes through.
- */
-function ownerSelected(names: Iterable<string>, live: LiveSelection): string[] {
-  return [...names].filter((name) => !live.lazyOwned.has(name) || live.active.has(name));
-}
-
-/** Where a loader call was refused: under the gate (optionally stage-scoped), or by a stage. */
-export type LazyLoaderRefusalScope =
-  | { kind: "gated"; stage: string | null }
-  | { kind: "stage"; stage: string };
-
-/** The stage-naming refusal reason for a loader called outside its tools' eligibility. */
-export function lazyLoaderRefusalReason(loader: string, scope: LazyLoaderRefusalScope): string {
-  const enabled = Object.hasOwn(LAZY_TOOL_LOADERS, loader) ? LAZY_TOOL_LOADERS[loader] : undefined;
-  const tools = (enabled ?? []).join(", ");
-  if (scope.kind === "gated") {
-    const where = scope.stage === null ? "this gated session" : `the gated ${scope.stage} session`;
-    return `perk read-only mode: ${loader} is blocked (its tools — ${tools} — are not allowlisted in ${where}).`;
-  }
-  return `perk stage scoping: ${loader} is blocked (its tools — ${tools} — are not available in the ${scope.stage} stage).`;
-}
 
 /** The read-only marker / custom-message type injected into context while active. */
 const MODE_CONTEXT_TYPE = "perk:mode-context";
@@ -159,22 +132,23 @@ export interface ToolGating {
    * AND session_tree). `stage` is the branch-LWW workflow-state stage id (undefined = unscoped).
    */
   syncFromState(mode: string | undefined, stage: string | undefined): void;
-  /** Enter read-only mode: persist `mode=read-only` + snapshot/restrict tools. (Called by plan mode — `/plan`, `--plan`, `Ctrl+Alt+P` — the warm objective-plan factory and the warm objective-refine entry; never the CI executor.) */
+  /** Enter read-only mode: persist `mode=read-only` + reconcile perk's tools. (Called by plan mode — `/plan`, `--plan`, `Ctrl+Alt+P` — the warm objective-plan factory and the warm objective-refine entry; never the CI executor.) */
   enter(ctx?: ExtensionContext): void;
-  /** Exit read-only mode: persist `mode=read-write` + restore tools. (Called by the plan-mode toggle and the save/exit doors.) */
+  /** Exit read-only mode: persist `mode=read-write` + reconcile perk's tools. (Called by the plan-mode toggle and the save/exit doors.) */
   exit(ctx?: ExtensionContext): void;
   /** Whether the gate is currently active (in-memory source of truth for `tool_call`). */
   isActive(): boolean;
+  /**
+   * The loadout host's hook: hide every declared tool ineligible in the presented landing, plus
+   * the host itself. Never throws — a failure hides only the host (presentation is fail-open; the
+   * backstop still enforces).
+   */
+  prepareLoadout(loadout: ToolLoadout): ToolLoadoutChanges;
 }
 
 function isReadOnlyMode(mode: string | undefined): boolean {
   return mode === "read-only";
 }
-
-/** The engagement record: the host's active starting set (the restore authority — never
- * `getAllTools()` — for every name EXCEPT lazy-owned ones, whose membership is the owner's live
- * selection), the registry census at snapshot time, and the late registrants admitted so far. */
-type Engaged = { snapshot: readonly string[]; census: ReadonlySet<string>; admitted: Set<string> };
 
 export function registerToolGating(
   pi: ExtensionAPI,
@@ -186,9 +160,9 @@ export function registerToolGating(
   // The branch-LWW stage id this session is scoped to (null = unscoped). Fail-open by contrast
   // with `active`: no stage / unknown stage / any lookup miss → no filtering.
   let stageId: string | null = null;
-  // Taken ONCE on the first engagement of either concern (the preset.ts discipline, shared by the
-  // gate and stage scoping); cleared when neither is engaged any more.
-  let engaged: Engaged | null = null;
+  // The mode the loadout host presents. Leads every install (so the hook run inside the install
+  // already sees it); on a failed install it falls back to the settled gate.
+  let presentedMode: Mode = "read-write";
 
   function hasFloor(): boolean {
     try {
@@ -200,120 +174,55 @@ export function registerToolGating(
   }
 
   const isActive = () => active || hasFloor();
-  // The gate-ON view follows the scoped stage (recomputed per observation — a late stage sync
-  // re-scopes it, and the catalog fills after this controller is created).
-  const gatedToolNames = (): ReadonlySet<string> => new Set(gatedToolsFor(stageId));
 
   /**
-   * Recompute + install the active tool set from both concerns (contracts.md §8.40):
-   *  - gate ON → the stage's gated view (`gatedToolsFor` — every name the eligibility formula
-   *    admits read-only there: the stage's non-blocked tools plus the mode-over-stage set), NO
-   *    further stage filter (the gated view already IS the diet).
-   *  - gate OFF + stage scoped → a SUBTRACTIVE filter over the baseline (`baseline`): names
-   *    outside the diet universe (builtins, child-side tools, un-enumerated foreign tools) pass
-   *    through untouched; diet-universe names (the catalog ∪ BORROWED_TOOLS) survive only when
-   *    the stage's diet (`stageToolsFor`) carries them.
-   *  - neither engaged → restore the baseline and forget it (a session that never engages gets
-   *    ZERO setActiveTools calls — bare warm sessions stay byte-identical).
-   * Lazy-owned names (the tools of every REGISTERED loader in LAZY_TOOL_LOADERS) take their
-   * membership from the owner's live selection in every arm: the gated view is a ceiling
-   * (installed only while the owner has the tool selected), and the baseline neither restores one
-   * the owner hid nor drops one it enabled. perk never re-activates or restores a lazy-owned tool
-   * — Pi's transcript restore and the owner's recorded-selection replay do; perk only keeps it or
-   * (by stage) strips it. While engaged the set is re-installed on every sync (tree navigation
-   * across mode entries must recompute correctly).
+   * Reconcile perk's own tools for a (gate, stage) landing (contracts.md §8.40). The in-memory
+   * gate latches ON before any fallible read (fail-closed) and is released only after a
+   * successful install. The presented mode and stage lead the install; an install happens only
+   * when perk's names must change — or when the presented mode flips under an active host, so Pi
+   * rebuilds the prompt's snippet map for the new presentation (a gate exit restores edit/write's
+   * snippets even when no perk name changed).
    */
-
-  /**
-   * The gate-OFF reconciliation baseline: `snapshot ∪ admitted` under owner-selected membership,
-   * plus every lazy-owned tool currently active. A tool the census never saw (pi-subagents'
-   * `subagent_supervisor` registers in its own `session_start`, after perk's sync) is admitted
-   * the first time it is seen active and stays admitted through perk's own filtering (so a
-   * navigation back to an admitting stage restores it); an owner that deactivates its late tool
-   * before perk ever sees it active is respected; a tool the census saw inactive is never
-   * re-activated. A lazy-owned snapshot member the owner has since hidden is dropped, and one the
-   * owner enabled after the snapshot is kept. Gate-OFF paths only (the gate-ON set is by name —
-   * no bookkeeping there).
-   */
-  function baseline(e: Engaged, live: LiveSelection): string[] {
-    for (const name of live.active) if (!e.census.has(name)) e.admitted.add(name);
-    const lazyActive = [...live.active].filter((name) => live.lazyOwned.has(name));
-    return [...new Set([...ownerSelected([...e.snapshot, ...e.admitted], live), ...lazyActive])];
-  }
-
-  /** The owner's live selection, read per install (after the first-engagement snapshot). */
-  function readLive(): LiveSelection {
-    return {
-      active: new Set(pi.getActiveTools()),
-      lazyOwned: lazyOwnedBy(pi.getAllTools().map((t) => t.name)),
-    };
-  }
-
   function apply(nextActive: boolean, nextStage: string | null): void {
-    // Fail-closed: a read-only sync engages the in-memory gate BEFORE the fallible reads/installs.
     if (nextActive) active = true;
     const effective = nextActive || hasFloor();
-    const stageList = stageToolsFor(nextStage);
-    // First engagement of either concern: ONE literal (a throwing read records no half state).
-    if ((effective || stageList !== undefined) && engaged === null) {
-      engaged = {
-        snapshot: pi.getActiveTools(),
-        census: new Set(pi.getAllTools().map((t) => t.name)),
-        admitted: new Set(),
-      };
-    }
-    // The live reads follow the snapshot literal above, so the fail-closed ordering is unchanged.
-    if (effective) {
-      pi.setActiveTools(ownerSelected(gatedToolsFor(nextStage), readLive()));
-    } else if (engaged !== null) {
-      const base = baseline(engaged, readLive());
-      if (stageList !== undefined) {
-        // The diet universe is computed per install: the catalog fills after the controller.
-        const scoped = new Set(dietUniverse());
-        pi.setActiveTools(base.filter((name) => !scoped.has(name) || stageList.includes(name)));
-      } else {
-        pi.setActiveTools(base);
-        engaged = null;
+    const previousMode = presentedMode;
+    stageId = nextStage;
+    presentedMode = effective ? "read-only" : "read-write";
+    try {
+      const live = pi.getActiveTools();
+      const target = reconcileTarget(
+        { active: live, registered: pi.getAllTools().map((t) => t.name) },
+        stageId,
+        presentedMode,
+      );
+      if (target !== null) pi.setActiveTools(target);
+      else if (presentedMode !== previousMode && live.includes(LOADOUT_HOST_NAME)) {
+        pi.setActiveTools(live);
       }
+    } catch (error) {
+      presentedMode = isActive() ? "read-only" : "read-write";
+      throw error;
     }
     active = nextActive;
-    stageId = nextStage;
   }
 
-  // Pi fires `resources_discover` after EVERY extension's `session_start` has run (pi-subagents
-  // registers `subagent_supervisor` there, after perk's sync) — the one point where startup-late
-  // registrants meet the gate/stage diet: re-apply the in-memory mode/stage (no rebuild, no other
-  // checkpoint). Idempotent on `reason: "reload"`; a throw is Pi-reported and never opens the gate.
+  // Pi fires `resources_discover` after EVERY extension's `session_start` has run — the point
+  // where startup-late registrants (pi-subagents' `subagent_supervisor`) meet the landing. A no-op
+  // when nothing changed; a throw is Pi-reported and never opens the gate.
   pi.on("resources_discover", async () => {
     apply(active, stageId);
   });
 
-  /**
-   * The lazy-loader refusal (the one stage-enforced `tool_call`, contracts.md §8.40): a loader
-   * called where the tools it enables are ineligible is refused with a stage-naming reason. The
-   * owner re-advertises its loader every turn in its own `before_agent_start`, AFTER perk's
-   * handler, so schema removal cannot hide it — refusing the activation call is the only way to
-   * keep a stage-excluded tool from being reintroduced. The activated tool itself stays under
-   * the fail-open stage filter. An unscoped or unknown-stage session never refuses.
-   */
-  function lazyLoaderRefusal(toolName: string): string | null {
-    if (!Object.hasOwn(LAZY_TOOL_LOADERS, toolName)) return null;
-    if (isActive()) {
-      return gatedToolNames().has(toolName)
-        ? null
-        : lazyLoaderRefusalReason(toolName, { kind: "gated", stage: stageId });
-    }
-    const stageList = stageToolsFor(stageId);
-    return stageId !== null && stageList !== undefined && !stageList.includes(toolName)
-      ? lazyLoaderRefusalReason(toolName, { kind: "stage", stage: stageId })
-      : null;
+  /** The registered tool's provenance, or undefined when the name is not registered here. */
+  function registeredProvenance(name: string): Provenance | undefined {
+    return pi.getAllTools().find((t) => t.name === name)?.sourceInfo;
   }
 
-  // Enforce the whole allowlist even if toolset narrowing failed or foreign tools registered late.
+  // Enforce the whole policy even if presentation failed or a tool was activated between
+  // reconciliations.
   pi.on("tool_call", async (event) => {
     try {
-      const refusal = lazyLoaderRefusal(event.toolName);
-      if (refusal !== null) return { block: true, reason: refusal };
       if (!isActive()) return;
       if (event.toolName === "edit" || event.toolName === "write") {
         return {
@@ -321,7 +230,16 @@ export function registerToolGating(
           reason: `perk read-only mode: ${event.toolName} is blocked (file modifications disabled).`,
         };
       }
-      if (!isEligible(event.toolName, stageId, "read-only")) {
+      // A name this session never registered is never callable here — a catalogued perk name
+      // included (classification is by catalog, callability by the live registry).
+      const provenance = registeredProvenance(event.toolName);
+      if (provenance === undefined) {
+        return {
+          block: true,
+          reason: `perk read-only mode: ${event.toolName} is blocked (tool not registered).`,
+        };
+      }
+      if (!isEligible(event.toolName, provenance, stageId, "read-only")) {
         return {
           block: true,
           reason: `perk read-only mode: ${event.toolName} is blocked (tool not allowlisted).`,
@@ -344,8 +262,16 @@ export function registerToolGating(
     }
   });
 
-  // Inject the hidden read-only mode context while active (display:false → not shown in transcript).
   pi.on("before_agent_start", async (_event, ctx) => {
+    // Reconcile before every request, gated or not: a tool activated since the last point (a
+    // `tool_search` hit) meets the landing before the model is asked again. Pi treats the live
+    // loadout as authoritative unless a later handler edits `selectedTools` explicitly.
+    try {
+      apply(active, stageId);
+    } catch (error) {
+      console.error(`perk: tool reconciliation failed before the request — ${error}`);
+    }
+    // Inject the hidden read-only mode context while active (display:false → not in transcript).
     if (!isActive()) return;
     // Once-only per selected branch: injected customs persist to the branch, and the FULL-branch
     // scan (not live model context) dedups — a copy compaction summarized away still counts as
@@ -412,5 +338,23 @@ export function registerToolGating(
       apply(false, stageId);
     },
     isActive,
+    prepareLoadout(loadout: ToolLoadout): ToolLoadoutChanges {
+      try {
+        const infos = new Map<string, Provenance>(
+          pi.getAllTools().map((t) => [t.name, t.sourceInfo] as const),
+        );
+        return {
+          hiddenDeclarations: hiddenDeclarationsFor(
+            loadout.declared.map((t) => t.name),
+            infos,
+            stageId,
+            presentedMode,
+          ),
+        };
+      } catch (error) {
+        console.error(`perk: loadout presentation failed — ${error}`);
+        return { hiddenDeclarations: [LOADOUT_HOST_NAME] };
+      }
+    },
   };
 }
