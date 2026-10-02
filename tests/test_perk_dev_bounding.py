@@ -347,22 +347,27 @@ def test_packet_inherits_nested_call_evidence_inside_its_tool_result(env: Env):
     # Packets render through the learn renderer, so a sliced toolResult carrying Pi's
     # `message.nestedCalls` brings its <nested_calls> block along — the parent's own error flag
     # untouched by a failed child.
-    nested_result = _tool_result("codemode", "Script completed")
-    message = nested_result["message"]
-    assert isinstance(message, dict)
-    message["isError"] = False
-    message["nestedCalls"] = {
-        "calls": [
-            {
-                "id": "tc1/1",
-                "name": "write",
-                "arguments": {"path": "b.ts"},
-                "status": "error",
-                "durationMs": 3,
-                "error": "write is blocked (read-only)",
-            }
-        ],
-        "complete": False,
+    nested_result: dict[str, object] = {
+        "type": "message",
+        "message": {
+            "role": "toolResult",
+            "toolName": "codemode",
+            "isError": False,
+            "content": [{"type": "text", "text": "Script completed"}],
+            "nestedCalls": {
+                "calls": [
+                    {
+                        "id": "tc1/1",
+                        "name": "write",
+                        "arguments": {"path": "b.ts"},
+                        "status": "error",
+                        "durationMs": 3,
+                        "error": "write is blocked (read-only)",
+                    }
+                ],
+                "complete": False,
+            },
+        },
     }
     env.write(
         "s.jsonl",
