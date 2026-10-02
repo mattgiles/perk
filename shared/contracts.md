@@ -7650,8 +7650,9 @@ carrier is fixed by rewording, never by widening a policy.
 
 **Own-names-only activation.** perk installs and removes ONLY catalogued names; it never
 activates or deactivates a foreign tool. At every reconciliation point the gate
-(`extension/substrate/toolGating.ts`) installs `reconcileTarget(live, stage, mode, cohort)` (pure,
-`toolPolicy.ts`; `cohort` is the session's discovery-cohort membership):
+(`extension/substrate/toolGating.ts`) installs `reconcileTarget(live, stage, mode, deferred)` (pure,
+`toolPolicy.ts`; `deferred` lists the family members deferred in this session — empty outside the
+discovery cohort):
 
 `(live active − perk-owned) ∪ eligible-always-perk(stage, mode) ∪ (live active ∩ eligible-deferred-perk(stage, mode))`
 
@@ -7661,8 +7662,9 @@ vacated provider tool, a registry filter — below) is never installed and never
 `reconcileTarget` returns `null` when the target set-equals the live active set
 (order-insensitive) and perk then installs nothing. Outside the discovery cohort every eligible
 perk tool is always-declared (a family member included — exactly the pre-pilot loadout); inside
-it the second term covers the non-deferred names and the third term keeps a deferred perk tool
-exactly while it is active and eligible (primed by a door or launcher, a `tool_search` hit, a
+it the second term covers every name not deferred in this session (a member whose re-registration
+failed included — it is still `direct`, so `tool_search` could never find it) and the third term
+keeps a deferred perk tool exactly while it is active and eligible (primed by a door or launcher, a `tool_search` hit, a
 transcript restore); priming is perk's only activation of a deferred tool. The reconciliation points: `syncFromState` (the
 `session_start` and `session_tree` rebuilds and the doors' stage syncs), the gate's `enter`/
 `exit`, the `resources_discover` re-apply (Pi fires it after every extension's `session_start` —
@@ -7819,10 +7821,10 @@ and leaves the session a nonparticipant), a qualifying session not yet joined ca
 registering activation's own `pi` (never by name, so a second bound session never shares it), and
 this re-registers this activation's retained family members with `exposure: "deferred"` (an
 already-deferred member is skipped; a per-name failure reports `perk: could not defer <name> — …`
-and is skipped) — then `ToolGating.joinDiscoveryCohort(family)`: the next install removes the
-family from the live set once (a cohort startup is still ONE perk install; a throwing install
+and is skipped) — then, when at least one member deferred, `ToolGating.joinDiscoveryCohort(deferred)`
+with exactly the names that deferred: the next install removes them from the live set once (a cohort startup is still ONE perk install; a throwing install
 leaves the deferral pending for the next point). **Primed activation:**
-`ToolGating.primeDeferred(names)` activates the named family members that are registered, eligible
+`ToolGating.primeDeferred(names)` activates the named members deferred in this session that are registered, eligible
 in the presented landing and inactive, in catalog order, in one install; it is a no-op outside the
 cohort and never throws (`perk: priming failed — …`; presentation is fail-open — the model can
 still `tool_search`, and enforcement is untouched). Every carrier that names a deferred tool has a
@@ -7848,7 +7850,7 @@ until re-primed or re-searched); `/reload` re-runs the factory, which re-joins a
 A nested `ctx.executeTool` reaches a deferred inactive member (Pi's callable set includes every
 registered deferred tool; the call is recorded on the parent result's `nestedCalls`), which widens
 nothing a script could not reach while the member was an active direct tool. `/perk-selfcheck`
-prints `discovery: cohort (family: …)` (the whole family) or `discovery: nonparticipant`. The
+prints `discovery: cohort (family: …)` (the members this session deferred) or `discovery: nonparticipant`. The
 measurements, the pinned adopt/retire criteria and the decision are recorded in
 `docs/design/native-discovery-pilot.md`.
 

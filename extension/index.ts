@@ -539,7 +539,10 @@ export default function perk(
       if (!gating.discovery().cohort) {
         const infos = new Map(pi.getAllTools().map((t) => [t.name, t.sourceInfo] as const));
         if (isDiscoveryHost(infos, pi.getActiveTools())) {
-          gating.joinDiscoveryCohort(deferDiscoveryFamily(pi));
+          // Join with what actually deferred: a member whose re-registration failed stays
+          // always-declared, and nothing deferred means nothing to join.
+          const deferred = deferDiscoveryFamily(pi);
+          if (deferred.length > 0) gating.joinDiscoveryCohort(deferred);
         }
       }
     } catch (error) {

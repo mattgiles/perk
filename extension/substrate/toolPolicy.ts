@@ -602,9 +602,11 @@ export function carveOutWritersFor(
  * The active set perk installs for a (stage, mode) landing, or null when the live set already
  * equals it (order-insensitive) — so a session whose live set needs no change gets no install:
  *   (live active − perk-owned) ∪ eligible-always-perk ∪ (live active ∩ eligible-deferred-perk)
- * The third term applies only inside the discovery cohort (`cohort`): there a family member is
- * kept exactly while it is active (primed or host-activated) and eligible; outside it every
- * eligible perk tool is always-declared. Foreign names keep their live order and membership (perk
+ * "Deferred" means deferred IN THIS SESSION — the names `deferred` lists (the discovery cohort's
+ * successfully re-registered family; empty outside the cohort). Such a name is kept exactly while
+ * it is active (primed or host-activated) and eligible; every other eligible perk tool — a family
+ * member whose re-registration failed included, since it is still `direct` and unsearchable — is
+ * always-declared. Foreign names keep their live order and membership (perk
  * never activates or deactivates one); perk names follow in catalog order. Only REGISTERED perk
  * names count: a catalogued name the host did not register (a vacated provider tool, a host
  * registry filter) is never installed.
@@ -613,14 +615,15 @@ export function reconcileTarget(
   live: { active: readonly string[]; registered: readonly string[] },
   stage: string | null | undefined,
   mode: Mode,
-  cohort = false,
+  deferred: readonly string[] = [],
 ): string[] | null {
   const registered = new Set(live.registered);
   const active = new Set(live.active);
+  const deferredHere = new Set(deferred);
   const foreign = live.active.filter((name) => !CATALOG.has(name));
-  const perk = [...CATALOG].flatMap(([name, policy]) => {
+  const perk = [...CATALOG].flatMap(([name]) => {
     if (!registered.has(name) || !isEligible(name, undefined, stage, mode)) return [];
-    return policy.declared !== "deferred" || !cohort || active.has(name) ? [name] : [];
+    return !deferredHere.has(name) || active.has(name) ? [name] : [];
   });
   const target = [...foreign, ...perk];
   return sameNames(target, live.active) ? null : target;

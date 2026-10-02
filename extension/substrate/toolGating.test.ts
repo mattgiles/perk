@@ -955,3 +955,19 @@ test("a throwing install keeps the cohort deferral pending for the next point", 
   for (const name of family) assert.ok(!h.active().includes(name), `${name} deactivated now`);
   assert.equal(h.installs.length, 1);
 });
+
+test("a member whose deferred re-registration failed stays always-declared: dropped under the gate, restored at its exit", () => {
+  // deferDiscoveryFamily omits a member it could not re-register; it is still `direct`, so
+  // tool_search cannot find it and only reconciliation can bring it back.
+  const joined = discoveryFamily().filter((name) => name !== "objective_stack_status");
+  const h = gateFixture(() => false);
+  h.gate.joinDiscoveryCohort(joined);
+  h.gate.syncFromState("read-write", "implement");
+  assert.ok(h.active().includes("objective_stack_status"), "never deferred, so kept at the join");
+  h.gate.enter();
+  assert.ok(!h.active().includes("objective_stack_status"), "gate-blocked under the gate");
+  h.gate.exit();
+  assert.ok(h.active().includes("objective_stack_status"), "restored at the gate exit");
+  assert.deepEqual(h.gate.discovery(), { cohort: true, family: joined }, "reports what deferred");
+  assert.deepEqual(h.gate.primeDeferred(["objective_stack_status"]), [], "not a deferred member");
+});

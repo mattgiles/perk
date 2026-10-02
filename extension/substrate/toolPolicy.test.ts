@@ -618,35 +618,38 @@ test("reconcileTarget: null when nothing changes; foreign names keep their live 
       );
     }
   }
-  // The deferred third term, inside the cohort: kept only while live AND eligible; never
-  // activated.
+  // The deferred third term, for a name deferred in this session: kept only while live AND
+  // eligible; never activated.
+  const here = ["tt_deferred"];
   const planned = reconcileTarget(
     { active: ["tt_deferred"], registered },
     "plan",
     "read-write",
-    true,
+    here,
   );
   assert.ok(planned?.includes("tt_deferred"));
-  const notLive = reconcileTarget({ active: [], registered }, "plan", "read-write", true);
+  const notLive = reconcileTarget({ active: [], registered }, "plan", "read-write", here);
   assert.ok(notLive !== null && !notLive.includes("tt_deferred"));
   const ineligible = reconcileTarget(
     { active: ["tt_deferred"], registered },
     "implement",
     "read-write",
-    true,
+    here,
   );
   assert.ok(ineligible !== null && !ineligible.includes("tt_deferred"));
-  // Outside the cohort a family member is always-declared: installed whenever eligible.
-  for (const cohort of [undefined, false]) {
-    const outside = reconcileTarget({ active: [], registered }, "plan", "read-write", cohort);
-    assert.ok(outside?.includes("tt_deferred"), String(cohort));
+  // A family member NOT deferred in this session (outside the cohort, or its re-registration
+  // failed) is always-declared: installed whenever eligible, dropped where it is not.
+  for (const deferred of [undefined, [], ["tt_allowed"]]) {
+    const label = JSON.stringify(deferred ?? null);
+    const outside = reconcileTarget({ active: [], registered }, "plan", "read-write", deferred);
+    assert.ok(outside?.includes("tt_deferred"), label);
     const dropped = reconcileTarget(
       { active: ["tt_deferred"], registered },
       "implement",
       "read-write",
-      cohort,
+      deferred,
     );
-    assert.ok(dropped !== null && !dropped.includes("tt_deferred"), String(cohort));
+    assert.ok(dropped !== null && !dropped.includes("tt_deferred"), label);
   }
   // A catalogued name the host never registered is never installed and never forces an install.
   const partial = ["read", "tt_allowed"];

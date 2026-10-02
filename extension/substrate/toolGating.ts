@@ -24,8 +24,10 @@
 //  - THE DISCOVERY COHORT: a session whose host has Pi's builtin `tool_search` registered and
 //    active at `session_start` joins it (index.ts: `deferDiscoveryFamily` re-registers the pilot
 //    family deferred, then `joinDiscoveryCohort`). The next install deactivates the family once
-//    (still ONE perk install at startup); thereafter a family member is kept exactly while it is
-//    active and eligible (`reconcileTarget`'s third term, cohort-only). Priming
+//    (still ONE perk install at startup); thereafter a member deferred in this session is kept
+//    exactly while it is active and eligible (`reconcileTarget`'s third term). A member whose
+//    re-registration failed is still `direct` — `tool_search` cannot find it — so it stays
+//    always-declared like any perk tool. Priming
 //    (`primeDeferred`) is the one perk-initiated activation of a deferred tool: a warm door or a
 //    wave launcher activates the members its carrier names. Every other session is a
 //    nonparticipant and keeps today's always-declared loadout. Resets: resume/fork start from the
@@ -69,7 +71,6 @@ import {
   discoveryFamily,
   hiddenDeclarationsFor,
   isEligible,
-  isPerkTool,
   LOADOUT_HOST_NAME,
   type Mode,
   normalizeStage,
@@ -164,19 +165,20 @@ export interface ToolGating {
    */
   prepareLoadout(loadout: ToolLoadout): ToolLoadoutChanges;
   /**
-   * Join the discovery cohort with the family `deferDiscoveryFamily` re-registered deferred: the
-   * next reconciliation removes those names from the live set once, as part of its one install.
-   * Idempotent per activation (a second call is a no-op); installs nothing itself.
+   * Join the discovery cohort with the family members `deferDiscoveryFamily` actually re-registered
+   * deferred: the next reconciliation removes those names from the live set once, as part of its
+   * one install, and only they are treated as deferred from then on. Idempotent per activation
+   * (a second call is a no-op); installs nothing itself.
    */
   joinDiscoveryCohort(family: readonly string[]): void;
   /**
-   * Primed activation: activate the deferred family members among `names` that are registered,
+   * Primed activation: activate the members deferred in this session among `names` that are registered,
    * eligible in the presented landing and not yet active, in catalog order; returns them. A no-op
    * (`[]`, no install) outside the cohort. Never throws — a failure is reported and returns `[]`
    * (presentation is fail-open: the model can still `tool_search`; enforcement is untouched).
    */
   primeDeferred(names: readonly string[]): string[];
-  /** The selfcheck read: whether this session joined the cohort, and the whole family if so. */
+  /** The selfcheck read: whether this session joined the cohort, and the members it deferred. */
   discovery(): { cohort: boolean; family: readonly string[] };
 }
 
@@ -200,9 +202,11 @@ export function registerToolGating(
   // The builtins the gate switched off (codemode), restored when the presentation turns
   // read-write. Updated only after a successful install.
   let suspended: string[] = [];
-  // Whether this activation joined the discovery cohort, and the family the next install must
-  // deactivate once (cleared only after a successful install).
+  // Whether this activation joined the discovery cohort; the family members it deferred (catalog
+  // order); and those the next install must still deactivate once (cleared only after a
+  // successful install).
   let cohort = false;
+  let deferred: string[] = [];
   let pendingDeferral: string[] = [];
 
   function hasFloor(): boolean {
@@ -235,14 +239,14 @@ export function registerToolGating(
       const live = pi.getActiveTools();
       const infos = provenanceMap();
       const step = suspensionStep({ active: live, infos }, presentedMode, suspended);
-      const deferring = new Set(pendingDeferral.filter(isPerkTool));
+      const deferring = new Set(pendingDeferral);
       const joined = step.active.filter((name) => !deferring.has(name));
       const target =
         reconcileTarget(
           { active: joined, registered: [...infos.keys()] },
           stageId,
           presentedMode,
-          cohort,
+          deferred,
         ) ?? joined;
       if (!sameNames(target, live)) pi.setActiveTools(target);
       else if (presentedMode !== previousMode && live.includes(LOADOUT_HOST_NAME)) {
@@ -396,8 +400,10 @@ export function registerToolGating(
     isActive,
     joinDiscoveryCohort(family: readonly string[]): void {
       if (cohort) return;
+      const named = new Set(family);
       cohort = true;
-      pendingDeferral = [...family];
+      deferred = discoveryFamily().filter((name) => named.has(name));
+      pendingDeferral = [...deferred];
     },
     primeDeferred(names: readonly string[]): string[] {
       if (!cohort) return [];
@@ -405,7 +411,7 @@ export function registerToolGating(
         const wanted = new Set(names);
         const live = pi.getActiveTools();
         const registered = new Set(pi.getAllTools().map((t) => t.name));
-        const targets = discoveryFamily().filter(
+        const targets = deferred.filter(
           (name) =>
             wanted.has(name) &&
             registered.has(name) &&
@@ -420,7 +426,7 @@ export function registerToolGating(
       }
     },
     discovery() {
-      return { cohort, family: cohort ? discoveryFamily() : [] };
+      return { cohort, family: [...deferred] };
     },
     prepareLoadout(loadout: ToolLoadout): ToolLoadoutChanges {
       try {
