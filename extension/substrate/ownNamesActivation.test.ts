@@ -32,6 +32,7 @@ import { ensureToolCatalog } from "../testing/toolCatalog.ts";
 import { sideSessionTools } from "../vendor/btw/core.ts";
 import {
   gatedToolsFor,
+  isDiscoveryHost,
   isPerkTool,
   LOADOUT_HOST_NAME,
   perkToolsFor,
@@ -784,4 +785,6 @@ test("hidden host: active in every landing where registered and never declared; 
     const tools = sideSessionTools(readOnly);
     assert.ok(!tools.includes("codemode") && !tools.includes("tool_search"), String(readOnly));
   }
+  // …so /btw's side session is never a discovery host: it keeps today's loadout by construction.
+  assert.equal(isDiscoveryHost(new Map(), sideSessionTools(false)), false);
 });

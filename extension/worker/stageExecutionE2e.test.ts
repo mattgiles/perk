@@ -19,13 +19,14 @@ import {
   fauxAssistantMessage,
   fauxText,
   fauxToolCall,
+  getCurrentTools,
   type Model,
 } from "@earendil-works/pi-ai";
 import { agentScratchDir, type PlanRef, runEventsPath } from "../substrate/cache.ts";
 import { fakePerkRouter, fauxModelRuntime, scaffoldWorkerWorktree } from "../testing/harness.ts";
 // Test-side adapter import: the E2E tier mints the nominal selection deliberately (the faux
 // runtime + faux model ride the SAME production `defaultCreateRuntime` path).
-import { WorkerModelSelection } from "./sdkAdapter.ts";
+import { type DriveRuntimeLike, defaultCreateRuntime, WorkerModelSelection } from "./sdkAdapter.ts";
 import { type DriveBudget, type DriveStage, type RunEvent, runStage } from "./stageExecution.ts";
 
 // Extension delivery is the PRODUCTION load path: `defaultCreateRuntime` layers disk settings
@@ -47,7 +48,8 @@ let runCounter = 0;
 /** Drive a full stage through the real factory + a faux model; return outcome + captured events. */
 async function runDrive(opts: {
   stage: DriveStage;
-  responses: ReturnType<typeof fauxAssistantMessage>[];
+  /** Scripted replies; a function reply receives the request context (it may record it). */
+  responses: unknown[];
   routes?: Record<string, { json: unknown; code?: number }>;
   initialPrompt?: string;
   planRef?: PlanRef;
@@ -63,6 +65,10 @@ async function runDrive(opts: {
   signal?: AbortSignal;
   /** Observe each event as the injected array sink receives it (e.g. to abort mid-drive). */
   onEvent?: (event: RunEvent) => void;
+  /** Settings `defaultTools` for the scaffold (Pi's startup active-set preference). */
+  defaultTools?: string[];
+  /** Observe the PRODUCTION runtime (built by `defaultCreateRuntime`) once constructed. */
+  onRuntime?: (runtime: DriveRuntimeLike) => void;
 }) {
   const runId = `01JE2E${String(runCounter++).padStart(20, "0")}`;
   const cwd = scaffoldWorkerWorktree({
@@ -70,6 +76,7 @@ async function runDrive(opts: {
     stage: opts.stage,
     planRef: opts.planRef,
     packages: opts.packages,
+    defaultTools: opts.defaultTools,
   });
 
   const savedEnv = new Map<string, string | undefined>();
@@ -98,14 +105,26 @@ async function runDrive(opts: {
       },
       // When `fileSink`, omit the array sink so the production default NDJSON file sink runs; then
       // parse it back into `events` (the default sink is a no-op unless PERK_RUN_ID is set, which it is).
-      opts.fileSink
-        ? {}
-        : {
-            eventSink: (e) => {
-              events.push(e);
-              opts.onEvent?.(e);
-            },
-          },
+      {
+        ...(opts.fileSink
+          ? {}
+          : {
+              eventSink: (e: RunEvent) => {
+                events.push(e);
+                opts.onEvent?.(e);
+              },
+            }),
+        ...(opts.onRuntime !== undefined
+          ? {
+              createRuntime: async (o: { worktree: string; model?: WorkerModelSelection }) => {
+                assert.ok(o.model !== undefined, "the E2E tier always passes its faux selection");
+                const runtime = await defaultCreateRuntime(o.worktree, o.model);
+                opts.onRuntime?.(runtime);
+                return runtime;
+              },
+            }
+          : {}),
+      },
     );
     if (opts.fileSink) {
       for (const line of readFileSync(runEventsPath(cwd, runId), "utf8").trim().split("\n")) {
@@ -215,6 +234,33 @@ test("e2e: implement HAPPY (file sink) — the production NDJSON sink writes the
     "the file sink captured the submit tool_outcome",
   );
   assertMonotonicSeq(events);
+});
+
+test("e2e: implement HAPPY with the discovery opt-in — the worker is a nonparticipant: the family stays declared, tool_search is never registered", async () => {
+  let runtime: DriveRuntimeLike | undefined;
+  const seen: { declared: string[]; registered: string[] } = { declared: [], registered: [] };
+  const first = (context: { messages: never }) => {
+    seen.declared = getCurrentTools(context.messages).map((t) => t.name);
+    const session = runtime?.session as unknown as { getAllTools(): { name: string }[] };
+    seen.registered = session.getAllTools().map((t) => t.name);
+    return fauxAssistantMessage([fauxToolCall("submit", {})], { stopReason: "toolUse" as const });
+  };
+  const { outcome } = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [first, idle()],
+    defaultTools: ["+tool_search"],
+    onRuntime: (r) => {
+      runtime = r;
+    },
+  });
+  assert.ok(seen.registered.length > 0, "the first request was observed");
+  for (const name of ["collect_review_wave", "push_annotations", "objective_stack_status"])
+    assert.ok(seen.declared.includes(name), `${name} is declared on the first request`);
+  assert.ok(!seen.declared.includes("tool_search"), "tool_search is not declared");
+  assert.ok(!seen.registered.includes("tool_search"), "the worker registers no tool_search");
+  assert.equal(outcome.status, "completed", "the drive still completes via submit");
+  assert.equal(outcome.terminal_signal, "submit_tool");
 });
 
 // --- Scenario 2: address HAPPY -----------------------------------------------------------------

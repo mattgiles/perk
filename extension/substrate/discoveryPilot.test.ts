@@ -9,32 +9,41 @@
 // design record (`docs/design/native-discovery-pilot.md`).
 
 import assert from "node:assert/strict";
-import { before, test } from "node:test";
+import { existsSync, readFileSync } from "node:fs";
+import { before, type TestContext, test } from "node:test";
+import { AgentSession, type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import { REVIEW_BROWSER_PRIMES } from "../pi/v1/codeReview/browser.ts";
+import { createFakeSubagents } from "../testing/fakeSubagents.ts";
 import {
   COHORT_SETTINGS,
+  fakePerk,
+  loadAt,
   type PerkSession,
+  plantSession,
   type RecordedRequest,
   recordingRuntime,
+  recordPerkInstalls,
+  registerFakeTool,
+  scaffoldRepo,
+  spyInjections,
   staged,
   toolSearch,
 } from "../testing/harness.ts";
 import { ensureToolCatalog } from "../testing/toolCatalog.ts";
+import type { PlanRef } from "./cache.ts";
 import {
+  discoveryFamily,
   isEligible,
   isPerkTool,
   perkToolNames,
   perkToolPolicy,
+  perkToolsFor,
   REGISTRY_STAGE_IDS,
 } from "./toolPolicy.ts";
 
 before(ensureToolCatalog);
 
 const PRINT = process.env.PERK_PRINT_DISCOVERY_CENSUS === "1";
-
-/** The catalogued discovery-pilot family (`declared: "deferred"`), in catalog order. */
-function family(): string[] {
-  return perkToolNames().filter((name) => perkToolPolicy(name)?.declared === "deferred");
-}
 
 /** A census-capable session: the real `tool_search` registered; `cohort` activates it. */
 async function pilotSession(
@@ -54,6 +63,542 @@ async function pilotSession(
   });
   return { h, rt };
 }
+
+/** The session's active perk names, sorted. */
+function activePerk(h: PerkSession): string[] {
+  return h.session.getActiveToolNames().filter(isPerkTool).sort();
+}
+
+/** The registered subset of a perk view, sorted — what perk's activation installs. */
+function registeredSubset(h: PerkSession, view: readonly string[]): string[] {
+  const registered = new Set(h.session.getAllTools().map((t) => t.name));
+  return view.filter((name) => registered.has(name)).sort();
+}
+
+const isActive = (h: PerkSession, name: string): boolean =>
+  h.session.getActiveToolNames().includes(name);
+
+/** The backstop's verdict for a call to `name` (the block reason, or undefined when allowed). */
+async function blocked(h: PerkSession, name: string): Promise<string | undefined> {
+  const verdict = await h.emitToolCall(name, {});
+  return verdict?.block === true ? verdict.reason : undefined;
+}
+
+/** Count the family re-registrations (`deferDiscoveryFamily` → Pi's registry refresh). */
+function recordDeferrals(t: TestContext): { count: number } {
+  const seen = { count: 0 };
+  const proto = AgentSession.prototype as unknown as Record<
+    string,
+    (...args: unknown[]) => unknown
+  >;
+  const original = proto._refreshToolRegistry;
+  assert.ok(original !== undefined, "Pi's registry refresh is where a re-registration lands");
+  t.mock.method(proto, "_refreshToolRegistry", function (this: unknown, ...args: unknown[]) {
+    if (new Error().stack?.includes("deferDiscoveryFamily") === true) seen.count += 1;
+    return original.apply(this, args);
+  });
+  return seen;
+}
+
+/** Every perk install, with the session it went into (the two-session isolation proof). */
+function recordInstallsBySession(t: TestContext): { session: AgentSession; names: string[] }[] {
+  const installs: { session: AgentSession; names: string[] }[] = [];
+  const original = AgentSession.prototype.setActiveToolsByName;
+  t.mock.method(
+    AgentSession.prototype,
+    "setActiveToolsByName",
+    function (this: AgentSession, names: string[]) {
+      if (new Error().stack?.includes("substrate/toolGating.ts") === true)
+        installs.push({ session: this, names: [...names] });
+      return original.call(this, names);
+    },
+  );
+  return installs;
+}
+
+/** A plan-ref linking the session to objective 7 (the stack-drive commands' fallback). */
+const PLAN_REF: PlanRef = {
+  provider: "github",
+  pr_id: "42",
+  url: "https://github.com/o/r/issues/42",
+  labels: [],
+  objective_id: "7",
+  base: null,
+};
+
+/** The implement-eligible family members (read-write). */
+const IMPLEMENT_MEMBERS = ["collect_review_wave", "objective_stack_status", "push_annotations"];
+
+// --- 1. the cohort join ---------------------------------------------------------------------------
+
+test("cohort join (A): the family re-registers deferred and leaves the request; tool_search is declared; one perk install; a re-emitted session_start changes nothing", async (t) => {
+  const installs = recordPerkInstalls(t);
+  const deferrals = recordDeferrals(t);
+  const family = discoveryFamily();
+  assert.deepEqual(
+    family.filter((name) => isEligible(name, undefined, "implement", "read-write")).sort(),
+    IMPLEMENT_MEMBERS,
+  );
+  const { h, rt } = await pilotSession("implement", "read-write", true);
+  try {
+    assert.equal(deferrals.count, family.length, "each member re-registered exactly once");
+    assert.equal(installs.length, 1, "a cohort startup is ONE perk install");
+    for (const name of family) {
+      assert.equal(h.toolInfo(name)?.exposure, "deferred", `${name} re-registered deferred`);
+      assert.ok(!isActive(h, name), `${name} inactive`);
+    }
+    assert.deepEqual(
+      activePerk(h),
+      registeredSubset(h, perkToolsFor("implement", "read-write", true)),
+    );
+    rt.census();
+    await h.session.prompt("census");
+    const request = rt.last();
+    assert.ok(request.tools.includes("tool_search"), "tool_search is declared");
+    for (const name of family) {
+      assert.ok(!request.tools.includes(name), `${name} undeclared`);
+      assert.ok(!request.prompt.includes(`- ${name}: `), `${name}'s snippet left the prompt`);
+      for (const line of h.registeredTool(name)?.promptGuidelines ?? [])
+        assert.ok(!request.prompt.includes(line), `${name}'s guideline left the prompt`);
+    }
+    assert.equal(installs.length, 1, "the prompt turn installed nothing");
+
+    // Prime one member, then re-emit session_start: nothing re-registers or installs, and the
+    // primed member is kept.
+    spyInjections(h);
+    await h.invokeCommand("objective-sync", "7");
+    assert.ok(isActive(h, "objective_stack_status"), "primed by the door");
+    const [installed, deferred] = [installs.length, deferrals.count];
+    await h.emitSessionStart();
+    assert.equal(deferrals.count, deferred, "nothing re-registered");
+    assert.equal(installs.length, installed, "nothing installed");
+    assert.ok(isActive(h, "objective_stack_status"), "the primed member is kept");
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- 2. nonparticipant preservation ---------------------------------------------------------------
+
+test("nonparticipant preservation (A): tool_search inactive, absent, or a foreign namesake — the family stays direct, active and declared; a bare session still installs nothing", async (t) => {
+  const installs = recordPerkInstalls(t);
+  const family = discoveryFamily();
+  const namesake = (pi: ExtensionAPI) => registerFakeTool(pi, "tool_search");
+  const arms: [string, Parameters<typeof staged>[2], boolean][] = [
+    ["tool_search registered but inactive", { extraExtensions: [toolSearch()] }, false],
+    ["no tool_search at all", {}, false],
+    [
+      "a foreign tool_search namesake, active and opted in",
+      { extraExtensions: [namesake], settings: COHORT_SETTINGS },
+      true,
+    ],
+  ];
+  for (const [arm, opts, namesakeActive] of arms) {
+    const rt = await recordingRuntime();
+    const h = await staged("implement", "read-write", {
+      headful: false,
+      ...opts,
+      model: rt.reg.getModel(),
+      modelRuntime: rt.reg.modelRuntime,
+    });
+    try {
+      assert.equal(isActive(h, "tool_search"), namesakeActive, `${arm}: the precondition`);
+      for (const name of family)
+        assert.equal(h.toolInfo(name)?.exposure, "direct", `${arm}: ${name} stays direct`);
+      assert.deepEqual(
+        activePerk(h),
+        registeredSubset(h, perkToolsFor("implement", "read-write")),
+        `${arm}: today's always-declared loadout`,
+      );
+      rt.census();
+      await h.session.prompt("census");
+      for (const name of IMPLEMENT_MEMBERS) {
+        assert.ok(isActive(h, name), `${arm}: ${name} active`);
+        assert.ok(rt.last().tools.includes(name), `${arm}: ${name} declared`);
+      }
+    } finally {
+      h.dispose();
+    }
+  }
+
+  // The bare-session zero-call guarantee holds with the family flagged.
+  installs.length = 0;
+  const rt = await recordingRuntime();
+  const bare = await loadAt(scaffoldRepo(), {
+    headful: false,
+    model: rt.reg.getModel(),
+    modelRuntime: rt.reg.modelRuntime,
+    env: { PERK_RUN_ID: undefined },
+    extraExtensions: [toolSearch()],
+  });
+  try {
+    await bare.session.extensionRunner.emitResourcesDiscover(
+      bare.session.sessionManager.getCwd(),
+      "reload",
+    );
+    rt.census();
+    await bare.session.prompt("census");
+    assert.deepEqual(installs, [], "zero perk installs");
+    for (const name of family) assert.ok(rt.last().tools.includes(name), `${name} declared`);
+  } finally {
+    bare.dispose();
+  }
+});
+
+test("two-session isolation (A): a cohort session's join never reaches a nonparticipant bound in the same process", async (t) => {
+  const installs = recordInstallsBySession(t);
+  const family = discoveryFamily();
+  const a = await pilotSession("implement", "read-write", true);
+  const b = await pilotSession("implement", "read-write", false);
+  try {
+    await a.h.emitSessionStart();
+    for (const name of family) {
+      assert.equal(a.h.toolInfo(name)?.exposure, "deferred", `A: ${name}`);
+      assert.equal(b.h.toolInfo(name)?.exposure, "direct", `B: ${name}`);
+    }
+    for (const name of IMPLEMENT_MEMBERS) {
+      assert.ok(!isActive(a.h, name), `A defers ${name}`);
+      assert.ok(isActive(b.h, name), `B keeps ${name}`);
+    }
+    const intoA = installs.filter((i) => i.session === a.h.session);
+    const intoB = installs.filter((i) => i.session === b.h.session);
+    assert.equal(intoA.length, 1, "A's join rode A's one startup install");
+    for (const name of family)
+      assert.ok(!intoA[0]?.names.includes(name), `A's install drops ${name}`);
+    for (const install of intoB)
+      for (const name of IMPLEMENT_MEMBERS)
+        assert.ok(install.names.includes(name), `no install into B drops ${name}`);
+  } finally {
+    a.h.dispose();
+    b.h.dispose();
+  }
+});
+
+// --- 3. primed activation -------------------------------------------------------------------------
+
+test("primed activation (A): /objective-sync primes objective_stack_status, declared on the next request; /objective-recover primes nothing; a successful start_review_wave primes collect_review_wave, a failed launch nothing", async () => {
+  {
+    const fake = createFakeSubagents();
+    const { h, rt } = await pilotSession("implement", "read-write", true, {
+      planRef: PLAN_REF,
+      extraExtensions: [fake.extension],
+    });
+    try {
+      spyInjections(h);
+      await h.invokeCommand("objective-recover");
+      assert.ok(!isActive(h, "objective_stack_status"), "recover primes nothing");
+      await h.invokeCommand("objective-sync");
+      assert.ok(isActive(h, "objective_stack_status"), "sync primed it (the plan-ref's objective)");
+      rt.census();
+      await h.session.prompt("census");
+      assert.ok(rt.last().tools.includes("objective_stack_status"), "declared on the next request");
+
+      assert.ok(!isActive(h, "collect_review_wave"));
+      const started = await h.invokeTool("start_review_wave", {
+        angles: ["claimed-intent", "correctness"],
+        pr: 42,
+        worktree: "/abs/wt",
+      });
+      assert.equal((started.details as { ok: boolean }).ok, true, started.content[0]?.text);
+      assert.ok(isActive(h, "collect_review_wave"), "the launch primed its collector");
+      rt.census();
+      await h.session.prompt("census");
+      assert.ok(rt.last().tools.includes("collect_review_wave"), "declared on the next request");
+    } finally {
+      h.dispose();
+    }
+  }
+  {
+    // No subagent responder + a tiny ping timeout: the deterministic `unavailable` launch.
+    const { h } = await pilotSession("implement", "read-write", true, {
+      env: { PERK_WAVE_RPC_PING_MS: "20" },
+    });
+    try {
+      const failed = await h.invokeTool("start_review_wave", {
+        angles: ["claimed-intent", "correctness"],
+        pr: 42,
+        worktree: "/abs/wt",
+      });
+      assert.equal((failed.details as { ok: boolean }).ok, false);
+      assert.ok(!isActive(h, "collect_review_wave"), "a failed launch primes nothing");
+    } finally {
+      h.dispose();
+    }
+  }
+});
+
+test("primed activation (A): an ineligible prime and a nonparticipant prime install nothing", async (t) => {
+  const installs = recordPerkInstalls(t);
+  {
+    // objective_stack_status rides only the worktree stages: a cohort plan session skips it.
+    const { h } = await pilotSession("plan", "read-write", true);
+    try {
+      spyInjections(h);
+      const before = installs.length;
+      await h.invokeCommand("objective-sync", "7");
+      assert.ok(!isActive(h, "objective_stack_status"), "ineligible: never activated");
+      assert.equal(installs.length, before, "no install");
+    } finally {
+      h.dispose();
+    }
+  }
+  {
+    const { h } = await pilotSession("implement", "read-write", false);
+    try {
+      spyInjections(h);
+      const before = installs.length;
+      await h.invokeCommand("objective-sync", "7");
+      assert.ok(isActive(h, "objective_stack_status"), "always declared outside the cohort");
+      assert.equal(installs.length, before, "priming is a no-op outside the cohort");
+    } finally {
+      h.dispose();
+    }
+  }
+});
+
+// --- 4. priming survives the points ---------------------------------------------------------------
+
+/** The code-review handshake the fake plannotator records (responded to at teardown). */
+type Envelope = { respond: (response: unknown) => void };
+
+/** A fake plannotator: the presence-probe command plus a bus listener recording each request. */
+function fakePlannotator(sink: Envelope[]): (pi: ExtensionAPI) => void {
+  return (pi) => {
+    pi.registerCommand("plannotator-review", {
+      description: "fake plannotator (test)",
+      handler: async () => {},
+    });
+    pi.events.on("plannotator:request", (data) => {
+      sink.push(data as Envelope);
+    });
+  };
+}
+
+/** Settle every recorded bridge and wait for the readiness poll's env restore (bounded). */
+async function settleBridges(sink: Envelope[]): Promise<void> {
+  for (const envelope of sink) envelope.respond({ status: "handled", result: { approved: true } });
+  const start = Date.now();
+  while ("PLANNOTATOR_PORT" in process.env && Date.now() - start < 5000) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+const CHECKOUT_OK_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  path: "/wt/review-77",
+  pr: 77,
+  url: "https://github.com/o/r/pull/77",
+  head_sha: "a".repeat(40),
+  base_sha: "b".repeat(40),
+  base_ref: "main",
+});
+
+test("priming survives the points (A): door-primed members stay active and declared through before_agent_start, resources_discover and session_start; under the gate only the gate-allowed one stays", async () => {
+  const sink: Envelope[] = [];
+  const bin = fakePerk(scaffoldRepo(), { stdout: CHECKOUT_OK_JSON });
+  const { h, rt } = await pilotSession("implement", "read-write", true, {
+    headful: true,
+    env: { PERK_BIN: bin },
+    extraExtensions: [fakePlannotator(sink)],
+  });
+  try {
+    spyInjections(h);
+    await h.runCommandHandler("pr-review-browser", "77");
+    for (const name of REVIEW_BROWSER_PRIMES) assert.ok(isActive(h, name), `${name} primed`);
+    await h.emitBeforeAgentStart();
+    await h.session.extensionRunner.emitResourcesDiscover(
+      h.session.sessionManager.getCwd(),
+      "reload",
+    );
+    await h.emitSessionStart();
+    rt.census();
+    await h.session.prompt("census");
+    for (const name of REVIEW_BROWSER_PRIMES)
+      assert.ok(rt.last().tools.includes(name), `${name} declared after every point`);
+
+    // Gate entry: push_annotations is gate-allowed (mode over stage) and kept; the gate-blocked
+    // collector is dropped.
+    await h.invokeCommand("plan");
+    assert.equal(h.workflowState().mode, "read-only");
+    assert.ok(isActive(h, "push_annotations"), "kept under the gate");
+    assert.ok(!isActive(h, "collect_review_wave"), "ineligible under the gate: dropped");
+    rt.census();
+    await h.session.prompt("census");
+    assert.ok(rt.last().tools.includes("push_annotations"));
+    assert.ok(!rt.last().tools.includes("collect_review_wave"));
+    // Gate exit: the kept member survives; reconciliation never re-activates the dropped one.
+    await h.invokeCommand("plan");
+    assert.equal(h.workflowState().mode, "read-write");
+    assert.ok(isActive(h, "push_annotations"), "kept across the exit");
+    assert.ok(!isActive(h, "collect_review_wave"), "only a primer or the host re-activates");
+  } finally {
+    await settleBridges(sink);
+    h.dispose();
+  }
+});
+
+test("priming resets (A): resume and fork from the primed leaf start without it and perk never installs it; /tree restores it and perk keeps it, or drops it in an ineligible stage", async (t) => {
+  const installs = recordPerkInstalls(t);
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [{ stage: "implement", mode: "read-write" }]);
+  const rt = await recordingRuntime();
+  const opts = {
+    headful: false,
+    model: rt.reg.getModel(),
+    modelRuntime: rt.reg.modelRuntime,
+    extraExtensions: [toolSearch()],
+    settings: COHORT_SETTINGS,
+    env: { PERK_RUN_ID: undefined },
+  };
+  const primed = await loadAt(cwd, { ...opts, sessionManager: SessionManager.open(file) });
+  let leaf: string;
+  try {
+    spyInjections(primed);
+    await primed.invokeCommand("objective-sync", "7");
+    assert.ok(isActive(primed, "objective_stack_status"));
+    rt.census();
+    await primed.session.prompt("census");
+    const id = primed.session.sessionManager.getLeafId();
+    assert.ok(id !== null);
+    leaf = id;
+  } finally {
+    primed.dispose();
+  }
+  assert.ok(existsSync(file) && readFileSync(file, "utf8").includes("objective_stack_status"));
+
+  for (const manager of [SessionManager.open(file), SessionManager.forkFrom(file, cwd)]) {
+    installs.length = 0;
+    const resumed = await loadAt(cwd, { ...opts, sessionManager: manager });
+    try {
+      assert.equal(resumed.workflowState().stage, "implement");
+      assert.ok(!isActive(resumed, "objective_stack_status"), "starts without it");
+      rt.census();
+      await resumed.session.prompt("census");
+      assert.ok(!isActive(resumed, "objective_stack_status"));
+      assert.ok(installs.length > 0, "the recorder sees perk's startup install (non-vacuous)");
+      assert.deepEqual(
+        installs.filter((names) => names.includes("objective_stack_status")),
+        [],
+        "perk never installs it",
+      );
+    } finally {
+      resumed.dispose();
+    }
+  }
+
+  const h = await loadAt(cwd, { ...opts, sessionManager: SessionManager.open(file) });
+  try {
+    const [planted] = h.entryIds() as [string];
+    await h.navigateTo(planted);
+    await h.navigateTo(leaf);
+    assert.ok(isActive(h, "objective_stack_status"), "/tree restored it and perk kept it");
+    const toPlan = h.session.sessionManager.appendCustomEntry("perk:workflow-state", {
+      stage: "plan",
+    });
+    await h.navigateTo(planted);
+    await h.navigateTo(toPlan);
+    assert.equal(h.workflowState().stage, "plan");
+    assert.ok(!isActive(h, "objective_stack_status"), "dropped where it is ineligible");
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- 5. ineligible search, end to end -------------------------------------------------------------
+
+test("ineligible search (A): in plan a searched collect_review_wave is hidden at once, deactivated at the next prompt and blocked under the gate; an eligible search in implement survives every point", async () => {
+  {
+    const { h, rt } = await pilotSession("plan", "read-write", true);
+    try {
+      rt.callThenStop("tool_search", { query: "collect the adversarial review wave reports" });
+      await h.session.prompt("find the collector");
+      assert.ok(isActive(h, "collect_review_wave"), "the search activated it for this prompt");
+      assert.ok(
+        !rt.last().tools.includes("collect_review_wave"),
+        "hidden on the very next request",
+      );
+      rt.census();
+      await h.session.prompt("census");
+      assert.ok(!isActive(h, "collect_review_wave"), "deactivated when the next prompt started");
+      assert.ok(!rt.last().tools.includes("collect_review_wave"));
+      await h.invokeCommand("plan");
+      assert.equal(
+        await blocked(h, "collect_review_wave"),
+        "perk read-only mode: collect_review_wave is blocked (tool not allowlisted).",
+      );
+    } finally {
+      h.dispose();
+    }
+  }
+  {
+    const { h, rt } = await pilotSession("implement", "read-write", true);
+    try {
+      rt.callThenStop("tool_search", { query: "push findings to the browser as annotations" });
+      await h.session.prompt("find the annotation tool");
+      assert.ok(rt.last().tools.includes("push_annotations"), "declared on the next request");
+      await h.session.extensionRunner.emitResourcesDiscover(
+        h.session.sessionManager.getCwd(),
+        "reload",
+      );
+      await h.emitSessionStart();
+      await h.invokeCommand("plan");
+      assert.ok(isActive(h, "push_annotations"), "kept under the gate");
+      await h.invokeCommand("plan");
+      rt.census();
+      await h.session.prompt("census");
+      assert.ok(rt.last().tools.includes("push_annotations"), "declared after every point");
+    } finally {
+      h.dispose();
+    }
+  }
+});
+
+// --- 6. offline discoverability pins (criterion D1) -----------------------------------------------
+
+/**
+ * D1's scored queries, exactly as pinned before measurement — a change needs an owner-approved
+ * amendment recorded in docs/design/native-discovery-pilot.md BEFORE the amended run is scored.
+ */
+const D1_QUERIES: readonly { stage: string; member: string; query: string }[] = [
+  {
+    stage: "implement",
+    member: "collect_review_wave",
+    query: "collect the adversarial review wave reports",
+  },
+  {
+    stage: "implement",
+    member: "push_annotations",
+    query: "push findings to the browser as annotations",
+  },
+  { stage: "implement", member: "objective_stack_status", query: "stacked delivery train status" },
+  {
+    stage: "plan",
+    member: "collect_draft_review_wave",
+    query: "collect the draft review wave reports",
+  },
+];
+
+test("discoverability (A, D1): each family member is tool_search's top hit for its pinned query where eligible", async () => {
+  assert.deepEqual(
+    D1_QUERIES.map((q) => q.member).sort(),
+    [...discoveryFamily()].sort(),
+    "one scored query per family member",
+  );
+  for (const { stage, member, query } of D1_QUERIES) {
+    assert.ok(isEligible(member, undefined, stage, "read-write"), `${member} eligible in ${stage}`);
+    const { h } = await pilotSession(stage, "read-write", true);
+    try {
+      const result = await h.invokeTool("tool_search", { query });
+      const loaded = (result.details as { loaded: string[] }).loaded;
+      if (PRINT) process.stderr.write(`D1 ${stage} "${query}" → ${JSON.stringify(loaded)}\n`);
+      assert.equal(loaded[0], member, `D1: "${query}" in ${stage}`);
+    } finally {
+      h.dispose();
+    }
+  }
+});
 
 /** The bytes one census request costs: its declared tools plus its system prompt. */
 function requestBytes(request: RecordedRequest): number {
@@ -87,7 +632,7 @@ const MEASURED_POPULATION = [
 const FIXED_COST_STAGE = "gist-author";
 
 test("census and savings (A): per-stage request bytes with and without the cohort; the fixed cost is tool_search's own declaration", async () => {
-  const members = family();
+  const members = discoveryFamily();
   const rows: { stage: string; baseline: number; cohort: number; net: number }[] = [];
   let censusTools: string[] = [];
   let toolSearchOwn = -1;
