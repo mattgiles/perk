@@ -1,6 +1,7 @@
 """The session-normalization pipeline + renderer + splitter (`contracts.md` §8.35, node 3.2)."""
 
 import json
+from dataclasses import fields, replace
 from pathlib import Path
 
 from perk.learn.normalize import (
@@ -8,13 +9,22 @@ from perk.learn.normalize import (
     _MAX_FILE_LIST,
     _MAX_PAYLOAD_CHARS,
     _TOOL_RESULT_HEAD_LINES,
+    SessionReport,
     escape_xml,
     normalize_session,
+    render_entry,
     render_evidence,
     sanitize_surrogates,
     split_to_chunks,
 )
-from perk.learn.session_jsonl import ParsedSession, SessionEntry, ToolCall, parse_session_jsonl
+from perk.learn.session_jsonl import (
+    NestedCall,
+    NestedCalls,
+    ParsedSession,
+    SessionEntry,
+    ToolCall,
+    parse_session_jsonl,
+)
 
 
 def _entry(
@@ -40,6 +50,7 @@ def _entry(
     read_files: tuple[str, ...] = (),
     modified_files: tuple[str, ...] = (),
     from_id: str | None = None,
+    nested_calls: NestedCalls | None = None,
 ) -> SessionEntry:
     return SessionEntry(
         index=index,
@@ -64,6 +75,7 @@ def _entry(
         read_files=read_files,
         modified_files=modified_files,
         from_id=from_id,
+        nested_calls=nested_calls,
     )
 
 
@@ -290,3 +302,296 @@ def test_render_evidence_survives_lone_surrogate_in_session(tmp_path: Path):
     assert len(report.sessions) == 1
     chunk = (repo / report.sessions[0].chunk_paths[0]).read_text(encoding="utf-8")
     assert "bad ? char" in chunk
+
+
+# --- nested-call evidence ------------------------------------------------------------
+
+
+def _call(
+    call_id: str,
+    name: str = "read",
+    status: str = "ok",
+    *,
+    args_text: str | None = '{"path": "a.ts"}',
+    arguments_bytes: int | None = None,
+    duration_ms: int | None = None,
+    error: str | None = None,
+) -> NestedCall:
+    return NestedCall(
+        call_id=call_id,
+        name=name,
+        status=status,
+        args_text=args_text,
+        arguments_bytes=arguments_bytes,
+        duration_ms=duration_ms,
+        error=error,
+    )
+
+
+# The projection of the released grammar fixture (see test_learn_session_jsonl.py).
+_FIXTURE_NESTED = NestedCalls(
+    calls=(
+        _call("tc1/1", duration_ms=12),
+        _call(
+            "tc1/2",
+            "write",
+            "error",
+            args_text='{"path": "b.ts"}',
+            duration_ms=3,
+            error="write is blocked (read-only)",
+        ),
+        _call("tc1/3", args_text=None, arguments_bytes=9000),
+    ),
+    complete=False,
+    malformed=0,
+    dropped=0,
+)
+
+
+def _tool_result(
+    index: int,
+    text: str = "",
+    nested: NestedCalls | None = None,
+    *,
+    is_error: bool = False,
+    parent_id: str | None = None,
+    tool_name: str = "codemode",
+) -> SessionEntry:
+    return _entry(
+        index,
+        "message",
+        role="toolResult",
+        tool_name=tool_name,
+        text=text,
+        is_error=is_error,
+        parent_id=parent_id,
+        nested_calls=nested,
+    )
+
+
+def test_render_nested_calls_inside_the_parent_tool_result():
+    e = _tool_result(7, "Script completed; error handled", _FIXTURE_NESTED)
+    assert render_entry(e) == "\n".join(
+        [
+            '<tool_result tool="codemode" error="false" id="e7">Script completed; error handled',
+            '<nested_calls complete="false">',
+            '<nested_call id="tc1/1" name="read" status="ok" ms="12">'
+            "<args>{&quot;path&quot;: &quot;a.ts&quot;}</args></nested_call>",
+            '<nested_call id="tc1/2" name="write" status="error" ms="3">'
+            "<args>{&quot;path&quot;: &quot;b.ts&quot;}</args>"
+            "<error>write is blocked (read-only)</error></nested_call>",
+            '<nested_call id="tc1/3" name="read" status="ok" args_omitted_bytes="9000">'
+            "</nested_call>",
+            "</nested_calls></tool_result>",
+        ]
+    )
+
+
+def test_render_without_nested_calls_is_byte_identical():
+    e = _tool_result(1, "body", None, tool_name="x")
+    assert render_entry(e) == '<tool_result tool="x" error="false" id="e1">body</tool_result>'
+
+
+def test_render_parent_error_is_the_outer_flag_never_a_childs():
+    child_failed = NestedCalls(
+        calls=(_call("p/1", status="error", error="boom"),), complete=True, malformed=0, dropped=0
+    )
+    ok_parent = render_entry(_tool_result(1, "done", child_failed))
+    assert ok_parent.startswith('<tool_result tool="codemode" error="false" id="e1">')
+    assert 'status="error"' in ok_parent
+    clean_child = NestedCalls(calls=(_call("p/1"),), complete=True, malformed=0, dropped=0)
+    failed_parent = render_entry(_tool_result(1, "Script failed", clean_child, is_error=True))
+    assert failed_parent.startswith('<tool_result tool="codemode" error="true" id="e1">')
+    assert '<nested_calls complete="true">' in failed_parent
+
+
+def test_render_nested_loss_diagnostics_only_when_nonzero():
+    lossy = NestedCalls(calls=(_call("p/1"),), complete=False, malformed=2, dropped=44)
+    assert '<nested_calls complete="false" malformed="2" dropped="44">' in render_entry(
+        _tool_result(1, "", lossy)
+    )
+    only_dropped = replace(lossy, malformed=0)
+    assert '<nested_calls complete="false" dropped="44">' in render_entry(
+        _tool_result(1, "", only_dropped)
+    )
+    unreadable = NestedCalls(calls=(), complete=False, malformed=1, dropped=0)
+    assert render_entry(_tool_result(1, "", unreadable)) == (
+        '<tool_result tool="codemode" error="false" id="e1">\n'
+        '<nested_calls complete="false" malformed="1">\n'
+        "</nested_calls></tool_result>"
+    )
+
+
+def test_render_nested_calls_escape_every_value():
+    hostile = NestedCalls(
+        calls=(
+            _call(
+                'x/1"<&',
+                'na"me<',
+                'st<a>t&us"',
+                args_text='{"q": "a < b & c"}',
+                error='bad <tag> & "quote"',
+            ),
+        ),
+        complete=True,
+        malformed=0,
+        dropped=0,
+    )
+    rendered = render_entry(_tool_result(1, "", hostile))
+    assert (
+        '<nested_call id="x/1&quot;&lt;&amp;" name="na&quot;me&lt;" '
+        'status="st&lt;a&gt;t&amp;us&quot;">'
+    ) in rendered
+    assert "<args>{&quot;q&quot;: &quot;a &lt; b &amp; c&quot;}</args>" in rendered
+    assert "<error>bad &lt;tag&gt; &amp; &quot;quote&quot;</error>" in rendered
+
+
+def test_prune_keeps_empty_text_results_with_nested_calls():
+    e0 = _entry(0, "message", role="user", text="q", parent_id=None)
+    with_calls = _tool_result(1, "", _FIXTURE_NESTED, parent_id="e0")
+    unreadable_only = _tool_result(
+        2,
+        "",
+        NestedCalls(calls=(), complete=False, malformed=1, dropped=0),
+        parent_id="e1",
+    )
+    bare = _tool_result(3, "", None, parent_id="e2")
+    n = _norm(e0, with_calls, unreadable_only, bare)
+    assert [e.entry_id for e in n.entries] == ["e0", "e1", "e2"]
+
+
+def test_dedup_collapses_identical_nested_payloads_ignoring_ids_and_durations():
+    first = _FIXTURE_NESTED
+    again = replace(
+        first,
+        calls=tuple(
+            replace(c, call_id=c.call_id.replace("tc1", "tc9"), duration_ms=99) for c in first.calls
+        ),
+    )
+    e0 = _entry(0, "message", role="user", text="q", parent_id=None)
+    e1 = _tool_result(1, "Script completed", first, parent_id="e0")
+    e2 = _tool_result(2, "Script completed", again, parent_id="e1")
+    n = _norm(e0, e1, e2)
+    assert n.duplicate_groups == 1
+    assert n.entries[1].nested_calls == first, "the first occurrence keeps its calls"
+    assert n.entries[2].text == "↑ duplicate of entry e1"
+    assert n.entries[2].nested_calls is None
+
+
+def _no_collapse(a: NestedCalls, b: NestedCalls) -> None:
+    e0 = _entry(0, "message", role="user", text="q", parent_id=None)
+    e1 = _tool_result(1, "Script completed", a, parent_id="e0")
+    e2 = _tool_result(2, "Script completed", b, parent_id="e1")
+    n = _norm(e0, e1, e2)
+    assert n.duplicate_groups == 0
+    assert [e.nested_calls for e in n.entries[1:]] == [a, b]
+
+
+def test_dedup_child_status_distinguishes_payloads():
+    ok = NestedCalls(calls=(_call("p/1"),), complete=True, malformed=0, dropped=0)
+    _no_collapse(ok, replace(ok, calls=(_call("p/1", status="error"),)))
+
+
+def test_dedup_malformed_distinguishes_payloads():
+    base = NestedCalls(calls=(_call("p/1"),), complete=False, malformed=0, dropped=0)
+    _no_collapse(base, replace(base, malformed=1))
+
+
+def test_dedup_dropped_distinguishes_payloads():
+    base = NestedCalls(calls=(_call("p/1"),), complete=False, malformed=0, dropped=0)
+    _no_collapse(base, replace(base, dropped=3))
+
+
+def test_dedup_omitted_argument_size_distinguishes_payloads():
+    a = NestedCalls(
+        calls=(_call("p/1"), _call("p/2", args_text=None, arguments_bytes=9000)),
+        complete=False,
+        malformed=0,
+        dropped=0,
+    )
+    b = replace(a, calls=(_call("p/1"), _call("p/2", args_text=None, arguments_bytes=9001)))
+    _no_collapse(a, b)
+
+
+def test_truncate_nested_args_and_errors_counted_diagnostics_untouched():
+    long_args = json.dumps({"content": "x" * 300})
+    nested = NestedCalls(
+        calls=(
+            _call("p/1", args_text=long_args, arguments_bytes=None),
+            _call("p/2", status="error", error="e" * 600),
+            _call("p/3", status="error", error="f" * 500),
+            _call("p/4", args_text=None, arguments_bytes=9000),
+        ),
+        complete=False,
+        malformed=2,
+        dropped=5,
+    )
+    e0 = _entry(0, "message", role="user", text="q", parent_id=None)
+    n = _norm(e0, _tool_result(1, "Script completed", nested, parent_id="e0"))
+    assert n.truncations == 2
+    out = n.entries[1].nested_calls
+    assert out is not None
+    args = out.calls[0].args_text
+    assert args is not None and len(args) < len(long_args)
+    assert args.startswith(long_args[:100]) and args.endswith(long_args[-100:])
+    assert f"…[truncated {len(long_args) - 200} chars]…" in args
+    error = out.calls[1].error
+    assert error == "e" * 250 + "…[truncated 100 chars]…" + "e" * 250
+    assert out.calls[2].error == "f" * 500, "a cap-length error is never clipped"
+    assert (out.complete, out.malformed, out.dropped) == (False, 2, 5)
+    assert out.calls[3] == nested.calls[3]
+
+
+def test_render_evidence_renders_nested_calls_and_keeps_the_report_shape(tmp_path: Path):
+    src = tmp_path / "bundle" / "planning-main.jsonl"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        json.dumps({"type": "session", "id": "S"}),
+        json.dumps(
+            {
+                "type": "message",
+                "id": "t1",
+                "message": {
+                    "role": "toolResult",
+                    "toolName": "codemode",
+                    "toolCallId": "tc1",
+                    "isError": False,
+                    "content": [{"type": "text", "text": "Script completed"}],
+                    "nestedCalls": {
+                        "calls": [
+                            {
+                                "id": "tc1/1",
+                                "name": "write",
+                                "arguments": {"path": "b.ts"},
+                                "status": "error",
+                                "durationMs": 3,
+                                "error": "write is blocked (read-only)",
+                            }
+                        ],
+                        "complete": False,
+                    },
+                },
+            }
+        ),
+    ]
+    src.write_text("\n".join(lines), encoding="utf-8")
+    report = render_evidence(
+        tmp_path, tmp_path / "bundle", (("planning-session/main", "bundle/planning-main.jsonl"),)
+    )
+    (session,) = report.sessions
+    chunk = (tmp_path / session.chunk_paths[0]).read_text(encoding="utf-8")
+    assert '<tool_result tool="codemode" error="false" id="t1">Script completed' in chunk
+    assert '<nested_calls complete="false">' in chunk
+    assert "<error>write is blocked (read-only)</error></nested_call>" in chunk
+    assert [f.name for f in fields(SessionReport)] == [
+        "role",
+        "source",
+        "entries_read",
+        "entries_kept",
+        "entries_pruned",
+        "malformed_lines",
+        "duplicate_groups",
+        "truncations",
+        "boilerplate",
+        "chunk_paths",
+    ]
