@@ -627,12 +627,15 @@ test("diagnostic locations honor every TypeScript line break and EOF insertion",
 
 test("real discovery output stays resolver-covered and all resolved ranges recompose", async () => {
   const catalog = scanRepository(ROOT);
-  assert.equal(catalog.candidates.length, 97);
+  assert.equal(catalog.candidates.length, 98);
   assert.ok(
     catalog.candidates.some(
       (candidate) => candidate.id === "typescript-tool:resolve_submit_conflicts",
     ),
   );
+  // The loadout host is discovered (and excluded by the graph); its shorthand `prepareLoadout`
+  // fragment resolves as an unsupported source shape, tolerated below.
+  assert.ok(catalog.candidates.some((candidate) => candidate.id === "typescript-tool:perk_stage"));
   const byPath = new Map<string, string[]>();
   for (const candidate of catalog.candidates) {
     for (const fragment of candidate.fragments) {

@@ -237,6 +237,53 @@ export function install(pi: any): void {
   );
 });
 
+test("a loadout-host-shaped registration: named derived fields and a shorthand hook pass field governance; the spread form is opaque", async () => {
+  const catalog = await scanFixture(
+    ["host", "spread_host"],
+    `
+export function install(pi: any, prepareLoadout: any, derived: any): void {
+  const { exposure, annotations } = derived;
+  pi.registerTool({
+    name: "host",
+    label: "Host",
+    description: "Presents the loadout.",
+    parameters: { type: "object", additionalProperties: false, properties: {} },
+    exposure,
+    annotations,
+    prepareLoadout,
+    async execute() {},
+  });
+  pi.registerTool({
+    name: "spread_host",
+    label: "Host",
+    description: "Presents the loadout.",
+    parameters: { type: "object", additionalProperties: false, properties: {} },
+    ...derived,
+    prepareLoadout,
+    async execute() {},
+  });
+}
+`,
+  );
+
+  assert.deepEqual(catalog.tool_field_issues, [
+    {
+      kind: "opaque",
+      field: null,
+      reason: "spread-assignment",
+      tool: "spread_host",
+      path: "extension/sample.ts",
+      selector: "tool:spread_host/member:4",
+    },
+  ]);
+  const host = catalog.candidates.find((candidate) => candidate.id === "typescript-tool:host");
+  assert.ok(host);
+  assert.deepEqual(
+    host.fragments.map((fragment) => fragment.id),
+    ["description", "prepareLoadout"],
+  );
+});
+
 test("registerPerkTool registrations: governed by the matrix's perk names, the policy never scanned", async () => {
   const catalog = await scanFixture(
     ["seam_governed"],

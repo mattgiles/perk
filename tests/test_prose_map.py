@@ -280,8 +280,9 @@ def test_tool_field_governance_findings_have_exact_contract_messages() -> None:
 def test_repository_prose_map_is_complete_and_current(built: BuildResult) -> None:
     assert built.catalog.findings == ()
     assert len(built.catalog.units) > 150
-    assert len(built.catalog.governed_tools) == 40
+    assert len(built.catalog.governed_tools) == 41
     assert "resolve_submit_conflicts" in built.catalog.governed_tools
+    assert "perk_stage" in built.catalog.governed_tools
     assert (ROOT / RENDERED_PATH).read_text(encoding="utf-8") == built.rendered
 
 
@@ -431,6 +432,19 @@ def test_fixture_and_borrowed_sources_are_excluded(built: BuildResult) -> None:
         candidate_id.startswith("markdown:prompts/_fixtures/") for candidate_id in excluded_ids
     )
     assert any("extension/vendor/btw/" in candidate_id for candidate_id in excluded_ids)
+    assert "typescript-tool:perk_stage" in excluded_ids
+
+
+def test_loadout_host_is_discovered_and_excluded_without_model_facing_prose(
+    built: BuildResult,
+) -> None:
+    # The exclusion rests on the host carrying no prose that reaches a model: a snippet or
+    # guidelines added to the registration grows this fragment set and forces a re-decision.
+    host_id = "typescript-tool:perk_stage"
+    (host,) = (candidate for candidate in built.catalog.excluded if candidate.id == host_id)
+    assert host.path == "extension/pi/perkTool.ts"
+    assert {fragment.id for fragment in host.fragments} == {"description", "prepareLoadout"}
+    assert all(unit.candidate.id != host_id for unit in built.catalog.units)
 
 
 def test_graph_boundary_forbids_unknown_fields(tmp_path: Path) -> None:
