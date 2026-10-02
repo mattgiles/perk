@@ -11,6 +11,7 @@
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
 import {
+  COHORT_SETTINGS,
   type PerkSession,
   type RecordedRequest,
   recordingRuntime,
@@ -34,9 +35,6 @@ const PRINT = process.env.PERK_PRINT_DISCOVERY_CENSUS === "1";
 function family(): string[] {
   return perkToolNames().filter((name) => perkToolPolicy(name)?.declared === "deferred");
 }
-
-/** The cohort opt-in: Pi's `+name` modifier activates the registered builtin at startup. */
-const COHORT_SETTINGS = { defaultTools: ["+tool_search"] };
 
 /** A census-capable session: the real `tool_search` registered; `cohort` activates it. */
 async function pilotSession(

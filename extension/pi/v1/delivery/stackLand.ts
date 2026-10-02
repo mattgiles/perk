@@ -27,7 +27,7 @@ import { WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import { resolveStackObjective } from "../../../substrate/workflowState.ts";
 import { registerPerkTool } from "../../perkTool.ts";
 import { driveStackReconcile, evidenceLines, registerStackDrivingCommand } from "./stackDrive.ts";
-import { findingLines } from "./stackStatus.ts";
+import { findingLines, STACK_STATUS_PRIMES } from "./stackStatus.ts";
 import type { StackResult } from "./stackSync.ts";
 
 /** Render the `stack land --json` envelope — fully lenient. A `dry_run: true` payload is the
@@ -225,5 +225,6 @@ export function installStackLandBindings(pi: ExtensionAPI, gating: ToolGating): 
       "train via the typed land tool on explicit approval. Pass an objective number (else " +
       "the active objective).",
     guidance: objectiveLandGuidance,
+    primes: STACK_STATUS_PRIMES,
   });
 }

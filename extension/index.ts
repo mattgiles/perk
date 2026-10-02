@@ -782,7 +782,7 @@ export default function perk(
   // binding between the stack door (which sets the verified pins on open) and the wave's
   // `stack: true` mode (which reads them — never model-relayed coordinates).
   const stackPin = createStackPinState();
-  installReviewWaveBindings(pi, reportWave, annotations, stackPin);
+  installReviewWaveBindings(pi, gating, reportWave, annotations, stackPin);
   installAuditBindings(pi, reportWave);
   installHarvestBindings(pi, reportWave);
   installDreamBindings(pi, reportWave);
@@ -801,7 +801,7 @@ export default function perk(
   // `collect_draft_review_wave`) the draft-review door drives: non-blocking draft-review
   // launch over the door-primed context + the typed collect (plus the `perk:wave` marker on the
   // primed browser surface).
-  registerDraftReviewWaveTools(pi, draftReviewWave, reportWave, annotations);
+  registerDraftReviewWaveTools(pi, gating, draftReviewWave, reportWave, annotations);
 
   // The door-primed browser annotation tool (`push_annotations`): the browser door primes the
   // surface handle on open and clears it on settle/degrade — the tool refuses outside a
@@ -810,18 +810,18 @@ export default function perk(
 
   // The warm `/pr-review-terminal` door: the terminal review entry — hunk always, no provider
   // dispatch (the command IS the selection); posting rides `submit_pr_review` above.
-  installPrReviewTerminalBindings(pi);
+  installPrReviewTerminalBindings(pi, gating);
 
   // The warm `/pr-review-browser` door: the browser review entry — plannotator always, opened
   // in the background (pre-PR it absorbs the since-base local browser review); posting is the
   // human's own platform-post from the UI, with `submit_pr_review` for request-changes only.
-  installPrReviewBrowserBindings(pi, annotations, perkStatus, browserDeps);
+  installPrReviewBrowserBindings(pi, gating, annotations, perkStatus, browserDeps);
 
   // The warm `/stack-review-browser` door + its cold-launch twin (`open_stack_review`): the
   // stacked-PR browser review over the pinned combined base→top patch — one reviewer wave with
   // `stack: true` bound to the same pins, then judgment-routed per-PR posting through
   // `submit_pr_review`.
-  installStackReviewBindings(pi, annotations, perkStatus, stackPin, browserDeps);
+  installStackReviewBindings(pi, gating, annotations, perkStatus, stackPin, browserDeps);
 
   // The warm `/plan-review-browser` door: the summonable streaming draft review — the
   // plannotator plan-review browser on the working plan draft, draft reviewers streaming

@@ -89,7 +89,8 @@ export function driveStackReconcile(
  * `/objective-land`): gate-on soft refusal (notify + inject nothing — stack sync/recovery/
  * landing mutates published branches and PRs, and the mutating tools are gate-blocked
  * everywhere) → resolve the objective (explicit argument → workflow `active_objective` →
- * plan-ref `objective_id`) → report → inject the preview-first guidance naming the typed tools
+ * plan-ref `objective_id`) → report → prime the deferred tools the guidance names (`primes`; a
+ * no-op outside the discovery cohort) → inject the preview-first guidance naming the typed tools
  * plus the binding suffix.
  */
 export function registerStackDrivingCommand(
@@ -99,6 +100,8 @@ export function registerStackDrivingCommand(
     name: string;
     description: string;
     guidance: (objective: string) => string;
+    /** The deferred tools the guidance names — exactly those (the prompt guard pins it). */
+    primes: readonly string[];
   },
 ): void {
   registerPerkCommand(pi, opts.name, {
@@ -114,6 +117,7 @@ export function registerStackDrivingCommand(
         return;
       }
       report(ctx, opts.name, "info", `#${objective}`);
+      gating.primeDeferred(opts.primes);
       pi.sendUserMessage(opts.guidance(objective) + bindingSuffix(ctx.cwd, `command:${opts.name}`));
     },
   });

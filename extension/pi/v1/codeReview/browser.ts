@@ -40,6 +40,8 @@
 // readiness-degrade arm — the model never sees the URL).
 // The door still registers NO tools of its own; perk-side posting reuses `submit_pr_review`
 // (installed by `installCuratedSubmissionBindings`). The local (pre-PR) mode never primes.
+// In a discovery-cohort session the guidance names two deferred tools, so the same moment also
+// activates them (`REVIEW_BROWSER_PRIMES`) before the guidance reaches the model.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
@@ -47,6 +49,7 @@ import { runColdDoor } from "../../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { interceptConsoleError } from "../../../substrate/consoleCapture.ts";
 import { render } from "../../../substrate/prompts.ts";
+import type { ToolGating } from "../../../substrate/toolGating.ts";
 import { type ReportTarget, report } from "../../../surfaces/report.ts";
 import type { ActivityHandle } from "../../../surfaces/surfaces.ts";
 import {
@@ -78,6 +81,12 @@ import { parseReviewDoorArgs } from "./terminal.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "pr-review-browser";
+
+/**
+ * The deferred tools a browser review's guidance names — primed the moment the annotation
+ * surface is (a no-op outside the discovery cohort).
+ */
+export const REVIEW_BROWSER_PRIMES = ["collect_review_wave", "push_annotations"] as const;
 
 // ------------------------------------------------------------------------ guidance
 
@@ -195,7 +204,8 @@ export interface ReviewBrowserCoreOpts {
 /**
  * The full browser-lifecycle core, extracted from the PR-mode arm and parameterized for the
  * stack door: start the browser open in the background, prime the annotation surface the
- * moment the port is picked (push_annotations now serves this browser session), observe
+ * moment the port is picked (push_annotations now serves this browser session) together with
+ * the deferred tools the guidance names (`REVIEW_BROWSER_PRIMES`), observe
  * readiness in the background (degrade notice on never-ready), route the bridge respond
  * through the injectable mapper, clear the surface on settle, and inject the guidance
  * immediately (the URL is deterministic once the port is picked). While plannotator sets up,
@@ -211,6 +221,7 @@ export interface ReviewBrowserCoreOpts {
 export async function openReviewBrowserCore(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
+  gating: ToolGating,
   annotations: AnnotationState,
   status: ActivityHandle,
   opts: ReviewBrowserCoreOpts,
@@ -239,6 +250,7 @@ export async function openReviewBrowserCore(
   }
 
   primeAnnotationSurface(annotations, { mode: "review", url: started.url });
+  gating.primeDeferred(REVIEW_BROWSER_PRIMES);
 
   void observeBrowserReadiness(pi, ctx, started, annotations, {
     scope: opts.scope,
@@ -273,12 +285,13 @@ export async function openReviewBrowserCore(
 async function openBrowserAndGuide(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
+  gating: ToolGating,
   annotations: AnnotationState,
   status: ActivityHandle,
   opts: PrReviewBrowserGuidanceOpts,
   deps: StartBrowserDeps = {},
 ): Promise<void> {
-  await openReviewBrowserCore(pi, ctx, annotations, status, {
+  await openReviewBrowserCore(pi, ctx, gating, annotations, status, {
     scope: SCOPE,
     browserOpts: { cwd: ctx.cwd, source: { mode: "pr", prUrl: opts.prUrl } },
     guidance: prReviewBrowserGuidance(opts) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
@@ -295,6 +308,7 @@ async function openBrowserAndGuide(
  */
 export function installPrReviewBrowserBindings(
   pi: ExtensionAPI,
+  gating: ToolGating,
   annotations: AnnotationState,
   status: ActivityHandle,
   deps: StartBrowserDeps = {},
@@ -364,6 +378,7 @@ export function installPrReviewBrowserBindings(
         await openBrowserAndGuide(
           pi,
           ctx,
+          gating,
           annotations,
           status,
           {
@@ -408,6 +423,7 @@ export function installPrReviewBrowserBindings(
         await openBrowserAndGuide(
           pi,
           ctx,
+          gating,
           annotations,
           status,
           {

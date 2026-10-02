@@ -18,6 +18,7 @@ import { OBJECTIVE_DRAFT_ARTIFACT, renderObjectiveDraft } from "../../authoring/
 import {
   clearDraftReviewContext,
   createDraftReviewWaveState,
+  DRAFT_REVIEW_DOOR_PRIMES,
   primeDraftReviewContext,
 } from "../../authoring/review/draftContext.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
@@ -100,6 +101,7 @@ async function draftContextPrimed(): Promise<boolean> {
     target,
     {
       angles: ["grounding", "risk"],
+      gating: fakeGating(true),
     },
   );
   return (result.details as { error_type?: string }).error_type !== "no_draft_context";
@@ -1032,10 +1034,11 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
     signal: undefined,
   } as unknown as ExtensionContext;
 
+  const gating = fakeGating(false);
   const guidance = await openObjectiveReviewSurface(
     pi,
     ctx,
-    fakeGating(false),
+    gating,
     { rendered: RENDERED, artifactRaw: DRAFT_PAYLOAD, custom: "check the dependency story" },
     draftReview,
     annotations,
@@ -1054,12 +1057,19 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
   // Both surfaces primed with the deterministic handle the moment the open returns.
   assert.equal(await annotationMode(), "plan", "the annotation surface is primed in plan mode");
   assert.equal(await draftContextPrimed(), true, "the draft-review context is primed");
+  // …and the deferred tools the guidance names were primed exactly once, with the door's constant.
+  assert.deepEqual(gating.primes, [[...DRAFT_REVIEW_DOOR_PRIMES]]);
+  assert.deepEqual(
+    [...DRAFT_REVIEW_DOOR_PRIMES],
+    ["collect_draft_review_wave", "push_annotations"],
+  );
   // The primed wave context carries draftType objective + the RENDERED bytes + the custom lane
   // (probed through a spawn-recording adapter whose spawn fails — nothing stays pending).
   const spawns = createMemoryWaveAdapter({ spawnError: "probe only" });
   const target = { hasUI: false, ui: undefined } as unknown as ReportTarget;
   await executeStartDraftReviewWave(draftReview, reportWaveOver(spawns), target, {
     angles: ["grounding", "risk"],
+    gating: fakeGating(true),
   });
   const script = spawns.calls.spawn[0]?.workflowScript ?? "";
   assert.match(script, /Draft type: objective\./, "the wave reviews the objective draft type");

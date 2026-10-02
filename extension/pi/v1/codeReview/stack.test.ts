@@ -14,14 +14,19 @@ import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-age
 import { workflowDir } from "../../../substrate/cache.ts";
 import { createPerkStatus } from "../../../surfaces/surfaces.ts";
 import {
+  COHORT_SETTINGS,
+  fakeGating,
   fakePerk,
   loadPerkSession,
   plantSession,
   scaffoldRepo,
+  spyInjectionLoadouts,
   spyInjections,
+  toolSearch,
 } from "../../../testing/harness.ts";
 import { pinnedReviewContextCommand } from "../../../waves/adversarialReviewWave.ts";
 import { createAnnotationState } from "../providers/annotations.ts";
+import { REVIEW_BROWSER_PRIMES } from "./browser.ts";
 import { createStackPinState } from "./reviewWave.ts";
 import {
   bindingBaseRef,
@@ -619,6 +624,33 @@ test("/stack-review-browser 77: objective argv, ONE guidance injection, the stat
   }
 });
 
+test("/stack-review-browser 77 in a discovery-cohort session: REVIEW_BROWSER_PRIMES are active when the guidance is sent", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const planted = plantStackCheckout(cwd);
+  const bin = fakePerk(cwd, { stdout: planted.json });
+  const sink: FakeBrowser = { envelopes: [] };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [fakePlannotator(sink), toolSearch()],
+    settings: COHORT_SETTINGS,
+  });
+  const spy = spyInjectionLoadouts(h);
+  try {
+    for (const name of REVIEW_BROWSER_PRIMES)
+      assert.ok(!h.session.getActiveToolNames().includes(name), `${name} deferred at startup`);
+    await h.runCommandHandler("stack-review-browser", "77");
+    assert.equal(spy.injected.length, 1, "one guidance injection");
+    for (const name of REVIEW_BROWSER_PRIMES) {
+      assert.ok(spy.injected[0]?.includes(name), `the guidance names ${name}`);
+      assert.ok(spy.active[0]?.includes(name), `${name} active when the guidance is sent`);
+    }
+  } finally {
+    await settleBridges(sink);
+    h.dispose();
+  }
+});
+
 test("/stack-review-browser: a missing or digest-mismatched patch reports the reason and emits NO request", async () => {
   for (const arm of ["missing", "mismatch"] as const) {
     const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
@@ -941,9 +973,10 @@ test("executeOpenStackReview: a stack wave pending against a DIFFERENT pin refus
     { ...ROW_B, pr: 9 },
   ]);
   const opens: number[] = [];
-  const open: Parameters<typeof executeOpenStackReview>[6] = (
+  const open: Parameters<typeof executeOpenStackReview>[7] = (
     _pi,
     _ctx,
+    _gating,
     _annotations,
     _status,
     pin,
@@ -960,6 +993,7 @@ test("executeOpenStackReview: a stack wave pending against a DIFFERENT pin refus
   const refused = await executeOpenStackReview(
     pi,
     ctx,
+    fakeGating(false),
     latch,
     createAnnotationState(),
     createPerkStatus(),
@@ -982,6 +1016,7 @@ test("executeOpenStackReview: a stack wave pending against a DIFFERENT pin refus
   const ok = await executeOpenStackReview(
     pi,
     ctx,
+    fakeGating(false),
     latch,
     createAnnotationState(),
     createPerkStatus(),
@@ -1013,11 +1048,12 @@ test("executeOpenStackReview: a browser-open failure is browser_failed and keeps
   const failed = await executeOpenStackReview(
     pi,
     ctx,
+    fakeGating(false),
     latch,
     createAnnotationState(),
     createPerkStatus(),
     stackPin,
-    (_pi, _ctx, _annotations, _status, _pin, opts) => {
+    (_pi, _ctx, _gating, _annotations, _status, _pin, opts) => {
       opens.push({
         checkoutPath: opts.checkoutPath,
         patchPath: opts.patchPath,
@@ -1042,11 +1078,12 @@ test("executeOpenStackReview: a browser-open failure is browser_failed and keeps
   const succeeded = await executeOpenStackReview(
     pi,
     ctx,
+    fakeGating(false),
     latch,
     createAnnotationState(),
     createPerkStatus(),
     stackPin,
-    (_pi, _ctx, _annotations, _status, pin, opts) => {
+    (_pi, _ctx, _gating, _annotations, _status, pin, opts) => {
       pin.pinned = opts.pinned;
       return Promise.resolve(true);
     },
@@ -1062,6 +1099,7 @@ test("executeOpenStackReview: a browser-open failure is browser_failed and keeps
   const third = await executeOpenStackReview(
     pi,
     ctx,
+    fakeGating(false),
     latch,
     createAnnotationState(),
     createPerkStatus(),

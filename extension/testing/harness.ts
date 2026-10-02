@@ -1201,6 +1201,29 @@ export const toolSearch = (): InlineExtension => ({
 });
 
 /**
+ * The discovery-cohort opt-in (load beside `toolSearch()`): Pi's `+name` modifier activates the
+ * registered builtin at startup, so perk joins the cohort at `session_start`.
+ */
+export const COHORT_SETTINGS = { defaultTools: ["+tool_search"] };
+
+/**
+ * Like `spyInjections`, but also records the live active tool set at each injection — proving a
+ * door primed its deferred tools BEFORE its guidance reached the model.
+ */
+export function spyInjectionLoadouts(h: PerkSession): { injected: string[]; active: string[][] } {
+  const out = { injected: [] as string[], active: [] as string[][] };
+  (
+    h.session as unknown as {
+      sendUserMessage: (c: unknown, options?: unknown) => Promise<void>;
+    }
+  ).sendUserMessage = async (c) => {
+    out.injected.push(typeof c === "string" ? c : JSON.stringify(c));
+    out.active.push(h.session.getActiveToolNames());
+  };
+  return out;
+}
+
+/**
  * A ToolGating fake recording exits and every `primeDeferred` call (the door tests assert a door
  * primes exactly its constant); `active` is the isActive snapshot. It reports a nonparticipant
  * session: priming activates nothing and the cohort join is a no-op.

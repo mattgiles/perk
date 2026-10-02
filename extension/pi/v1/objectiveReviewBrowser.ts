@@ -61,6 +61,7 @@ import {
 } from "../../authoring/objective/draft.ts";
 import {
   clearDraftReviewContext,
+  DRAFT_REVIEW_DOOR_PRIMES,
   type DraftReviewWaveState,
   primeDraftReviewContext,
 } from "../../authoring/review/draftContext.ts";
@@ -421,6 +422,8 @@ export async function openObjectiveReviewSurface(
     draft: opts.rendered,
     ...(opts.custom !== undefined ? { custom: opts.custom } : {}),
   });
+  // The deferred tools the guidance names ride the same moment (a discovery-cohort session).
+  gating.primeDeferred(DRAFT_REVIEW_DOOR_PRIMES);
 
   // The shared door-session token: the observer's degrade arm flips `degraded` so the decision
   // task never routes a post-degrade decision through the save path (a readiness false-negative
