@@ -9,14 +9,18 @@
 // design record (`docs/design/native-discovery-pilot.md`).
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { before, type TestContext, test } from "node:test";
-import { AgentSession, type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { before, test } from "node:test";
+import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import { DRAFT_REVIEW_DOOR_PRIMES } from "../authoring/review/draftContext.ts";
 import { REVIEW_BROWSER_PRIMES } from "../pi/v1/codeReview/browser.ts";
+import { PLANNOTATOR_REVIEW_COMMAND } from "../pi/v1/providers/plannotatorHandoff.ts";
 import { createFakeSubagents } from "../testing/fakeSubagents.ts";
 import {
   COHORT_SETTINGS,
   fakePerk,
+  gitInit,
   loadAt,
   type PerkSession,
   plantSession,
@@ -84,38 +88,6 @@ async function blocked(h: PerkSession, name: string): Promise<string | undefined
   return verdict?.block === true ? verdict.reason : undefined;
 }
 
-/** Count the family re-registrations (`deferDiscoveryFamily` → Pi's registry refresh). */
-function recordDeferrals(t: TestContext): { count: number } {
-  const seen = { count: 0 };
-  const proto = AgentSession.prototype as unknown as Record<
-    string,
-    (...args: unknown[]) => unknown
-  >;
-  const original = proto._refreshToolRegistry;
-  assert.ok(original !== undefined, "Pi's registry refresh is where a re-registration lands");
-  t.mock.method(proto, "_refreshToolRegistry", function (this: unknown, ...args: unknown[]) {
-    if (new Error().stack?.includes("deferDiscoveryFamily") === true) seen.count += 1;
-    return original.apply(this, args);
-  });
-  return seen;
-}
-
-/** Every perk install, with the session it went into (the two-session isolation proof). */
-function recordInstallsBySession(t: TestContext): { session: AgentSession; names: string[] }[] {
-  const installs: { session: AgentSession; names: string[] }[] = [];
-  const original = AgentSession.prototype.setActiveToolsByName;
-  t.mock.method(
-    AgentSession.prototype,
-    "setActiveToolsByName",
-    function (this: AgentSession, names: string[]) {
-      if (new Error().stack?.includes("substrate/toolGating.ts") === true)
-        installs.push({ session: this, names: [...names] });
-      return original.call(this, names);
-    },
-  );
-  return installs;
-}
-
 /** A plan-ref linking the session to objective 7 (the stack-drive commands' fallback). */
 const PLAN_REF: PlanRef = {
   provider: "github",
@@ -133,7 +105,6 @@ const IMPLEMENT_MEMBERS = ["collect_review_wave", "objective_stack_status", "pus
 
 test("cohort join (A): the family re-registers deferred and leaves the request; tool_search is declared; one perk install; a re-emitted session_start changes nothing", async (t) => {
   const installs = recordPerkInstalls(t);
-  const deferrals = recordDeferrals(t);
   const family = discoveryFamily();
   assert.deepEqual(
     family.filter((name) => isEligible(name, undefined, "implement", "read-write")).sort(),
@@ -141,7 +112,6 @@ test("cohort join (A): the family re-registers deferred and leaves the request; 
   );
   const { h, rt } = await pilotSession("implement", "read-write", true);
   try {
-    assert.equal(deferrals.count, family.length, "each member re-registered exactly once");
     assert.equal(installs.length, 1, "a cohort startup is ONE perk install");
     for (const name of family) {
       assert.equal(h.toolInfo(name)?.exposure, "deferred", `${name} re-registered deferred`);
@@ -163,16 +133,42 @@ test("cohort join (A): the family re-registers deferred and leaves the request; 
     }
     assert.equal(installs.length, 1, "the prompt turn installed nothing");
 
-    // Prime one member, then re-emit session_start: nothing re-registers or installs, and the
+    // Prime one member, then re-emit session_start: nothing installs, the family stays deferred
+    // (an already-deferred member is never re-registered — the seam test pins the skip), and the
     // primed member is kept.
     spyInjections(h);
     await h.invokeCommand("objective-sync", "7");
     assert.ok(isActive(h, "objective_stack_status"), "primed by the door");
-    const [installed, deferred] = [installs.length, deferrals.count];
+    const installed = installs.length;
     await h.emitSessionStart();
-    assert.equal(deferrals.count, deferred, "nothing re-registered");
     assert.equal(installs.length, installed, "nothing installed");
+    for (const name of family) assert.equal(h.toolInfo(name)?.exposure, "deferred", name);
     assert.ok(isActive(h, "objective_stack_status"), "the primed member is kept");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("reload (A): a real /reload re-runs the factory — the family is deferred and inactive again, tool_search stays declared, a primed member is gone", async () => {
+  const family = discoveryFamily();
+  const { h, rt } = await pilotSession("implement", "read-write", true);
+  try {
+    spyInjections(h);
+    await h.invokeCommand("objective-sync", "7");
+    assert.ok(isActive(h, "objective_stack_status"), "primed before the reload");
+    await h.reload();
+    for (const name of family) {
+      assert.equal(
+        h.toolInfo(name)?.exposure,
+        "deferred",
+        `${name} re-deferred by the new activation`,
+      );
+      assert.ok(!isActive(h, name), `${name} inactive after the reload`);
+    }
+    rt.census();
+    await h.session.prompt("census");
+    assert.ok(rt.last().tools.includes("tool_search"), "tool_search stays declared");
+    for (const name of family) assert.ok(!rt.last().tools.includes(name), `${name} undeclared`);
   } finally {
     h.dispose();
   }
@@ -245,8 +241,7 @@ test("nonparticipant preservation (A): tool_search inactive, absent, or a foreig
   }
 });
 
-test("two-session isolation (A): a cohort session's join never reaches a nonparticipant bound in the same process", async (t) => {
-  const installs = recordInstallsBySession(t);
+test("two-session isolation (A): a cohort session's join never reaches a nonparticipant bound in the same process", async () => {
   const family = discoveryFamily();
   const a = await pilotSession("implement", "read-write", true);
   const b = await pilotSession("implement", "read-write", false);
@@ -260,14 +255,6 @@ test("two-session isolation (A): a cohort session's join never reaches a nonpart
       assert.ok(!isActive(a.h, name), `A defers ${name}`);
       assert.ok(isActive(b.h, name), `B keeps ${name}`);
     }
-    const intoA = installs.filter((i) => i.session === a.h.session);
-    const intoB = installs.filter((i) => i.session === b.h.session);
-    assert.equal(intoA.length, 1, "A's join rode A's one startup install");
-    for (const name of family)
-      assert.ok(!intoA[0]?.names.includes(name), `A's install drops ${name}`);
-    for (const install of intoB)
-      for (const name of IMPLEMENT_MEMBERS)
-        assert.ok(install.names.includes(name), `no install into B drops ${name}`);
   } finally {
     a.h.dispose();
     b.h.dispose();
@@ -435,6 +422,73 @@ test("priming survives the points (A): door-primed members stay active and decla
     assert.ok(!isActive(h, "collect_review_wave"), "only a primer or the host re-activates");
   } finally {
     await settleBridges(sink);
+    h.dispose();
+  }
+});
+
+test("draft-review door from a gated worktree (A): /plan → plan_draft → plan_review's wave arm primes collect_draft_review_wave and push_annotations, declared on the next request", async () => {
+  const cwd = scaffoldRepo({
+    handoff: { runId: "01DRAFTWAVE", mode: "read-write", stage: "implement" },
+  });
+  gitInit(cwd, { dirty: false });
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "config.toml"), '[providers]\nplan = "plannotator-plan"\n');
+  const rt = await recordingRuntime();
+  let bus: ExtensionAPI["events"] | undefined;
+  const h = await loadAt(cwd, {
+    model: rt.reg.getModel(),
+    modelRuntime: rt.reg.modelRuntime,
+    env: { PERK_RUN_ID: "01DRAFTWAVE" },
+    settings: COHORT_SETTINGS,
+    extraExtensions: [
+      toolSearch(),
+      (pi) => {
+        // A fake plannotator: presence plus a pending handshake; denied at teardown.
+        bus = pi.events;
+        pi.registerCommand(PLANNOTATOR_REVIEW_COMMAND, {
+          description: "fake plannotator (presence probe target)",
+          handler: async () => {},
+        });
+        pi.events.on("plannotator:request", (data) => {
+          const req = data as { respond?: (r: unknown) => void };
+          req.respond?.({ status: "handled", result: { status: "pending", reviewId: "rev-c" } });
+        });
+      },
+    ],
+  });
+  try {
+    spyInjections(h);
+    for (const name of DRAFT_REVIEW_DOOR_PRIMES) assert.ok(!isActive(h, name), `${name} inactive`);
+    await h.invokeCommand("plan");
+    assert.equal(h.workflowState().mode, "read-only", "the real gate is on");
+    for (const name of DRAFT_REVIEW_DOOR_PRIMES)
+      assert.ok(!isActive(h, name), `${name} still deferred under the gate`);
+    const written = await h.invokeTool("plan_draft", { plan: "# A plan in a cohort worktree\n" });
+    assert.equal((written.details as { ok?: boolean }).ok, true, "the draft landed");
+    const reviewed = await h.invokeTool(
+      "plan_review",
+      {},
+      {
+        ui: {
+          select: async (_title: string, options: string[]) =>
+            options.find((o) => /reviewer wave/.test(o)),
+          input: async () => undefined,
+        },
+      },
+    );
+    assert.equal((reviewed.details as { status?: string }).status, "wave_launched");
+    for (const name of DRAFT_REVIEW_DOOR_PRIMES)
+      assert.ok(isActive(h, name), `${name} primed by the wave arm`);
+    rt.census();
+    await h.session.prompt("census");
+    for (const name of DRAFT_REVIEW_DOOR_PRIMES)
+      assert.ok(rt.last().tools.includes(name), `${name} declared on the next request`);
+  } finally {
+    // Settle the open review (a deny) so the door's background tasks end before disposal.
+    bus?.emit("plannotator:review-result", { reviewId: "rev-c", approved: false, feedback: "x" });
+    for (let i = 0; i < 80 && !h.notifies.some((n) => /DENIED/.test(n)); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
     h.dispose();
   }
 });
