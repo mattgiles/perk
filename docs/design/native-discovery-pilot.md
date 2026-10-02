@@ -86,7 +86,7 @@ Verbatim from the plan; the status column is filled from the evidence named.
 | P1 | nonparticipant preservation — warm sessions without an active builtin `tool_search`, a foreign namesake, the two-session isolation, the headless worker, `/btw` | cases 2, 9, 10 | PASS |
 | P2 | the bare-session zero-call guarantee holds for nonparticipants; a cohort startup is one perk install; a re-emitted `session_start` installs nothing | cases 1, 2 | PASS |
 | P3 | primed activation: no-op outside the cohort; skips ineligible/unregistered; doors and launchers prime exactly their constants; survives every reconciliation point while eligible; resume/fork reset, `/tree` restores | cases 3, 4 + the door tests | PASS |
-| P4 | nested path: a deferred inactive member is callable and recorded `ok`; cancellation, oversized arguments (`argumentsBytes`, `complete: false`) and gated denial with `parentToolCallId` behave as pinned; `perk learn evidence --render` over the probe transcript shows the `<nested_calls>` block | case 7 + ledger | offline PASS; render leg NOT PASSED (unobserved) |
+| P4 | nested path: a deferred inactive member is callable and recorded `ok`; cancellation, oversized arguments (`argumentsBytes`, `complete: false`) and gated denial with `parentToolCallId` behave as pinned; `perk learn evidence --render` over the probe transcript shows the `<nested_calls>` block | case 7 + ledger | PASS (offline case 7; render leg `d6de65da`, ledger §3) |
 | P5 | `perk init` preserves the opt-in entry twice over; `settings-wiring` reports no drift | `test_init_preserves_local_default_tools_opt_in` | PASS |
 | P6 | the prompt guard's deferred rule passes on both planes, launcher carriers included | (7) | PASS |
 | C1 | the codemode gated read-path rule is recorded in §8.40 and the record | (11) | PASS (§6 here; §8.40 **The codemode composition limit**) |
@@ -164,8 +164,8 @@ no gated codemode path is built and the suspension stands. Un-suspension waits f
 ## 7. Decision
 
 **PENDING.** Offline rows: S1, S2, D1, D2, P1, P2, P3, P5, P6, C1 PASS; P4's offline half PASS.
-Live: D3, D4 and D5 PASS. P4's render leg is unobserved, so NOT PASSED until the ledger records
-it. On ADOPT: the entry stays committed, the family stays deferred, everything ships, and the
+Live: D3, D4, D5 and P4's render leg PASS. Every row is PASS, so the decision rule gives ADOPT;
+the decision line is written after the review fixes land and §5 is re-measured at that commit. On ADOPT: the entry stays committed, the family stays deferred, everything ships, and the
 follow-up plan is named below. On RETIRE: the pilot-only runtime is reverted as the plan's RETIRE
 end state specifies, keeping case 8 (empty-family form), this record and the evidence.
 

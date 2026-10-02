@@ -141,7 +141,7 @@ transcript facts (never model self-report), with its commit SHA and PASS / NOT P
 | D3 — review door → `start_review_wave` → `collect_review_wave` → `push_annotations`/`submit_pr_review` | cohort implement session `01a0fd25-a296-72f2-bfff-2896927c1fe9` (after `/reload`), `/pr-review-browser` active arm on PR #2650 | `89a77fcc` | The transcript's tool-change entry adding `collect_review_wave` + `push_annotations` precedes the door's guidance and the model's first call. `start_review_wave` ok (4/4 lanes runnable, run `f1a6801b-d625-404e-905d-58eab4a1a240`), `collect_review_wave` ok (complete, 4/4 covered, no failures), four `push_annotations` calls ok (none held). Zero `tool_search` calls, zero dead-end turns. The human posted a COMMENT review from the browser; perk posted nothing. | PASS |
 | D4 — `objective_stack_status` found through `tool_search` on the first query | the same cohort implement session (`objective_stack_status` deferred and inactive since the reload; no door primed it) | `4a83ebb6` | The human asked "What's the stacked delivery status of objective 2634?" without naming a tool. The model's first call was `tool_search` ("objective stacked delivery train status") → `details.loaded = ["objective_stack_status"]`; the transcript's tool-change entry added it; the next call `objective_stack_status {objective: 2634}` returned `ok: true` ("this objective uses incremental delivery; no delivery train exists"). Zero dead-end turns. Caveat: the model had authored the pilot in this session and knew the tool's name and D1's pinned queries, so this leg proves the live search-and-activate path more than naive discoverability (D1 carries the scored discoverability). | PASS |
 | D5 — `/plan` → `plan_draft` → `plan_review` → wave chooser → collect | the same cohort implement session, under the `/plan` toggle (read-only) | `54022d2e` | `plan_draft` ok, `plan_review` → the chooser's "Browser review + reviewer wave" arm. Its result is followed by the transcript's tool-change entry adding `collect_draft_review_wave` (`push_annotations` was still active from D3 and gate-allowed) before the model's next call. `start_draft_review_wave` ok (3/3 lanes, run `cad11001-e5e9-42ad-af62-beb0325717cb`), `collect_draft_review_wave` ok (complete, 3/3 covered, no failures, no findings), three `push_annotations` (empty, `replace: true`) accepted. Zero `tool_search` calls, zero dead-end turns. The human then approved by accident, which saved the throwaway draft as plan #2651 and exited the gate (the collector left the active set — ineligible read-write in implement, as planned). | PASS |
-| P4 live — `perk learn evidence --render` over the nested-probe transcript | — | — | — | NOT PASSED (unobserved) |
+| P4 live — `perk learn evidence --render` over the nested-probe transcript | the case 7 probe session (`discoveryNested.test.ts`, cohort implement) | `d6de65da` | `perk learn evidence` gathers only a plan's own linked sessions, so the leg runs its render step — `perk.learn.normalize.render_evidence`, the function `--render` calls — over the probe JSONL. The chunk carries three `<nested_calls>` blocks: `complete="true"` with `objective_stack_status` `status="ok"` and its args; `complete="true"` with `status="error"` and `<error>Operation aborted</error>`; `complete="false"` with `push_annotations` `args_omitted_bytes="9103"` and the tool's `no_surface` refusal (excerpt §5). The render also counted one malformed line: Pi's `role: "system"` message entry, which the session parser does not recognize — an unrelated parser gap. | PASS |
 
 ## §4 `/perk-selfcheck` in the cohort sessions
 
@@ -155,3 +155,21 @@ The implement session `01a0fd25-a296-72f2-bfff-2896927c1fe9`, after `/reload` at
 The reload's transcript tool-change entry: added `tool_search`; removed `objective_stack_status`,
 `collect_review_wave`, `push_annotations` (the join's one-time deactivation; `collect_draft_review_wave`
 is not eligible in a read-write implement session, so it was never active there).
+
+## §5 The P4 render excerpt
+
+`render_evidence` over the case 7 probe session (its three probe turns' tool results):
+
+```text
+<nested_calls complete="true">
+<nested_call id="call-fixture_nested_probe/1" name="objective_stack_status" status="ok" ms="336"><args>{&quot;objective&quot;: &quot;7&quot;}</args></nested_call>
+</nested_calls></tool_result>
+…
+<nested_calls complete="true">
+<nested_call id="call-fixture_nested_probe/1" name="objective_stack_status" status="error" ms="1"><args>{&quot;objective&quot;: &quot;7&quot;}</args><error>Operation aborted</error></nested_call>
+</nested_calls></tool_result>
+…
+<nested_calls complete="false">
+<nested_call id="call-fixture_nested_probe/1" name="push_annotations" status="error" ms="3" args_omitted_bytes="9103"><error>push_annotations failed: no annotation surface is primed — push_annotations only works inside a door-opened plannotator review flow (the door primes the surface when the browser opens)</error></nested_call>
+</nested_calls></tool_result>
+```
