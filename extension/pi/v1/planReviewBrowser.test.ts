@@ -30,6 +30,7 @@ import type { ReportTarget } from "../../surfaces/report.ts";
 import { createPerkStatus } from "../../surfaces/surfaces.ts";
 import { seedBrowserReview } from "../../testing/draftReview.ts";
 import {
+  fakeGating,
   gitInit,
   loadPerkSession,
   type PerkSession,
@@ -458,21 +459,6 @@ const DE_FEEDBACK = `${DE_SECTION}\n\n---\n\nAlso add a rollback note.`;
 
 function stateEntry(data: Record<string, unknown>): unknown {
   return { type: "custom", customType: WORKFLOW_STATE_TYPE, data };
-}
-
-/** A ToolGating fake recording exits; `active` is the isActive snapshot. */
-function fakeGating(active: boolean): ToolGating & { exits: number } {
-  const g = {
-    exits: 0,
-    syncFromState() {},
-    enter() {},
-    exit() {
-      g.exits += 1;
-    },
-    isActive: () => active,
-    prepareLoadout: () => ({}),
-  };
-  return g;
 }
 
 const APPROVE_OUT: ReviewOutcome = { status: "completed", approved: true, reviewId: "rev-a" };

@@ -29,6 +29,7 @@ import type { ReportTarget } from "../../surfaces/report.ts";
 import { createPerkStatus } from "../../surfaces/surfaces.ts";
 import { seedBrowserReview } from "../../testing/draftReview.ts";
 import {
+  fakeGating,
   fakePerk,
   gitInit,
   loadPerkSession,
@@ -460,21 +461,6 @@ const DE_FEEDBACK = [
 
 function stateEntry(data: Record<string, unknown>): unknown {
   return { type: "custom", customType: WORKFLOW_STATE_TYPE, data };
-}
-
-/** A ToolGating fake recording exits; `active` is the isActive snapshot. */
-function fakeGating(active: boolean): ToolGating & { exits: number } {
-  const g = {
-    exits: 0,
-    syncFromState() {},
-    enter() {},
-    exit() {
-      g.exits += 1;
-    },
-    isActive: () => active,
-    prepareLoadout: () => ({}),
-  };
-  return g;
 }
 
 const RENDERED = renderObjectiveDraft({ title: "Ship retries", prose: PROSE, roadmap: ROADMAP });

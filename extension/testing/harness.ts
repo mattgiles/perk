@@ -12,6 +12,7 @@
 //   - keep via session.reload()                 -> reload() re-emits session_start
 //   - fork via a planted session .jsonl         -> plantSession()
 
+import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
@@ -23,11 +24,20 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import type { TestContext } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  fauxAssistantMessage,
+  fauxText,
+  fauxToolCall,
+  getCurrentSystemPrompt,
+  getCurrentTools,
+} from "@earendil-works/pi-ai";
 import { getModel } from "@earendil-works/pi-ai/compat";
 import {
-  type AgentSession,
+  AgentSession,
   createAgentSession,
+  createToolSearchExtension,
   DefaultResourceLoader,
   type ExtensionAPI,
   type ExtensionUIContext,
@@ -39,6 +49,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import perk from "../index.ts";
 import { type PlanRef, workflowDir, writePlanRef } from "../substrate/cache.ts";
+import type { ToolGating } from "../substrate/toolGating.ts";
 import {
   type BranchEntry,
   branchOf,
@@ -403,14 +414,20 @@ export function scaffoldWorkerWorktree(opts: {
   planRef?: PlanRef;
   /** Settings `packages` list; default `[repoRoot]` (the live checkout by absolute path). */
   packages?: string[];
+  /** Settings `defaultTools` (Pi's startup active-set preference); omitted when unset. */
+  defaultTools?: string[];
 }): string {
   const cwd = mkdtempSync(join(tmpdir(), "perk-worker-wt-"));
   // extension/testing/harness.ts -> repo root is two levels up.
   const repoRoot = resolve(import.meta.dirname, "..", "..");
   mkdirSync(join(cwd, ".pi"), { recursive: true });
+  const settings = {
+    packages: opts.packages ?? [repoRoot],
+    ...(opts.defaultTools !== undefined ? { defaultTools: opts.defaultTools } : {}),
+  };
   writeFileSync(
     join(cwd, ".pi", "settings.json"),
-    `${JSON.stringify({ packages: opts.packages ?? [repoRoot] }, null, 2)}\n`,
+    `${JSON.stringify(settings, null, 2)}\n`,
     "utf8",
   );
   mkdirSync(join(workflowDir(cwd), "handoff"), { recursive: true });
@@ -1073,4 +1090,127 @@ export function spyInjections(h: PerkSession, optionsSeen?: unknown[]): string[]
     optionsSeen?.push(options);
   };
   return injected;
+}
+
+// --- shared fixture pieces for the tool-activation suites ---------------------------------------
+
+/**
+ * loadPerkSession with process.cwd() pointed at the scaffold for the load: provider vacating
+ * (e.g. perk's plan surface under a foreign `[providers] plan`) resolves `process.cwd()` at
+ * factory time, so running a suite from a repo with its own selections would otherwise leak into
+ * what registers. Restores cwd before returning.
+ */
+export async function loadAt(
+  cwd: string,
+  opts: Omit<Parameters<typeof loadPerkSession>[0], "cwd"> = {},
+): Promise<PerkSession> {
+  const savedCwd = process.cwd();
+  process.chdir(cwd);
+  try {
+    return await loadPerkSession({ cwd, ...opts });
+  } finally {
+    process.chdir(savedCwd);
+  }
+}
+
+/** A Mode A session claimed into a (stage, mode) landing through the handoff. */
+export async function staged(
+  stage: string,
+  mode: "read-only" | "read-write",
+  opts: Omit<Parameters<typeof loadPerkSession>[0], "cwd"> & {
+    /** Extra handoff keys (e.g. an objective id the plan-ref does not carry). */
+    handoffExtra?: Record<string, unknown>;
+    /** A plan-ref written into the scaffold before the load. */
+    planRef?: PlanRef;
+  } = {},
+): Promise<PerkSession> {
+  const { handoffExtra, planRef, ...loadOpts } = opts;
+  const runId = `01OWN${stage.replaceAll("-", "").toUpperCase()}${mode === "read-only" ? "RO" : "RW"}`;
+  const cwd = scaffoldRepo({ handoff: { runId, mode, stage, extra: handoffExtra } });
+  if (planRef !== undefined) writePlanRef(cwd, planRef);
+  return loadAt(cwd, { ...loadOpts, env: { PERK_RUN_ID: runId, ...(loadOpts.env ?? {}) } });
+}
+
+/** One captured model request: the declared tools (the model-visible census) and the prompt. */
+export type RecordedRequest = { tools: string[]; declared: unknown[]; prompt: string };
+
+/** A faux runtime whose every scripted response first records the request it answers. */
+export async function recordingRuntime() {
+  const reg = await fauxModelRuntime();
+  const requests: RecordedRequest[] = [];
+  const record = (reply: () => unknown) => (context: { messages: never }) => {
+    const declared = getCurrentTools(context.messages);
+    requests.push({
+      tools: declared.map((t) => t.name),
+      declared,
+      prompt: getCurrentSystemPrompt(context.messages),
+    });
+    return reply();
+  };
+  const stop = () => fauxAssistantMessage([fauxText("done")], { stopReason: "stop" });
+  return {
+    reg,
+    requests,
+    /** Script one plain census turn. */
+    census() {
+      reg.setResponses([record(stop)]);
+    },
+    /** Script a turn that calls `tool` with `args`, then stops. */
+    callThenStop(tool: string, args: Parameters<typeof fauxToolCall>[1]) {
+      reg.setResponses([
+        record(() =>
+          fauxAssistantMessage([fauxToolCall(tool, args, { id: `call-${tool}` })], {
+            stopReason: "toolUse",
+          }),
+        ),
+        record(stop),
+      ]);
+    },
+    last: (): RecordedRequest => {
+      const request = requests.at(-1);
+      assert.ok(request !== undefined, "a model request was made");
+      return request;
+    },
+  };
+}
+
+/**
+ * Record every install perk itself makes (attributed by stack to the gating module) while the
+ * test runs — Pi's own installs (registration refreshes, transcript restores) are not perk's.
+ */
+export function recordPerkInstalls(t: TestContext): string[][] {
+  const installs: string[][] = [];
+  const original = AgentSession.prototype.setActiveToolsByName;
+  t.mock.method(
+    AgentSession.prototype,
+    "setActiveToolsByName",
+    function (this: AgentSession, names: string[]) {
+      if (new Error().stack?.includes("substrate/toolGating.ts") === true)
+        installs.push([...names]);
+      return original.call(this, names);
+    },
+  );
+  return installs;
+}
+
+/** Pi's real builtin `tool_search`, loaded through the CLI's builtin path (`source: "builtin"`). */
+export const toolSearch = (): InlineExtension => ({
+  name: "tool-search",
+  factory: createToolSearchExtension(),
+  builtin: true,
+});
+
+/** A ToolGating fake recording exits; `active` is the isActive snapshot. */
+export function fakeGating(active: boolean): ToolGating & { exits: number } {
+  const g = {
+    exits: 0,
+    syncFromState() {},
+    enter() {},
+    exit() {
+      g.exits += 1;
+    },
+    isActive: () => active,
+    prepareLoadout: () => ({}),
+  };
+  return g;
 }

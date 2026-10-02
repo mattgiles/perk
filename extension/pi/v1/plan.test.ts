@@ -34,12 +34,13 @@ import { sessionDataDir } from "../../substrate/cache.ts";
 import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import { digestSessionData } from "../../substrate/sessionData.ts";
 import { readSessionPointers } from "../../substrate/sessionPointers.ts";
-import { readOnlyContext, type ToolGating } from "../../substrate/toolGating.ts";
+import { readOnlyContext } from "../../substrate/toolGating.ts";
 import { gatedToolsFor, toolMatrix } from "../../substrate/toolPolicy.ts";
 import type { BranchEntry, EntrySink } from "../../substrate/workflowState.ts";
 import { rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
 import {
+  fakeGating,
   fakePerk,
   gitInit,
   loadPerkSession,
@@ -1553,21 +1554,6 @@ function fakeSink(branch: unknown[]): EntrySink {
 
 function runIdEntry(runId: string): unknown {
   return { type: "custom", customType: WORKFLOW_STATE_TYPE, data: { run_id: runId } };
-}
-
-/** A ToolGating fake recording exits; `active` is the isActive snapshot. */
-function fakeGating(active: boolean): ToolGating & { exits: number } {
-  const g = {
-    exits: 0,
-    syncFromState() {},
-    enter() {},
-    exit() {
-      g.exits += 1;
-    },
-    isActive: () => active,
-    prepareLoadout: () => ({}),
-  };
-  return g;
 }
 
 /** An ExtensionAPI fake: appendEntry lands on the branch; exec returns the canned payload. */

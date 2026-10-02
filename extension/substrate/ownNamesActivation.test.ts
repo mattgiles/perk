@@ -8,18 +8,9 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { before, type TestContext, test } from "node:test";
+import { before, test } from "node:test";
 import {
-  fauxAssistantMessage,
-  fauxText,
-  fauxToolCall,
-  getCurrentSystemPrompt,
-  getCurrentTools,
-} from "@earendil-works/pi-ai";
-import {
-  AgentSession,
   createCodemodeExtension,
-  createToolSearchExtension,
   type ExtensionAPI,
   type InlineExtension,
   SessionManager,
@@ -27,13 +18,16 @@ import {
 import { registerPerkTool } from "../pi/perkTool.ts";
 import {
   fakeNpmPackage,
-  fauxModelRuntime,
-  loadPerkSession,
+  loadAt,
   PERK_EXTENSION_PATH,
   type PerkSession,
   plantSession,
+  recordingRuntime,
+  recordPerkInstalls,
   registerFakeTool,
   scaffoldRepo,
+  staged,
+  toolSearch,
 } from "../testing/harness.ts";
 import { ensureToolCatalog } from "../testing/toolCatalog.ts";
 import { sideSessionTools } from "../vendor/btw/core.ts";
@@ -48,23 +42,6 @@ import {
 
 // The perk-subset assertions read the catalog: fill it the way production does first.
 before(ensureToolCatalog);
-
-/**
- * loadPerkSession with process.cwd() pointed at the scaffold for the load (provider vacating
- * resolves `process.cwd()` at factory time). Restores cwd before returning.
- */
-async function loadAt(
-  cwd: string,
-  opts: Omit<Parameters<typeof loadPerkSession>[0], "cwd"> = {},
-): Promise<PerkSession> {
-  const savedCwd = process.cwd();
-  process.chdir(cwd);
-  try {
-    return await loadPerkSession({ cwd, ...opts });
-  } finally {
-    process.chdir(savedCwd);
-  }
-}
 
 /** The ESM source of a fake package registering load-time no-op tools. */
 function loadTimeTools(names: readonly string[]): string {
@@ -139,68 +116,6 @@ test("spike (A): a named inline factory's tool carries its exact synthetic path"
 
 // --- shared fixture pieces ------------------------------------------------------------------------
 
-/** One captured model request: the declared tools (the model-visible census) and the prompt. */
-type Request = { tools: string[]; declared: unknown[]; prompt: string };
-
-/** A faux runtime whose every scripted response first records the request it answers. */
-async function recordingRuntime() {
-  const reg = await fauxModelRuntime();
-  const requests: Request[] = [];
-  const record = (reply: () => unknown) => (context: { messages: never }) => {
-    const declared = getCurrentTools(context.messages);
-    requests.push({
-      tools: declared.map((t) => t.name),
-      declared,
-      prompt: getCurrentSystemPrompt(context.messages),
-    });
-    return reply();
-  };
-  const stop = () => fauxAssistantMessage([fauxText("done")], { stopReason: "stop" });
-  return {
-    reg,
-    requests,
-    /** Script one plain census turn. */
-    census() {
-      reg.setResponses([record(stop)]);
-    },
-    /** Script a turn that calls `tool` with `args`, then stops. */
-    callThenStop(tool: string, args: Parameters<typeof fauxToolCall>[1]) {
-      reg.setResponses([
-        record(() =>
-          fauxAssistantMessage([fauxToolCall(tool, args, { id: `call-${tool}` })], {
-            stopReason: "toolUse",
-          }),
-        ),
-        record(stop),
-      ]);
-    },
-    last: (): Request => {
-      const request = requests.at(-1);
-      assert.ok(request !== undefined, "a model request was made");
-      return request;
-    },
-  };
-}
-
-/**
- * Record every install perk itself makes (attributed by stack to the gating module) while the
- * test runs — Pi's own installs (registration refreshes, transcript restores) are not perk's.
- */
-function recordPerkInstalls(t: TestContext): string[][] {
-  const installs: string[][] = [];
-  const original = AgentSession.prototype.setActiveToolsByName;
-  t.mock.method(
-    AgentSession.prototype,
-    "setActiveToolsByName",
-    function (this: AgentSession, names: string[]) {
-      if (new Error().stack?.includes("substrate/toolGating.ts") === true)
-        installs.push([...names]);
-      return original.call(this, names);
-    },
-  );
-  return installs;
-}
-
 const foreignActive = (h: PerkSession): string[] =>
   h.session.getActiveToolNames().filter((n) => !isPerkTool(n));
 
@@ -236,11 +151,6 @@ function bareFactory(names: readonly string[]): (pi: ExtensionAPI) => void {
   };
 }
 
-const toolSearch = (): InlineExtension => ({
-  name: "tool-search",
-  factory: createToolSearchExtension(),
-  builtin: true,
-});
 const codemode = (mode: "on" | "only"): InlineExtension => ({
   name: "codemode",
   factory: createCodemodeExtension({ mode }),
@@ -283,17 +193,6 @@ const runnerEnv = {
   PI_SUBAGENT_CHILD: "1",
   PI_SUBAGENT_EXTENSION_BINDINGS: '{"perk.parent-restrictions/1":{"readOnly":true}}',
 };
-
-/** A Mode A session claimed into a (stage, mode) landing through the handoff. */
-async function staged(
-  stage: string,
-  mode: "read-only" | "read-write",
-  opts: Omit<Parameters<typeof loadPerkSession>[0], "cwd"> = {},
-): Promise<PerkSession> {
-  const runId = `01OWN${stage.replaceAll("-", "").toUpperCase()}${mode === "read-only" ? "RO" : "RW"}`;
-  const cwd = scaffoldRepo({ handoff: { runId, mode, stage } });
-  return loadAt(cwd, { ...opts, env: { PERK_RUN_ID: runId, ...(opts.env ?? {}) } });
-}
 
 // --- 1. search-then-reconcile ---------------------------------------------------------------------
 

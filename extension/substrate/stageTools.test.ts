@@ -43,7 +43,7 @@ import { simplifyGuidance } from "../pi/v1/simplify.ts";
 import { retainedDispatch } from "../testing/fakeConflictResolver.ts";
 import {
   fauxModelRuntime,
-  loadPerkSession,
+  loadAt,
   type PerkSession,
   plantSession,
   registerFakeTool,
@@ -71,25 +71,6 @@ import {
 
 // The pure diet/guard tests read the catalog: fill it the way production does first.
 before(ensureToolCatalog);
-
-/**
- * loadPerkSession with process.cwd() pointed at the scaffold for the load: provider vacating
- * (e.g. perk's plan surface under a foreign `[providers] plan`) resolves `process.cwd()` at
- * factory time, so running the suite from a repo with its own selections would otherwise leak
- * into what registers (the planMode.test.ts chdir pattern). Restores cwd before returning.
- */
-async function loadAt(
-  cwd: string,
-  opts: Omit<Parameters<typeof loadPerkSession>[0], "cwd"> = {},
-): Promise<PerkSession> {
-  const savedCwd = process.cwd();
-  process.chdir(cwd);
-  try {
-    return await loadPerkSession({ cwd, ...opts });
-  } finally {
-    process.chdir(savedCwd);
-  }
-}
 
 /** The 5 authoring tools every worktree-stage session must scope off. (The reconcile trio —
  * `reconcile_objective`/`add_objective_node`/`objective_node` — is NOT here: it rides the
