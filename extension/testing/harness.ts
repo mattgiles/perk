@@ -118,6 +118,8 @@ export interface PerkSession {
     promptSnippet?: string;
     promptGuidelines?: string[];
     executionMode?: string;
+    /** Present only when the definition declares one (a perk `kind: query` tool). */
+    outputSchema?: unknown;
   } | null;
   /**
    * A registered tool's `getAllTools()` record — Pi's view of its derived `exposure` and
@@ -153,7 +155,13 @@ export interface PerkSession {
       signal?: AbortSignal;
       ctxSignal?: AbortSignal;
     },
-  ): Promise<{ content: { text?: string }[]; details: unknown; terminate?: boolean }>;
+  ): Promise<{
+    content: { text?: string }[];
+    details: unknown;
+    terminate?: boolean;
+    structuredContent?: unknown;
+    isError?: boolean;
+  }>;
   /** Fire a `tool_call` event through the runner; returns the gating verdict (block/reason). */
   emitToolCall(
     toolName: string,
@@ -866,6 +874,7 @@ export async function loadPerkSession(opts: {
         ...(def.promptSnippet !== undefined ? { promptSnippet: def.promptSnippet } : {}),
         ...(def.promptGuidelines !== undefined ? { promptGuidelines: def.promptGuidelines } : {}),
         ...(def.executionMode !== undefined ? { executionMode: def.executionMode as string } : {}),
+        ...(def.outputSchema !== undefined ? { outputSchema: def.outputSchema as unknown } : {}),
       };
     },
     toolInfo(name: string) {
@@ -979,7 +988,13 @@ export async function loadPerkSession(opts: {
         ctx,
       );
       await tick();
-      return result as { content: { text?: string }[]; details: unknown; terminate?: boolean };
+      return result as {
+        content: { text?: string }[];
+        details: unknown;
+        terminate?: boolean;
+        structuredContent?: unknown;
+        isError?: boolean;
+      };
     },
     async emitToolCall(toolName, input) {
       const result = await session.extensionRunner.emitToolCall({

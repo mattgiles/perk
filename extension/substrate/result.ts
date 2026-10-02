@@ -2,7 +2,14 @@
 // shape and the loud-but-soft failure idiom (report + "<label> failed: <message>"), so the nine
 // cold-door-delegating doors share one discriminated union instead of ad-hoc *Result/*Details
 // pairs (cf. report.ts, branchOf).
+//
+// It also owns the rule mapping that shape onto Pi's structured result contract
+// (`structureResult`, applied once to every perk tool by the registration seam, contracts.md
+// §8.40): `details` doubles as `structuredContent`, and a soft failure (`details.ok === false`)
+// is flagged `isError` — so the `details.ok` discriminant every perk tool already follows is what
+// the model, Pi's UI and programmatic callers (nested `ctx.executeTool`, codemode scripts) see.
 
+import type { JsonValue } from "@earendil-works/pi-ai";
 import { type ReportTarget, report } from "../surfaces/report.ts";
 
 /** The single text block every warm-door result renders ("one text field, two doors"). */
@@ -77,5 +84,36 @@ export function failFor<X extends object = Record<never, never>>(
         ...(extras ?? {}),
       } as FailDetails<X>,
     };
+  };
+}
+
+/** The two result fields `structureResult` derives; everything else on a result passes through. */
+export type StructuredFields = { structuredContent?: JsonValue; isError?: boolean };
+
+/**
+ * Derive Pi's structured result fields from a perk tool result:
+ *  - `structuredContent` is `details` itself — the same reference, no clone — and is absent when
+ *    `details` is undefined. The cast is sound by construction: perk details are JSON (Pi persists
+ *    them via `JSON.stringify`), and a seam every tool passes through must gain no throw path
+ *    (a JSON round-trip would throw on a BigInt or a cycle) and no copy;
+ *  - an own `ok === false` on an object `details` forces `isError: true`; otherwise the incoming
+ *    flag is preserved exactly (key absent stays absent, a tool-set `true` survives). `false` is
+ *    never written.
+ * Every other field (`content`, `details`, `terminate`, `usage`) is spread through untouched.
+ * Pure and idempotent.
+ */
+export function structureResult<R extends { content: unknown; details?: unknown }>(
+  result: R,
+): R & StructuredFields {
+  const { details } = result;
+  const failed =
+    typeof details === "object" &&
+    details !== null &&
+    Object.hasOwn(details, "ok") &&
+    (details as { ok?: unknown }).ok === false;
+  return {
+    ...result,
+    ...(details !== undefined ? { structuredContent: details as JsonValue } : {}),
+    ...(failed ? { isError: true } : {}),
   };
 }

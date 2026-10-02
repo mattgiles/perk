@@ -2,12 +2,12 @@
 // §8.40). Every perk tool is registered through `registerPerkTool` (`pi/perkTool.ts`) with a
 // policy descriptor; the catalog records it, and every perk-side view — the gated (read-only)
 // activation view, the gate-OFF stage diet, the carve-out writer list the read-only context names,
-// the Pi metadata (`exposure`, `annotations.readOnlyHint`) and the golden stage×tool matrix — is
-// DERIVED from the descriptors. Every other tool is classified by WHO registered it, never by its
-// name: Pi's `sourceInfo` provenance (a package spec, an exact synthetic path, or the builtin
-// registrar) selects a posture row, and an unrecognized provenance is `unknown` (passes every
-// diet, blocked under the gate). Nothing here enumerates a foreign tool name save the one
-// in-package exception row.
+// the Pi metadata (`exposure`, `annotations.readOnlyHint`, a query's `outputSchema`) and the golden
+// stage×tool matrix — is DERIVED from the descriptors. Every other tool is classified by WHO
+// registered it, never by its name: Pi's `sourceInfo` provenance (a package spec, an exact
+// synthetic path, or the builtin registrar) selects a posture row, and an unrecognized provenance
+// is `unknown` (passes every diet, blocked under the gate). Nothing here enumerates a foreign tool
+// name save the one in-package exception row.
 //
 // Activation is own-names-only: perk installs and removes ONLY catalogued names
 // (`reconcileTarget`); foreign eligibility is presented by hiding declarations
@@ -42,6 +42,16 @@ export type Declared = "always" | "deferred";
 /** The session's gate mode (the workflow-state `mode` field). */
 export type Mode = "read-only" | "read-write";
 
+/**
+ * A query tool's SUCCESS details beyond the `ok` discriminant, as plain JSON-Schema property
+ * objects (like a definition's `parameters` literal). The seam composes Pi's `outputSchema` from
+ * it (`deriveOutputSchema`); `ok` itself is the seam's and may not appear.
+ */
+export type QueryResultSchema = {
+  readonly properties: Readonly<Record<string, object>>;
+  readonly required?: readonly string[];
+};
+
 /** A perk tool's policy descriptor — the one input every derived view reads. */
 export type ToolPolicy = {
   /** Registry stage ids where the tool is eligible (validated at registration; empty = reachable only unscoped). */
@@ -52,6 +62,12 @@ export type ToolPolicy = {
   kind: ToolKind;
   /** Reserved for the discovery pilot; default "always". */
   declared?: Declared;
+  /**
+   * `kind: query` only (required there, refused elsewhere): the success details' schema, from
+   * which the seam derives the tool's Pi `outputSchema` — so only a pure read can ever become a
+   * structured script API.
+   */
+  result?: QueryResultSchema;
 };
 
 // --- stage families -----------------------------------------------------------------------------
@@ -94,6 +110,7 @@ function normalizedPolicy(policy: ToolPolicy): string {
     modeOverStage: policy.modeOverStage === true,
     kind: policy.kind,
     declared: policy.declared ?? "always",
+    result: policy.result ?? null,
   });
 }
 
@@ -142,24 +159,65 @@ export const POLICY_OWNED_FIELDS = [
   "annotations",
   "defaultActive",
   "prepareLoadout",
+  "outputSchema",
 ] as const;
 
-/** The Pi metadata a policy derives (`readOnlyHint` = never modifies the worktree — a hint only). */
+/**
+ * The Pi metadata a policy derives (`readOnlyHint` = never modifies the worktree — a hint only;
+ * `outputSchema` = the structured result a script receives — query kinds only).
+ */
 export type PiToolMetadata = {
   exposure: "direct" | "model-only" | "deferred";
   annotations?: { readOnlyHint: true };
+  outputSchema?: object;
 };
 
-/** Derive the Pi `exposure` + `annotations` for a policy — never hand-set on a definition. */
+/**
+ * Compose a query tool's Pi `outputSchema` from its declared success details: the `details.ok`
+ * discriminated union every perk result follows. The success arm is closed (a details field added
+ * without a schema update fails the conformance pin); the failure arm stays open for `failFor`
+ * extras.
+ */
+export function deriveOutputSchema(result: QueryResultSchema): object {
+  return {
+    anyOf: [
+      {
+        type: "object",
+        properties: { ok: { const: true }, ...result.properties },
+        required: ["ok", ...(result.required ?? [])],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          ok: { const: false },
+          error: { type: "string" },
+          error_type: { type: "string" },
+        },
+        required: ["ok", "error", "error_type"],
+        additionalProperties: true,
+      },
+    ],
+  };
+}
+
+/**
+ * Derive the Pi `exposure` + `annotations` (+ `outputSchema` for a query) for a policy — never
+ * hand-set on a definition.
+ */
 export function derivePiMetadata(policy: ToolPolicy): PiToolMetadata {
   const exposure = MODEL_ONLY_KINDS.has(policy.kind)
     ? "model-only"
     : policy.declared === "deferred"
       ? "deferred"
       : "direct";
-  return policy.gated === "blocked"
-    ? { exposure }
-    : { exposure, annotations: { readOnlyHint: true } };
+  return {
+    exposure,
+    ...(policy.gated === "blocked" ? {} : { annotations: { readOnlyHint: true } }),
+    ...(policy.kind === "query" && policy.result !== undefined
+      ? { outputSchema: deriveOutputSchema(policy.result) }
+      : {}),
+  };
 }
 
 /** Throw `perk tool policy: <name> — …` unless the definition + policy may register. */
@@ -189,6 +247,25 @@ export function validateToolPolicy(
     fail(
       `declared: "deferred" requires kind query or action — a ${policy.kind} tool is model-only, and a model-only tool can never be script-callable (exposure is one enum)`,
     );
+  }
+  if (policy.kind === "query" && policy.result === undefined) {
+    fail("a query tool must declare its success details (result)");
+  }
+  if (policy.kind !== "query" && policy.result !== undefined) {
+    fail(
+      `\`result\` is declared by query tools only — a ${policy.kind} tool is never a script API`,
+    );
+  }
+  if (policy.result !== undefined) {
+    const { properties, required = [] } = policy.result;
+    if (Object.hasOwn(properties, "ok")) {
+      fail("`result.properties` must not declare `ok` (the seam owns the discriminant)");
+    }
+    for (const field of required) {
+      if (!Object.hasOwn(properties, field)) {
+        fail(`\`result.required\` names "${field}", which \`result.properties\` does not declare`);
+      }
+    }
   }
   const prior = CATALOG.get(name);
   if (prior !== undefined && normalizedPolicy(prior) !== normalizedPolicy(policy)) {

@@ -1,6 +1,8 @@
 // Live warm-surface tests for the stacked-delivery status read (stackStatus.ts): the frozen
-// registration baselines (tool + command), the strict bad_input decode, the objective-inference
-// precedence through the registered tool, the lenient `renderStackStatus` render, and the two
+// registration baselines (tool + command, the derived query `outputSchema` included), the
+// structured result and its conformance to that schema on both arms, the strict bad_input decode,
+// the objective-inference precedence through the registered tool, the lenient
+// `renderStackStatus` render, and the two
 // `/objective-stack` command arms (gate-on multiline success + multiline failure). Fully offline
 // (fakePerk via PERK_BIN; a REAL bound AgentSession via the T1 harness). The mutating stack
 // family's suites stay in stackSync.test.ts / stackRecover.test.ts / stackLand.test.ts.
@@ -10,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { Value } from "typebox/value";
 import { writePlanRef } from "../../../substrate/cache.ts";
 import { REPORT_DETAIL_TYPE } from "../../../surfaces/surfaces.ts";
 import { fakePerk, loadPerkSession, plantSession, scaffoldRepo } from "../../../testing/harness.ts";
@@ -40,6 +43,39 @@ const BASELINE_STACK_STATUS = {
     "objective_stack_status is read-only — call it freely to inspect the delivery train, unresolved operations, pending continuations, and orphaned residue (objective inferred when omitted).",
   ],
   executionMode: "sequential",
+  // Derived by the seam from the policy's `result` — written out in full here as the second,
+  // independent statement of the envelope.
+  outputSchema: {
+    anyOf: [
+      {
+        type: "object",
+        properties: {
+          ok: { const: true },
+          objective: {
+            type: "string",
+            description: "The objective id the status was read for.",
+          },
+          status: {
+            type: "object",
+            description:
+              "The perk objective stack status --json payload (shared/schemas/outputs/objective-stack-status.schema.json).",
+          },
+        },
+        required: ["ok", "objective", "status"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          ok: { const: false },
+          error: { type: "string" },
+          error_type: { type: "string" },
+        },
+        required: ["ok", "error", "error_type"],
+        additionalProperties: true,
+      },
+    ],
+  },
 };
 
 test("registration parity: objective_stack_status + /objective-stack match the frozen baselines", async () => {
@@ -57,6 +93,35 @@ test("registration parity: objective_stack_status + /objective-stack match the f
         "Show an objective's stacked delivery train (status, operations, continuation, residue). " +
         "Pass an objective number (else the active objective, else the plan-ref's).",
     });
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- the structured result ---------------------------------------------------------------
+
+test("structured result: success details carry the cold payload; structuredContent IS details; both arms conform to the outputSchema", async () => {
+  const cwd = scaffoldRepo();
+  const bin = fakePerk(cwd, { stdout: OK_ENVELOPE });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
+  try {
+    const schema = h.registeredTool("objective_stack_status")?.outputSchema;
+    assert.ok(schema !== undefined, "the query tool declares an outputSchema");
+
+    const success = await h.invokeTool("objective_stack_status", { objective: "7" });
+    const details = success.details as Record<string, unknown>;
+    assert.deepEqual(details, { ok: true, objective: "7", status: JSON.parse(OK_ENVELOPE) });
+    assert.equal(success.structuredContent, success.details, "the same reference");
+    assert.equal("isError" in success, false);
+    assert.equal(Value.Check(schema as never, success.structuredContent), true, "success arm");
+    // The success arm is closed: an undeclared details key fails the schema.
+    assert.equal(Value.Check(schema as never, { ...details, extra: 1 }), false, "closed arm");
+
+    const failure = await h.invokeTool("objective_stack_status", {});
+    assert.equal(failure.isError, true);
+    assert.equal(failure.structuredContent, failure.details);
+    assert.equal((failure.details as { error_type?: string }).error_type, "no_objective");
+    assert.equal(Value.Check(schema as never, failure.structuredContent), true, "fail arm");
   } finally {
     h.dispose();
   }

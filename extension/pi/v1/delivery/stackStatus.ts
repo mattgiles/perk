@@ -165,18 +165,20 @@ function readStackStatus(pi: ExtensionAPI, ctx: ExtensionContext, objective: str
   });
 }
 
-/** The tool implementation: resolve, delegate, render, never throw. */
+/** The tool implementation: resolve, delegate, render, never throw. The success details carry the
+ * cold `--json` payload verbatim as `status` (the query's structured result; the text is its
+ * render). */
 async function stackStatus(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   objectiveParam: string | undefined,
-): Promise<Result<{ objective: string }>> {
+): Promise<Result<{ objective: string; status: ColdJson }>> {
   const fail = failFor(ctx, "objective-stack", "objective_stack_status");
   const objective = resolveStackObjective(objectiveParam, ctx);
   if (objective === null) return fail(STACK_NO_OBJECTIVE_MESSAGE, "no_objective");
   const r = await readStackStatus(pi, ctx, objective);
   if (!r.ok) return fail(r.message, r.errorType);
-  return ok(renderStackStatus(r.data), { objective });
+  return ok(renderStackStatus(r.data), { objective, status: r.data });
 }
 
 /** Install the stacked-delivery status read: the `objective_stack_status` tool (strict
@@ -219,7 +221,25 @@ export function installStackStatusBindings(pi: ExtensionAPI): void {
         return stackStatus(pi, ctx, objective);
       },
     },
-    { stages: [...WORKTREE_STAGES], gated: "blocked", kind: "query" },
+    {
+      stages: [...WORKTREE_STAGES],
+      gated: "blocked",
+      kind: "query",
+      result: {
+        properties: {
+          objective: {
+            type: "string",
+            description: "The objective id the status was read for.",
+          },
+          status: {
+            type: "object",
+            description:
+              "The perk objective stack status --json payload (shared/schemas/outputs/objective-stack-status.schema.json).",
+          },
+        },
+        required: ["objective", "status"],
+      },
+    },
   );
 
   registerPerkCommand(pi, "objective-stack", {
