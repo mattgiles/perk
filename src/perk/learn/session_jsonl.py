@@ -21,11 +21,24 @@ empty :class:`ParsedSession`; a non-JSON / non-object / type-less line → count
 ``malformed_lines``, never raised. Real logs already carry entry ``type`` values absent from the
 installed type union (``active_long_running`` / ``needs_attention``), so any unknown ``type``
 parses fine — the classifier downstream treats it as boilerplate.
+
+**Nested-call evidence.** Pi ≥ 0.99 records the tool calls a tool made through
+``ctx.executeTool`` (codemode scripts and other nested callers) on the CALLING tool's toolResult
+message as ``message.nestedCalls`` — the pi-ai ``NestedToolCalls`` grammar
+``{calls: NestedToolCallRecord[], complete: boolean}`` with records
+``{id, name, status: ok|error|unfinished, arguments?, argumentsBytes?, durationMs?, error?}``
+(``arguments`` omitted over budget, ``argumentsBytes`` then set; nested results never recorded).
+:func:`_project_nested_calls` projects it into :class:`NestedCalls` leniently: it never invents
+(omitted arguments stay ``None``; absence never claims completeness), never raises (it runs
+outside the parser's per-line ``except`` arm — a raise would abort the whole parse), and degrades
+an unreadable block or record into an explicit ``malformed`` count rather than a malformed line.
 """
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from pydantic import Field
 
@@ -44,13 +57,49 @@ class ToolCall:
     call_id: str | None
 
 
+# Mirrors Pi's recorder cap (`NESTED_CALL_LIMITS.maxCalls`), so honest records never hit it.
+_MAX_NESTED_CALLS = 256
+
+
+@dataclass(frozen=True)
+class NestedCall:
+    """One nested tool call recorded on its caller's toolResult (``message.nestedCalls``).
+
+    ``status`` keeps the grammar's string verbatim (``ok`` / ``error`` / ``unfinished``, or any
+    other string a later Pi writes); a non-string status is ``"unknown"``. ``args_text`` is the
+    compact JSON of ``arguments`` when recorded, ``None`` when Pi omitted them (over budget) —
+    never invented; ``arguments_bytes`` is Pi's size of the omitted arguments, when given.
+    """
+
+    call_id: str
+    name: str
+    status: str
+    args_text: str | None
+    arguments_bytes: int | None
+    duration_ms: int | None
+    error: str | None
+
+
+@dataclass(frozen=True)
+class NestedCalls:
+    """The projected ``message.nestedCalls`` block. ``complete`` is ``True`` only when the
+    grammar's flag is literally ``true``; ``malformed`` counts the records (or the whole block:
+    1) the projection could not read; ``dropped`` counts the records beyond the projection cap."""
+
+    calls: tuple[NestedCall, ...]
+    complete: bool
+    malformed: int
+    dropped: int
+
+
 @dataclass(frozen=True)
 class SessionEntry:
     """One flat, frozen projection of a Pi session-log entry — the fields the normalization
     pipeline + renderer need, nothing more. ``index`` is the entry's position in file order
     (header excluded); ``kind`` is the JSONL ``type``. ``raw_chars`` is the entry's raw JSONL
     line size in code points (the decoded line, newline excluded) — complete by construction:
-    unprojected fields (e.g. ``message.details``) are counted."""
+    unprojected fields (e.g. ``message.details``) are counted. ``nested_calls`` is a toolResult's
+    projected nested-call record (``None`` when the line carries none)."""
 
     index: int
     kind: str
@@ -75,6 +124,7 @@ class SessionEntry:
     modified_files: tuple[str, ...]
     from_id: str | None
     raw_chars: int = 0
+    nested_calls: NestedCalls | None = None
 
 
 @dataclass(frozen=True)
@@ -122,6 +172,9 @@ class _MessageModel(LenientParseModel):
     tool_name: str | None = Field(default=None, alias="toolName")
     tool_call_id: str | None = Field(default=None, alias="toolCallId")
     is_error: bool = Field(default=False, alias="isError")
+    # Typed `object` so NO shape of the record can fail the line's validation: a malformed block
+    # must degrade inside the projection, never turn a readable toolResult into a malformed line.
+    nested_calls: object | None = Field(default=None, alias="nestedCalls")
 
 
 class _CompactionDetails(LenientParseModel):
@@ -163,6 +216,9 @@ class SessionEntryModel(LenientParseModel):
         tool_name = self.message.tool_name if self.message is not None else None
         tool_call_id = self.message.tool_call_id if self.message is not None else None
         is_error = self.message.is_error if self.message is not None else False
+        nested_calls = (
+            _project_nested_calls(self.message.nested_calls) if self.message is not None else None
+        )
         read_files = self.details.read_files if self.details is not None else ()
         modified_files = self.details.modified_files if self.details is not None else ()
         return SessionEntry(
@@ -189,6 +245,7 @@ class SessionEntryModel(LenientParseModel):
             modified_files=modified_files,
             from_id=self.from_id,
             raw_chars=raw_chars,
+            nested_calls=nested_calls,
         )
 
     def _joined_text(self) -> str:
@@ -288,3 +345,72 @@ def _opt_str(value: object) -> str | None:
 
 def _opt_int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _opt_count(value: object) -> int | None:
+    """A recorded count/duration as an ``int``: a finite number rounds; anything else (a bool, a
+    string, ``inf``/``-inf``/``nan`` — which ``json.loads`` accepts) is ``None``. Never raises."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and math.isfinite(value):
+        return round(value)
+    return None
+
+
+def _json_object(value: object) -> dict[str, object] | None:
+    """A decoded JSON object (string keys by construction), else ``None``."""
+    return cast("dict[str, object]", value) if isinstance(value, dict) else None
+
+
+def _project_nested_call(raw: object) -> NestedCall | None:
+    """One readable record, or ``None`` when it is not an object or its ``id``/``name`` are not
+    strings."""
+    record = _json_object(raw)
+    if record is None:
+        return None
+    call_id = record.get("id")
+    name = record.get("name")
+    if not isinstance(call_id, str) or not isinstance(name, str):
+        return None
+    status = record.get("status")
+    arguments = record.get("arguments")
+    error = record.get("error")
+    return NestedCall(
+        call_id=call_id,
+        name=name,
+        status=status if isinstance(status, str) else "unknown",
+        # `json.dumps` over a `json.loads` product cannot raise: keys are strings and non-finite
+        # floats serialize.
+        args_text=json.dumps(arguments, sort_keys=True) if isinstance(arguments, dict) else None,
+        arguments_bytes=_opt_count(record.get("argumentsBytes")),
+        duration_ms=_opt_count(record.get("durationMs")),
+        error=error if isinstance(error, str) else None,
+    )
+
+
+def _project_nested_calls(raw: object) -> NestedCalls | None:
+    """Project a toolResult's ``message.nestedCalls`` (see the module docstring). Total by
+    construction: absent/``null`` → ``None``; a non-object block → no calls with
+    ``malformed=1``; a non-list ``calls`` → no calls with ``malformed=1`` (``complete`` still
+    read); an unreadable record → counted, its siblings kept; records past the cap → ``dropped``."""
+    if raw is None:
+        return None
+    block = _json_object(raw)
+    if block is None:
+        return NestedCalls(calls=(), complete=False, malformed=1, dropped=0)
+    complete = block.get("complete") is True
+    records = block.get("calls")
+    if not isinstance(records, list):
+        return NestedCalls(calls=(), complete=complete, malformed=1, dropped=0)
+    calls: list[NestedCall] = []
+    malformed = 0
+    for record in records[:_MAX_NESTED_CALLS]:
+        call = _project_nested_call(record)
+        if call is None:
+            malformed += 1
+        else:
+            calls.append(call)
+    dropped = max(len(records) - _MAX_NESTED_CALLS, 0)
+    return NestedCalls(calls=tuple(calls), complete=complete, malformed=malformed, dropped=dropped)
