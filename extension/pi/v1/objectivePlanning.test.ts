@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PLAN_CONTEXT_TYPE } from "../../authoring/plan/prose.ts";
 import { planRefPath, writePlanRef } from "../../substrate/cache.ts";
-import { gatedToolsFor } from "../../substrate/toolPolicy.ts";
+import { gatedToolsFor, isPerkTool } from "../../substrate/toolPolicy.ts";
 import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import {
   createFakeSubagents,
@@ -479,15 +479,18 @@ test("/objective-plan enters the read-only gate: mode flips, write blocked, anno
       "plan guidance rides the gate the factory entered",
     );
     assert.equal(h.workflowState().stage, "objective-plan", "the warm factory claims the stage");
-    // The active set is the objective-plan stage's gated view (the registered subset of it).
+    // perk's active subset is the objective-plan stage's gated view (the registered subset of
+    // it); edit/write stay active — hidden from the model and blocked by the backstop.
     const gated = gatedToolsFor("objective-plan");
     const expected = h.session
       .getAllTools()
       .map((t) => t.name)
       .filter((name) => gated.includes(name))
       .sort();
-    assert.deepEqual([...h.session.getActiveToolNames()].sort(), expected);
+    const active = h.session.getActiveToolNames();
+    assert.deepEqual(active.filter(isPerkTool).sort(), expected);
     assert.ok(expected.includes("objective_node") && expected.includes("explore_objective_node"));
+    assert.ok(active.includes("edit") && active.includes("write"));
   } finally {
     h.dispose();
   }

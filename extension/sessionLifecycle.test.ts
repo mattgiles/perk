@@ -28,9 +28,14 @@ import {
   type SessionPointer,
 } from "./substrate/sessionPointers.ts";
 import { readOnlyContext } from "./substrate/toolGating.ts";
-import { gatedToolsFor } from "./substrate/toolPolicy.ts";
+import { gatedToolsFor, isPerkTool } from "./substrate/toolPolicy.ts";
 import { WORKFLOW_STATE_TYPE } from "./substrate/workflowState.ts";
-import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
+import {
+  loadPerkSession,
+  plantSession,
+  registerFakeTool,
+  scaffoldRepo,
+} from "./testing/harness.ts";
 
 const runnerPacket = {
   PI_SUBAGENT_CHILD: "1",
@@ -59,6 +64,14 @@ test("runner floor: latched for the activation, backstopped, and invisible to a 
     cwd,
     sessionManager: SessionManager.open(file),
     env: runnerPacket,
+    // The engine's in-child completion tool, registered the way pi-subagents does (its named
+    // prompt-runtime factory — the child-engine posture row).
+    extraExtensions: [
+      {
+        name: "pi-subagents:prompt-runtime",
+        factory: (pi) => registerFakeTool(pi, "structured_output"),
+      },
+    ],
   });
   try {
     assert.equal(h.workflowState().mode, "read-only");
@@ -359,9 +372,9 @@ test("composition: a consuming cold start orders gate → verified linkage → c
     // else touched workflow-state or the tool set in between. (Pi's own initial tool
     // installation precedes the handler; nothing of perk's does.) After the receiver comes the
     // cosmetic tail — the perk-owned session name's ownership record (contracts.md §8.71(h)),
-    // appended only once every load-bearing effect has run. The trailing `tools` is the gate's
-    // one `resources_discover` re-apply of the same stage set, which Pi fires after every
-    // extension's `session_start` has run (contracts.md §8.40) — the only effect after that.
+    // appended only once every load-bearing effect has run. The gate's `resources_discover`
+    // re-apply (Pi fires it after every extension's `session_start`) installs nothing: perk's
+    // own names already match the landing (own-names-only — contracts.md §8.40).
     const claim = events.indexOf("append:mode,perk_version,pi_session_id,run_id,stage");
     assert.ok(claim >= 0, JSON.stringify(events));
     assert.ok(
@@ -374,10 +387,8 @@ test("composition: a consuming cold start orders gate → verified linkage → c
       "append:active_plan_ref",
       "receiver",
       "append:session_name",
-      "tools",
     ]);
-    assert.ok(toolSets.at(-1)?.includes("submit"), "implement scoping re-applied at startup");
-    assert.ok(toolSets.at(-2)?.includes("submit"), "implement scoping installed before linkage");
+    assert.ok(toolSets.at(-1)?.includes("submit"), "implement scoping installed before linkage");
     assert.equal(receiver.constructed(), 1, "one receiver per activation, like production");
     assert.equal(receiver.syncs.length, 1);
     const sync = receiver.syncs[0];
@@ -420,8 +431,11 @@ test("composition: a post-gate branch-read failure leaves the gate applied and r
     "setActiveToolsByName",
     function (this: AgentSession, names: string[]) {
       original.call(this, names);
+      // perk installs only its own names' change: the gate sync is the install whose perk subset
+      // is the implement stage's gated view.
       const gated = new Set(gatedToolsFor("implement"));
-      if (names.length === gated.size && names.every((name) => gated.has(name))) {
+      const perk = names.filter(isPerkTool);
+      if (perk.length === gated.size && perk.every((name) => gated.has(name))) {
         gateSynced = true;
       }
     },
@@ -530,6 +544,9 @@ test("composition: navigation syncs the gate before the receiver from ONE rebuil
   try {
     // Startup here is a keep without a handoff: no launched stage, no linkage, no capture.
     assert.equal(readSessionPointers(cwd, "01RID"), null);
+    // A foreign deactivation of a perk tool since startup, so the navigation's gate sync has a
+    // perk name to restore (own-names-only installs nothing when perk's names already match).
+    h.session.setActiveToolsByName(h.session.getActiveToolNames().filter((n) => n !== "submit"));
     events.length = 0;
     // Navigate to the planted state entry (the current leaf is a no-op for Pi; an earlier
     // entry re-selects a branch that still carries the same state).

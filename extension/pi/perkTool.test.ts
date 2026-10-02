@@ -24,7 +24,7 @@ const PI_V1 = join(import.meta.dirname, "v1");
 
 before(ensureToolCatalog);
 
-const MODEL_ONLY_KINDS = new Set(["terminal", "interactive", "orchestration"]);
+const MODEL_ONLY_KINDS = new Set(["terminal", "interactive", "orchestration", "host"]);
 
 const TERMINAL_TOOLS = [
   "plan_review",
@@ -147,7 +147,7 @@ function terminateMismatches(scanned: ScannedRegistration[]): string[] {
 
 // --- the census -------------------------------------------------------------------------------
 
-test("exposure census: model-only iff terminal/interactive/orchestration; readOnlyHint iff not blocked", async () => {
+test("exposure census: model-only iff terminal/interactive/orchestration/host; readOnlyHint iff not blocked", async () => {
   const h = await loadPerkSessionAt(scaffoldRepo());
   try {
     for (const name of perkToolNames()) {
@@ -179,9 +179,10 @@ test("terminal census pin: exactly the nine tools that can end the turn", () => 
 
 test("per-registration terminate scan: terminates(definition) ⇔ kind terminal, over every registration", () => {
   const scanned = scanProduction();
+  // The loadout host registers through `registerLoadoutHost`, never `registerPerkTool`.
   assert.deepEqual(
     sorted(scanned.map((r) => r.name)),
-    sorted(perkToolNames()),
+    sorted(perkToolNames().filter((name) => perkToolPolicy(name)?.kind !== "host")),
     "the scan sees every catalogued registration (and nothing else)",
   );
   for (const r of scanned) assert.equal(r.kind, perkToolPolicy(r.name)?.kind, r.name);
