@@ -224,15 +224,16 @@ test("/learn-docs: a worktree-stage host (plan_save scoped off) is refused", asy
 test("/learn-docs: a foreign setActiveTools restriction (no perk state) is refused", async () => {
   // The @tombell/pi-plan shape: a foreign provider hides tools via setActiveTools WITHOUT
   // writing perk workflow-state — only `pi.getActiveTools()` can see it (the authoritative
-  // predicate; workflow-state would report a viable host here).
-  const foreignRestrictor = (pi: ExtensionAPI): void => {
-    pi.on("session_start", async () => {
-      pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "plan_save"));
-    });
-  };
+  // predicate; workflow-state would report a viable host here). perk re-activates its own tools
+  // at its next reconciliation point, so the restriction is the foreign toggle made since the
+  // last one (here: after startup, before the command).
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");
   const bin = fakePerk(cwd, { stdout: GATHER_DOCS_JSON, argvFile });
+  let restrict = (): void => {};
+  const foreignRestrictor = (pi: ExtensionAPI): void => {
+    restrict = () => pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "plan_save"));
+  };
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
@@ -240,6 +241,8 @@ test("/learn-docs: a foreign setActiveTools restriction (no perk state) is refus
   });
   const injected = spyInjections(h);
   try {
+    restrict();
+    assert.ok(!h.session.getActiveToolNames().includes("plan_save"));
     await h.runCommandHandler("learn-docs", "");
     assertRefused(h, injected, argvFile);
   } finally {
