@@ -5,7 +5,9 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
+import { createCodemodeExtension, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { failFor, ok } from "../substrate/result.ts";
 import {
   gatedToolsFor,
   isPerkTool,
@@ -14,7 +16,7 @@ import {
   stageToolsFor,
   type ToolPolicy,
 } from "../substrate/toolPolicy.ts";
-import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { fauxModelRuntime, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   LOADOUT_HOST_POLICY,
   type PerkToolDefinition,
@@ -301,4 +303,94 @@ test("registerLoadoutHost: a catalogued model-only host with the one prepareLoad
     /must not set `prepareLoadout`/,
   );
   assert.equal(captured.length, 1);
+});
+
+test("a real codemode script: an action soft failure rejects (catchable), an action success resolves to text, a query soft failure resolves to its structured value", async () => {
+  const reg = await fauxModelRuntime();
+  const h = await loadPerkSession({
+    cwd: scaffoldRepo(),
+    headful: false,
+    model: reg.getModel(),
+    modelRuntime: reg.modelRuntime,
+    extraExtensions: [
+      createCodemodeExtension({ mode: "on" }),
+      (pi) => {
+        registerPerkTool(
+          pi,
+          {
+            name: "probe_action",
+            label: "probe_action",
+            description: "test-only action that soft-fails on demand",
+            parameters: {
+              type: "object",
+              additionalProperties: false,
+              properties: { fail: { type: "boolean" } },
+            } as never,
+            async execute(_id, params, _signal, _onUpdate, ctx) {
+              if ((params as { fail?: boolean }).fail === true) {
+                return failFor(ctx, "probe_action")("boom", "test_failure");
+              }
+              return ok("fine", {});
+            },
+          },
+          { stages: [], gated: "allowed", kind: "action" },
+        );
+        registerPerkTool(
+          pi,
+          {
+            name: "probe_query",
+            label: "probe_query",
+            description: "test-only query that always soft-fails",
+            parameters: EMPTY_PARAMS,
+            async execute(_id, _params, _signal, _onUpdate, ctx) {
+              return failFor(ctx, "probe_query")("nope", "test_failure");
+            },
+          },
+          { stages: [], gated: "allowed", kind: "query", result: { properties: {}, required: [] } },
+        );
+      },
+    ],
+  });
+  try {
+    h.session.setActiveToolsByName([
+      ...new Set([...h.session.getActiveToolNames(), "codemode", "probe_action", "probe_query"]),
+    ]);
+    const script = [
+      "const out = {};",
+      "try { await tools.probe_action({ fail: true }); out.action = 'resolved'; }",
+      "catch (e) { out.action = 'rejected: ' + e.message; }",
+      "out.ok = await tools.probe_action({});",
+      "out.query = await tools.probe_query({});",
+      "return out;",
+    ].join("\n");
+    reg.setResponses([
+      fauxAssistantMessage([fauxToolCall("codemode", { code: script })], {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage([fauxText("done")], { stopReason: "stop" }),
+    ]);
+    await h.session.prompt("run the script");
+    const codemodeResult = h.session.sessionManager
+      .getBranch()
+      .flatMap((entry) =>
+        entry.type === "message" &&
+        entry.message.role === "toolResult" &&
+        entry.message.toolName === "codemode"
+          ? [entry.message]
+          : [],
+      )
+      .at(-1);
+    assert.ok(codemodeResult !== undefined, "the codemode script ran");
+    assert.equal(codemodeResult.isError, false, "the script itself completed");
+    const text = codemodeResult.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
+    const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+    const out = JSON.parse(json) as { action?: string; ok?: unknown; query?: unknown };
+    assert.deepEqual(Object.keys(out).sort(), ["action", "ok", "query"], "the script continued");
+    assert.ok(out.action?.startsWith("rejected: "), `action: ${out.action}`);
+    assert.ok(out.action?.includes("probe_action failed: boom"), `action: ${out.action}`);
+    assert.equal(out.ok, "fine");
+    assert.deepEqual(out.query, { ok: false, error: "nope", error_type: "test_failure" });
+  } finally {
+    h.dispose();
+  }
 });
