@@ -21,11 +21,14 @@ import {
 } from "../authoring/objective/prose.ts";
 import { PLAN_AUTHORING_CONTEXT } from "../authoring/plan/prose.ts";
 import { REFINEMENT_CONTEXT } from "../authoring/refinement/prose.ts";
+import { DRAFT_REVIEW_DOOR_PRIMES } from "../authoring/review/draftContext.ts";
 import { learnFactoryGuidance } from "../learning/prose.ts";
 import { CODE_FACTORY, DOCS_FACTORY } from "../learning/routing.ts";
 import { prReviewGuidance } from "../pi/v1/codeReview/automated.ts";
+import { REVIEW_BROWSER_PRIMES } from "../pi/v1/codeReview/browser.ts";
+import { REVIEW_LAUNCH_PRIMES } from "../pi/v1/codeReview/reviewWave.ts";
 import { stackReviewGuidance } from "../pi/v1/codeReview/stack.ts";
-import { prReviewTerminalGuidance } from "../pi/v1/codeReview/terminal.ts";
+import { prReviewTerminalGuidance, REVIEW_TERMINAL_PRIMES } from "../pi/v1/codeReview/terminal.ts";
 import { isPlanGuidanceStage } from "../pi/v1/contextInjection.ts";
 import {
   commitAndCompactContinuation,
@@ -33,11 +36,13 @@ import {
 } from "../pi/v1/delivery/commitCompact.ts";
 import { objectiveLandGuidance } from "../pi/v1/delivery/stackLand.ts";
 import { objectiveRecoverGuidance } from "../pi/v1/delivery/stackRecover.ts";
+import { STACK_STATUS_PRIMES } from "../pi/v1/delivery/stackStatus.ts";
 import {
   objectiveSyncGuidance,
   syncConflictResolutionGuidance,
 } from "../pi/v1/delivery/stackSync.ts";
 import { draftAndCompactContinuation, draftAndCompactGuidance } from "../pi/v1/draftCompact.ts";
+import { DRAFT_LAUNCH_PRIMES } from "../pi/v1/draftReviewWaveTools.ts";
 import { gistSaveGuidance } from "../pi/v1/gist.ts";
 import { simplifyGuidance } from "../pi/v1/simplify.ts";
 import { retainedDispatch } from "../testing/fakeConflictResolver.ts";
@@ -54,6 +59,7 @@ import { render } from "./prompts.ts";
 import { renderReadOnlyContext } from "./toolGating.ts";
 import {
   AUTHORING_STAGES,
+  discoveryFamily,
   GIST_STAGES,
   gatedToolsFor,
   isEligible,
@@ -447,6 +453,33 @@ function referencedScopedTools(text: string): string[] {
   return scanUniverse().filter((name) => toolMention(name).test(text));
 }
 
+/**
+ * Each registered perk tool's own model-facing carrier text — its description plus its prompt
+ * guidelines — read from a live session (a tool's text rides every request while it is active,
+ * so a tool naming a deferred one is a carrier like any drive).
+ */
+const toolCarriers = new Map<string, string>();
+before(async () => {
+  const h = await loadAt(scaffoldRepo());
+  try {
+    for (const name of perkToolNames()) {
+      const def = h.registeredTool(name);
+      if (def !== null) {
+        toolCarriers.set(name, [def.description, ...(def.promptGuidelines ?? [])].join("\n"));
+      }
+    }
+  } finally {
+    h.dispose();
+  }
+});
+
+/** A registered perk tool's carrier text (fails loudly when the live session lacks the tool). */
+function toolCarrier(name: string): string {
+  const text = toolCarriers.get(name);
+  assert.ok(text !== undefined, `${name} is registered in the live session`);
+  return text;
+}
+
 /** The draft-and-compact subjects and the gated landings the session seam routes to each. */
 const DRAFT_SUBJECT_LANDINGS: readonly ["plan" | "objective" | "gist" | "refinement", Landing[]][] =
   [
@@ -477,6 +510,11 @@ const DRIVE_COVERAGE: readonly {
   text: () => string;
   /** The drive deliberately names NO scoped tool — skip the scan-broken tripwire for this row. */
   namesNoTools?: boolean;
+  /**
+   * The deferred tools this carrier's primer activates before it reaches the model — the
+   * primer's exported constant, never re-typed (the deferred rule pins it two-way).
+   */
+  primes?: readonly string[];
 }[] = [
   {
     // The reported regression: `/land` auto-drives the reconcile pass in the CURRENT worktree
@@ -513,6 +551,7 @@ const DRIVE_COVERAGE: readonly {
     drive: "stages/objective-sync.md (/objective-sync)",
     landings: rw(WORKTREE_STAGES),
     text: () => objectiveSyncGuidance("5"),
+    primes: STACK_STATUS_PRIMES,
   },
   {
     drive: "stages/objective-recover.md (/objective-recover)",
@@ -523,6 +562,7 @@ const DRIVE_COVERAGE: readonly {
     drive: "stages/objective-land.md (/objective-land)",
     landings: rw(WORKTREE_STAGES),
     text: () => objectiveLandGuidance("5"),
+    primes: STACK_STATUS_PRIMES,
   },
   {
     drive: "stages/learn.md",
@@ -609,6 +649,7 @@ const DRIVE_COVERAGE: readonly {
         base_sha: "abc123",
         directive: "focus",
       }),
+    primes: REVIEW_TERMINAL_PRIMES,
   },
   {
     drive: "stages/pr-review-terminal/foreign.md",
@@ -620,6 +661,7 @@ const DRIVE_COVERAGE: readonly {
         base_sha: "abc123",
         directive: "focus",
       }),
+    primes: REVIEW_TERMINAL_PRIMES,
   },
   {
     drive: "stages/pr-review-browser/active.md",
@@ -631,6 +673,7 @@ const DRIVE_COVERAGE: readonly {
         worktree: "/tmp/wt",
         directive: "focus",
       }),
+    primes: REVIEW_BROWSER_PRIMES,
   },
   {
     drive: "stages/pr-review-browser/foreign.md",
@@ -642,6 +685,7 @@ const DRIVE_COVERAGE: readonly {
         worktree: "/tmp/wt",
         directive: "focus",
       }),
+    primes: REVIEW_BROWSER_PRIMES,
   },
   {
     // The stacked-review door: registered globally but realistically lands in the worktree
@@ -686,6 +730,7 @@ const DRIVE_COVERAGE: readonly {
           ],
         },
       }),
+    primes: REVIEW_BROWSER_PRIMES,
   },
   {
     // The stack-review cold seed: the launched session's initial prompt names the ONE
@@ -710,6 +755,7 @@ const DRIVE_COVERAGE: readonly {
       render("stages/plan-review-browser.md", {
         custom: "check every migration step against the rollback story",
       }),
+    primes: DRAFT_REVIEW_DOOR_PRIMES,
   },
   {
     // The objective draft-review door: registered globally but stage-gated at entry to the two
@@ -721,6 +767,22 @@ const DRIVE_COVERAGE: readonly {
       render("stages/objective-review-browser.md", {
         custom: "check the roadmap ordering against the dependency story",
       }),
+    primes: DRAFT_REVIEW_DOOR_PRIMES,
+  },
+  {
+    // The wave launchers are carriers in their own right: their description and guidelines name
+    // their collector, and the PR launcher is reachable without a door — so each primes its
+    // collector on a successful launch.
+    drive: "start_review_wave (description + guidelines)",
+    landings: rw([...WORKTREE_STAGES, "stack-review"]),
+    text: () => toolCarrier("start_review_wave"),
+    primes: REVIEW_LAUNCH_PRIMES,
+  },
+  {
+    drive: "start_draft_review_wave (description + guidelines)",
+    landings: [...rw([...PLAN_FAMILY_STAGES, ...OBJECTIVE_STAGES]), ...EVERY_GATED],
+    text: () => toolCarrier("start_draft_review_wave"),
+    primes: DRAFT_LAUNCH_PRIMES,
   },
   {
     // The simplify doors: registered globally but stage-gated at entry to the stages whose
@@ -895,6 +957,49 @@ test("prompt guard: every carrier names only tools eligible in every (stage, mod
   // A violation means the carrier would dead-end in that session: reword the carrier — never
   // widen a policy to fit.
   assert.deepEqual(violations, []);
+});
+
+test("prompt guard (deferred rule): a carrier naming a deferred tool primes it, and primes only deferred tools it names", () => {
+  const family = new Set(discoveryFamily());
+  const violations: string[] = [];
+  for (const { drive, text, primes = [] } of DRIVE_COVERAGE) {
+    const named = referencedScopedTools(text());
+    for (const name of named) {
+      if (family.has(name) && !primes.includes(name)) {
+        violations.push(`${drive} names deferred \`${name}\` but never primes it (a dead-end)`);
+      }
+    }
+    for (const name of primes) {
+      if (!named.includes(name)) violations.push(`${drive} primes \`${name}\` it never names`);
+      if (!family.has(name)) violations.push(`${drive} primes \`${name}\`, which is not deferred`);
+    }
+  }
+  // A violation means a discovery-cohort session would dead-end (or prime noise): fix the
+  // primer's constant or reword the carrier — never undefer to fit.
+  assert.deepEqual(violations, []);
+  if (family.size > 0) {
+    assert.ok(
+      DRIVE_COVERAGE.some((row) => (row.primes ?? []).length > 0),
+      "non-vacuous: some carrier primes a deferred tool",
+    );
+  }
+});
+
+test("prompt guard (deferred rule): only the two wave launchers' own texts name another tool's deferred family member", () => {
+  const family = discoveryFamily();
+  assert.ok(toolCarriers.size > 0, "the live census read the registered tools");
+  const carriers = [...toolCarriers]
+    .filter(([name, text]) =>
+      referencedScopedTools(text).some((named) => named !== name && family.includes(named)),
+    )
+    .map(([name]) => name)
+    .sort();
+  // A new entry here is a tool whose always-present text names a deferred tool: give it a primer
+  // and a DRIVE_COVERAGE row, or reword it.
+  assert.deepEqual(
+    carriers,
+    family.length === 0 ? [] : ["start_draft_review_wave", "start_review_wave"],
+  );
 });
 
 test("prompt guard: the match rule's representative cases", () => {

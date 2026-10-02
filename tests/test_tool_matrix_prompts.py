@@ -7,6 +7,9 @@ seed templates, the composed `prompts/common/**` fragments they interpolate, and
 skill bodies — against the derived matrix both planes share (`shared/fixtures/tool-matrix.json`,
 drift-guarded by `extension/substrate/toolMatrix.test.ts`).
 
+The deferred rule rides here too: a discovery-pilot tool (`declared: deferred`) may be named only
+by a primed carrier, and nothing on this plane primes — so none of these carriers may name one.
+
 Coverage, stated narrowly: the raw seed/fragment/skill SOURCE text (Jinja tags included).
 Dynamic DATA blocks, interpolated runtime values and user transclusions are out of scope.
 
@@ -214,6 +217,53 @@ def test_every_common_fragment_is_classified() -> None:
     assert classified - fragments == set(), "stale classification rows"
     for fragment in TOOL_FREE_FRAGMENTS:
         assert referenced_tools((PROMPTS / fragment).read_text(encoding="utf-8")) == [], fragment
+
+
+DISCOVERY_FAMILY = frozenset(
+    {
+        "collect_draft_review_wave",
+        "collect_review_wave",
+        "objective_stack_status",
+        "push_annotations",
+    }
+)
+"""The discovery-pilot family: the matrix tools declared `deferred` (contracts.md §8.40)."""
+
+
+def _deferred_tools() -> frozenset[str]:
+    return frozenset(
+        name for name, entry in MATRIX["tools"].items() if entry.get("declared") == "deferred"
+    )
+
+
+def test_the_deferred_set_is_exactly_the_pilot_family() -> None:
+    assert _deferred_tools() == DISCOVERY_FAMILY
+
+
+def test_no_python_launched_carrier_names_a_deferred_tool() -> None:
+    """A deferred tool only ever rides a primed carrier (a warm door or a wave launcher — the TS
+    half's deferred rule): no cold seed, no composed fragment and no stage-bound skill body may
+    name one, because nothing primes it before such a carrier reaches the model."""
+    deferred = _deferred_tools()
+    carriers: list[tuple[str, str]] = [
+        (template, (PROMPTS / template).read_text(encoding="utf-8")) for template in LANDINGS
+    ]
+    carriers += [
+        (path.relative_to(PROMPTS).as_posix(), path.read_text(encoding="utf-8"))
+        for path in sorted((PROMPTS / "common").rglob("*.md"))
+    ]
+    carriers += [
+        (str(path.relative_to(REPO_ROOT)), path.read_text(encoding="utf-8"))
+        for path, landings in _skill_landings()
+        if landings
+    ]
+    violations = [
+        f"{label} names deferred `{name}`"
+        for label, text in carriers
+        for name in referenced_tools(text)
+        if name in deferred
+    ]
+    assert violations == []
 
 
 def test_match_rule_representative_cases() -> None:

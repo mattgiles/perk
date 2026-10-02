@@ -621,7 +621,7 @@ export function stackReviewBindingOf(
 
 const TOOL_GUIDELINES = [
   "Call open_stack_review ONCE, with no arguments, inside the perk objective stack review session — the stack snapshot is bound to the session by the cold door (launch handoff), never passed by you.",
-  "Follow the returned guidance exactly: launch the reviewer wave with stack: true, stream findings via push_annotations, and run the judgment-routed per-PR posting protocol through submit_pr_review (dry-run ALL batches first, bottom→top, only what the human approves).",
+  "Follow the returned guidance exactly: launch the reviewer wave with stack: true, stream findings into the browser as it directs, and run the judgment-routed per-PR posting protocol through submit_pr_review (dry-run ALL batches first, bottom→top, only what the human approves).",
   "The tool is single-use per session; a bad_state failure means this session is not a stack-review launch, or the checkout / its pinned combined patch is gone or was refreshed since the launch — re-run perk objective stack review.",
 ];
 
