@@ -7763,7 +7763,13 @@ system prompt (`_rebuildSystemPrompt` builds the snippet map excluding the names
 install; the pre-request pass only filters further) while its `promptGuidelines` still render.
 Because the presented mode leads every install, the hook run inside a gate-exit install already
 presents read-write, so `edit`/`write`'s snippets return in that same install. The hook never
-throws: a failure reports and hides only the host (presentation is fail-open). The diet is
+throws: a failure reports and hides only the host (presentation is fail-open). Its result is
+hidden declarations only, on both arms: the `LoadoutPresentation` type (`toolPolicy.ts`) forbids
+Pi's `descriptions`, so the host never rewrites a model-facing description at request time. The
+host registers under a literal `name: "perk_stage"` with its policy-derived `exposure`/
+`annotations` written as named fields, so prose-map discovery sees it (a static-string name, no
+opaque spread); the prose map records it as an excluded candidate (`loadout-host` in
+`docs/design/prose-prompt-map.yaml`) because none of its registration text reaches a model. The diet is
 presentation-only: an ineligible foreign tool is hidden, never deactivated. **Enforcement** stays
 the read-only `tool_call` backstop (§8.3), whatever presentation did. The former lazy-loader
 refusal is retired: hidden declarations survive an owner's per-turn re-advertisement (pi-subagents'
