@@ -77,10 +77,20 @@ _Avoid_: PERK_TOOLS, perk tool list, tool census (for perk's own tools)
 
 **Policy descriptor**:
 A perk tool's registration-time record — the stages it belongs to, its gate posture (`allowed`,
-`blocked`, or a **carve-out** naming its one bounded write), whether it is mode-over-stage, and its
+`blocked`, or a **carve-out** naming its one bounded write), whether it is mode-over-stage, its
 kind (`terminal` / `interactive` / `orchestration` / `query` / `action`, plus `host` reserved for
-the loadout host; the first three and `host` are declared model-only).
+the loadout host; the first three and `host` are declared model-only), how it is declared, and —
+for `kind: query` only — its `result`: the success details' schema. The tool's Pi metadata
+(`exposure`, `annotations`, a query's `outputSchema`) is derived from it, never hand-set.
 _Avoid_: tool config, tool metadata, tool flags
+
+**Structured result**:
+The Pi-facing shape the registration seam derives on every perk tool result: `structuredContent`
+(the result's `details`) and `isError` (forced when `details.ok === false`, else the tool's own
+flag). Programmatic callers — a nested `ctx.executeTool`, a codemode script — read it; only
+`kind: query` tools declare its schema (`outputSchema`, composed from the descriptor's `result`),
+so only queries hand a script a structured value.
+_Avoid_: structured details, typed result, output schema (for the result itself)
 
 **Eligibility formula**:
 The one rule deciding whether a tool may be active in a (stage, mode) landing:
