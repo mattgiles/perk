@@ -66,7 +66,8 @@ Measured with the same command on 2026-10-02, Pi 0.99.2, at `5f0cb619` (the four
 the cohort join, the primers and the acceptance tests). The nonparticipant arm reproduces §1
 byte-for-byte except `stack-review` (+10 bytes: `open_stack_review`'s guideline reworded from
 "stream findings via push_annotations" to "stream findings into the browser as it directs" after
-the deferred rule's carrier census flagged it). Re-run at the decision commit before the decision.
+the deferred rule's carrier census flagged it). Re-run at the decision commit `1045863d` (after
+the review fixes): both tables and the D1 results are byte-identical to the ones below.
 
 Verbatim stderr:
 

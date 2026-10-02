@@ -1,8 +1,7 @@
 # Native-discovery pilot: cohort, criteria, measurements, decision
 
-**Status:** binding record (Objective #2634, Node 3.2). **Decision: PENDING** — the offline rows
-are measured; the live legs (D3, D4, D5, P4's render leg) are run from this PR's own delivery flow
-and the decision line is written at closeout (§7). The raw evidence (verbatim census tables, the
+**Status:** binding record (Objective #2634, Node 3.2). **Decision: ADOPT** (§7) — every pinned
+criterion passed, the four live legs included, run from this PR's own delivery flow. The raw evidence (verbatim census tables, the
 live-leg ledger) is [`archive/native-discovery-pilot-dogfood.md`](./archive/native-discovery-pilot-dogfood.md);
 the cross-plane contract is `shared/contracts.md` §8.40 **The discovery pilot**.
 
@@ -14,7 +13,8 @@ the cross-plane contract is `shared/contracts.md` §8.40 **The discovery pilot**
   the behaviour-neutral harness lift `d7d7f17b` over the base `eb3c526d`.
 - **Measured commit** `5f0cb619` — the pilot runtime (`f29bf9d9`), the primers (`d06f6a62`), the
   prompt guard's deferred rule (`288d5483`), the opt-in (`ff468b97`) and the acceptance tests
-  (`5f0cb619`). §5 is re-run at the decision commit before the decision line is written.
+  (`5f0cb619`). **Decision commit** `1045863d` (after the review fixes): §5 re-measured there,
+  byte-identical per tool and per stage; D1 unchanged.
 - The question the pilot answers: does deferring a small, optional family of perk tools behind
   Pi's builtin `tool_search` save enough per request, at a small enough fixed cost, without
   dead-ending any flow — measured, not estimated.
@@ -109,7 +109,8 @@ No amendment has been made.
 ## 5. Measurements
 
 Per-stage census request bytes (declared tools + system prompt), read-write, one census request per
-arm; `net = nonparticipant − cohort`. Measured at `5f0cb619`:
+arm; `net = nonparticipant − cohort`. Measured at `5f0cb619`, re-measured byte-identical at
+`1045863d`:
 
 | Stage | Baseline (`4912cc12`) | Nonparticipant | Cohort | Net |
 |---|---|---|---|---|
@@ -163,11 +164,18 @@ no gated codemode path is built and the suspension stands. Un-suspension waits f
 
 ## 7. Decision
 
-**PENDING.** Offline rows: S1, S2, D1, D2, P1, P2, P3, P5, P6, C1 PASS; P4's offline half PASS.
-Live: D3, D4, D5 and P4's render leg PASS. Every row is PASS, so the decision rule gives ADOPT;
-the decision line is written after the review fixes land and §5 is re-measured at that commit. On ADOPT: the entry stays committed, the family stays deferred, everything ships, and the
-follow-up plan is named below. On RETIRE: the pilot-only runtime is reverted as the plan's RETIRE
-end state specifies, keeping case 8 (empty-family form), this record and the evidence.
+**ADOPT.** Every row of §4 is PASS: S1, S2, D1, D2, P1–P6 and C1 offline, and the live legs D3,
+D4, D5 and P4's render leg recorded in the evidence ledger (archive §3) with their commits.
+
+What it authorizes: the opt-in entry stays committed in this repo's `.pi/settings.json`; the four
+tools stay `declared: deferred`; the cohort join, the primers and the prompt guard's deferred rule
+ship as specified in §8.40. It does **not** authorize converging the entry into consumer repos —
+that is the follow-up plan below.
+
+The PR review's one correctness finding was fixed before the decision commit: a member whose
+deferred re-registration failed is still `direct` and unsearchable, so the session now treats only
+the members that actually deferred as deferred (the rest stay always-declared), and it does not
+join the cohort when nothing deferred.
 
 ## 8. Falsified planning-time assumptions
 
@@ -184,6 +192,9 @@ end state specifies, keeping case 8 (empty-family form), this record and the evi
 - **The draft launcher's installer** is `registerDraftReviewWaveTools`, not
   `installDraftReviewWaveBindings`; `gating` is threaded there.
 - **`tool_search` loads every match** up to its limit, not one tool (§5's observation).
+- **A failed re-registration was safe.** Planning assumed skipping a member that could not be
+  re-registered was harmless; the PR review showed cohort-wide reconciliation would then strand it
+  (dropped at gate entry, never restored, invisible to `tool_search`). Fixed before the decision.
 - **`perk init` in this checkout** exits 2 on a pre-existing skills-sync conflict, and the
   recorded `settings-wiring` hash in `.perk/managed-state.toml` was already stale before the
   opt-in. The opt-in moves neither: the observed and desired hashes are identical with and without
@@ -191,9 +202,13 @@ end state specifies, keeping case 8 (empty-family form), this record and the evi
 
 ## 9. Follow-ups
 
-- **On ADOPT:** a follow-up plan for `perk init` convergence of `defaultTools: ["+tool_search"]`
-  and the matching `perk-expert` reference update (not performed here — the node forbids it before
-  an adopt decision).
+- **The adoption follow-up:** a plan for `perk init` convergence of
+  `defaultTools: ["+tool_search"]` and the matching `perk-expert` reference update (not performed
+  here — the node forbids it before an adopt decision).
+- **Broad searches spend the saving** (§5's observation): worth a look if `tool_search` gains a
+  per-call cap, or if family growth makes over-activation costly.
+- **The session parser** counts Pi's `role: "system"` message entries as malformed lines (found
+  during P4's render leg) — a `/learn` evidence-pipeline gap, unrelated to the pilot.
 - **To `/learn`:** `docs/learned/workflow/warm-door-commands.md` (Law 1/4 still name
   `READ_ONLY_TOOLS`/`STAGE_TOOLS`) and its Law 4 corollary — a carrier naming a deferred tool must
   be primed.
