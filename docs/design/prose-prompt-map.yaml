@@ -539,6 +539,15 @@ exclusions:
   - id: borrowed-btw
     match: { paths: ["extension/vendor/btw/**"] }
     reason: Borrowed side-chat implementation; represented as an external assembly boundary.
+  - id: loadout-host
+    match: { ids: ["typescript-tool:perk_stage"] }
+    reason: >-
+      The loadout host `perk_stage` presents the session's tool loadout and has no model-facing
+      role: it is model-only (never nested-, codemode- or tool_search-reachable), its own
+      `prepareLoadout` hides its declaration from every request, it carries no prompt snippet or
+      guidelines, and its hook returns hidden declarations only (never `descriptions`), so no part
+      of its registration reaches a model. It is discovered so the closed-world tool-contract
+      checks stay exact, and excluded here rather than routed.
 
 session_shapes:
   - { id: plan.cold, capability: planning.plan, label: Plan authoring — cold door, delivery: cold, trigger: "perk plan", assembly: plan-authoring }
