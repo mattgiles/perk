@@ -58,12 +58,7 @@
 // the warm `/objective-refine` entry (`pi/v1/objectiveRefinement.ts`); `exit` rides the plan-mode
 // toggle and the save/exit doors. The CI executor (`pi/v1/delivery/ci.ts`) never touches the gate.
 
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  ToolLoadout,
-  ToolLoadoutChanges,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolLoadout } from "@earendil-works/pi-coding-agent";
 import { render } from "./prompts.ts";
 import { readOnlyBashVerdict } from "./readOnlyBash.ts";
 import {
@@ -72,6 +67,7 @@ import {
   hiddenDeclarationsFor,
   isEligible,
   LOADOUT_HOST_NAME,
+  type LoadoutPresentation,
   type Mode,
   normalizeStage,
   type Provenance,
@@ -161,9 +157,9 @@ export interface ToolGating {
   /**
    * The loadout host's hook: hide every declared tool ineligible in the presented landing, plus
    * the host itself. Never throws — a failure hides only the host (presentation is fail-open; the
-   * backstop still enforces).
+   * backstop still enforces). It only ever hides — never a `descriptions` rewrite.
    */
-  prepareLoadout(loadout: ToolLoadout): ToolLoadoutChanges;
+  prepareLoadout(loadout: ToolLoadout): LoadoutPresentation;
   /**
    * Join the discovery cohort with the family members `deferDiscoveryFamily` actually re-registered
    * deferred: the next reconciliation removes those names from the live set once, as part of its
@@ -428,7 +424,7 @@ export function registerToolGating(
     discovery() {
       return { cohort, family: [...deferred] };
     },
-    prepareLoadout(loadout: ToolLoadout): ToolLoadoutChanges {
+    prepareLoadout(loadout: ToolLoadout): LoadoutPresentation {
       try {
         return {
           hiddenDeclarations: hiddenDeclarationsFor(

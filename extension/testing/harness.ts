@@ -1240,7 +1240,7 @@ export function fakeGating(
       g.exits += 1;
     },
     isActive: () => active,
-    prepareLoadout: () => ({}),
+    prepareLoadout: () => ({ hiddenDeclarations: [] }),
     joinDiscoveryCohort() {},
     primeDeferred(names: readonly string[]): string[] {
       g.primes.push([...names]);

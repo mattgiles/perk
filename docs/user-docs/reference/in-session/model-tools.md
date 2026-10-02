@@ -70,7 +70,8 @@ model-only. Other perk-owned tools are non-terminating.
 
 `perk_stage` is the **loadout host**: a tool with no action, active in every session where it is
 registered and never shown to the model. It exists to hide, before each model request, every
-declared tool that is not eligible in the session's stage and mode (below).
+declared tool that is not eligible in the session's stage and mode (below). It only hides
+declarations; it never rewrites another tool's description.
 
 `resolve_submit_conflicts` consumes one unused, verified submit/address conflict authorization.
 It is sequential and non-terminating: only a `resolved` result permits the parent to call canonical

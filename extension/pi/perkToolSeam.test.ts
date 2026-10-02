@@ -4,6 +4,7 @@
 // process — so the fakes never reach the census/parity/fixture suites' catalog.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { createCodemodeExtension, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -392,6 +393,26 @@ test("registerLoadoutHost: a catalogued model-only host with the one prepareLoad
     /must not set `prepareLoadout`/,
   );
   assert.equal(captured.length, 1);
+  // Keep the host discoverable between opt-in runs: the prose map sees only a static-string `name`
+  // and treats a spread member as opaque. The authoritative check is the opt-in
+  // `tests/test_prose_map.py` (never run by CI); this is the CI-gated tripwire.
+  const source = readFileSync(new URL("./perkTool.ts", import.meta.url), "utf8");
+  const hostFn = source.indexOf("export function registerLoadoutHost");
+  const callStart = source.indexOf("pi.registerTool({", hostFn);
+  assert.ok(hostFn >= 0 && callStart > hostFn, "the host registers through pi.registerTool");
+  let depth = 0;
+  let callEnd = -1;
+  for (let i = callStart + "pi.registerTool".length; i < source.length; i++) {
+    if (source[i] === "(") depth++;
+    else if (source[i] === ")" && --depth === 0) {
+      callEnd = i + 1;
+      break;
+    }
+  }
+  assert.ok(callEnd > callStart, "the host registration call closes");
+  const registration = source.slice(callStart, callEnd);
+  assert.ok(registration.includes('name: "perk_stage",'), "a literal host name");
+  assert.equal(registration.includes("..."), false, "no spread in the host registration");
 });
 
 test("a real codemode script: an action soft failure rejects (catchable), an action success resolves to text, a query soft failure resolves to its structured value", async () => {

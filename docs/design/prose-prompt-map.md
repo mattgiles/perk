@@ -8,7 +8,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 - **248** canonical source units
 - **1290** logical fragments
 - **16** session shapes and **12** assemblies
-- **14** explicitly excluded candidates (policy-only; not displayed)
+- **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
 
 ### Vocabulary

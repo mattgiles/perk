@@ -137,9 +137,10 @@ for anything else.
 _Avoid_: borrowed census, foreign tool list, lazy loader, lazy-owned tool
 
 **Loadout host**:
-The always-active, never-declared perk tool `perk_stage` whose `prepareLoadout` hides every declared
-tool ineligible in the session's (stage, mode) landing — presentation only; the read-only
-`tool_call` backstop stays the enforcement.
+The always-active perk tool `perk_stage`, declared to Pi but hidden from every request by its own
+`prepareLoadout`, which also hides every declared tool ineligible in the session's (stage, mode)
+landing — presentation only (it hides; it never rewrites a description); the read-only `tool_call`
+backstop stays the enforcement. The prose map discovers it and records it as an excluded candidate.
 _Avoid_: stage tool, gate tool, presenter
 
 ### Read-only bash gate

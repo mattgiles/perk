@@ -15,17 +15,13 @@
 // only be replaced by the extension that registered it, so the seam retains what each activation
 // registered (keyed by that activation's own `pi`) and re-registers exactly that, deferred.
 
-import type {
-  ExtensionAPI,
-  ToolDefinition,
-  ToolLoadout,
-  ToolLoadoutChanges,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition, ToolLoadout } from "@earendil-works/pi-coding-agent";
 import { structureResult } from "../substrate/result.ts";
 import {
   derivePiMetadata,
   discoveryFamily,
   LOADOUT_HOST_NAME,
+  type LoadoutPresentation,
   type POLICY_OWNED_FIELDS,
   perkToolPolicy,
   REGISTRY_STAGE_IDS,
@@ -119,21 +115,29 @@ export const LOADOUT_HOST_POLICY: ToolPolicy = {
 /**
  * Register the loadout host: an always-active, model-only tool with no action whose
  * `prepareLoadout` hides declarations from each request (itself always). No prompt snippet and
- * no guidelines, so it never reaches the system prompt either. Its `execute` is never called, so
- * it stays unwrapped.
+ * no guidelines, so it never reaches the system prompt either; its `description` is declared to Pi
+ * but hidden from every request, and the hook only hides (`LoadoutPresentation`). Its `execute` is
+ * never called, so it stays unwrapped.
+ *
+ * The host is the one perk registration the prose map discovers but excludes (`loadout-host` in
+ * `docs/design/prose-prompt-map.yaml`): discovery reads only a static-string `name` and treats a
+ * spread as opaque, so the name is a literal (the catalog stays keyed by `LOADOUT_HOST_NAME`) and
+ * the policy-derived metadata is written as named fields.
  */
 export function registerLoadoutHost(
   pi: ExtensionAPI,
-  prepareLoadout: (loadout: ToolLoadout) => ToolLoadoutChanges,
+  prepareLoadout: (loadout: ToolLoadout) => LoadoutPresentation,
 ): void {
   recordPerkTool(LOADOUT_HOST_NAME, LOADOUT_HOST_POLICY);
+  const { exposure, annotations } = derivePiMetadata(LOADOUT_HOST_POLICY);
   pi.registerTool({
-    name: LOADOUT_HOST_NAME,
+    name: "perk_stage",
     label: "perk stage",
     description:
       "perk's loadout host: it presents the session's stage/mode tool loadout and has no action.",
     parameters: { type: "object", additionalProperties: false, properties: {} },
-    ...derivePiMetadata(LOADOUT_HOST_POLICY),
+    exposure,
+    annotations,
     prepareLoadout,
     async execute() {
       return {
