@@ -79,8 +79,9 @@ _Avoid_: PERK_TOOLS, perk tool list, tool census (for perk's own tools)
 A perk tool's registration-time record — the stages it belongs to, its gate posture (`allowed`,
 `blocked`, or a **carve-out** naming its one bounded write), whether it is mode-over-stage, its
 kind (`terminal` / `interactive` / `orchestration` / `query` / `action`, plus `host` reserved for
-the loadout host; the first three and `host` are declared model-only), how it is declared, and —
-for `kind: query` only — its `result`: the success details' schema. The tool's Pi metadata
+the loadout host; the first three and `host` are declared model-only), whether it is a
+discovery-pilot family member (`declared: deferred`), and — for `kind: query` only — its `result`:
+the success details' schema. The tool's Pi metadata
 (`exposure`, `annotations`, a query's `outputSchema`) is derived from it, never hand-set.
 _Avoid_: tool config, tool metadata, tool flags
 
@@ -108,11 +109,25 @@ _Avoid_: mode switch, plan stage (for the toggle)
 
 **Own-names-only activation**:
 perk's activation rule: at every reconciliation point it installs the live active set with only
-its own names replaced — the eligible always-declared perk tools plus the live eligible deferred
-ones — and never activates or deactivates a foreign tool (of the builtins, the read-only gate only
-suspends `codemode` and restores it at release); a session whose live set already matches gets no
-install.
+its own names replaced — the eligible always-declared perk tools plus, inside the discovery
+cohort, the live eligible deferred ones — and never activates or deactivates a foreign tool (of
+the builtins, the read-only gate only suspends `codemode` and restores it at release); a session
+whose live set already matches gets no install. Door-primed activation is perk's only activation
+of a deferred tool.
 _Avoid_: snapshot restore, baseline, admitted set, perk-owned allowlist
+
+**Discovery cohort**:
+The sessions in which perk re-registers the pilot family (`declared: deferred`) deferred and
+switches it off once: those where Pi's builtin `tool_search` is registered and active at
+`session_start` (the opt-in `defaultTools: ["+tool_search"]`). The headless worker, `/btw` and any
+session without the opt-in are nonparticipants by construction and keep every perk tool declared.
+_Avoid_: pilot sessions, tool_search sessions
+
+**Door-primed activation**:
+A warm door (or a wave launcher) activating the deferred perk tools its carrier names, at the
+moment it primes its other surfaces (a launcher: on a successful launch) — before the carrier
+reaches the model; a no-op outside the discovery cohort.
+_Avoid_: auto-activation, lazy load
 
 **Provenance posture**:
 How a foreign tool is governed — by who registered it (Pi's `sourceInfo`: a package spec, an exact

@@ -7511,12 +7511,14 @@ derived metadata and the derived result fields (**Structured results**, below). 
 | `gated` | `allowed` · `blocked` · `{ carveOut: "<prose>" }` | its posture under the read-only gate; a carve-out names its one bounded write |
 | `modeOverStage` | boolean (default false) | a mode gesture needs it regardless of stage |
 | `kind` | `terminal` · `interactive` · `orchestration` · `query` · `action` · `host` | what the tool IS — `terminal` if it can return `terminate: true`; `interactive` if it opens a human surface and hands off without terminating; `orchestration` if it spawns children, a wave or a foreground child/resolver; `query` for a pure read; else `action` (a trust/confirm dialog does not change the kind); `host` is reserved for the loadout host (below) |
-| `declared` | `always` (default) · `deferred` | reserved for discoverable-not-activated tools; `deferred` requires kind `query`/`action` |
+| `declared` | `always` (default) · `deferred` | `deferred` marks a discovery-pilot family member (**The discovery pilot**, below); it requires kind `query`/`action` and `gated` `allowed`/`blocked` |
 | `result` | `{ properties, required? }` (JSON-Schema property objects) | `kind: query` only — required there, refused on every other kind: the SUCCESS details' properties beyond `ok`, from which the seam derives `outputSchema` |
 
 Registration refuses (`perk tool policy: <name> — …`): `kind: host` (`the loadout host registers
 through registerLoadoutHost`), an unknown stage id, a blank carve-out,
-`declared: deferred` on a model-only kind, a definition carrying `exposure`, `annotations`,
+`declared: deferred` on a model-only kind, `declared: deferred` with a carve-out (`` declared:
+"deferred" requires gated allowed or blocked — the read-only context names carve-out writers, and
+an undeclared writer would dead-end ``), a definition carrying `exposure`, `annotations`,
 `defaultActive`, `prepareLoadout` or `outputSchema` (the policy owns them — type-level and at
 runtime), a query without `result` (`a query tool must declare its success details (result)`),
 `result` on any other kind (`` `result` is declared by query tools only — a <kind> tool is never a
@@ -7524,7 +7526,9 @@ script API``), a `result.properties` declaring `ok` (the seam owns the discrimin
 `result.required` name absent from `result.properties`, and a divergent re-registration (`result`
 included). **Derived Pi metadata:** `kind ∈ {terminal, interactive,
 orchestration, host}` → `exposure: "model-only"` (§8.3's terminal guarantee); else `declared: deferred`
-→ `"deferred"`; else `"direct"`. `gated ≠ blocked` → `annotations.readOnlyHint: true` ("never
+in a discovery-cohort session (`derivePiMetadata(policy, { cohort: true })`) → `"deferred"`; else
+`"direct"` — registration and the golden matrix derive without the cohort, so a family member
+registers (and tabulates) `direct`. `gated ≠ blocked` → `annotations.readOnlyHint: true` ("never
 modifies the worktree" — a hint, never a permission grant). `kind: query` → `outputSchema` =
 `{ anyOf: [{ type: object, properties: { ok: { const: true }, …result.properties }, required:
 ["ok", …result.required], additionalProperties: false }, { type: object, properties: { ok:
@@ -7569,7 +7573,8 @@ posture alone (`mode = read-write ∨ gated ≠ blocked`, never stage-scoped), a
 is eligible only read-write (it passes every diet; under the gate the backstop blocks it). The
 derived views are **perk-only** — they are what perk's activation installs:
 
-- `perkToolsFor(stage, mode)` — the eligible `declared: always` perk names, in catalog order.
+- `perkToolsFor(stage, mode, cohort = false)` — the eligible perk names, in catalog order; a
+  `declared: deferred` name is excluded only in a discovery-cohort session.
 - `gatedToolsFor(stage)` = `perkToolsFor(stage, "read-only")` — the gate-ON **activation view**.
   The gate's `tool_call` backstop checks `isEligible` itself, so a host-activated eligible
   deferred tool is never blocked.
@@ -7629,18 +7634,24 @@ outside the guard). Match rule: a name
 containing `_` matches as a bare word; a single-word name (`submit`, `ready`, `land`, `todo`, …)
 matches only backtick-quoted — an unquoted single-word mention is an accepted, recorded miss.
 TS (`extension/substrate/stageTools.test.ts`, `DRIVE_COVERAGE`): every warm drive/door/context
-row with its `(stage, mode)` landings, eligibility from the live formula. Python
+row with its `(stage, mode)` landings, eligibility from the live formula. **The deferred rule:** a
+carrier naming a `declared: deferred` tool must be primed (**The discovery pilot**, below) — each
+row carries its primer's exported constant (`primes`), and the guard asserts two-way that every
+named deferred tool is primed and every prime is a deferred tool the carrier names; the two wave
+launchers' own description + guidelines are rows (they name their collector), and a census pins
+that no other registered perk tool's text names another tool's deferred member. Python
 (`tests/test_tool_matrix_prompts.py`): the cold-door seed templates, the composed
 `prompts/common/**` fragments (by their interpolators' landings) and every stage-bound
 `skills/perk-*/SKILL.md` body, eligibility from the fixture; census tests require every stage
-template and fragment to be classified. Coverage is raw template/skill source only — dynamic
+template and fragment to be classified; none of these may name a deferred tool (nothing on that
+plane primes), and the fixture's deferred set is pinned to the four family names. Coverage is raw template/skill source only — dynamic
 data blocks, interpolated runtime values and user transclusions are out of scope. A flagged
 carrier is fixed by rewording, never by widening a policy.
 
 **Own-names-only activation.** perk installs and removes ONLY catalogued names; it never
 activates or deactivates a foreign tool. At every reconciliation point the gate
-(`extension/substrate/toolGating.ts`) installs `reconcileTarget(live, stage, mode)` (pure,
-`toolPolicy.ts`):
+(`extension/substrate/toolGating.ts`) installs `reconcileTarget(live, stage, mode, cohort)` (pure,
+`toolPolicy.ts`; `cohort` is the session's discovery-cohort membership):
 
 `(live active − perk-owned) ∪ eligible-always-perk(stage, mode) ∪ (live active ∩ eligible-deferred-perk(stage, mode))`
 
@@ -7648,9 +7659,11 @@ activates or deactivates a foreign tool. At every reconciliation point the gate
 count (`live.registered` = `getAllTools()`): a catalogued name the host did not register (a
 vacated provider tool, a registry filter — below) is never installed and never forces an install.
 `reconcileTarget` returns `null` when the target set-equals the live active set
-(order-insensitive) and perk then installs nothing. The third term keeps a deferred perk tool the
-host activated (a `tool_search` hit, a transcript restore) exactly while it is eligible; perk
-never activates a deferred tool itself. The reconciliation points: `syncFromState` (the
+(order-insensitive) and perk then installs nothing. Outside the discovery cohort every eligible
+perk tool is always-declared (a family member included — exactly the pre-pilot loadout); inside
+it the second term covers the non-deferred names and the third term keeps a deferred perk tool
+exactly while it is active and eligible (primed by a door or launcher, a `tool_search` hit, a
+transcript restore); priming is perk's only activation of a deferred tool. The reconciliation points: `syncFromState` (the
 `session_start` and `session_tree` rebuilds and the doors' stage syncs), the gate's `enter`/
 `exit`, the `resources_discover` re-apply (Pi fires it after every extension's `session_start` —
 where startup-late registrants such as pi-subagents' `subagent_supervisor` meet the landing; a
@@ -7684,7 +7697,8 @@ as exactly that filter, so every perk report child (`tools: read, grep, find, ls
 NO perk tool — nothing to install, nothing to present; the floor's backstop still applies (§8.3).
 Every other absence of a registered, eligible, always-declared perk tool from the active set — a
 foreign extension's `setActiveTools` — is undone by the next reconciliation: perk's own activation
-is policy-owned (a deferred perk tool is never re-activated — only the host activates one). (`defaultTools` and its `-name` modifiers shape only Pi's own startup set: on Pi
+is policy-owned (in the cohort a deferred perk tool is never re-activated by reconciliation — only
+priming or the host activates one). (`defaultTools` and its `-name` modifiers shape only Pi's own startup set: on Pi
 0.99.2 every extension tool joins the startup active set regardless, so a `-name` modifier has no
 effect on an extension tool, perk's or foreign.) Foreign activation is never touched either way.
 **The absent host:** where a registry filter leaves out `perk_stage` (an allowlisted child,
@@ -7769,8 +7783,8 @@ ineligible match is hidden on the very next request and deactivated when the nex
 set at construction, so a resumed or forked session starts from the defaults plus
 registration-activated tools; the transcript's declared loadout is restored only by `/tree`
 navigation (which runs before `session_tree` handlers). perk preserves what the host restored (the
-third term) and adds nothing — a `tool_search` activation does not survive resume or fork, and
-perk never replays it.
+third term) and adds nothing — a `tool_search` activation or a priming does not survive resume or
+fork, and perk never replays it.
 
 **The codemode composition limit.** codemode builds its own description from the UNFILTERED
 callable set (mode `only`: every callable direct tool, `edit`/`write` included; mode `on`: the
@@ -7778,7 +7792,65 @@ callable set (mode `only`: every callable direct tool, `edit`/`write` included; 
 In a read-write stage session with codemode active, its description may therefore name diet-hidden
 foreign tools — accepted, presentation-only. Under the gate codemode is suspended (above), so no
 gated request carries that list; a nested `ctx.executeTool()` from any gate-allowed tool still
-goes through the `tool_call` backstop (`parentToolCallId`).
+goes through the `tool_call` backstop (`parentToolCallId`). **The gated read path (recorded, not
+built)** — three contracts kept apart: (i) what a script receives is unchanged (**Structured
+results**, above); (ii) read-write script callability is unchanged — every active direct and every
+deferred/codemode-exposed tool is nested-callable, actions included; (iii) if codemode is ever
+un-suspended under the read-only gate, a script may reach only `kind: query` perk tools eligible
+under the gate plus the gate-allowed builtin reads, every foreign tool by its posture, and a
+foreign `annotations.readOnlyHint` is never a grant. Today the gate-eligible query set is empty
+(`objective_stack_status` is `gated: blocked`), so no gated codemode path exists and the
+suspension stands; un-suspension waits for a gate-allowed `kind: query` tool and is its own
+change, never a side effect.
+
+**The discovery pilot (opt-in).** The **discovery cohort** is the sessions whose host has Pi's
+builtin `tool_search` registered and active at `session_start` (`isDiscoveryHost(infos, active)`
+— the posture table's builtin row; a foreign namesake never qualifies). The opt-in is a
+hand-written `defaultTools: ["+tool_search"]` entry in a repo's tracked `.pi/settings.json` (this
+repo carries one); `perk init` never writes, orders or removes it, and the managed
+`settings-wiring` portion never sees the key. The **pilot family** is the catalogued
+`declared: deferred` names (`discoveryFamily()`, catalog order): `objective_stack_status`,
+`collect_review_wave`, `collect_draft_review_wave`, `push_annotations` — each optional (opened
+only by a primed carrier), self-guarding outside its flow (`no_objective`, the pending-wave guard,
+`no_surface`) and schema-heavy. **The join:** in the `session_start` handler, before PHASE 1's
+sync and inside its own `try/catch` (a failure reports `perk: discovery cohort join failed — …`
+and leaves the session a nonparticipant), a qualifying session not yet joined calls
+`deferDiscoveryFamily(pi)` — `registerPerkTool` retains each registered definition keyed by the
+registering activation's own `pi` (never by name, so a second bound session never shares it), and
+this re-registers this activation's retained family members with `exposure: "deferred"` (an
+already-deferred member is skipped; a per-name failure reports `perk: could not defer <name> — …`
+and is skipped) — then `ToolGating.joinDiscoveryCohort(family)`: the next install removes the
+family from the live set once (a cohort startup is still ONE perk install; a throwing install
+leaves the deferral pending for the next point). **Primed activation:**
+`ToolGating.primeDeferred(names)` activates the named family members that are registered, eligible
+in the presented landing and inactive, in catalog order, in one install; it is a no-op outside the
+cohort and never throws (`perk: priming failed — …`; presentation is fail-open — the model can
+still `tool_search`, and enforcement is untouched). Every carrier that names a deferred tool has a
+primer that runs BEFORE the carrier reaches the model, with an exported constant:
+
+| Primer (serves) | Constant | Moment |
+|---|---|---|
+| `openReviewBrowserCore` (`/pr-review-browser`, `/stack-review-browser`, `open_stack_review`) | `REVIEW_BROWSER_PRIMES` = `collect_review_wave`, `push_annotations` | beside `primeAnnotationSurface` |
+| `/pr-review-terminal` (the PR arms; the local arm names no tool) | `REVIEW_TERMINAL_PRIMES` = `collect_review_wave` | before the guidance is sent |
+| `openPlanReviewSurface` / `openObjectiveReviewSurface` (the two draft-review doors and their chooser wave arms) | `DRAFT_REVIEW_DOOR_PRIMES` = `collect_draft_review_wave`, `push_annotations` | beside the companion surfaces |
+| `/objective-sync`, `/objective-land` (`/objective-recover` primes none) | `STACK_STATUS_PRIMES` = `objective_stack_status` | before the guidance is sent |
+| `start_review_wave` | `REVIEW_LAUNCH_PRIMES` = `collect_review_wave` | on a successful launch (reachable without a door) |
+| `start_draft_review_wave` | `DRAFT_LAUNCH_PRIMES` = `collect_draft_review_wave` | on a successful launch (covers a resume between door and launch) |
+
+A failed launch primes nothing. **Nonparticipants by construction:** a session without the opt-in
+or with a foreign namesake, the headless worker (its runtime loads no `tool_search` factory),
+`/btw`'s side session (`sideSessionTools` carries no extension builtin) and every spawned report
+child (it registers no perk tool) keep the always-declared loadout — every family member stays
+`direct`, and a nonparticipant census request is byte-identical to the pre-pilot one. **Resets:**
+resume and fork start from the host's defaults and re-join (a primed or searched member is gone
+until re-primed or re-searched); `/reload` re-runs the factory, which re-joins and re-deactivates;
+`/tree` restores the transcript's loadout and perk keeps a restored member while it is eligible.
+A nested `ctx.executeTool` reaches a deferred inactive member (Pi's callable set includes every
+registered deferred tool; the call is recorded on the parent result's `nestedCalls`), which widens
+nothing a script could not reach while the member was an active direct tool. `/perk-selfcheck`
+prints `discovery: cohort (family: …)` (the whole family) or `discovery: nonparticipant`. The
+measurements, the pinned adopt/retire criteria and the decision are recorded in
+`docs/design/native-discovery-pilot.md`.
 
 **Fail postures.** Stage scoping is **fail-open** where the gate is fail-closed: no stage, an
 unknown stage id (version skew), or any lookup miss → no diet. Presentation is fail-open (a broken

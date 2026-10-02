@@ -62,7 +62,74 @@ Per-stage census request bytes (declared + system prompt), read-write; fixed cos
 
 ## §2 Cohort census (the pilot family deferred)
 
-Pending — filled from the re-run at the measured commit.
+Measured with the same command on 2026-10-02, Pi 0.99.2, at `5f0cb619` (the four family flags,
+the cohort join, the primers and the acceptance tests). The nonparticipant arm reproduces §1
+byte-for-byte except `stack-review` (+10 bytes: `open_stack_review`'s guideline reworded from
+"stream findings via push_annotations" to "stream findings into the browser as it directs" after
+the deferred rule's carrier census flagged it). Re-run at the decision commit before the decision.
+
+Verbatim stderr:
+
+```text
+Per-tool census (implement session; request = JSON {description, parameters}; prompt = snippet + guidelines):
+
+| tool | kind | gated | stages | request bytes | prompt bytes |
+|---|---|---|---|---|---|
+| `plan_draft` | action | carve-out | plan, save, objective-plan | 436 | 341 |
+| `objective_draft` | action | carve-out | objective-author, objective-save | 4237 | 592 |
+| `gist_draft` | action | carve-out | gist-author, gist-save | 865 | 504 |
+| `objective_refinement_draft` | action | carve-out | objective-refine | 705 | 634 |
+| `objective_stack_adopt` | action | blocked | implement, submit, address, land, learn | 746 | 276 |
+| `objective_stack_recover` | action | blocked | implement, submit, address, land, learn | 1225 | 735 |
+| `objective_stack_land` | action | blocked | implement, submit, address, land, learn | 829 | 538 |
+| `objective_stack_status` | query | blocked | implement, submit, address, land, learn | 422 | 244 |
+| `post_pr_review` | action | blocked | implement, submit, address, land, learn | 1965 | 2228 |
+| `submit_pr_review` | action | blocked | implement, submit, address, land, learn, stack-review | 2199 | 1690 |
+| `collect_review_wave` | action | blocked | implement, submit, address, land, learn, stack-review | 436 | 1191 |
+| `collect_draft_review_wave` | action | allowed | plan, save, objective-plan, objective-author, objective-save | 430 | 1191 |
+| `push_annotations` | action | allowed | plan, save, objective-plan, objective-author, objective-save, implement, submit, address, land, learn, stack-review | 1914 | 1850 |
+| `run_ci` | action | blocked | implement, submit, address, land, learn | 511 | 946 |
+| `objective_node` | action | carve-out | objective-author, objective-save, objective-plan, implement, submit, address, land, learn | 1232 | 532 |
+| `reconcile_objective` | action | blocked | objective-author, objective-save, objective-plan, implement, submit, address, land, learn | 687 | 569 |
+| `add_objective_node` | action | blocked | objective-author, objective-save, objective-plan, implement, submit, address, land, learn | 1227 | 783 |
+
+Per-stage census request bytes (declared + system prompt), read-write; fixed cost = 693:
+
+| stage | nonparticipant | cohort | net |
+|---|---|---|---|
+| gist-author | 8443 | 9136 | -693 |
+| gist-save | 8443 | 9136 | -693 |
+| objective-author | 38246 | 33418 | 4828 |
+| objective-save | 30718 | 25890 | 4828 |
+| objective-plan | 30235 | 25407 | 4828 |
+| plan | 23728 | 18900 | 4828 |
+| save | 18822 | 13994 | 4828 |
+| implement | 51093 | 45542 | 5551 |
+| submit | 51093 | 45542 | 5551 |
+| address | 51093 | 45542 | 5551 |
+| land | 51093 | 45542 | 5551 |
+| learn | 51093 | 45542 | 5551 |
+| audit | 6811 | 7504 | -693 |
+| objective-refine | 9287 | 9980 | -693 |
+| stack-review | 19649 | 14827 | 4822 |
+```
+
+The D1 run (case 6, same invocation; `details.loaded` in rank order):
+
+```text
+D1 implement "collect the adversarial review wave reports" → ["collect_review_wave","collect_draft_review_wave","push_annotations","objective_stack_status"]
+D1 implement "push findings to the browser as annotations" → ["push_annotations"]
+D1 implement "stacked delivery train status" → ["objective_stack_status"]
+D1 plan "collect the draft review wave reports" → ["collect_draft_review_wave","collect_review_wave","push_annotations","objective_stack_status"]
+```
+
+The nested probe (case 7, `PERK_PRINT_DISCOVERY_CENSUS=1 node --test
+extension/substrate/discoveryNested.test.ts`) — the records Pi persisted on the parent tool result:
+
+```text
+cancelled record: {"calls":[{"id":"call-fixture_nested_probe/1","name":"objective_stack_status","status":"error","arguments":{"objective":"7"},"durationMs":0,"error":"Operation aborted"}],"complete":true}
+oversized record: {"calls":[{"id":"call-fixture_nested_probe/1","name":"push_annotations","status":"error","argumentsBytes":9103,"durationMs":2,"error":"push_annotations failed: no annotation surface is primed — push_annotations only works inside a door-opened plannotator review flow (the door primes the surface when the browser opens)"}],"complete":false}
+```
 
 ## §3 Live-leg ledger
 
