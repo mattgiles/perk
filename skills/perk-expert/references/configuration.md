@@ -349,6 +349,13 @@ thinking = "high"
 > `.pi/settings.json`; the value survives init/doctor. Note pi's `/settings` toggle writes the
 > **global** settings file, which the committed project key overrides — the durable opt-out is
 > the project key itself.
+>
+> perk also **seeds** `"defaultTools": ["+tool_search"]` (Pi's native tool discovery) into the
+> same slice — appending to an existing `defaultTools` list, never reordering or removing your
+> entries; an explicit empty list (`[]`) is left alone. To opt out, add `"-tool_search"` to the
+> list in the repo's `.pi/settings.json`; the entry survives init/doctor. The project entry beats
+> user scope (a user-global `-tool_search` does not opt a repo out). Enabling applies on `/reload`
+> or the next launch; opting out needs a new launch.
 
 ### `[models.subagents]`
 

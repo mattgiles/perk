@@ -354,6 +354,26 @@ project key itself.
 { "tuiMode": "regular" }
 ```
 
+## Opt out of native tool discovery (`defaultTools`)
+
+perk seeds `"+tool_search"` into the `defaultTools` list of `.pi/settings.json` (appending to an
+existing list; never reordering or removing your entries). It turns on Pi's builtin `tool_search`,
+so the repo's interactive sessions join the **discovery cohort**: four optional, schema-heavy perk
+tools are deferred until a door primes them or the model searches for them, which keeps them out
+of every request. To opt out, commit `-tool_search` in the repo's project settings:
+
+```json
+{ "defaultTools": ["-tool_search"] }
+```
+
+Any entry naming `tool_search` (`-tool_search`, `+tool_search`, plain `tool_search`) is your vote,
+so it survives init/doctor. It must be the **project** entry — Pi applies project modifiers after
+user-scope ones, so a user-global `-tool_search` is overridden. The opt-out takes effect at the
+**next launch**; `/reload` is not enough (Pi keeps an already-active tool active, and the session
+re-joins). An explicit empty selection (`"defaultTools": []`, Pi's "no builtin tools") is also
+left alone. Opting out makes the repo's sessions nonparticipants: every perk tool stays declared
+and there is no `tool_search`.
+
 ## Read the footer's cache-hit rate; diagnose misses (`showCacheMissNotices`)
 
 The perk footer's `CH<pct>%` segment is the prompt-cache-hit rate of the latest turn (restoring
