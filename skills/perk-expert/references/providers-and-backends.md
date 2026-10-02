@@ -166,12 +166,13 @@ the default `pi-web-access` is itself a foreign package.
 Provider tool vocabularies are not normalized:
 
 - `pi-web-access`: `web_search`, `source_check`, `fetch_content`, and `get_search_content`, plus
-  its `web_enable` loader — the four tools stay hidden until the model calls `web_enable`
-  (`code_search` stays allowlisted for version tolerance);
+  its `web_enable` loader — the four tools stay hidden until the model calls `web_enable`;
 - `ollama-web-search`: `ollama_web_search` and `ollama_web_fetch`;
 - `juicesharp-web-tools`: `web_search` and `web_fetch`.
 
-The read-only gate recognizes the union. `pi-web-access` is zero-config; `ollama-web-search`
+perk governs them by provenance, not by name: every `web` provider's package is a `research`
+posture row, so whatever tools it registers stay available in every stage and under the
+read-only gate. `pi-web-access` is zero-config; `ollama-web-search`
 requires a local Ollama daemon; `juicesharp-web-tools` requires an API key.
 
 ### Built in, not selectable

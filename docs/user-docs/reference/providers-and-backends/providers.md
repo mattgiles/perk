@@ -95,12 +95,13 @@ a foreign package because perk has no native web implementation.
 The providers do not share a normalized tool vocabulary:
 
 - `pi-web-access`: `web_search`, `source_check`, `fetch_content`, and `get_search_content`, plus
-  its `web_enable` loader — the four tools stay hidden until the model calls `web_enable`
-  (`code_search` remains allowlisted for version tolerance);
+  its `web_enable` loader — the four tools stay hidden until the model calls `web_enable`;
 - `ollama-web-search`: `ollama_web_search` and `ollama_web_fetch`;
 - `juicesharp-web-tools`: `web_search` and `web_fetch`.
 
-The read-only gate recognizes the union of those names. `pi-web-access` is zero-config;
+Perk governs them by the package that registered them, not by name: each web provider's package
+is a research row in the [foreign posture table](../in-session/model-tools.md#foreign-tools-by-provenance),
+so its tools stay available in every stage and under the read-only gate. `pi-web-access` is zero-config;
 `ollama-web-search` requires a local Ollama daemon, and `juicesharp-web-tools` requires an API key.
 
 ### Built in, not selectable
