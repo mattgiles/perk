@@ -138,7 +138,20 @@ transcript facts (never model self-report), with its commit SHA and PASS / NOT P
 
 | Leg | Session kind | Commit | Observed | Result |
 |---|---|---|---|---|
-| D3 — review door → `start_review_wave` → `collect_review_wave` → `push_annotations`/`submit_pr_review` | cohort worktree | — | — | NOT PASSED (unobserved) |
+| D3 — review door → `start_review_wave` → `collect_review_wave` → `push_annotations`/`submit_pr_review` | cohort implement session `01a0fd25-a296-72f2-bfff-2896927c1fe9` (after `/reload`), `/pr-review-browser` active arm on PR #2650 | `89a77fcc` | The transcript's tool-change entry adding `collect_review_wave` + `push_annotations` precedes the door's guidance and the model's first call. `start_review_wave` ok (4/4 lanes runnable, run `f1a6801b-d625-404e-905d-58eab4a1a240`), `collect_review_wave` ok (complete, 4/4 covered, no failures), four `push_annotations` calls ok (none held). Zero `tool_search` calls, zero dead-end turns. The human posted a COMMENT review from the browser; perk posted nothing. | PASS |
 | D4 — `objective_stack_status` found through `tool_search` on the first query | cohort implement | — | — | NOT PASSED (unobserved) |
 | D5 — `/plan` → `plan_draft` → `plan_review` → wave chooser → collect | cohort worktree | — | — | NOT PASSED (unobserved) |
 | P4 live — `perk learn evidence --render` over the nested-probe transcript | — | — | — | NOT PASSED (unobserved) |
+
+## §4 `/perk-selfcheck` in the cohort sessions
+
+The implement session `01a0fd25-a296-72f2-bfff-2896927c1fe9`, after `/reload` at `89a77fcc`:
+
+```text
+  tools: 35 active / 66 registered; schemas=39008c; guidelines=0c; snippets=4502c
+  discovery: cohort (family: objective_stack_status, collect_review_wave, collect_draft_review_wave, push_annotations)
+```
+
+The reload's transcript tool-change entry: added `tool_search`; removed `objective_stack_status`,
+`collect_review_wave`, `push_annotations` (the join's one-time deactivation; `collect_draft_review_wave`
+is not eligible in a read-write implement session, so it was never active there).

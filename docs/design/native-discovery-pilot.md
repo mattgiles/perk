@@ -80,7 +80,7 @@ Verbatim from the plan; the status column is filled from the evidence named.
 | S2 | the cohort's fixed cost (`tool_search`'s declaration + snippet, measured as `−net` in a stage with no eligible member) `≤ 1,024` bytes | case 8 | PASS (693) |
 | D1 | each family member is `tool_search`'s top-1 hit for its pinned query where eligible — **scored on the four queries pinned in case 6 exactly as written**; a miss is NOT PASSED; a query may be changed only by an owner-approved amendment recorded in the design record (date, reason, old → new) BEFORE the amended run is scored, and any other reworded query is an exploratory observation, never D1's result | case 6 | PASS (4/4) |
 | D2 | an ineligible search is hidden on the next request, deactivated at the next prompt, blocked under the gate | case 5 | PASS |
-| D3 (live) | in a cohort worktree session on this PR (after the preliminary `/submit` has opened the draft PR), a review door (`/pr-review-browser` or `/pr-review-terminal`) → `start_review_wave` → `collect_review_wave` → `push_annotations`/`submit_pr_review` with every guidance-named tool declared before the model's first call; zero dead-end turns | ledger | NOT PASSED (unobserved) |
+| D3 (live) | in a cohort worktree session on this PR (after the preliminary `/submit` has opened the draft PR), a review door (`/pr-review-browser` or `/pr-review-terminal`) → `start_review_wave` → `collect_review_wave` → `push_annotations`/`submit_pr_review` with every guidance-named tool declared before the model's first call; zero dead-end turns | ledger | PASS (`89a77fcc`, ledger §3) |
 | D4 (live) | in a cohort implement session the model finds `objective_stack_status` through `tool_search` on its first query and the call succeeds | ledger | NOT PASSED (unobserved) |
 | D5 (live) | the `/plan` toggle in the worktree session → `plan_draft` → `plan_review` → the chooser's "Browser review + reviewer wave" (the `plan_review` wave arm runs `openPlanReviewSurface`; `/plan-review-browser` itself refuses worktree stages, so it is NOT the entry point): `collect_draft_review_wave` and `push_annotations` are declared on the next request and the wave collects — the carried dogfood-gate item | ledger | NOT PASSED (unobserved) |
 | P1 | nonparticipant preservation — warm sessions without an active builtin `tool_search`, a foreign namesake, the two-session isolation, the headless worker, `/btw` | cases 2, 9, 10 | PASS |
@@ -164,7 +164,7 @@ no gated codemode path is built and the suspension stands. Un-suspension waits f
 ## 7. Decision
 
 **PENDING.** Offline rows: S1, S2, D1, D2, P1, P2, P3, P5, P6, C1 PASS; P4's offline half PASS.
-Live rows D3, D4, D5 and P4's render leg are unobserved, so NOT PASSED until the ledger records
+Live: D3 PASS. D4, D5 and P4's render leg are unobserved, so NOT PASSED until the ledger records
 them. On ADOPT: the entry stays committed, the family stays deferred, everything ships, and the
 follow-up plan is named below. On RETIRE: the pilot-only runtime is reverted as the plan's RETIRE
 end state specifies, keeping case 8 (empty-family form), this record and the evidence.
