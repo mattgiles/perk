@@ -27,7 +27,6 @@ import {
   type SessionArtifactCtx,
   type SessionDataCtx,
 } from "../../substrate/sessionData.ts";
-import type { ToolGating } from "../../substrate/toolGating.ts";
 import {
   type EntrySink,
   rebuildWorkflowState,
@@ -36,6 +35,7 @@ import {
 import type { ReportTarget } from "../../surfaces/report.ts";
 import { dreamRepoCommit, dreamReportInput, plantDreamFiles } from "../../testing/dreamFixtures.ts";
 import {
+  fakeGating,
   fakePerk,
   loadPerkSession,
   plantSession,
@@ -322,21 +322,6 @@ function fakeSink(branch: unknown[]): EntrySink {
 
 function stateEntry(data: Record<string, unknown>): unknown {
   return { type: "custom", customType: WORKFLOW_STATE_TYPE, data };
-}
-
-/** A ToolGating fake recording exits; `active` is the isActive snapshot. */
-function fakeGating(active: boolean): ToolGating & { exits: number } {
-  const g = {
-    exits: 0,
-    syncFromState() {},
-    enter() {},
-    exit() {
-      g.exits += 1;
-    },
-    isActive: () => active,
-    prepareLoadout: () => ({}),
-  };
-  return g;
 }
 
 /** An ExtensionAPI fake: appendEntry lands on the branch; exec returns the canned payload. */

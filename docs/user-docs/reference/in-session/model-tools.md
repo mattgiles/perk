@@ -392,7 +392,7 @@ delegation and the checklist.
 
 The diet is presentation for foreign tools: a `subagent` the model enabled in a `plan` session
 stays active but is not declared to the model, and a late-registering tool (the delegation
-supervisor) is shown or hidden by its posture the moment it appears. A deferred perk tool that
+supervisor) is shown or hidden by its posture the moment it appears. In a discovery-pilot session (below), a deferred perk tool that
 `tool_search` activates stays while it is eligible; where it is not, it is hidden from the very
 next request and switched off when the next prompt starts (until then it stays callable — the
 read-write diet has no call-time check). Pi restores such activations only when you navigate
@@ -401,6 +401,45 @@ the session tree, not on resume or fork; perk keeps what Pi restored and adds no
 One composition limit: `codemode` writes its own description from every callable tool, so in a
 read-write stage session with codemode active, that description may name a tool the diet hides.
 This affects only what the model reads; under the gate codemode is switched off.
+
+### Discovery pilot (opt-in)
+
+A repo can opt its interactive sessions into Pi's native tool discovery by adding one hand-written
+entry to its tracked `.pi/settings.json`:
+
+```json
+"defaultTools": ["+tool_search"]
+```
+
+`perk init` never writes, reorders or removes this entry, and `perk doctor` does not report it as
+drift. A session whose Pi has its builtin `tool_search` registered **and** active at startup joins
+the **discovery cohort**: perk re-registers four optional, schema-heavy tools as deferred and
+switches them off once — `objective_stack_status`, `collect_review_wave`,
+`collect_draft_review_wave` and `push_annotations`. Their schemas, snippets and guidelines leave
+every request until something activates them; `tool_search` itself is declared instead.
+
+They come back in two ways:
+
+- **Primed activation.** The door or launcher whose guidance names a deferred tool activates it
+  before that guidance reaches the model: `/pr-review-browser`, `/stack-review-browser` and
+  `open_stack_review` (the review-wave collector and `push_annotations`); `/pr-review-terminal`
+  with a PR (the collector); `/plan-review-browser`, `/objective-review-browser` and the
+  draft-review chooser's wave arms (the draft collector and `push_annotations`);
+  `/objective-sync` and `/objective-land` (`objective_stack_status`); and a successful
+  `start_review_wave` / `start_draft_review_wave` (its collector). A failed launch activates
+  nothing.
+- **Search.** The model can find any of them with `tool_search`; the match is declared from the
+  next model call.
+
+An activated tool stays only while the stage and mode allow it, exactly like any perk tool.
+Resume and fork start without it (re-run the door or search again); `/reload` deactivates the
+four again; navigating the session tree restores whatever the transcript had and perk keeps it.
+`/perk-selfcheck` reports `discovery: cohort (family: …)` or `discovery: nonparticipant`.
+
+Who never participates: a session without the entry (or whose `tool_search` comes from some other
+extension), the headless worker, `/btw`'s side session and spawned subagent children — they keep
+every perk tool declared as before. The pilot's measurements and its adopt/retire decision are
+recorded in `docs/design/native-discovery-pilot.md`.
 
 Pi owns its builtins (`read`, `edit`, `write`, `bash`, `grep`, `find`, and related host tools); this
 reference does not redefine them. Stage scoping is fail-open at compatibility boundaries: a bare

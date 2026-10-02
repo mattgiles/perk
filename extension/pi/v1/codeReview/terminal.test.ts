@@ -26,12 +26,19 @@ import { test } from "node:test";
 import { writePlanRef } from "../../../substrate/cache.ts";
 import { REPORT_DETAIL_TYPE } from "../../../surfaces/surfaces.ts";
 import {
+  COHORT_SETTINGS,
   fakePerk,
   loadPerkSession,
   scaffoldRepo,
+  spyInjectionLoadouts,
   spyInjections,
+  toolSearch,
 } from "../../../testing/harness.ts";
-import { parseReviewDoorArgs, prReviewTerminalGuidance } from "./terminal.ts";
+import {
+  parseReviewDoorArgs,
+  prReviewTerminalGuidance,
+  REVIEW_TERMINAL_PRIMES,
+} from "./terminal.ts";
 
 // --- parseReviewDoorArgs -----------------------------------------------------------------
 
@@ -373,6 +380,54 @@ test("/pr-review-terminal <pr>: foreign success injects ONE guidance with the wo
     );
   } finally {
     h.dispose();
+  }
+});
+
+test("/pr-review-terminal in a discovery-cohort session: the PR arms prime REVIEW_TERMINAL_PRIMES before the guidance; the local arm primes nothing", async () => {
+  assert.deepEqual([...REVIEW_TERMINAL_PRIMES], ["collect_review_wave"]);
+  const cohort = async (cwd: string, stdout: string, code?: number) => {
+    const bin = fakePerk(cwd, { stdout, ...(code !== undefined ? { code } : {}) });
+    const hunkDir = fakeHunk(cwd);
+    return loadPerkSession({
+      cwd,
+      env: { PERK_RUN_ID: "01RID", PERK_BIN: bin, PATH: `${hunkDir}:${process.env.PATH ?? ""}` },
+      extraExtensions: [toolSearch()],
+      settings: COHORT_SETTINGS,
+    });
+  };
+  // The foreign arm.
+  const foreign = await cohort(
+    scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } }),
+    CHECKOUT_OK_JSON,
+  );
+  try {
+    assert.ok(!foreign.session.getActiveToolNames().includes("collect_review_wave"), "deferred");
+    const spy = spyInjectionLoadouts(foreign);
+    await foreign.runCommandHandler("pr-review-terminal", "77");
+    assert.equal(spy.injected.length, 1, "one guidance injection");
+    assert.ok(spy.injected[0]?.includes("collect_review_wave"), "the guidance names the tool");
+    for (const name of REVIEW_TERMINAL_PRIMES)
+      assert.ok(spy.active[0]?.includes(name), `${name} active when the guidance is sent`);
+  } finally {
+    foreign.dispose();
+  }
+  // The local (pre-PR) arm: its guidance names no deferred tool, so nothing is primed.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  gitScaffold(cwd);
+  plantPlanRef(cwd);
+  const local = await cohort(
+    cwd,
+    JSON.stringify({ success: false, error_type: "no_pr", message: "No PR found" }),
+    1,
+  );
+  try {
+    const spy = spyInjectionLoadouts(local);
+    await local.runCommandHandler("pr-review-terminal", "");
+    assert.equal(spy.injected.length, 1, "the local guidance");
+    assert.ok(!spy.injected[0]?.includes("collect_review_wave"));
+    assert.ok(!spy.active[0]?.includes("collect_review_wave"), "nothing primed");
+  } finally {
+    local.dispose();
   }
 });
 

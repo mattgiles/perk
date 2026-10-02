@@ -19,6 +19,9 @@
 // The door registers NO tools — the fan-out pair is installed globally
 // (`installReviewWaveBindings`) and posting reuses `submit_pr_review` (installed by
 // `installCuratedSubmissionBindings`), whose gate ladder (contracts §8.4) applies unchanged.
+// The PR arms' guidance names `collect_review_wave`, which a discovery-cohort session defers, so
+// they prime it (`REVIEW_TERMINAL_PRIMES`) before the guidance is sent; the local arm names no
+// tool and primes nothing.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
@@ -26,6 +29,7 @@ import { runColdDoor } from "../../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { sinceBaseSha } from "../../../substrate/git.ts";
 import { render } from "../../../substrate/prompts.ts";
+import type { ToolGating } from "../../../substrate/toolGating.ts";
 import { report } from "../../../surfaces/report.ts";
 import {
   decodePrUrl,
@@ -44,6 +48,12 @@ import {
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "pr-review-terminal";
+
+/**
+ * The deferred tool the PR arms' guidance names — primed before the guidance is sent (a no-op
+ * outside the discovery cohort).
+ */
+export const REVIEW_TERMINAL_PRIMES = ["collect_review_wave"] as const;
 
 // ------------------------------------------------------------------------ arg parse
 
@@ -110,7 +120,7 @@ export function prReviewTerminalGuidance(opts: PrReviewTerminalGuidanceOpts): st
 // ------------------------------------------------------------------------ registration
 
 /** Install the warm `/pr-review-terminal` command (no tools — posting rides submit_pr_review). */
-export function installPrReviewTerminalBindings(pi: ExtensionAPI): void {
+export function installPrReviewTerminalBindings(pi: ExtensionAPI, gating: ToolGating): void {
   registerPerkCommand(pi, SCOPE, {
     description:
       "Review a PR human-in-the-loop in the hunk terminal TUI: no arg reviews the active " +
@@ -180,6 +190,7 @@ export function installPrReviewTerminalBindings(pi: ExtensionAPI): void {
           launchLine,
           scope: SCOPE,
         });
+        gating.primeDeferred(REVIEW_TERMINAL_PRIMES);
         pi.sendUserMessage(
           prReviewTerminalGuidance({
             mode: "foreign",
@@ -261,6 +272,7 @@ export function installPrReviewTerminalBindings(pi: ExtensionAPI): void {
               directive: parsed.directive,
             })
           : prReviewTerminalGuidance({ mode: "local", worktree: ctx.cwd, baseSha });
+      if (target.mode === "pr") gating.primeDeferred(REVIEW_TERMINAL_PRIMES);
       pi.sendUserMessage(guidance + bindingSuffix(ctx.cwd, `command:${SCOPE}`));
     },
   });

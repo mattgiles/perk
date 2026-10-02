@@ -35,6 +35,12 @@ import { resolveStackObjective } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
 import { registerPerkTool } from "../../perkTool.ts";
 
+/**
+ * The deferred tool the `/objective-sync` and `/objective-land` guidance names — primed before
+ * the guidance is sent (a no-op outside the discovery cohort).
+ */
+export const STACK_STATUS_PRIMES = ["objective_stack_status"] as const;
+
 /** The lenient finding-row render shared with the landing readiness preview
  * (stackLand.ts imports it — the ONE copy; the door-era duplicate died with the door). */
 export function findingLines(train: ColdJson, key: string): string[] {
@@ -225,6 +231,7 @@ export function installStackStatusBindings(pi: ExtensionAPI): void {
       stages: [...WORKTREE_STAGES],
       gated: "blocked",
       kind: "query",
+      declared: "deferred",
       result: {
         properties: {
           objective: {

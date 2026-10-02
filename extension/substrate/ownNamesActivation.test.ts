@@ -8,18 +8,9 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { before, type TestContext, test } from "node:test";
+import { before, test } from "node:test";
 import {
-  fauxAssistantMessage,
-  fauxText,
-  fauxToolCall,
-  getCurrentSystemPrompt,
-  getCurrentTools,
-} from "@earendil-works/pi-ai";
-import {
-  AgentSession,
   createCodemodeExtension,
-  createToolSearchExtension,
   type ExtensionAPI,
   type InlineExtension,
   SessionManager,
@@ -27,44 +18,29 @@ import {
 import { registerPerkTool } from "../pi/perkTool.ts";
 import {
   fakeNpmPackage,
-  fauxModelRuntime,
-  loadPerkSession,
+  loadAt,
   PERK_EXTENSION_PATH,
   type PerkSession,
   plantSession,
+  recordingRuntime,
+  recordPerkInstalls,
   registerFakeTool,
   scaffoldRepo,
+  staged,
 } from "../testing/harness.ts";
 import { ensureToolCatalog } from "../testing/toolCatalog.ts";
 import { sideSessionTools } from "../vendor/btw/core.ts";
 import {
   gatedToolsFor,
+  isDiscoveryHost,
   isPerkTool,
   LOADOUT_HOST_NAME,
   perkToolsFor,
   stageToolsFor,
-  WORKTREE_STAGES,
 } from "./toolPolicy.ts";
 
 // The perk-subset assertions read the catalog: fill it the way production does first.
 before(ensureToolCatalog);
-
-/**
- * loadPerkSession with process.cwd() pointed at the scaffold for the load (provider vacating
- * resolves `process.cwd()` at factory time). Restores cwd before returning.
- */
-async function loadAt(
-  cwd: string,
-  opts: Omit<Parameters<typeof loadPerkSession>[0], "cwd"> = {},
-): Promise<PerkSession> {
-  const savedCwd = process.cwd();
-  process.chdir(cwd);
-  try {
-    return await loadPerkSession({ cwd, ...opts });
-  } finally {
-    process.chdir(savedCwd);
-  }
-}
 
 /** The ESM source of a fake package registering load-time no-op tools. */
 function loadTimeTools(names: readonly string[]): string {
@@ -139,68 +115,6 @@ test("spike (A): a named inline factory's tool carries its exact synthetic path"
 
 // --- shared fixture pieces ------------------------------------------------------------------------
 
-/** One captured model request: the declared tools (the model-visible census) and the prompt. */
-type Request = { tools: string[]; declared: unknown[]; prompt: string };
-
-/** A faux runtime whose every scripted response first records the request it answers. */
-async function recordingRuntime() {
-  const reg = await fauxModelRuntime();
-  const requests: Request[] = [];
-  const record = (reply: () => unknown) => (context: { messages: never }) => {
-    const declared = getCurrentTools(context.messages);
-    requests.push({
-      tools: declared.map((t) => t.name),
-      declared,
-      prompt: getCurrentSystemPrompt(context.messages),
-    });
-    return reply();
-  };
-  const stop = () => fauxAssistantMessage([fauxText("done")], { stopReason: "stop" });
-  return {
-    reg,
-    requests,
-    /** Script one plain census turn. */
-    census() {
-      reg.setResponses([record(stop)]);
-    },
-    /** Script a turn that calls `tool` with `args`, then stops. */
-    callThenStop(tool: string, args: Parameters<typeof fauxToolCall>[1]) {
-      reg.setResponses([
-        record(() =>
-          fauxAssistantMessage([fauxToolCall(tool, args, { id: `call-${tool}` })], {
-            stopReason: "toolUse",
-          }),
-        ),
-        record(stop),
-      ]);
-    },
-    last: (): Request => {
-      const request = requests.at(-1);
-      assert.ok(request !== undefined, "a model request was made");
-      return request;
-    },
-  };
-}
-
-/**
- * Record every install perk itself makes (attributed by stack to the gating module) while the
- * test runs — Pi's own installs (registration refreshes, transcript restores) are not perk's.
- */
-function recordPerkInstalls(t: TestContext): string[][] {
-  const installs: string[][] = [];
-  const original = AgentSession.prototype.setActiveToolsByName;
-  t.mock.method(
-    AgentSession.prototype,
-    "setActiveToolsByName",
-    function (this: AgentSession, names: string[]) {
-      if (new Error().stack?.includes("substrate/toolGating.ts") === true)
-        installs.push([...names]);
-      return original.call(this, names);
-    },
-  );
-  return installs;
-}
-
 const foreignActive = (h: PerkSession): string[] =>
   h.session.getActiveToolNames().filter((n) => !isPerkTool(n));
 
@@ -236,206 +150,16 @@ function bareFactory(names: readonly string[]): (pi: ExtensionAPI) => void {
   };
 }
 
-const toolSearch = (): InlineExtension => ({
-  name: "tool-search",
-  factory: createToolSearchExtension(),
-  builtin: true,
-});
 const codemode = (mode: "on" | "only"): InlineExtension => ({
   name: "codemode",
   factory: createCodemodeExtension({ mode }),
   builtin: true,
 });
 
-/** Test-only deferred perk tools (this file's process only — the matrix suite never sees them). */
-const DEFERRED_WORKTREE = "fixture_deferred_worktree_query";
-const DEFERRED_PLAN = "fixture_deferred_plan_query";
-const deferredFixtures: InlineExtension = {
-  name: "perk-deferred-fixtures",
-  factory: (pi) => {
-    const def = (name: string, description: string) => ({
-      name,
-      label: name,
-      description,
-      parameters: { type: "object", additionalProperties: false, properties: {} } as never,
-      async execute() {
-        return { content: [{ type: "text" as const, text: "ok" }], details: {} };
-      },
-    });
-    registerPerkTool(pi, def(DEFERRED_WORKTREE, "Look up the worktree ledger."), {
-      stages: WORKTREE_STAGES,
-      gated: "allowed",
-      kind: "query",
-      declared: "deferred",
-      result: { properties: {} },
-    });
-    registerPerkTool(pi, def(DEFERRED_PLAN, "Look up the planning almanac."), {
-      stages: ["plan"],
-      gated: "allowed",
-      kind: "query",
-      declared: "deferred",
-      result: { properties: {} },
-    });
-  },
-};
-
 const runnerEnv = {
   PI_SUBAGENT_CHILD: "1",
   PI_SUBAGENT_EXTENSION_BINDINGS: '{"perk.parent-restrictions/1":{"readOnly":true}}',
 };
-
-/** A Mode A session claimed into a (stage, mode) landing through the handoff. */
-async function staged(
-  stage: string,
-  mode: "read-only" | "read-write",
-  opts: Omit<Parameters<typeof loadPerkSession>[0], "cwd"> = {},
-): Promise<PerkSession> {
-  const runId = `01OWN${stage.replaceAll("-", "").toUpperCase()}${mode === "read-only" ? "RO" : "RW"}`;
-  const cwd = scaffoldRepo({ handoff: { runId, mode, stage } });
-  return loadAt(cwd, { ...opts, env: { PERK_RUN_ID: runId, ...(opts.env ?? {}) } });
-}
-
-// --- 1. search-then-reconcile ---------------------------------------------------------------------
-
-test("search-then-reconcile (A): an eligible tool_search activation survives every point; an ineligible one is hidden at once and deactivated when the next prompt starts", async () => {
-  {
-    const rt = await recordingRuntime();
-    const h = await staged("implement", "read-write", {
-      headful: false,
-      model: rt.reg.getModel(),
-      modelRuntime: rt.reg.modelRuntime,
-      extraExtensions: [toolSearch(), deferredFixtures],
-    });
-    try {
-      h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "tool_search"]);
-      rt.callThenStop("tool_search", { query: "worktree ledger" });
-      await h.session.prompt("find the ledger tool");
-      assert.ok(rt.last().tools.includes(DEFERRED_WORKTREE), "declared on the next request");
-      assert.ok(h.session.getActiveToolNames().includes(DEFERRED_WORKTREE));
-      await h.session.extensionRunner.emitResourcesDiscover(
-        h.session.sessionManager.getCwd(),
-        "reload",
-      );
-      await h.emitSessionStart();
-      await h.invokeCommand("plan");
-      assert.ok(h.session.getActiveToolNames().includes(DEFERRED_WORKTREE), "kept under the gate");
-      await h.invokeCommand("plan");
-      rt.census();
-      await h.session.prompt("census");
-      assert.ok(rt.last().tools.includes(DEFERRED_WORKTREE), "declared after every point");
-      assert.ok(!rt.last().tools.includes(DEFERRED_PLAN), "the unsearched one never activates");
-    } finally {
-      h.dispose();
-    }
-  }
-  {
-    const rt = await recordingRuntime();
-    const h = await staged("plan", "read-write", {
-      headful: false,
-      model: rt.reg.getModel(),
-      modelRuntime: rt.reg.modelRuntime,
-      extraExtensions: [toolSearch(), deferredFixtures],
-    });
-    try {
-      h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "tool_search"]);
-      rt.callThenStop("tool_search", { query: "worktree ledger" });
-      await h.session.prompt("find the ledger tool");
-      assert.ok(
-        h.session.getActiveToolNames().includes(DEFERRED_WORKTREE),
-        "the search activated it; it stays active for the rest of this prompt",
-      );
-      assert.ok(!rt.last().tools.includes(DEFERRED_WORKTREE), "hidden on the very next request");
-      rt.census();
-      await h.session.prompt("census");
-      assert.ok(
-        !h.session.getActiveToolNames().includes(DEFERRED_WORKTREE),
-        "deactivated when the next prompt started",
-      );
-      assert.ok(!rt.last().tools.includes(DEFERRED_WORKTREE));
-      await h.invokeCommand("plan");
-      assert.equal(
-        await blocked(h, DEFERRED_WORKTREE),
-        `perk read-only mode: ${DEFERRED_WORKTREE} is blocked (tool not allowlisted).`,
-      );
-    } finally {
-      h.dispose();
-    }
-  }
-});
-
-// --- 2. search-then-tree/resume/fork (host behaviour bounds perk's) -----------------------------
-
-test("search-then-tree/resume/fork (A): a resume or fork from the eligible searched leaf starts without it and perk never re-activates it; /tree restores it and perk keeps it (or drops it in an ineligible stage)", async (t) => {
-  const installs = recordPerkInstalls(t);
-  const cwd = scaffoldRepo();
-  const file = plantSession(cwd, [{ stage: "implement", mode: "read-write" }]);
-  const rt = await recordingRuntime();
-  const opts = {
-    headful: false,
-    model: rt.reg.getModel(),
-    modelRuntime: rt.reg.modelRuntime,
-    extraExtensions: [toolSearch(), deferredFixtures],
-    env: { PERK_RUN_ID: undefined },
-  };
-  const searched = await loadAt(cwd, { ...opts, sessionManager: SessionManager.open(file) });
-  let leaf: string;
-  try {
-    searched.session.setActiveToolsByName([
-      ...searched.session.getActiveToolNames(),
-      "tool_search",
-    ]);
-    rt.callThenStop("tool_search", { query: "worktree ledger" });
-    await searched.session.prompt("find the ledger tool");
-    assert.ok(searched.session.getActiveToolNames().includes(DEFERRED_WORKTREE));
-    const id = searched.session.sessionManager.getLeafId();
-    assert.ok(id !== null);
-    leaf = id;
-  } finally {
-    searched.dispose();
-  }
-  assert.ok(existsSync(file) && readFileSync(file, "utf8").includes(DEFERRED_WORKTREE));
-
-  // Resume and fork land on the searched leaf, in implement — where the tool is ELIGIBLE, so
-  // perk would keep it had the host restored it: its absence is the host's, not perk's filter.
-  for (const manager of [SessionManager.open(file), SessionManager.forkFrom(file, cwd)]) {
-    installs.length = 0;
-    const resumed = await loadAt(cwd, { ...opts, sessionManager: manager });
-    try {
-      assert.equal(resumed.workflowState().stage, "implement");
-      assert.ok(!resumed.session.getActiveToolNames().includes(DEFERRED_WORKTREE));
-      rt.census();
-      await resumed.session.prompt("census");
-      assert.ok(!resumed.session.getActiveToolNames().includes(DEFERRED_WORKTREE));
-      assert.ok(installs.length > 0, "the recorder sees perk's startup install (non-vacuous)");
-      assert.deepEqual(
-        installs.filter((names) => names.includes(DEFERRED_WORKTREE)),
-        [],
-        "perk never installs it",
-      );
-    } finally {
-      resumed.dispose();
-    }
-  }
-
-  // /tree navigation is where the host restores the declared loadout.
-  const h = await loadAt(cwd, { ...opts, sessionManager: SessionManager.open(file) });
-  try {
-    const [planted] = h.entryIds() as [string];
-    await h.navigateTo(planted);
-    await h.navigateTo(leaf);
-    assert.ok(h.session.getActiveToolNames().includes(DEFERRED_WORKTREE), "restored and kept");
-    // A branch whose stage makes it ineligible: Pi restores the declared loadout, perk drops it.
-    const toPlan = h.session.sessionManager.appendCustomEntry("perk:workflow-state", {
-      stage: "plan",
-    });
-    await h.navigateTo(planted);
-    await h.navigateTo(toPlan);
-    assert.equal(h.workflowState().stage, "plan");
-    assert.ok(!h.session.getActiveToolNames().includes(DEFERRED_WORKTREE), "dropped in plan");
-  } finally {
-    h.dispose();
-  }
-});
 
 // --- 4. gate entry/exit + snippets ----------------------------------------------------------------
 
@@ -1061,4 +785,6 @@ test("hidden host: active in every landing where registered and never declared; 
     const tools = sideSessionTools(readOnly);
     assert.ok(!tools.includes("codemode") && !tools.includes("tool_search"), String(readOnly));
   }
+  // …so /btw's side session is never a discovery host: it keeps today's loadout by construction.
+  assert.equal(isDiscoveryHost(new Map(), sideSessionTools(false)), false);
 });

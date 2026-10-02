@@ -39,6 +39,7 @@ import {
   supersedingDraftReviewBridge,
 } from "../../testing/draftReview.ts";
 import {
+  fakeGating,
   fakePerk,
   loadPerkSession,
   plantSession,
@@ -754,21 +755,6 @@ function selectPlanProvider(cwd: string, id: string): void {
 
 /** A recording bridge: captures the reviewed bytes, returns the canned outcome. */
 const cannedBridge = scriptedDraftReviewBridge;
-
-/** A ToolGating fake recording exits; `active` is the isActive snapshot. */
-function fakeGating(active: boolean): ToolGating & { exits: number } {
-  const g = {
-    exits: 0,
-    syncFromState() {},
-    enter() {},
-    exit() {
-      g.exits += 1;
-    },
-    isActive: () => active,
-    prepareLoadout: () => ({}),
-  };
-  return g;
-}
 
 /** An ExtensionAPI fake: appendEntry lands on the branch; exec returns the canned payload. */
 function fakeColdDoorPi(

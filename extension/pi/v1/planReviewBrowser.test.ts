@@ -19,6 +19,7 @@ import { PLAN_DRAFT_ARTIFACT, revisePlanDraft } from "../../authoring/plan/draft
 import {
   clearDraftReviewContext,
   createDraftReviewWaveState,
+  DRAFT_REVIEW_DOOR_PRIMES,
   primeDraftReviewContext,
 } from "../../authoring/review/draftContext.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
@@ -30,6 +31,7 @@ import type { ReportTarget } from "../../surfaces/report.ts";
 import { createPerkStatus } from "../../surfaces/surfaces.ts";
 import { seedBrowserReview } from "../../testing/draftReview.ts";
 import {
+  fakeGating,
   gitInit,
   loadPerkSession,
   type PerkSession,
@@ -101,6 +103,7 @@ async function draftContextPrimed(): Promise<boolean> {
     target,
     {
       angles: ["grounding", "risk"],
+      gating: fakeGating(true),
     },
   );
   return (result.details as { error_type?: string }).error_type !== "no_draft_context";
@@ -458,21 +461,6 @@ const DE_FEEDBACK = `${DE_SECTION}\n\n---\n\nAlso add a rollback note.`;
 
 function stateEntry(data: Record<string, unknown>): unknown {
   return { type: "custom", customType: WORKFLOW_STATE_TYPE, data };
-}
-
-/** A ToolGating fake recording exits; `active` is the isActive snapshot. */
-function fakeGating(active: boolean): ToolGating & { exits: number } {
-  const g = {
-    exits: 0,
-    syncFromState() {},
-    enter() {},
-    exit() {
-      g.exits += 1;
-    },
-    isActive: () => active,
-    prepareLoadout: () => ({}),
-  };
-  return g;
 }
 
 const APPROVE_OUT: ReviewOutcome = { status: "completed", approved: true, reviewId: "rev-a" };
@@ -1187,10 +1175,11 @@ test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETU
     signal: undefined,
   } as unknown as ExtensionContext;
 
+  const gating = fakeGating(false);
   const guidance = await openPlanReviewSurface(
     pi,
     ctx,
-    fakeGating(false),
+    gating,
     { draft: "# The draft\n", custom: "check the rollback story" },
     draftReview,
     annotations,
@@ -1209,6 +1198,12 @@ test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETU
   // Both surfaces primed with the deterministic handle the moment the open returns.
   assert.equal(await annotationMode(), "plan", "the annotation surface is primed in plan mode");
   assert.equal(await draftContextPrimed(), true, "the draft-review context is primed");
+  // …and the deferred tools the guidance names were primed exactly once, with the door's constant.
+  assert.deepEqual(gating.primes, [[...DRAFT_REVIEW_DOOR_PRIMES]]);
+  assert.deepEqual(
+    [...DRAFT_REVIEW_DOOR_PRIMES],
+    ["collect_draft_review_wave", "push_annotations"],
+  );
   // The handshake saw the preset port and the EXACT draft bytes.
   assert.equal(requests.length, 1);
   assert.equal(requests[0]?.portAtEmit, "45001");

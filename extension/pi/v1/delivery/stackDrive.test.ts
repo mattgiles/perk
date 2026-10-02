@@ -8,8 +8,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { decideStackReconcile } from "../../../delivery/stackReconcile.ts";
-import { loadPerkSession, scaffoldRepo, spyInjections } from "../../../testing/harness.ts";
+import {
+  COHORT_SETTINGS,
+  loadPerkSession,
+  scaffoldRepo,
+  spyInjectionLoadouts,
+  spyInjections,
+  toolSearch,
+} from "../../../testing/harness.ts";
 import { driveStackReconcile, evidenceLines } from "./stackDrive.ts";
+import { STACK_STATUS_PRIMES } from "./stackStatus.ts";
 
 const STACK_COMMANDS = ["objective-sync", "objective-recover", "objective-land"];
 
@@ -206,6 +214,43 @@ test("gate-off: the driving commands inject the guidance", async () => {
     assert.ok(injected[2]?.includes("objective_stack_land"), "land guidance names its tool");
   } finally {
     h.dispose();
+  }
+});
+
+test("discovery cohort: /objective-sync and /objective-land prime STACK_STATUS_PRIMES before the guidance; /objective-recover primes nothing", async () => {
+  assert.deepEqual([...STACK_STATUS_PRIMES], ["objective_stack_status"]);
+  const cohort = () =>
+    loadPerkSession({
+      cwd: scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } }),
+      env: { PERK_RUN_ID: "01RID" },
+      extraExtensions: [toolSearch()],
+      settings: COHORT_SETTINGS,
+    });
+  const deferred = (active: readonly string[] | undefined) =>
+    STACK_STATUS_PRIMES.every((name) => !(active ?? []).includes(name));
+  const primed = (active: readonly string[] | undefined) =>
+    STACK_STATUS_PRIMES.every((name) => (active ?? []).includes(name));
+  const h = await cohort();
+  try {
+    assert.ok(deferred(h.session.getActiveToolNames()), "deferred at startup");
+    const spy = spyInjectionLoadouts(h);
+    await h.invokeCommand("objective-recover", "7");
+    assert.ok(!spy.injected[0]?.includes("objective_stack_status"), "recover names no status read");
+    assert.ok(deferred(spy.active[0]), "recover primes nothing");
+    await h.invokeCommand("objective-sync", "7");
+    assert.ok(spy.injected[1]?.includes("objective_stack_status"), "sync names the status read");
+    assert.ok(primed(spy.active[1]), "sync primed before its guidance");
+  } finally {
+    h.dispose();
+  }
+  const land = await cohort();
+  try {
+    const spy = spyInjectionLoadouts(land);
+    await land.invokeCommand("objective-land", "7");
+    assert.ok(spy.injected[0]?.includes("objective_stack_status"), "land names the status read");
+    assert.ok(primed(spy.active[0]), "land primed before its guidance");
+  } finally {
+    land.dispose();
   }
 });
 

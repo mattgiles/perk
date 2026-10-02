@@ -50,6 +50,7 @@ import { type ColdJson, runColdDoor } from "../../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { failFor, ok } from "../../../substrate/result.ts";
+import type { ToolGating } from "../../../substrate/toolGating.ts";
 import { report } from "../../../surfaces/report.ts";
 import type { ActivityHandle } from "../../../surfaces/surfaces.ts";
 import {
@@ -383,6 +384,7 @@ export function pinSupersedeRefusal(stackPin: StackPinState, next: PinnedStack):
 async function openStackBrowser(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
+  gating: ToolGating,
   annotations: AnnotationState,
   status: ActivityHandle,
   stackPin: StackPinState,
@@ -395,7 +397,7 @@ async function openStackBrowser(
     browserDeps?: StartBrowserDeps;
   },
 ): Promise<boolean> {
-  const started = await openReviewBrowserCore(pi, ctx, annotations, status, {
+  const started = await openReviewBrowserCore(pi, ctx, gating, annotations, status, {
     scope: SCOPE,
     browserOpts: {
       cwd: opts.checkoutPath,
@@ -416,6 +418,7 @@ async function openStackBrowser(
 /** Register the warm `/stack-review-browser` command (posting rides submit_pr_review). */
 function registerStackReviewBrowser(
   pi: ExtensionAPI,
+  gating: ToolGating,
   annotations: AnnotationState,
   status: ActivityHandle,
   stackPin: StackPinState,
@@ -526,7 +529,7 @@ function registerStackReviewBrowser(
             : " → adversarial reviewers") +
           " → plannotator browser triage → judgment-routed per-PR posting",
       );
-      await openStackBrowser(pi, ctx, annotations, status, stackPin, {
+      await openStackBrowser(pi, ctx, gating, annotations, status, stackPin, {
         checkoutPath: data.path,
         patchPath: patch.patchPath,
         pinned,
@@ -618,7 +621,7 @@ export function stackReviewBindingOf(
 
 const TOOL_GUIDELINES = [
   "Call open_stack_review ONCE, with no arguments, inside the perk objective stack review session — the stack snapshot is bound to the session by the cold door (launch handoff), never passed by you.",
-  "Follow the returned guidance exactly: launch the reviewer wave with stack: true, stream findings via push_annotations, and run the judgment-routed per-PR posting protocol through submit_pr_review (dry-run ALL batches first, bottom→top, only what the human approves).",
+  "Follow the returned guidance exactly: launch the reviewer wave with stack: true, stream findings into the browser as it directs, and run the judgment-routed per-PR posting protocol through submit_pr_review (dry-run ALL batches first, bottom→top, only what the human approves).",
   "The tool is single-use per session; a bad_state failure means this session is not a stack-review launch, or the checkout / its pinned combined patch is gone or was refreshed since the launch — re-run perk objective stack review.",
 ];
 
@@ -638,6 +641,7 @@ type StackBrowserOpen = typeof openStackBrowser;
 export async function executeOpenStackReview(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
+  gating: ToolGating,
   latch: OpenLatch,
   annotations: AnnotationState,
   status: ActivityHandle,
@@ -710,7 +714,7 @@ export async function executeOpenStackReview(
     pinned,
     ...(binding.focus !== null ? { directive: binding.focus } : {}),
   });
-  const started = await open(pi, ctx, annotations, status, stackPin, {
+  const started = await open(pi, ctx, gating, annotations, status, stackPin, {
     checkoutPath: binding.checkout_path,
     patchPath: patch.patchPath,
     pinned,
@@ -739,6 +743,7 @@ export async function executeOpenStackReview(
  */
 function registerOpenStackReview(
   pi: ExtensionAPI,
+  gating: ToolGating,
   annotations: AnnotationState,
   status: ActivityHandle,
   stackPin: StackPinState,
@@ -769,6 +774,7 @@ function registerOpenStackReview(
         return await executeOpenStackReview(
           pi,
           ctx,
+          gating,
           latch,
           annotations,
           status,
@@ -785,18 +791,20 @@ function registerOpenStackReview(
 /**
  * Install the Delivery-train review surface: the warm `/stack-review-browser` door + its
  * cold-launch twin (`open_stack_review`). Takes the threaded per-activation annotation state —
- * both openers prime it through `openReviewBrowserCore` — and the per-activation
+ * both openers prime it (and, through `gating`, the deferred tools the guidance names) via
+ * `openReviewBrowserCore` — and the per-activation
  * `StackPinState` shared with `installReviewWaveBindings` (both openers bind the verified pins
  * on a successful open; `start_review_wave`'s stack mode reads them). `deps` carries the
  * activation's port selection into both openers.
  */
 export function installStackReviewBindings(
   pi: ExtensionAPI,
+  gating: ToolGating,
   annotations: AnnotationState,
   status: ActivityHandle,
   stackPin: StackPinState,
   deps: StartBrowserDeps = {},
 ): void {
-  registerStackReviewBrowser(pi, annotations, status, stackPin, deps);
-  registerOpenStackReview(pi, annotations, status, stackPin, deps);
+  registerStackReviewBrowser(pi, gating, annotations, status, stackPin, deps);
+  registerOpenStackReview(pi, gating, annotations, status, stackPin, deps);
 }

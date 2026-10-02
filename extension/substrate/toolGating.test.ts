@@ -19,12 +19,14 @@ import {
 import { ensureToolCatalog } from "../testing/toolCatalog.ts";
 import { readOnlyContext, registerToolGating, renderReadOnlyContext } from "./toolGating.ts";
 import {
+  discoveryFamily,
   gatedToolsFor,
+  isEligible,
   isPerkTool,
   LOADOUT_HOST_NAME,
   type Mode,
   perkToolNames,
-  perkToolPolicy,
+  perkToolsFor,
   REGISTRY_STAGE_IDS,
   WORKTREE_STAGES,
 } from "./toolPolicy.ts";
@@ -73,12 +75,12 @@ function defaultRegistry(): FakeTool[] {
   ];
 }
 
-/** The default live active set: a bare session's — Pi's defaults plus every registrant's tools. */
+/**
+ * The default live active set: a bare session's — Pi's defaults plus every registrant's tools (a
+ * discovery-family member registers direct, so it is active on registration like any perk tool).
+ */
 function defaultActive(registry: readonly FakeTool[]): string[] {
-  return registry
-    .map((t) => t.name)
-    .filter((name) => !["grep", "find", "ls"].includes(name))
-    .filter((name) => perkToolPolicy(name)?.declared !== "deferred");
+  return registry.map((t) => t.name).filter((name) => !["grep", "find", "ls"].includes(name));
 }
 
 /** One recorded install: the names, the live foreign set it replaced, and the host's hidden set. */
@@ -849,4 +851,123 @@ test("codemode is suspended under the gate and restored at release; a never-acti
   foreign.gate.enter();
   assert.ok(foreign.active().includes("codemode"));
   assertForeignInvariance(foreign);
+});
+
+// --- the discovery cohort ---------------------------------------------------------------------------
+
+test("the cohort join: applied by the next reconciliation as ONE install (the family deactivated once); idempotent; nonparticipants keep the family", async () => {
+  const family = discoveryFamily();
+  assert.ok(family.length > 0, "the pilot family is catalogued");
+  const outside = gateFixture(() => false);
+  outside.gate.syncFromState("read-write", "implement");
+  assert.deepEqual(outside.gate.discovery(), { cohort: false, family: [] });
+  for (const name of family.filter((n) => isEligible(n, undefined, "implement", "read-write")))
+    assert.ok(outside.active().includes(name), `a nonparticipant keeps ${name}`);
+
+  const h = gateFixture(() => false);
+  h.gate.joinDiscoveryCohort(family);
+  assert.deepEqual(h.installs, [], "the join installs nothing itself");
+  assert.deepEqual(h.gate.discovery(), { cohort: true, family });
+  h.gate.syncFromState("read-write", "implement");
+  assert.equal(h.installs.length, 1, "one install at the first sync");
+  for (const name of family) assert.ok(!h.active().includes(name), `${name} deactivated`);
+  assert.deepEqual(activePerk(h), perkView(perkToolsFor("implement", "read-write", true)));
+  assertForeignInvariance(h);
+  // A second join and every later point change nothing.
+  h.gate.joinDiscoveryCohort(family);
+  await h.call("resources_discover");
+  await h.call("before_agent_start");
+  h.gate.syncFromState("read-write", "implement");
+  assert.equal(h.installs.length, 1, "no further install");
+});
+
+test("primeDeferred: a no-op outside the cohort; inside it activates the registered eligible inactive family members named, in catalog order, and they survive the points while eligible", async () => {
+  const outside = gateFixture(() => false);
+  outside.gate.syncFromState("read-write", "implement");
+  const before = outside.installs.length;
+  assert.deepEqual(outside.gate.primeDeferred(["collect_review_wave", "push_annotations"]), []);
+  assert.equal(outside.installs.length, before, "no install outside the cohort");
+
+  const h = gateFixture(() => false);
+  h.gate.joinDiscoveryCohort(discoveryFamily());
+  h.gate.syncFromState("read-write", "implement");
+  const live = h.active();
+  // Catalog order, whatever the caller's order; a non-family name is never primed.
+  const expected = discoveryFamily().filter((n) =>
+    ["push_annotations", "collect_review_wave"].includes(n),
+  );
+  assert.deepEqual(
+    h.gate.primeDeferred(["push_annotations", "submit", "collect_review_wave"]),
+    expected,
+  );
+  assert.deepEqual(h.installed().at(-1), [...live, ...expected], "one install: live + targets");
+  // Already active → nothing to do, no install.
+  const installs = h.installs.length;
+  assert.deepEqual(h.gate.primeDeferred(["collect_review_wave"]), []);
+  assert.equal(h.installs.length, installs);
+  // Kept through every reconciliation point while eligible…
+  h.gate.enter();
+  await h.call("resources_discover");
+  await h.call("before_agent_start");
+  assert.ok(h.active().includes("push_annotations"), "push_annotations is gate-allowed");
+  assert.ok(!h.active().includes("collect_review_wave"), "gate-blocked under the gate");
+  h.gate.exit();
+  assert.ok(h.active().includes("push_annotations"), "kept across the gate exit");
+  // …and dropped where it is ineligible (no gist stage carries the annotation tool).
+  assert.equal(isEligible("push_annotations", undefined, "gist-author", "read-write"), false);
+  h.gate.syncFromState("read-write", "gist-author");
+  assert.ok(!h.active().includes("push_annotations"), "dropped in gist-author");
+  // Returning to an eligible landing does not bring it back: only priming or the host activates.
+  h.gate.syncFromState("read-write", "implement");
+  assert.ok(!h.active().includes("push_annotations"), "never re-activated by reconciliation");
+  assertForeignInvariance(h);
+});
+
+test("primeDeferred skips an unregistered or ineligible name and never throws", async () => {
+  const registry = defaultRegistry().filter((t) => t.name !== "push_annotations");
+  const h = gateFixture(() => false, { registry });
+  h.gate.joinDiscoveryCohort(discoveryFamily());
+  h.gate.syncFromState("read-write", "plan");
+  const installs = h.installs.length;
+  assert.deepEqual(h.gate.primeDeferred(["push_annotations"]), [], "unregistered");
+  assert.deepEqual(h.gate.primeDeferred(["collect_review_wave"]), [], "ineligible in plan");
+  assert.equal(h.installs.length, installs);
+  h.fail("toolset");
+  await quietly(async () => {
+    assert.deepEqual(h.gate.primeDeferred(["collect_draft_review_wave"]), [], "a failed install");
+  });
+  h.fail(undefined);
+  assert.deepEqual(h.gate.primeDeferred(["collect_draft_review_wave"]), [
+    "collect_draft_review_wave",
+  ]);
+});
+
+test("a throwing install keeps the cohort deferral pending for the next point", async () => {
+  const family = discoveryFamily();
+  const h = gateFixture(() => false);
+  h.gate.joinDiscoveryCohort(family);
+  h.fail("toolset");
+  assert.throws(() => h.gate.syncFromState("read-write", "implement"), /toolset/);
+  for (const name of family.filter((n) => isEligible(n, undefined, "implement", "read-write")))
+    assert.ok(h.active().includes(name), `${name} still active after the failed install`);
+  h.fail(undefined);
+  await h.call("resources_discover");
+  for (const name of family) assert.ok(!h.active().includes(name), `${name} deactivated now`);
+  assert.equal(h.installs.length, 1);
+});
+
+test("a member whose deferred re-registration failed stays always-declared: dropped under the gate, restored at its exit", () => {
+  // deferDiscoveryFamily omits a member it could not re-register; it is still `direct`, so
+  // tool_search cannot find it and only reconciliation can bring it back.
+  const joined = discoveryFamily().filter((name) => name !== "objective_stack_status");
+  const h = gateFixture(() => false);
+  h.gate.joinDiscoveryCohort(joined);
+  h.gate.syncFromState("read-write", "implement");
+  assert.ok(h.active().includes("objective_stack_status"), "never deferred, so kept at the join");
+  h.gate.enter();
+  assert.ok(!h.active().includes("objective_stack_status"), "gate-blocked under the gate");
+  h.gate.exit();
+  assert.ok(h.active().includes("objective_stack_status"), "restored at the gate exit");
+  assert.deepEqual(h.gate.discovery(), { cohort: true, family: joined }, "reports what deferred");
+  assert.deepEqual(h.gate.primeDeferred(["objective_stack_status"]), [], "not a deferred member");
 });

@@ -9,7 +9,9 @@
 // (`replaceWaveStatus`: running at launch, failed on a zero-lane launch, incomplete/cleared at
 // collection) so the human decides after the findings land. Mirrors
 // `pi/v1/codeReview/reviewWave.ts`'s shape (own pending slot; a generic extraction waits for
-// the rule of three).
+// the rule of three). A successful launch also primes its collector (`DRAFT_LAUNCH_PRIMES`) in a
+// discovery-cohort session: the door primed it already, so this is the backstop for a resume
+// between the door and the launch (resume starts from the host's defaults).
 //
 // THE DOOR-PRIMED CONTEXT (the trust posture difference from the PR pair): the wave's inputs
 // ride the registration-owned `DraftReviewWaveState` — the context/state module lives in
@@ -27,6 +29,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { DraftReviewWaveState } from "../../authoring/review/draftContext.ts";
 import { subagentModel } from "../../substrate/config.ts";
 import { failFor, ok, type Result } from "../../substrate/result.ts";
+import type { ToolGating } from "../../substrate/toolGating.ts";
 import { paramsOf, stringArrayParam } from "../../substrate/toolParams.ts";
 import { OBJECTIVE_STAGES, PLAN_FAMILY_STAGES } from "../../substrate/toolPolicy.ts";
 import { type ReportTarget, report } from "../../surfaces/report.ts";
@@ -103,6 +106,12 @@ export interface StartDraftReviewWaveOk {
   launch: ReportWaveLaunchManifest;
 }
 
+/**
+ * The deferred tool a successful `start_draft_review_wave` launch primes — the collector its
+ * result, description and guidelines name (a no-op outside the discovery cohort).
+ */
+export const DRAFT_LAUNCH_PRIMES = ["collect_draft_review_wave"] as const;
+
 /** The fail arm retains the attempt receipt known before the failure (the `failFor` extras hook). */
 export type StartDraftReviewWaveResult = Result<
   StartDraftReviewWaveOk,
@@ -115,8 +124,9 @@ export type StartDraftReviewWaveResult = Result<
  * (the `executeStartReviewWave` mirror). Assumes DECODED params and a caller-resolved `model`.
  * An unprimed context is a loud soft-fail (`no_draft_context` — the door primes the draft under
  * review); a launch failure (the pre-spawn `ok: false` arm) is a loud soft-fail whose
- * `error_type` is the wave failure reason; success stores the pending ref and returns the run
- * identity so the parent yields until native wakes.
+ * `error_type` is the wave failure reason and primes nothing; success stores the pending ref,
+ * primes the collector (`DRAFT_LAUNCH_PRIMES`) and returns the run identity so the parent yields
+ * until native wakes.
  */
 export async function executeStartDraftReviewWave(
   state: DraftReviewWaveState,
@@ -131,6 +141,8 @@ export async function executeStartDraftReviewWave(
     annotations?: AnnotationState;
     /** Test seam for the marker push (default: global fetch / setTimeout). */
     annotationDeps?: Parameters<typeof replaceWaveStatus>[3];
+    /** The activation's gating controller — a successful launch primes its collector. */
+    gating: Pick<ToolGating, "primeDeferred">;
   },
 ): Promise<StartDraftReviewWaveResult> {
   const fail = failFor<{ attempts: ReportWaveAttemptReceipt[] }>(target, "start_draft_review_wave");
@@ -181,6 +193,7 @@ export async function executeStartDraftReviewWave(
     return fail(detail, failure?.reason ?? "spawn-failed", { attempts });
   }
   state.pending = start.ref;
+  opts.gating.primeDeferred(DRAFT_LAUNCH_PRIMES);
   let marker: WaveStatusOutcome = "no_surface";
   if (opts.annotations !== undefined) {
     marker = await replaceWaveStatus(
@@ -337,6 +350,7 @@ const COLLECT_TOOL_GUIDELINES = [
  */
 export function registerDraftReviewWaveTools(
   pi: ExtensionAPI,
+  gating: ToolGating,
   state: DraftReviewWaveState,
   wave: ReportWave,
   annotations: AnnotationState,
@@ -399,6 +413,7 @@ export function registerDraftReviewWaveTools(
           ...(model !== undefined ? { model } : {}),
           requiredSkillPreflight: (requirement) => preflightPonytailSkill(requirement, ctx.cwd),
           annotations,
+          gating,
         });
       },
     },
@@ -437,6 +452,7 @@ export function registerDraftReviewWaveTools(
       gated: "allowed",
       modeOverStage: true,
       kind: "action",
+      declared: "deferred",
     },
   );
 }

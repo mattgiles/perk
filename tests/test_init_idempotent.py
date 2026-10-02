@@ -171,6 +171,56 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert before == after
 
 
+def test_init_preserves_local_default_tools_opt_in(tmp_path):
+    """The discovery-pilot opt-in (contracts.md §8.40) is hand-written and unmanaged: `perk init`
+    never writes, orders or removes a `defaultTools` entry, and the key is invisible to the
+    managed `settings-wiring` portion (no drift, no hash change)."""
+    from perk.convergence.doctor import run_doctor
+    from perk.convergence.managed_state import load_managed_state, managed_artifacts
+
+    def settings_wiring_hashes(root: Path) -> tuple[str | None, str]:
+        descriptor = next(d for d in managed_artifacts() if d.key == "settings-wiring")
+        return descriptor.observed_hash(root), descriptor.desired_hash(root, self_repo=False)
+
+    # The control: the same convergence without the opt-in.
+    control = tmp_path / "control"
+    control.mkdir()
+    assert run_init(control, verify=False).ok
+
+    repo = tmp_path / "repo"
+    pi_dir = repo / ".pi"
+    pi_dir.mkdir(parents=True)
+    settings_path = pi_dir / "settings.json"
+    settings_path.write_text(
+        json.dumps({"defaultTools": ["+tool_search"]}, indent=2) + "\n", encoding="utf-8"
+    )
+    opt_in = json.dumps(["+tool_search"])
+
+    assert run_init(repo, verify=False).ok
+    first = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert json.dumps(first["defaultTools"]) == opt_in, "preserved by the first run"
+    assert f"npm:@mgiles/perk@{__version__}" in first["packages"], "the run still converged"
+
+    # The second run is a no-op on disk, and the entry survives byte-equal.
+    before = _snapshot(repo)
+    second = run_init(repo, verify=False)
+    assert second.ok
+    assert second.changes == []
+    assert _snapshot(repo) == before
+    assert json.dumps(json.loads(settings_path.read_text())["defaultTools"]) == opt_in
+
+    # The managed settings portion never sees the key: observed == desired == the control's.
+    observed, desired = settings_wiring_hashes(repo)
+    assert observed == desired
+    assert observed == settings_wiring_hashes(control)[0]
+    state = load_managed_state(repo)
+    assert state is not None
+    recorded = next(a for a in state.artifacts if a.key == "settings-wiring")
+    assert recorded.hash == desired
+    wiring = next(c for c in run_doctor(repo, verify=False).checks if c.name == "settings-wiring")
+    assert wiring.status == "ok", wiring.detail
+
+
 def test_managed_agents_scan_timeout_matches_extension_constant():
     """The bash scan-timeout number is a cross-plane constant (contracts §8.69).
 

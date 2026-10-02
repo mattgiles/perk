@@ -359,6 +359,9 @@ function fixture(
       synced.push([mode, s]);
     },
     prepareLoadout: () => ({}),
+    joinDiscoveryCohort() {},
+    primeDeferred: () => [],
+    discovery: () => ({ cohort: false, family: [] }),
   } satisfies ToolGating;
   const reviews = createDraftReviewSlot(pi);
   const notARunner = () => false;
@@ -1081,6 +1084,9 @@ function plannotatorArm(
     enter() {},
     syncFromState() {},
     prepareLoadout: () => ({}),
+    joinDiscoveryCohort() {},
+    primeDeferred: () => [],
+    discovery: () => ({ cohort: false, family: [] }),
   } satisfies ToolGating;
   const session = openBranchWorkflowSession(pi, ctx);
   assert.equal(

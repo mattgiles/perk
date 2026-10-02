@@ -12,6 +12,12 @@
 
 import type { ReportWaveRef } from "../../waves/reportWave.ts";
 
+/**
+ * The deferred tools a draft-review door's guidance names — primed beside the companion surfaces
+ * the moment the browser open picks the port (a no-op outside the discovery cohort).
+ */
+export const DRAFT_REVIEW_DOOR_PRIMES = ["collect_draft_review_wave", "push_annotations"] as const;
+
 /** The door-primed draft-review inputs (registration-owned state — never tool params). */
 export interface DraftReviewContext {
   /** The draft kind under review (the wave lane tasks are parameterized on it). */

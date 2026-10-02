@@ -8,7 +8,9 @@
 // authoritative for reconciliation. While the wave runs the pair keeps the code-owned
 // `perk:wave` status marker on the browser door's primed surface (`replaceWaveStatus`: running
 // at launch, failed on a zero-lane launch, incomplete/cleared at collection); the terminal door
-// primes no surface, so the marker is a no-op there.
+// primes no surface, so the marker is a no-op there. A successful launch also primes its
+// collector (`REVIEW_LAUNCH_PRIMES`): the launcher is reachable without a door, and its own
+// description and guidelines name `collect_review_wave`, which a discovery-cohort session defers.
 //
 // Registered in `extension/index.ts` beside the door registrations and FLOW-SCOPED via the
 // session's pending-wave guard: `start_review_wave` refuses while a wave is pending
@@ -29,6 +31,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { subagentModel } from "../../../substrate/config.ts";
 import { failFor, ok, type Result } from "../../../substrate/result.ts";
+import type { ToolGating } from "../../../substrate/toolGating.ts";
 import {
   booleanParam,
   numberParam,
@@ -170,6 +173,12 @@ export interface StartReviewWaveOk {
   launch: ReportWaveLaunchManifest;
 }
 
+/**
+ * The deferred tool a successful `start_review_wave` launch primes — the collector its result,
+ * description and guidelines name (a no-op outside the discovery cohort).
+ */
+export const REVIEW_LAUNCH_PRIMES = ["collect_review_wave"] as const;
+
 /** The fail arm retains the attempt receipt known before the failure (the `failFor` extras hook). */
 export type StartReviewWaveResult = Result<
   StartReviewWaveOk,
@@ -183,8 +192,9 @@ export type StartReviewWaveResult = Result<
  * refuses while it holds a ref, `collect_review_wave` drains it). Assumes DECODED params
  * (the registered tool runs `decodeStartReviewWaveParams` first) and a caller-resolved `model`.
  * Launch failure (the pre-spawn `ok: false` arm — `unavailable`/`spawn-failed`/`cancelled`) is a
- * loud soft-fail whose `error_type` is the wave failure reason; success stores the pending ref
- * and returns the run identity so the parent yields until native wakes.
+ * loud soft-fail whose `error_type` is the wave failure reason and primes nothing; success stores
+ * the pending ref, primes the collector (`REVIEW_LAUNCH_PRIMES`) and returns the run identity so
+ * the parent yields until native wakes.
  */
 export async function executeStartReviewWave(
   state: ReviewWaveState,
@@ -204,6 +214,8 @@ export async function executeStartReviewWave(
     annotations?: AnnotationState;
     /** Test seam for the marker push (default: global fetch / setTimeout). */
     annotationDeps?: Parameters<typeof replaceWaveStatus>[3];
+    /** The activation's gating controller — a successful launch primes its collector. */
+    gating: Pick<ToolGating, "primeDeferred">;
   },
 ): Promise<StartReviewWaveResult> {
   const fail = failFor<{ attempts: ReportWaveAttemptReceipt[] }>(target, "start_review_wave");
@@ -271,6 +283,7 @@ export async function executeStartReviewWave(
   state.pending = start.ref;
   // The pin a pending stack wave reviews is locked against supersession until collection.
   if (pinned !== undefined) stackPin.inFlight = pinned;
+  opts.gating.primeDeferred(REVIEW_LAUNCH_PRIMES);
   let marker: WaveStatusOutcome = "no_surface";
   if (opts.annotations !== undefined) {
     marker = await replaceWaveStatus(
@@ -429,6 +442,7 @@ const COLLECT_TOOL_GUIDELINES = [
  */
 export function installReviewWaveBindings(
   pi: ExtensionAPI,
+  gating: ToolGating,
   wave: ReportWave,
   annotations: AnnotationState,
   stackPin: StackPinState = createStackPinState(),
@@ -517,6 +531,7 @@ export function installReviewWaveBindings(
           ...(model !== undefined ? { model } : {}),
           requiredSkillPreflight: (requirement) => preflightPonytailSkill(requirement, ctx.cwd),
           annotations,
+          gating,
         });
       },
     },
@@ -545,6 +560,11 @@ export function installReviewWaveBindings(
         return executeCollectReviewWave(state, wave, ctx, { annotations, stackPin });
       },
     },
-    { stages: [...WORKTREE_STAGES, "stack-review"], gated: "blocked", kind: "action" },
+    {
+      stages: [...WORKTREE_STAGES, "stack-review"],
+      gated: "blocked",
+      kind: "action",
+      declared: "deferred",
+    },
   );
 }

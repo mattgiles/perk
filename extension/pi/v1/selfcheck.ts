@@ -365,17 +365,19 @@ export function branchContextCensus(
 
 /**
  * Render the census as a fixed multi-line block. The line grammar (the `census:` /
- * `append-system-prompt:` / `context-files:` / `skills:` / `tools:` / `per source:` / `branch:` /
- * `perk contexts:` / `native sdk bridge:` keys) is stable — the closing audit diffs against these
+ * `append-system-prompt:` / `context-files:` / `skills:` / `tools:` / `per source:` /
+ * `discovery:` / `branch:` / `perk contexts:` / `native sdk bridge:` keys) is stable — the closing audit diffs against these
  * exact keys; each `perk contexts:` row appends a `live=<n>` token — the pre-filter projection
  * count (`?` when the projection read failed) — after its historical `×copies (chars)`. The bridge block carries `describeBridge`, the
- * host entry (or `-`) and the root paths — identifiers only.
+ * host entry (or `-`) and the root paths — identifiers only. `discovery:` reports the session's
+ * discovery-cohort membership and, in the cohort, the whole pilot family in catalog order.
  */
 export function renderCensus(
   prompt: PromptCensus,
   tools: ToolsCensus,
   branch: BranchContextCensus,
   bridge: BridgeStatus,
+  discovery: { cohort: boolean; family: readonly string[] },
 ): string {
   const lines: string[] = ["census:"];
   lines.push(
@@ -404,6 +406,11 @@ export function renderCensus(
     lines.push(`    per source: ${rows}`);
   }
   lines.push(
+    discovery.cohort
+      ? `  discovery: cohort (family: ${discovery.family.join(", ")})`
+      : "  discovery: nonparticipant",
+  );
+  lines.push(
     `  branch: ${branch.entries} entries; binding-header-copies=${branch.bindingHeaderCopies}`,
   );
   const perkRows = branch.perkContexts.map(
@@ -429,7 +436,13 @@ export function renderCensus(
  */
 export function registerSelfcheck(
   pi: ExtensionAPI,
-  opts: { version: string; sharedOk: boolean; bridge: BridgeStatus },
+  opts: {
+    version: string;
+    sharedOk: boolean;
+    bridge: BridgeStatus;
+    /** The gating controller's discovery-cohort read (`ToolGating.discovery`). */
+    discovery: () => { cohort: boolean; family: readonly string[] };
+  },
 ): void {
   registerPerkCommand(pi, "perk-selfcheck", {
     description:
@@ -450,6 +463,7 @@ export function registerSelfcheck(
         toolsCensus(pi.getAllTools(), pi.getActiveTools()),
         branchContextCensus(branchOf(ctx), readLiveProjection(ctx)),
         opts.bridge,
+        opts.discovery(),
       );
       // Headless-safe: report() surfaces the derived counts/identifiers (never raw prompt content).
       reportTo(ctx, "selfcheck", report.level, `${report.summary}\n${census}`);

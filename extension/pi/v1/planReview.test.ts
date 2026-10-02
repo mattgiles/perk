@@ -30,7 +30,7 @@ import {
   scriptedRemotesSlot,
   supersedingDraftReviewBridge,
 } from "../../testing/draftReview.ts";
-import { gitInit, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
+import { fakeGating, gitInit, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
 import type { DraftReviewSlot } from "./draftReview.ts";
 import { executeObjectiveReview as executeObjectiveReviewCore } from "./objectiveReview.ts";
 import { installPlanBindings, planSaveDepsFor } from "./plan.ts";
@@ -88,21 +88,6 @@ const FAIL_ENVELOPE = JSON.stringify({
 
 /** A recording bridge: captures the reviewed bytes, returns the canned outcome. */
 const cannedBridge = scriptedDraftReviewBridge;
-
-/** A ToolGating fake recording exits; `active` is the isActive snapshot. */
-function fakeGating(active: boolean): ToolGating & { exits: number } {
-  const g = {
-    exits: 0,
-    syncFromState() {},
-    enter() {},
-    exit() {
-      g.exits += 1;
-    },
-    isActive: () => active,
-    prepareLoadout: () => ({}),
-  };
-  return g;
-}
 
 /**
  * An ExtensionAPI fake: appendEntry lands on the branch; exec returns the canned payload; the

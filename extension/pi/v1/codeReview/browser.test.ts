@@ -13,10 +13,13 @@ import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { writePlanRef } from "../../../substrate/cache.ts";
 import {
+  COHORT_SETTINGS,
   fakePerk,
   loadPerkSession,
   scaffoldRepo,
+  spyInjectionLoadouts,
   spyInjections,
+  toolSearch,
 } from "../../../testing/harness.ts";
 import {
   type AnnotationState,
@@ -27,7 +30,11 @@ import {
 } from "../providers/annotations.ts";
 import type { CodeReviewOutcome, StartedBrowser } from "../providers/plannotatorHandoff.ts";
 import { pickEphemeralPort } from "../providers/plannotatorPort.ts";
-import { observeBrowserReadiness, prReviewBrowserGuidance } from "./browser.ts";
+import {
+  observeBrowserReadiness,
+  prReviewBrowserGuidance,
+  REVIEW_BROWSER_PRIMES,
+} from "./browser.ts";
 
 /** Probe an annotation state: `findings: []` with nothing held makes NO fetch (pure probe). */
 async function surfacePrimed(state: AnnotationState): Promise<boolean> {
@@ -580,6 +587,33 @@ test("/pr-review-browser <pr>: foreign success injects ONE URL-free guidance, pr
       await new Promise((r) => setTimeout(r, 25));
     }
     assert.equal(await sessionSurfacePrimed(h), false, "the bridge settle clears the surface");
+  } finally {
+    await settleBridges(sink);
+    h.dispose();
+  }
+});
+
+test("/pr-review-browser <pr> in a discovery-cohort session: REVIEW_BROWSER_PRIMES are active when the guidance is sent", async () => {
+  assert.deepEqual([...REVIEW_BROWSER_PRIMES], ["collect_review_wave", "push_annotations"]);
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
+  const sink: FakeBrowser = { envelopes: [], envAtEmit: [] };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [fakePlannotator(sink), toolSearch()],
+    settings: COHORT_SETTINGS,
+  });
+  const spy = spyInjectionLoadouts(h);
+  try {
+    for (const name of REVIEW_BROWSER_PRIMES)
+      assert.ok(!h.session.getActiveToolNames().includes(name), `${name} deferred at startup`);
+    await h.runCommandHandler("pr-review-browser", "77");
+    assert.equal(spy.injected.length, 1, "one guidance injection");
+    for (const name of REVIEW_BROWSER_PRIMES) {
+      assert.ok(spy.injected[0]?.includes(name), `the guidance names ${name}`);
+      assert.ok(spy.active[0]?.includes(name), `${name} active when the guidance is sent`);
+    }
   } finally {
     await settleBridges(sink);
     h.dispose();

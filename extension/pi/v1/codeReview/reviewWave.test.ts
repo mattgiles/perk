@@ -18,7 +18,7 @@ import {
   type FakeSubagents,
   waveScriptItems,
 } from "../../../testing/fakeSubagents.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
+import { fakeGating, fakePerk, loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
 import { ensureToolCatalog } from "../../../testing/toolCatalog.ts";
 import {
@@ -41,6 +41,7 @@ import {
   executeCollectReviewWave,
   executeStartReviewWave as executeStartReviewWaveBase,
   installReviewWaveBindings,
+  REVIEW_LAUNCH_PRIMES,
   type ReviewWaveState,
   type StackPinState,
 } from "./reviewWave.ts";
@@ -49,13 +50,17 @@ const TWO_ANGLES: AdversarialReviewAngle[] = ["claimed-intent", "correctness"];
 const PREFLIGHT_OK = async () => ({ ok: true }) as const;
 /** The execute core with an EMPTY stack pin (the single-PR doors' posture) and the preflight
  * seam forced ok; stack-mode tests pass their own pin through `executeStartReviewWavePinned`. */
+type StartOpts = Omit<Parameters<typeof executeStartReviewWaveBase>[4], "gating"> & {
+  gating?: Parameters<typeof executeStartReviewWaveBase>[4]["gating"];
+};
 const executeStartReviewWave = (
   state: ReviewWaveState,
   wave: Parameters<typeof executeStartReviewWaveBase>[1],
   target: Parameters<typeof executeStartReviewWaveBase>[2],
-  opts: Parameters<typeof executeStartReviewWaveBase>[4],
+  opts: StartOpts,
 ) =>
   executeStartReviewWaveBase(state, wave, target, createStackPinState(), {
+    gating: fakeGating(false),
     ...opts,
     requiredSkillPreflight: PREFLIGHT_OK,
   });
@@ -64,9 +69,10 @@ const executeStartReviewWavePinned = (
   wave: Parameters<typeof executeStartReviewWaveBase>[1],
   target: Parameters<typeof executeStartReviewWaveBase>[2],
   stackPin: StackPinState,
-  opts: Parameters<typeof executeStartReviewWaveBase>[4],
+  opts: StartOpts,
 ) =>
   executeStartReviewWaveBase(state, wave, target, stackPin, {
+    gating: fakeGating(false),
     ...opts,
     requiredSkillPreflight: PREFLIGHT_OK,
   });
@@ -453,7 +459,7 @@ test("decodeStartReviewWaveParams refuses a missing/empty worktree and a blank d
 
 // --- the execute cores over the injected memory adapter --------------------------------------
 
-test("executeStartReviewWave: happy path stores the pending wave and returns the run handle", async () => {
+test("executeStartReviewWave: happy path stores the pending wave, primes its collector and returns the run handle", async () => {
   const state = freshState();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({
@@ -463,8 +469,11 @@ test("executeStartReviewWave: happy path stores the pending wave and returns the
     },
   });
   const wave = reportWaveOver(adapter);
-  const result = await executeStartReviewWave(state, wave, target, START_OPTS);
+  const gating = fakeGating(false);
+  const result = await executeStartReviewWave(state, wave, target, { ...START_OPTS, gating });
   assert.equal(result.details.ok, true);
+  assert.deepEqual(gating.primes, [[...REVIEW_LAUNCH_PRIMES]], "the launch primed its collector");
+  assert.deepEqual([...REVIEW_LAUNCH_PRIMES], ["collect_review_wave"]);
   const details = result.details as {
     asyncId?: string;
     asyncDir?: string;
@@ -483,9 +492,10 @@ test("executeStartReviewWave: happy path stores the pending wave and returns the
   assert.match(text, /matching native workflow-completion notice/);
   assert.match(text, /collect_review_wave/);
 
-  // The pending ref is stored: a second start refuses with wave_active…
-  const second = await executeStartReviewWave(state, wave, target, START_OPTS);
+  // The pending ref is stored: a second start refuses with wave_active (and primes nothing)…
+  const second = await executeStartReviewWave(state, wave, target, { ...START_OPTS, gating });
   assert.equal(second.details.ok, false);
+  assert.equal(gating.primes.length, 1, "a refused start primes nothing");
   assert.equal((second.details as { error_type?: string }).error_type, "wave_active");
   assert.match(second.content[0]?.text ?? "", /collect_review_wave first/);
 
@@ -499,13 +509,15 @@ test("executeStartReviewWave: happy path stores the pending wave and returns the
 test("executeStartReviewWave: a launch failure soft-fails with the wave reason and the attempt receipt", async () => {
   const state = freshState();
   const { target, notified } = fakeTarget();
+  const gating = fakeGating(false);
   const unavailable = await executeStartReviewWave(
     state,
     reportWaveOver(createMemoryWaveAdapter({ ping: null })),
     target,
-    START_OPTS,
+    { ...START_OPTS, gating },
   );
   assert.equal(unavailable.details.ok, false);
+  assert.deepEqual(gating.primes, [], "a failed launch primes nothing");
   const u = unavailable.details as { error_type?: string; attempts?: unknown };
   assert.equal(u.error_type, "unavailable");
   // The pre-spawn capability failure is preserved as an attempt receipt in the fail extras.
@@ -1041,6 +1053,7 @@ test("installReviewWaveBindings registers exactly the two tools over registratio
   const { pi, tools } = fakePi();
   installReviewWaveBindings(
     pi,
+    fakeGating(false),
     reportWaveOver(createMemoryWaveAdapter({})),
     createAnnotationState(),
   );
@@ -1128,6 +1141,7 @@ test("registered start_review_wave: a bad selection decodes to bad_input before 
   const { pi, tools } = fakePi();
   installReviewWaveBindings(
     pi,
+    fakeGating(false),
     reportWaveOver(createMemoryWaveAdapter({})),
     createAnnotationState(),
   );

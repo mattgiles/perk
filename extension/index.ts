@@ -14,7 +14,7 @@ import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createDraftReviewWaveState } from "./authoring/review/draftContext.ts";
 import { createHunkFeedbackReceiver, type HunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
-import { registerLoadoutHost } from "./pi/perkTool.ts";
+import { deferDiscoveryFamily, registerLoadoutHost } from "./pi/perkTool.ts";
 import { registerBashScanTimeout } from "./pi/v1/bashScanTimeout.ts";
 import { registerChildTaskRestore } from "./pi/v1/childTaskRestore.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
@@ -111,6 +111,7 @@ import { perkVersion, sharedDir, versionStamp } from "./substrate/resources.ts";
 import { isCanonicalRunId, mintRunId } from "./substrate/runId.ts";
 import { captureSessionPointer, recordRunSession } from "./substrate/sessionPointers.ts";
 import { registerToolGating } from "./substrate/toolGating.ts";
+import { isDiscoveryHost } from "./substrate/toolPolicy.ts";
 import {
   branchOf,
   rebuildWorkflowState,
@@ -530,6 +531,23 @@ export default function perk(
     // arms settle. Fail-closed on the gate: if the sync throws, leave it as-is (a failed sync
     // never opens it).
     const toolScope = sessionStartToolScope(identity);
+    // The discovery cohort join (contracts.md §8.40 "The discovery pilot"), BEFORE the first sync
+    // so the family's one-time deactivation rides that sync's single install. Only a host with
+    // Pi's builtin `tool_search` registered and active qualifies; every other session stays a
+    // nonparticipant. A failure leaves the session a nonparticipant.
+    try {
+      if (!gating.discovery().cohort) {
+        const infos = new Map(pi.getAllTools().map((t) => [t.name, t.sourceInfo] as const));
+        if (isDiscoveryHost(infos, pi.getActiveTools())) {
+          // Join with what actually deferred: a member whose re-registration failed stays
+          // always-declared, and nothing deferred means nothing to join.
+          const deferred = deferDiscoveryFamily(pi);
+          if (deferred.length > 0) gating.joinDiscoveryCohort(deferred);
+        }
+      }
+    } catch (error) {
+      console.error(`perk: discovery cohort join failed — ${error}`);
+    }
     try {
       gating.syncFromState(toolScope.mode, toolScope.stage);
     } catch (error) {
@@ -767,7 +785,7 @@ export default function perk(
   // binding between the stack door (which sets the verified pins on open) and the wave's
   // `stack: true` mode (which reads them — never model-relayed coordinates).
   const stackPin = createStackPinState();
-  installReviewWaveBindings(pi, reportWave, annotations, stackPin);
+  installReviewWaveBindings(pi, gating, reportWave, annotations, stackPin);
   installAuditBindings(pi, reportWave);
   installHarvestBindings(pi, reportWave);
   installDreamBindings(pi, reportWave);
@@ -786,7 +804,7 @@ export default function perk(
   // `collect_draft_review_wave`) the draft-review door drives: non-blocking draft-review
   // launch over the door-primed context + the typed collect (plus the `perk:wave` marker on the
   // primed browser surface).
-  registerDraftReviewWaveTools(pi, draftReviewWave, reportWave, annotations);
+  registerDraftReviewWaveTools(pi, gating, draftReviewWave, reportWave, annotations);
 
   // The door-primed browser annotation tool (`push_annotations`): the browser door primes the
   // surface handle on open and clears it on settle/degrade — the tool refuses outside a
@@ -795,18 +813,18 @@ export default function perk(
 
   // The warm `/pr-review-terminal` door: the terminal review entry — hunk always, no provider
   // dispatch (the command IS the selection); posting rides `submit_pr_review` above.
-  installPrReviewTerminalBindings(pi);
+  installPrReviewTerminalBindings(pi, gating);
 
   // The warm `/pr-review-browser` door: the browser review entry — plannotator always, opened
   // in the background (pre-PR it absorbs the since-base local browser review); posting is the
   // human's own platform-post from the UI, with `submit_pr_review` for request-changes only.
-  installPrReviewBrowserBindings(pi, annotations, perkStatus, browserDeps);
+  installPrReviewBrowserBindings(pi, gating, annotations, perkStatus, browserDeps);
 
   // The warm `/stack-review-browser` door + its cold-launch twin (`open_stack_review`): the
   // stacked-PR browser review over the pinned combined base→top patch — one reviewer wave with
   // `stack: true` bound to the same pins, then judgment-routed per-PR posting through
   // `submit_pr_review`.
-  installStackReviewBindings(pi, annotations, perkStatus, stackPin, browserDeps);
+  installStackReviewBindings(pi, gating, annotations, perkStatus, stackPin, browserDeps);
 
   // The warm `/plan-review-browser` door: the summonable streaming draft review — the
   // plannotator plan-review browser on the working plan draft, draft reviewers streaming
@@ -886,5 +904,5 @@ export default function perk(
   // `/perk-selfcheck` — the session-wiring verifier (turned from a liveness ping into a real check
   // that the converged ambient index reached `appendSystemPrompt` and the managed `AGENTS.md` block
   // reached `contextFiles`). doctor checks disk; selfcheck checks the prompt.
-  registerSelfcheck(pi, { version, sharedOk, bridge });
+  registerSelfcheck(pi, { version, sharedOk, bridge, discovery: () => gating.discovery() });
 }

@@ -25,6 +25,7 @@ import {
   waveScriptItems,
 } from "../../testing/fakeSubagents.ts";
 import {
+  fakeGating,
   fakePerk,
   gitInit,
   loadPerkSession,
@@ -37,6 +38,7 @@ import type { DraftReviewAngle } from "../../waves/draftReviewWave.ts";
 import { PONYTAIL_PACKAGE_ROOT } from "../../waves/ponytail.ts";
 import { reportWaveOver } from "../../waves/reportWave.ts";
 import {
+  DRAFT_LAUNCH_PRIMES,
   decodeStartDraftReviewWaveParams,
   executeCollectDraftReviewWave,
   executeStartDraftReviewWave as executeStartDraftReviewWaveBase,
@@ -50,9 +52,17 @@ import {
 
 const TWO_ANGLES: DraftReviewAngle[] = ["grounding", "risk"];
 const PREFLIGHT_OK = async () => ({ ok: true }) as const;
-const executeStartDraftReviewWave = (...args: Parameters<typeof executeStartDraftReviewWaveBase>) =>
-  executeStartDraftReviewWaveBase(args[0], args[1], args[2], {
-    ...args[3],
+type StartBase = Parameters<typeof executeStartDraftReviewWaveBase>;
+/** The execute core with the preflight seam forced ok and a recording nonparticipant gating. */
+const executeStartDraftReviewWave = (
+  state: StartBase[0],
+  wave: StartBase[1],
+  target: StartBase[2],
+  opts: Omit<StartBase[3], "gating"> & { gating?: StartBase[3]["gating"] },
+) =>
+  executeStartDraftReviewWaveBase(state, wave, target, {
+    gating: fakeGating(false),
+    ...opts,
     requiredSkillPreflight: PREFLIGHT_OK,
   });
 
@@ -538,7 +548,7 @@ test("executeStartDraftReviewWave: unprimed context -> loud no_draft_context (no
   assert.ok(notified.some((n) => n.severity === "error"));
 });
 
-test("executeStartDraftReviewWave: happy path stores the pending wave; the wave receives the primed draft", async () => {
+test("executeStartDraftReviewWave: happy path stores the pending wave, primes its collector; the wave receives the primed draft", async () => {
   const state = primePlan();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({
@@ -548,10 +558,14 @@ test("executeStartDraftReviewWave: happy path stores the pending wave; the wave 
     },
   });
   const wave = reportWaveOver(adapter);
+  const gating = fakeGating(true);
   const result = await executeStartDraftReviewWave(state, wave, target, {
     angles: TWO_ANGLES,
+    gating,
   });
   assert.equal(result.details.ok, true);
+  assert.deepEqual(gating.primes, [[...DRAFT_LAUNCH_PRIMES]], "the launch primed its collector");
+  assert.deepEqual([...DRAFT_LAUNCH_PRIMES], ["collect_draft_review_wave"]);
   const details = result.details as {
     asyncId?: string;
     asyncDir?: string;
@@ -573,13 +587,15 @@ test("executeStartDraftReviewWave: happy path stores the pending wave; the wave 
   assert.match(script, /# The draft/);
   assert.match(script, /Draft type: plan\./);
 
-  // The pending ref is stored: a second start refuses with wave_active…
+  // The pending ref is stored: a second start refuses with wave_active (and primes nothing)…
   const second = await executeStartDraftReviewWave(state, wave, target, {
     angles: TWO_ANGLES,
+    gating,
   });
   assert.equal(second.details.ok, false);
   assert.equal((second.details as { error_type?: string }).error_type, "wave_active");
   assert.match(second.content[0]?.text ?? "", /collect_draft_review_wave first/);
+  assert.equal(gating.primes.length, 1, "a refused start primes nothing");
 
   // …and collect drains it (clearing pending — a following collect is no_wave).
   const collected = await executeCollectDraftReviewWave(state, wave, target);
@@ -746,13 +762,15 @@ test("clearDraftReviewContext leaves an already-launched wave collectable (the e
 test("executeStartDraftReviewWave: a launch failure soft-fails with the wave reason and the attempt receipt", async () => {
   const state = primePlan("extra lens");
   const { target, notified } = fakeTarget();
+  const gating = fakeGating(true);
   const unavailable = await executeStartDraftReviewWave(
     state,
     reportWaveOver(createMemoryWaveAdapter({ ping: null })),
     target,
-    { angles: TWO_ANGLES },
+    { angles: TWO_ANGLES, gating },
   );
   assert.equal(unavailable.details.ok, false);
+  assert.deepEqual(gating.primes, [], "a failed launch primes nothing");
   const u = unavailable.details as { error_type?: string; attempts?: unknown };
   assert.equal(u.error_type, "unavailable");
   // The pre-spawn capability failure is preserved as an attempt receipt in the fail extras —
@@ -899,6 +917,7 @@ test("registerDraftReviewWaveTools registers exactly the two tools over registra
   const { pi, tools } = fakePi();
   registerDraftReviewWaveTools(
     pi,
+    fakeGating(true),
     createDraftReviewWaveState(),
     reportWaveOver(createMemoryWaveAdapter({})),
     createAnnotationState(),
@@ -1011,6 +1030,7 @@ test("registered start_draft_review_wave: a bad selection decodes to bad_input b
   const { pi, tools } = fakePi();
   registerDraftReviewWaveTools(
     pi,
+    fakeGating(true),
     createDraftReviewWaveState(),
     reportWaveOver(createMemoryWaveAdapter({})),
     createAnnotationState(),

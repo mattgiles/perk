@@ -267,5 +267,6 @@ export function installStackRecoverBindings(pi: ExtensionAPI, gating: ToolGating
       "the typed recover tool on explicit approval. Pass an objective number (else the active " +
       "objective).",
     guidance: objectiveRecoverGuidance,
+    primes: [],
   });
 }

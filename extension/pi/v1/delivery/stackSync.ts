@@ -56,6 +56,7 @@ import { report } from "../../../surfaces/report.ts";
 import { registerPerkTool } from "../../perkTool.ts";
 import type { StackConflictResolver, StackResolutionOutcome } from "./stackConflictResolver.ts";
 import { registerStackDrivingCommand } from "./stackDrive.ts";
+import { STACK_STATUS_PRIMES } from "./stackStatus.ts";
 
 /** Cold envelopes stay render-only. Explicit attempted resolution adds its typed result;
  * ordinary sync/adopt wire shapes remain slim, including automatic conflict refusals. */
@@ -677,5 +678,6 @@ export function installStackSyncBindings(
       "Drive a stack sync: preview the cascade, present it, act via the typed stack tools on " +
       "explicit approval. Pass an objective number (else the active objective).",
     guidance: objectiveSyncGuidance,
+    primes: STACK_STATUS_PRIMES,
   });
 }
