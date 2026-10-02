@@ -11,6 +11,7 @@ import {
   AUTHORING_STAGES,
   BUILTIN_TOOL_POLICY,
   carveOutWritersFor,
+  deriveOutputSchema,
   derivePiMetadata,
   GIST_STAGES,
   gatedToolsFor,
@@ -103,8 +104,132 @@ test("derivePiMetadata: terminal/interactive/orchestration/host are model-only; 
   );
 });
 
+test("derivePiMetadata: a query with declared success details gets the ok-discriminated outputSchema envelope", () => {
+  const result = {
+    properties: { objective: { type: "string" }, n: { type: "number" } },
+    required: ["objective"],
+  };
+  const envelope = {
+    anyOf: [
+      {
+        type: "object",
+        properties: { ok: { const: true }, objective: { type: "string" }, n: { type: "number" } },
+        required: ["ok", "objective"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          ok: { const: false },
+          error: { type: "string" },
+          error_type: { type: "string" },
+        },
+        required: ["ok", "error", "error_type"],
+        additionalProperties: true,
+      },
+    ],
+  };
+  assert.deepEqual(derivePiMetadata({ stages: [], gated: "blocked", kind: "query", result }), {
+    exposure: "direct",
+    outputSchema: envelope,
+  });
+  assert.deepEqual(deriveOutputSchema(result), envelope);
+  // `required` defaults to just the discriminant.
+  assert.deepEqual(
+    (deriveOutputSchema({ properties: {} }) as { anyOf: { required: string[] }[] }).anyOf[0]
+      ?.required,
+    ["ok"],
+  );
+  // Every other kind never gets an outputSchema, whatever the policy carries.
+  for (const kind of ["terminal", "interactive", "orchestration", "host", "action"] as const) {
+    assert.equal(
+      "outputSchema" in derivePiMetadata({ stages: [], gated: "allowed", kind, result }),
+      false,
+      kind,
+    );
+  }
+});
+
+test("validateToolPolicy: the result descriptor — required on query, refused elsewhere, no ok, required ⊆ properties, divergence", () => {
+  const query: ToolPolicy = {
+    stages: ["plan"],
+    gated: "allowed",
+    kind: "query",
+    result: { properties: { a: { type: "string" } }, required: ["a"] },
+  };
+  validateToolPolicy("vr_ok", {}, query, REGISTRY_IDS);
+  assert.throws(
+    () =>
+      validateToolPolicy(
+        "vr_missing",
+        {},
+        { stages: [], gated: "allowed", kind: "query" },
+        REGISTRY_IDS,
+      ),
+    /perk tool policy: vr_missing — a query tool must declare its success details \(result\)/,
+  );
+  for (const kind of ["action", "terminal", "interactive", "orchestration"] as const) {
+    assert.throws(
+      () => validateToolPolicy("vr_kind", {}, { ...query, kind }, REGISTRY_IDS),
+      new RegExp(
+        `perk tool policy: vr_kind — \`result\` is declared by query tools only — a ${kind} tool is never a script API`,
+      ),
+    );
+  }
+  assert.throws(
+    () =>
+      validateToolPolicy(
+        "vr_ok_prop",
+        {},
+        { ...query, result: { properties: { ok: { type: "boolean" } } } },
+        REGISTRY_IDS,
+      ),
+    /must not declare `ok`/,
+  );
+  assert.throws(
+    () =>
+      validateToolPolicy(
+        "vr_required",
+        {},
+        { ...query, result: { properties: {}, required: ["ghost"] } },
+        REGISTRY_IDS,
+      ),
+    /`result.required` names "ghost"/,
+  );
+  assert.throws(
+    () => validateToolPolicy("vr_field", { outputSchema: {} }, query, REGISTRY_IDS),
+    /must not set `outputSchema`/,
+  );
+  // An identical result re-records as a no-op; a changed one diverges.
+  recordPerkTool("vr_dup", query);
+  recordPerkTool("vr_dup", {
+    ...query,
+    result: { properties: { a: { type: "string" } }, required: ["a"] },
+  });
+  assert.throws(
+    () =>
+      validateToolPolicy(
+        "vr_dup",
+        {},
+        { ...query, result: { properties: { a: { type: "number" } }, required: ["a"] } },
+        REGISTRY_IDS,
+      ),
+    /re-registered with a divergent policy/,
+  );
+  assert.throws(
+    () => recordPerkTool("vr_dup", { ...query, result: { properties: {} } }),
+    /divergent policy/,
+  );
+  assert.equal(perkToolNames().filter((n) => n === "vr_dup").length, 1);
+});
+
 test("validateToolPolicy: refuses the host kind, unknown stages, deferred model-only kinds, policy-owned fields and divergent re-registration", () => {
-  const ok: ToolPolicy = { stages: ["plan"], gated: "allowed", kind: "query" };
+  const ok: ToolPolicy = {
+    stages: ["plan"],
+    gated: "allowed",
+    kind: "query",
+    result: { properties: {} },
+  };
   validateToolPolicy("vp_ok", { name: "vp_ok" }, ok, REGISTRY_IDS);
   assert.throws(
     () => validateToolPolicy("vp_host", {}, { ...ok, kind: "host" }, REGISTRY_IDS),
@@ -116,11 +241,23 @@ test("validateToolPolicy: refuses the host kind, unknown stages, deferred model-
   );
   for (const kind of ["terminal", "interactive", "orchestration"] as const) {
     assert.throws(
-      () => validateToolPolicy("vp_def", {}, { ...ok, kind, declared: "deferred" }, REGISTRY_IDS),
+      () =>
+        validateToolPolicy(
+          "vp_def",
+          {},
+          { stages: ["plan"], gated: "allowed", kind, declared: "deferred" },
+          REGISTRY_IDS,
+        ),
       /perk tool policy: vp_def — declared: "deferred" requires kind query or action/,
     );
   }
-  for (const field of ["exposure", "annotations", "defaultActive", "prepareLoadout"]) {
+  for (const field of [
+    "exposure",
+    "annotations",
+    "defaultActive",
+    "prepareLoadout",
+    "outputSchema",
+  ]) {
     assert.throws(
       () => validateToolPolicy("vp_field", { [field]: undefined }, ok, REGISTRY_IDS),
       new RegExp(`must not set \`${field}\``),
@@ -138,7 +275,13 @@ test("validateToolPolicy: refuses the host kind, unknown stages, deferred model-
     REGISTRY_IDS,
   );
   assert.throws(
-    () => validateToolPolicy("vp_dup", {}, { ...ok, kind: "action" }, REGISTRY_IDS),
+    () =>
+      validateToolPolicy(
+        "vp_dup",
+        {},
+        { stages: ["plan"], gated: "allowed", kind: "action" },
+        REGISTRY_IDS,
+      ),
     /re-registered with a divergent policy/,
   );
   assert.throws(() => recordPerkTool("vp_dup", { ...ok, gated: "blocked" }), /divergent policy/);

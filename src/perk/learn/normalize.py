@@ -4,7 +4,12 @@ Projects a parsed Pi session (:mod:`perk.learn.session_jsonl`) into **bounded, u
 Markdown chunks** through a fixed, deterministic pipeline, and reports per-role counters + chunk
 paths. The bounding decisions: split at entry boundaries (never elide the middle — every entry
 survives in some chunk); the only lossy compression is per-payload (param-truncate head+tail,
-tool-result line-prune head-lines + error-lines).
+tool-result line-prune head-lines + error-lines, and a nested call's args/error head+tail).
+
+Nested-call evidence (a toolResult's projected ``message.nestedCalls``) renders INSIDE its parent
+``<tool_result>`` as a ``<nested_calls>`` element; the parent's ``error`` attribute is always the
+outer result's own flag, never derived from its children, and omitted arguments are never
+invented. A transcript without the record renders byte-identically to one predating it.
 
 This is the **serialize-edge** companion to the lenient parser: the report shapes here are frozen
 domain dataclasses; their ``OutputModel`` projection lives in the command file
@@ -20,7 +25,14 @@ import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from perk.learn.session_jsonl import ParsedSession, SessionEntry, ToolCall, parse_session_jsonl
+from perk.learn.session_jsonl import (
+    NestedCall,
+    NestedCalls,
+    ParsedSession,
+    SessionEntry,
+    ToolCall,
+    parse_session_jsonl,
+)
 from perk.state.cache import atomic_write_text
 
 # Locked constants. A chunk caps at ~200KB (50_000 tokens x 4 chars); payloads truncate at 4000
@@ -31,6 +43,9 @@ _MAX_PAYLOAD_CHARS = 4000
 _MAX_PARAM_CHARS = 200
 _TOOL_RESULT_HEAD_LINES = 40
 _MAX_FILE_LIST = 50
+# A nested call's error caps at Pi's own recorder cap (`NESTED_CALL_LIMITS.maxErrorChars`), so an
+# honest record is never clipped; its args share the tool-call param cap.
+_MAX_NESTED_ERROR_CHARS = 500
 
 # The error-keyword set: a line matching any of these survives the tool-result head-line prune.
 _ERROR_RE = re.compile(r"error|exception|failed|failure|fatal|warning", re.IGNORECASE)
@@ -192,13 +207,34 @@ def _drop_boilerplate(
 def _signature(entry: SessionEntry) -> tuple[object, ...]:
     """The dedup key — the render-payload identity (same kind/role + byte-identical payload)."""
     calls = tuple((c.name, c.args_text) for c in entry.tool_calls)
-    return (entry.kind, entry.role, entry.text, entry.thinking, calls, entry.output, entry.command)
+    return (
+        entry.kind,
+        entry.role,
+        entry.text,
+        entry.thinking,
+        calls,
+        entry.output,
+        entry.command,
+        _nested_signature(entry.nested_calls),
+    )
+
+
+def _nested_signature(nested: NestedCalls | None) -> tuple[object, ...] | None:
+    """The nested-call payload identity. The loss diagnostics (``complete`` / ``malformed`` /
+    ``dropped`` / an omitted call's ``arguments_bytes``) are rendered evidence with no other
+    observable, so they DISTINGUISH payloads; only call ids and durations are excluded, so a
+    genuinely repeated result still collapses."""
+    if nested is None:
+        return None
+    calls = tuple((c.name, c.status, c.args_text, c.arguments_bytes, c.error) for c in nested.calls)
+    return (nested.complete, nested.malformed, nested.dropped, calls)
 
 
 def _dedup(entries: list[SessionEntry]) -> tuple[list[SessionEntry], int]:
     """Step 4a — collapse byte-identical EVIDENCE payloads: keep the first, replace each later
-    occurrence with a one-line ``↑ duplicate of entry <id>`` pointer. One duplicate-group is counted
-    per collapsed set. PRESERVED entries are exempt."""
+    occurrence with a one-line ``↑ duplicate of entry <id>`` pointer (which stands for the whole
+    payload, nested calls included). One duplicate-group is counted per collapsed set. PRESERVED
+    entries are exempt."""
     seen: dict[tuple[object, ...], str | None] = {}
     collapsed: set[tuple[object, ...]] = set()
     groups = 0
@@ -219,6 +255,7 @@ def _dedup(entries: list[SessionEntry]) -> tuple[list[SessionEntry], int]:
                     output=None,
                     command=None,
                     summary=None,
+                    nested_calls=None,
                 )
             )
             if sig not in collapsed:
@@ -254,10 +291,18 @@ def _drop_repeated_assistant_text(entries: list[SessionEntry]) -> list[SessionEn
 
 def _is_substantive(entry: SessionEntry) -> bool:
     """Step 5 — PRESERVED entries always survive; an EVIDENCE entry survives only with substantive
-    content (any of text / thinking / tool calls / output / command)."""
+    content (any of text / thinking / tool calls / output / command / a nested-call record — whose
+    calls or loss diagnostics are evidence even beside an empty text)."""
     if _is_preserved(entry):
         return True
-    return bool(entry.text or entry.thinking or entry.tool_calls or entry.output or entry.command)
+    return bool(
+        entry.text
+        or entry.thinking
+        or entry.tool_calls
+        or entry.output
+        or entry.command
+        or entry.nested_calls is not None
+    )
 
 
 def truncate_payloads(
@@ -267,8 +312,10 @@ def truncate_payloads(
 
     Per kind: tool-call args + oversized params → head+tail (``_MAX_PARAM_CHARS``, path-aware);
     tool-result / bash output → line-prune (first ``_TOOL_RESULT_HEAD_LINES`` + later error lines);
-    assistant/user text, thinking, preserved summary → head+tail (``_MAX_PAYLOAD_CHARS``). A
-    PRESERVED summary truncates but the entry is never dropped.
+    assistant/user text, thinking, preserved summary → head+tail (``_MAX_PAYLOAD_CHARS``); a nested
+    call's args → like tool-call args, its error → head+tail (``_MAX_NESTED_ERROR_CHARS``) — the
+    nested record's ``complete`` / ``malformed`` / ``dropped`` / ``arguments_bytes`` are never
+    altered. A PRESERVED summary truncates but the entry is never dropped.
 
     Public seam: besides being step 6 of :func:`normalize_session`, this is the per-payload
     bounding step the session-audit evidence bundler (``perk_dev.audit.bounding``) reuses over
@@ -318,8 +365,33 @@ def truncate_payloads(
                 count += 1
             changes["summary"] = truncated
 
+        if entry.nested_calls is not None and entry.nested_calls.calls:
+            nested, hits = _truncate_nested_calls(entry.nested_calls)
+            count += hits
+            changes["nested_calls"] = nested
+
         out.append(replace(entry, **changes) if changes else entry)
     return out, count
+
+
+def _truncate_nested_calls(nested: NestedCalls) -> tuple[NestedCalls, int]:
+    """Bound each nested call's args (``_MAX_PARAM_CHARS``, path-aware) and error
+    (``_MAX_NESTED_ERROR_CHARS``), counting each hit; everything else is kept as-is."""
+    hits = 0
+    calls: list[NestedCall] = []
+    for call in nested.calls:
+        args_text = call.args_text
+        if args_text is not None:
+            args_text, hit = _truncate_value(args_text, _MAX_PARAM_CHARS)
+            if hit:
+                hits += 1
+        error = call.error
+        if error is not None:
+            error, hit = _head_tail(error, _MAX_NESTED_ERROR_CHARS)
+            if hit:
+                hits += 1
+        calls.append(replace(call, args_text=args_text, error=error))
+    return replace(nested, calls=tuple(calls)), hits
 
 
 def _truncate_value(value: str, max_chars: int) -> tuple[str, bool]:
@@ -329,6 +401,14 @@ def _truncate_value(value: str, max_chars: int) -> tuple[str, bool]:
         return value, False
     if _looks_like_path(value):
         return _truncate_path(value), True
+    return _head_tail(value, max_chars)
+
+
+def _head_tail(value: str, max_chars: int) -> tuple[str, bool]:
+    """Plain head+tail char truncation with an inline ``…[truncated N chars]…`` marker. Returns
+    ``(value, False)`` when already within ``max_chars``."""
+    if len(value) <= max_chars:
+        return value, False
     keep = max_chars // 2
     removed = len(value) - 2 * keep
     return f"{value[:keep]}…[truncated {removed} chars]…{value[-keep:]}", True
@@ -407,14 +487,52 @@ def _render_message(entry: SessionEntry) -> str:
     if entry.role == "user":
         return f'<user id="{eid}">{escape_xml(entry.text)}</user>'
     if entry.role == "toolResult":
-        tool = escape_xml(entry.tool_name or "")
-        err = "true" if entry.is_error else "false"
-        body = escape_xml(entry.text)
-        return f'<tool_result tool="{tool}" error="{err}" id="{eid}">{body}</tool_result>'
+        return _render_tool_result(entry)
     if entry.role == "assistant":
         return _render_assistant(entry)
     role = escape_xml(entry.role or "unknown")
     return f'<message role="{role}" id="{eid}">{escape_xml(entry.text)}</message>'
+
+
+def _render_tool_result(entry: SessionEntry) -> str:
+    """A tool result; its nested calls (when recorded) render inside it, after the body. The
+    ``error`` attribute is the outer result's own flag — never derived from a child."""
+    tool = escape_xml(entry.tool_name or "")
+    err = "true" if entry.is_error else "false"
+    head = f'<tool_result tool="{tool}" error="{err}" id="{_eid(entry)}">{escape_xml(entry.text)}'
+    if entry.nested_calls is None:
+        return f"{head}</tool_result>"
+    return f"{head}\n{_render_nested_calls(entry.nested_calls)}</tool_result>"
+
+
+def _render_nested_calls(nested: NestedCalls) -> str:
+    """The ``<nested_calls>`` element: ``complete`` always; ``malformed`` / ``dropped`` only when
+    non-zero; per call ``id`` / ``name`` / ``status`` always, ``ms`` when recorded,
+    ``args_omitted_bytes`` when Pi omitted the arguments and gave their size, ``<args>`` when
+    recorded, ``<error>`` when non-empty."""
+    attrs = f' complete="{"true" if nested.complete else "false"}"'
+    if nested.malformed > 0:
+        attrs += f' malformed="{nested.malformed}"'
+    if nested.dropped > 0:
+        attrs += f' dropped="{nested.dropped}"'
+    lines = [f"<nested_calls{attrs}>"]
+    for call in nested.calls:
+        call_attrs = (
+            f'id="{escape_xml(call.call_id)}" name="{escape_xml(call.name)}" '
+            f'status="{escape_xml(call.status)}"'
+        )
+        if call.duration_ms is not None:
+            call_attrs += f' ms="{call.duration_ms}"'
+        if call.args_text is None and call.arguments_bytes is not None:
+            call_attrs += f' args_omitted_bytes="{call.arguments_bytes}"'
+        body = ""
+        if call.args_text is not None:
+            body += f"<args>{escape_xml(call.args_text)}</args>"
+        if call.error:
+            body += f"<error>{escape_xml(call.error)}</error>"
+        lines.append(f"<nested_call {call_attrs}>{body}</nested_call>")
+    lines.append("</nested_calls>")
+    return "\n".join(lines)
 
 
 def _render_assistant(entry: SessionEntry) -> str:

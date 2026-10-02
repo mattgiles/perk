@@ -267,12 +267,14 @@ const deferredFixtures: InlineExtension = {
       gated: "allowed",
       kind: "query",
       declared: "deferred",
+      result: { properties: {} },
     });
     registerPerkTool(pi, def(DEFERRED_PLAN, "Look up the planning almanac."), {
       stages: ["plan"],
       gated: "allowed",
       kind: "query",
       declared: "deferred",
+      result: { properties: {} },
     });
   },
 };

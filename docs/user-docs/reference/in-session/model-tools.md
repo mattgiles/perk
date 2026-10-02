@@ -126,6 +126,29 @@ further (a staging directory already claimed is named for disposal). The child's
 untrusted DATA. The `[models.subagents] librarian` key overrides
 the child's model.
 
+### Structured results
+
+Every perk tool result carries Pi's structured fields beside its text: `structuredContent` (the
+result's `details` object) and, whenever `details.ok` is `false`, `isError: true`. A perk soft
+failure therefore reaches the model as an error-flagged tool result (the TUI renders it in the
+error style); it neither ends the turn nor triggers a retry. `structuredContent` is never written
+to the session file and never sent to the model — it is for programmatic callers.
+
+`kind: query` tools also declare an output schema. `objective_stack_status`'s is
+`{ ok: true, objective, status } | { ok: false, error, error_type }`, where `status` is the
+published `perk objective stack status --json` envelope.
+
+A codemode script calling a perk tool receives:
+
+- from a **query** tool, the structured `{ ok, … }` value — on success and on a soft failure
+  alike (no throw);
+- from an **action** tool, its text on success, and a **rejection** carrying the result text
+  (`<tool> failed: <message>`) on a soft failure — catch it with `try`/`catch` and the script
+  continues.
+
+Terminal, interactive and orchestration tools are model-only: never callable from a script or
+another tool, and never given an output schema.
+
 ### Report-wave results
 
 An incomplete wave can contain useful successful, engine-validated sibling reports when the

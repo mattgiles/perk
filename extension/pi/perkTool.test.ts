@@ -138,6 +138,38 @@ function scanProduction(): ScannedRegistration[] {
   );
 }
 
+/**
+ * Object-literal keys no production file may set: the structured result fields and the query
+ * `outputSchema` are derived by the seam (never hand-set), and perk has no tool-result renderers.
+ */
+const SEAM_DERIVED_KEYS = new Set([
+  "outputSchema",
+  "structuredContent",
+  "isError",
+  "renderResult",
+  "renderCall",
+]);
+
+/** Every `<file>:<line> <key>` where an object literal sets one of SEAM_DERIVED_KEYS. */
+function seamDerivedKeys(file: string, source: string): string[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isObjectLiteralElementLike(node) &&
+      ts.isObjectLiteralExpression(node.parent) &&
+      node.name !== undefined &&
+      SEAM_DERIVED_KEYS.has(node.name.getText(sf).replace(/^["']|["']$/g, ""))
+    ) {
+      const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+      found.push(`${file}:${line + 1} ${node.name.getText(sf)}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
+
 /** The bidirectional check: terminates(def) ⇔ kind === "terminal". */
 function terminateMismatches(scanned: ScannedRegistration[]): string[] {
   return scanned
@@ -212,9 +244,30 @@ test("the scan discriminates within a mixed-kind module: a terminating plan_draf
   ]);
 });
 
+test("seam-derived census: no production file hand-sets outputSchema/structuredContent/isError or a tool-result renderer", () => {
+  const found = productionFiles(PI_V1).flatMap((path) =>
+    seamDerivedKeys(relative(PI_V1, path), readFileSync(path, "utf8")),
+  );
+  assert.deepEqual(found, []);
+  // The scan is not vacuous: a hand-set key in a registration is caught.
+  const source = readFileSync(join(PI_V1, "plan.ts"), "utf8");
+  const anchor = 'name: "plan_draft",';
+  const mutated = source.replace(anchor, `${anchor}\n    "isError": true, renderCall() {},`);
+  assert.deepEqual(
+    seamDerivedKeys("plan.ts", mutated).map((hit) => hit.replace(/:\d+ /, " ")),
+    ['plan.ts "isError"', "plan.ts renderCall"],
+  );
+});
+
 // --- the nested-runner probe --------------------------------------------------------------------
 
-type Outcome = { isError: boolean; text: string };
+type Outcome = {
+  isError: boolean;
+  text: string;
+  details: unknown;
+  structuredContent: unknown;
+  hasStructuredContent: boolean;
+};
 
 /** A test-only tool that calls `ctx.executeTool` for each target and records the outcomes. */
 function nestedProbe(targets: readonly string[], outcomes: Map<string, Outcome>) {
@@ -229,7 +282,13 @@ function nestedProbe(targets: readonly string[], outcomes: Map<string, Outcome>)
           const outcome = await ctx.executeTool(target, {});
           const result = outcome.result as AgentToolResult<unknown>;
           const text = result.content.map((c) => (c.type === "text" ? c.text : "")).join("");
-          outcomes.set(target, { isError: outcome.isError, text });
+          outcomes.set(target, {
+            isError: outcome.isError,
+            text,
+            details: result.details,
+            structuredContent: result.structuredContent,
+            hasStructuredContent: "structuredContent" in result,
+          });
         }
         return { content: [{ type: "text", text: "probed" }], details: {} };
       },
@@ -279,3 +338,41 @@ for (const mode of ["on", "only"] as const) {
     }
   });
 }
+
+test("positive nested probe: a nested caller of the query tool receives structuredContent + isError", async () => {
+  // No active objective and no plan-ref, so the query soft-fails deterministically before any
+  // cold-door exec.
+  const targets = ["objective_stack_status", "submit", "plan_review", "run_scout_wave"];
+  const outcomes = new Map<string, Outcome>();
+  const reg = await fauxModelRuntime();
+  const h = await loadPerkSessionAt(scaffoldRepo(), {
+    headful: false,
+    model: reg.getModel(),
+    modelRuntime: reg.modelRuntime,
+    extraExtensions: [nestedProbe(targets, outcomes)],
+  });
+  try {
+    reg.setResponses([
+      fauxAssistantMessage([fauxToolCall("nested_probe", {})], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxText("done")], { stopReason: "stop" }),
+    ]);
+    await h.session.prompt("probe the query tool");
+    const query = outcomes.get("objective_stack_status");
+    assert.ok(query !== undefined, "the query tool was probed");
+    assert.equal(query.isError, true);
+    assert.ok(query.hasStructuredContent, "structuredContent reaches the nested caller");
+    assert.deepEqual(query.structuredContent, query.details);
+    const details = query.details as { ok?: unknown; error_type?: unknown };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "no_objective");
+    // The model-only kinds still answer not-found.
+    for (const target of targets.slice(1)) {
+      const outcome = outcomes.get(target);
+      assert.ok(outcome !== undefined, `${target} was probed`);
+      assert.equal(outcome.isError, true, target);
+      assert.ok(outcome.text.includes(`Tool ${target} not found`), `${target}: ${outcome.text}`);
+    }
+  } finally {
+    h.dispose();
+  }
+});

@@ -6817,7 +6817,45 @@ ok (skip OR gathered manifest) · `1` no plan-ref / invalid · `2` not-a-repo. `
 gathers sessions + docs offline. The opt-in `--render` flag projects the found session JSONLs
 into bounded, untrusted-DATA-fenced Markdown chunks under `<bundle_dir>/chunks/` and reports on
 the envelope's **additive `render` field** (declared LAST, always serialized, `null` unless
-`--render`); the pipeline, fence format, and report fields are `normalize.py`'s contract.
+`--render`); the pipeline, fence format, and report fields are `normalize.py`'s contract, save the
+nested-call element pinned below.
+
+**Nested-call evidence.** Pi ≥ 0.99 (session format version 3) records the tool calls a tool made
+through `ctx.executeTool` (codemode scripts and other nested callers) on the CALLING tool's
+toolResult message as `message.nestedCalls` — the pi-ai `NestedToolCalls` grammar
+`{ calls: NestedToolCallRecord[], complete: boolean }`, record `{ id: "<callerToolCallId>/<n>",
+name, status: ok|error|unfinished, arguments?, argumentsBytes?, durationMs?, error? }`
+(`arguments` omitted over Pi's budget with `argumentsBytes` set instead; nested results are never
+recorded; nested calls write no JSONL entries of their own). `session_jsonl.py` projects it into
+`SessionEntry.nested_calls` (`NestedCalls { calls, complete, malformed, dropped }`), leniently —
+the projection never raises (it runs outside the parser's per-line `except` arm) and never makes
+the line malformed:
+
+| Input | Projection |
+|---|---|
+| absent / `null` | `None` — nothing rendered |
+| a non-object block | no calls, `malformed = 1`, `complete = false` |
+| `calls` not a list | no calls, `malformed = 1`, `complete` read from the block |
+| a non-object record, or one whose `id`/`name` is not a string | counted in `malformed`; its siblings kept |
+| a non-string `status` | `"unknown"` (any string kept verbatim) |
+| a non-finite (`inf`/`nan`) or non-numeric `durationMs`/`argumentsBytes` | that field absent; the record kept (a finite float rounds) |
+| `complete` | `true` only when literally `true` — absence never claims completeness |
+| records past 256 (Pi's own cap) | counted in `dropped`, not projected |
+
+`normalize.py` renders the record INSIDE its parent `<tool_result>`, after the body:
+`<nested_calls complete="true|false"[ malformed="N"][ dropped="N"]>` (the counts only when
+non-zero), one `<nested_call id name status[ ms][ args_omitted_bytes]>` per call (`ms` when a
+duration was recorded; `args_omitted_bytes` when the arguments were omitted and their size given)
+holding `<args>…</args>` when the arguments were recorded and `<error>…</error>` when the error is
+non-empty; every value is XML-escaped. Invariants: the parent's `error="…"` is the outer result's
+own flag, never derived from a child; omitted arguments and the (unrecorded) child result bodies
+are never invented; the loss diagnostics (`complete`, `malformed`, `dropped`, an omitted call's
+`argumentsBytes`) distinguish payloads under dedup (only call ids and durations are excluded from
+the signature) and a duplicate's pointer stands for the whole payload; a toolResult whose only
+evidence is its nested record survives the substantiveness prune; nested args truncate like
+tool-call args and a nested error head+tails at 500 chars (Pi's own cap), each counted in
+`truncations`; a transcript without the record renders byte-identically; the `render` envelope
+and its report fields are unchanged.
 
 The `--json` envelope (`OutputModel` serialize edge — the contract the warm orchestrator decodes):
 
@@ -7464,7 +7502,8 @@ the borrowed stage in its own policy.
 caller of `pi.registerTool(`, pinned by the import-direction guard's Rule I). The seam validates,
 records the tool in the process-wide catalog (registration order; an identical re-registration is
 a no-op, a divergent one throws), then registers `{ ...definition, ...derivePiMetadata(policy) }`
-— adding only the derived metadata. The descriptor:
+with the tool's own `execute` wrapped by the Result seam's `structureResult` — adding only the
+derived metadata and the derived result fields (**Structured results**, below). The descriptor:
 
 | Field | Values | Meaning |
 |---|---|---|
@@ -7473,20 +7512,51 @@ a no-op, a divergent one throws), then registers `{ ...definition, ...derivePiMe
 | `modeOverStage` | boolean (default false) | a mode gesture needs it regardless of stage |
 | `kind` | `terminal` · `interactive` · `orchestration` · `query` · `action` · `host` | what the tool IS — `terminal` if it can return `terminate: true`; `interactive` if it opens a human surface and hands off without terminating; `orchestration` if it spawns children, a wave or a foreground child/resolver; `query` for a pure read; else `action` (a trust/confirm dialog does not change the kind); `host` is reserved for the loadout host (below) |
 | `declared` | `always` (default) · `deferred` | reserved for discoverable-not-activated tools; `deferred` requires kind `query`/`action` |
+| `result` | `{ properties, required? }` (JSON-Schema property objects) | `kind: query` only — required there, refused on every other kind: the SUCCESS details' properties beyond `ok`, from which the seam derives `outputSchema` |
 
 Registration refuses (`perk tool policy: <name> — …`): `kind: host` (`the loadout host registers
 through registerLoadoutHost`), an unknown stage id, a blank carve-out,
 `declared: deferred` on a model-only kind, a definition carrying `exposure`, `annotations`,
-`defaultActive` or `prepareLoadout` (the policy owns them — type-level and at runtime), and a
-divergent re-registration. **Derived Pi metadata:** `kind ∈ {terminal, interactive,
+`defaultActive`, `prepareLoadout` or `outputSchema` (the policy owns them — type-level and at
+runtime), a query without `result` (`a query tool must declare its success details (result)`),
+`result` on any other kind (`` `result` is declared by query tools only — a <kind> tool is never a
+script API``), a `result.properties` declaring `ok` (the seam owns the discriminant), a
+`result.required` name absent from `result.properties`, and a divergent re-registration (`result`
+included). **Derived Pi metadata:** `kind ∈ {terminal, interactive,
 orchestration, host}` → `exposure: "model-only"` (§8.3's terminal guarantee); else `declared: deferred`
 → `"deferred"`; else `"direct"`. `gated ≠ blocked` → `annotations.readOnlyHint: true` ("never
-modifies the worktree" — a hint, never a permission grant). Stage families used in `stages`
+modifies the worktree" — a hint, never a permission grant). `kind: query` → `outputSchema` =
+`{ anyOf: [{ type: object, properties: { ok: { const: true }, …result.properties }, required:
+["ok", …result.required], additionalProperties: false }, { type: object, properties: { ok:
+{ const: false }, error: { type: string }, error_type: { type: string } }, required: ["ok",
+"error", "error_type"], additionalProperties: true }] }` — the success arm closed (a details field
+added without a schema update fails the conformance pin), the failure arm open for `failFor`
+extras; no other kind ever carries one. The golden matrix carries no `outputSchema` column. Stage families used in `stages`
 spreads, each registry-validated: `WORKTREE_STAGES` (derived — the stages that consume the
 plan-ref selector: `implement`/`submit`/`address`/`land`/`learn`), `PLAN_FAMILY_STAGES`
 (`plan`/`save`/`objective-plan`), `OBJECTIVE_STAGES` (`objective-author`/`objective-save`),
 `AUTHORING_STAGES` (`plan`/`objective-plan`/`objective-author`), `GIST_STAGES`
 (`gist-author`/`gist-save`).
+
+**Structured results (the Result seam).** Every perk tool result passes through
+`structureResult` (`extension/substrate/result.ts`), which derives exactly two fields:
+`structuredContent` = `details` (the same object; absent when `details` is undefined) and
+`isError` — **an own `ok === false` on the details forces `isError: true`; otherwise the incoming
+flag is preserved exactly** (absent stays absent, a tool-set `true` survives; `false` is never
+written). `content`, `details`, `terminate` (byte-for-byte) and `usage` pass through; streamed
+`onUpdate` partials are untouched; the loadout host's never-called `execute` stays unwrapped.
+Pi neither persists `structuredContent` to the session JSONL nor sends it to the model — it
+reaches programmatic callers only (a nested `ctx.executeTool` outcome; codemode). Two deltas are
+intended: (1) a perk soft failure reaches the model as an error-flagged tool result (the TUI's
+error shell) — no termination or retry change (`isError` does not end the batch); (2) per Pi's
+codemode `toScriptValue`, a script receives a tool's `structuredContent` iff the tool declares an
+`outputSchema`, else its text — and throws that text on `isError` — so an ACTION tool's soft
+failure REJECTS the script call with `<label> failed: <message>` (catchable; the script continues
+after a `catch`), an action's success resolves to its text, and a QUERY tool's result — success
+or soft failure — RESOLVES to its structured `{ ok, … }` value. The model-only kinds never become
+script APIs: they are `exposure: "model-only"` (uncallable from the nested runner) and can never
+carry `result`/`outputSchema`. The worker adapter (§8.11) already prefers `details.ok`, so its
+verdicts are unchanged.
 
 **The eligibility formula.**
 `eligible(tool, stage, mode) = (stage ∈ tool.stages ∧ (mode = read-write ∨ tool.gated ≠ blocked)) ∨ (mode = read-only ∧ tool.modeOverStage)`.

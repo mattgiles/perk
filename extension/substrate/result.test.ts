@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ReportTarget, Severity } from "../surfaces/report.ts";
-import { failFor, ok, type Result } from "./result.ts";
+import { failFor, ok, type Result, structureResult } from "./result.ts";
 
 /** A fake ReportTarget that records every notify call (mirrors report.test.ts). */
 function fakeTarget(
@@ -140,5 +140,92 @@ test("Result discriminates on details.ok (compile-time narrowing exercise)", () 
   const { target } = fakeTarget(false);
   captureStderr(() => {
     assert.equal(pick(failFor(target, "scope")("bad", "t")), "bad");
+  });
+});
+
+// --- structureResult: the derived structured fields ---------------------------------------------
+
+test("structureResult(ok): structuredContent IS details (same reference), no isError key", () => {
+  const result = ok("t", { pr: 7 });
+  const structured = structureResult(result);
+  assert.equal(structured.structuredContent, result.details);
+  assert.equal("isError" in structured, false);
+  assert.equal(structured.content, result.content);
+  assert.equal(structured.details, result.details);
+});
+
+test("structureResult(fail): isError true + structuredContent", () => {
+  const { target } = fakeTarget(false);
+  captureStderr(() => {
+    const result = failFor(target, "scope")("bad", "bad_input");
+    const structured = structureResult(result);
+    assert.equal(structured.isError, true);
+    assert.equal(structured.structuredContent, result.details);
+    assert.deepEqual(structured.structuredContent, {
+      ok: false,
+      error: "bad",
+      error_type: "bad_input",
+    });
+  });
+});
+
+test("structureResult: undefined details → no structuredContent key; null → null", () => {
+  const absent = structureResult({ content: [], details: undefined });
+  assert.equal("structuredContent" in absent, false);
+  assert.equal("isError" in absent, false);
+  const nulled = structureResult({ content: [], details: null });
+  assert.equal(nulled.structuredContent, null);
+  assert.equal("isError" in nulled, false);
+});
+
+test("structureResult: non-object details are structured, never flagged", () => {
+  const structured = structureResult({ content: [], details: "plain" });
+  assert.equal(structured.structuredContent, "plain");
+  assert.equal("isError" in structured, false);
+});
+
+test("structureResult: only an OWN ok === false flags the result", () => {
+  const inherited = Object.create({ ok: false }) as object;
+  assert.equal("isError" in structureResult({ content: [], details: inherited }), false);
+  assert.equal("isError" in structureResult({ content: [], details: { ok: "false" } }), false);
+  assert.equal("isError" in structureResult({ content: [], details: { ok: 0 } }), false);
+});
+
+test("structureResult: a tool-set isError survives beside ok: true; false is never written", () => {
+  const kept = structureResult({ content: [], details: { ok: true }, isError: true });
+  assert.equal(kept.isError, true);
+  const own = structureResult({ content: [], details: { ok: true }, isError: false });
+  assert.equal(own.isError, false, "a tool-set false is preserved, not cleared");
+  const forced = structureResult({ content: [], details: { ok: false }, isError: false });
+  assert.equal(forced.isError, true, "an own ok === false forces true");
+});
+
+test("structureResult: terminate and usage pass through byte-for-byte", () => {
+  const usage = { input: 1, output: 2 };
+  const result = { ...ok("t", { n: 1 }, { terminate: true }), usage };
+  const structured = structureResult(result);
+  assert.equal(structured.terminate, true);
+  assert.equal(structured.usage, usage);
+  assert.deepEqual(Object.keys(structured).sort(), [
+    "content",
+    "details",
+    "structuredContent",
+    "terminate",
+    "usage",
+  ]);
+});
+
+test("structureResult is idempotent", () => {
+  const { target } = fakeTarget(false);
+  captureStderr(() => {
+    for (const result of [
+      ok("t", { x: 1 }),
+      failFor(target, "scope")("bad", "t"),
+      { content: [], details: undefined },
+      { content: [], details: { ok: true }, isError: true },
+    ]) {
+      const once = structureResult(result);
+      assert.deepEqual(structureResult(once), once);
+    }
   });
 });

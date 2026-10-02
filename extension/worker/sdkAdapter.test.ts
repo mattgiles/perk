@@ -73,7 +73,12 @@ test("translateEvent: tool_execution_end → tool_ended (details.ok wins, !isErr
     translateEvent({
       type: "tool_execution_end",
       toolName: "submit",
-      result: { details: { ok: true, pr: { number: 1, url: "u" } } },
+      // The structured shape every perk result carries: isError false beside details.ok true.
+      isError: false,
+      result: {
+        details: { ok: true, pr: { number: 1, url: "u" } },
+        structuredContent: { ok: true, pr: { number: 1, url: "u" } },
+      },
     }),
     {
       kind: "tool_ended",

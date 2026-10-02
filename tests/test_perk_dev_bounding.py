@@ -343,6 +343,50 @@ def test_packet_wrapper_attrs_preamble_and_index_stamped_ids(env: Env):
     assert pair.estimated_tokens == estimate_tokens(packet)
 
 
+def test_packet_inherits_nested_call_evidence_inside_its_tool_result(env: Env):
+    # Packets render through the learn renderer, so a sliced toolResult carrying Pi's
+    # `message.nestedCalls` brings its <nested_calls> block along — the parent's own error flag
+    # untouched by a failed child.
+    nested_result: dict[str, object] = {
+        "type": "message",
+        "message": {
+            "role": "toolResult",
+            "toolName": "codemode",
+            "isError": False,
+            "content": [{"type": "text", "text": "Script completed"}],
+            "nestedCalls": {
+                "calls": [
+                    {
+                        "id": "tc1/1",
+                        "name": "write",
+                        "arguments": {"path": "b.ts"},
+                        "status": "error",
+                        "durationMs": 3,
+                        "error": "write is blocked (read-only)",
+                    }
+                ],
+                "complete": False,
+            },
+        },
+    }
+    env.write(
+        "s.jsonl",
+        [_ws(run_id="01A", stage="plan"), _user("an <untrusted_x> block"), nested_result],
+    )
+    report = env.build(CATALOG_UNTRUSTED)
+    pair = _result(report, UNTRUSTED).pairs[0]
+    assert pair.status == "packetized" and pair.entry_indices == (1, 2)
+    packet = (env.bundle_dir / pair.packet_path).read_text(encoding="utf-8")
+    assert '<tool_result tool="codemode" error="false" id="2">Script completed\n' in packet
+    assert '<nested_calls complete="false">' in packet
+    assert (
+        '<nested_call id="tc1/1" name="write" status="error" ms="3">'
+        "<args>{&quot;path&quot;: &quot;b.ts&quot;}</args>"
+        "<error>write is blocked (read-only)</error></nested_call>\n"
+        "</nested_calls></tool_result>"
+    ) in packet
+
+
 def test_empty_slice_still_emits_a_packet(env: Env):
     env.write("s.jsonl", [_ws(run_id="01A", stage="plan")])  # exercising, no anchors
     report = env.build(CATALOG_UNTRUSTED)

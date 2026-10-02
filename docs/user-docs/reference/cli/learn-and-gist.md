@@ -209,9 +209,12 @@ children that read it).
 Markdown chunks under `.perk/workflow/scratch/learn-evidence/chunks/` (one or more `<stem>[-N].md`
 parts per session role) through a deterministic pipeline — branch selection, boilerplate-drop,
 dedup, prune, per-payload truncation, then split-by-budget at entry boundaries (no entry is ever
-elided). With `--json`, a stable normalization report (per-role counters + chunk paths) rides the
-envelope's `render` field (`null` unless `--render`); with the human summary, one `render:` line per
-role. `--render` and `--json` are independent.
+elided). Nested tool calls recorded on a tool result (`message.nestedCalls`, Pi ≥ 0.99 — codemode
+scripts and other `ctx.executeTool` callers) render inside their parent `<tool_result>` as a
+`<nested_calls>` element with each call's status and the record's completeness; the parent's own
+`error` flag is unchanged. With `--json`, a stable normalization report (per-role counters + chunk
+paths) rides the envelope's `render` field (`null` unless `--render`); with the human summary, one
+`render:` line per role. `--render` and `--json` are independent.
 
 ### `perk learn docs-sync`
 
