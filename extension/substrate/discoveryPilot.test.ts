@@ -816,23 +816,26 @@ const SEED_CASES = (
   }
 ).cases;
 
-/** A host-checkable `defaultTools` value: absent (`undefined`) or a string array. */
-function hostList(value: unknown, label: string): string[] | undefined {
+/** A host-checkable `defaultTools` value: absent (`undefined`) or a raw JSON array. */
+function hostList(value: unknown, label: string): readonly unknown[] | undefined {
   if (value === undefined) return undefined;
-  assert.ok(
-    Array.isArray(value) && value.every((entry): entry is string => typeof entry === "string"),
-    `${label}: a host_check value is a string array`,
-  );
+  assert.ok(Array.isArray(value), `${label}: a host_check value is an array`);
   return value;
 }
 
+/** Whether a raw `defaultTools` array carries no string entry (`[]`, or only non-strings). */
+const noStringEntries = (value: unknown): boolean =>
+  Array.isArray(value) && !value.some((entry) => typeof entry === "string");
+
 /** Pi's own startup selection under `defaultTools` (absent = no key): the non-perk active set. */
-async function resolvedSelection(defaultTools: string[] | undefined): Promise<string[]> {
+async function resolvedSelection(defaultTools: readonly unknown[] | undefined): Promise<string[]> {
   const h = await loadAt(scaffoldRepo(), {
     headful: false,
     env: { PERK_RUN_ID: undefined },
     extraExtensions: [toolSearch()],
-    ...(defaultTools !== undefined ? { settings: { defaultTools } } : {}),
+    // Pi's `Settings` type says `string[]`, but a project file is raw JSON: feed it unchanged so
+    // Pi's own `getDefaultTools` filtering (non-strings dropped) is what gets measured.
+    ...(defaultTools !== undefined ? { settings: { defaultTools: defaultTools as string[] } } : {}),
   });
   try {
     return h.session
@@ -845,17 +848,19 @@ async function resolvedSelection(defaultTools: string[] | undefined): Promise<st
 }
 
 // The Python plane proves the seed's JSON delta; this lane proves the resolved selection, because
-// Pi's modifier semantics make the two differ for `[]` (no builtins, while a nonempty
-// modifier-only list starts from the four defaults).
-test("converged seed (A): for every host-checkable fixture case the seed adds tool_search and nothing else to Pi's resolved selection; an untouched [] still resolves to no builtins", async () => {
+// Pi's modifier semantics make the two differ for a list with no string entries (no builtins,
+// while a nonempty modifier-only list starts from the four defaults).
+test("converged seed (A): for every host-checkable fixture case the seed adds tool_search and nothing else to Pi's resolved selection; an untouched list with no string entries still resolves to no builtins, which a naive append would widen", async () => {
   const rows = SEED_CASES.filter((c) => c.host_check);
   assert.ok(rows.some((c) => c.seeded) && rows.some((c) => !c.seeded), "both arms are exercised");
   assert.ok(
-    rows.some((c) => Array.isArray(c.live) && c.live.length === 0),
-    "the empty-selection case is exercised",
+    rows.some((c) => Array.isArray(c.live) && c.live.length === 0) &&
+      rows.some((c) => noStringEntries(c.live) && Array.isArray(c.live) && c.live.length > 0),
+    "the empty and the all-non-string cases are exercised",
   );
   for (const row of rows) {
-    const before = await resolvedSelection(hostList(row.live, `${row.case} live`));
+    const live = hostList(row.live, `${row.case} live`);
+    const before = await resolvedSelection(live);
     const after = await resolvedSelection(hostList(row.converged, `${row.case} converged`));
     if (row.seeded) {
       assert.ok(!before.includes("tool_search"), `${row.case}: tool_search was not selected`);
@@ -863,7 +868,12 @@ test("converged seed (A): for every host-checkable fixture case the seed adds to
     } else {
       assert.deepEqual(after, before, `${row.case}: untouched`);
     }
-    if (Array.isArray(row.live) && row.live.length === 0)
-      assert.deepEqual(before, [], `${row.case}: [] is "no builtin tools"`);
+    if (live !== undefined && noStringEntries(live)) {
+      assert.equal(row.seeded, false, `${row.case}: never seeded`);
+      assert.deepEqual(before, [], `${row.case}: resolves to no builtin tools`);
+      // Why it is left alone: appending the modifier would switch on Pi's four defaults too.
+      const naive = await resolvedSelection([...live, "+tool_search"]);
+      assert.deepEqual(naive, ["bash", "edit", "read", "tool_search", "write"], row.case);
+    }
   }
 });

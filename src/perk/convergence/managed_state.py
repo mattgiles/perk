@@ -253,7 +253,7 @@ def _settings_portion(root: Path, *, self_repo: bool) -> bytes:
     # - `_converge_tui_mode` (seed-when-absent): rebuilding it against the empty stub would
     #   always yield "fullscreen" and permanently classify a repo that opted back to "regular"
     #   as locally-modified;
-    # - `_converge_discovery` (seed-when-unnamed; opted out via `-tool_search` or `[]`):
+    # - `_converge_discovery` (seed-when-unnamed; user-owned via `-tool_search` or `[]`):
     #   rebuilding it would always yield `["+tool_search"]` and permanently classify an
     #   opted-out repo as locally-modified.
     portion: dict[str, object] = {"packages": _canonical_package_order(packages)}

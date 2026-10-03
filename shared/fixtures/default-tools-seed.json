@@ -1,5 +1,5 @@
 {
-  "description": "The `defaultTools` discovery seed (contracts.md §8.10 \"`defaultTools` discovery convergence\"): each case pairs a project `.pi/settings.json` `defaultTools` value (`live`; omitted = key absent) with what `perk init` / `perk doctor --fix` converges it to (`converged`, byte-equal JSON) and whether the seed fired (`seeded` — the `defaultTools: +tool_search` change fragment). `host_check` marks the cases whose values are string arrays the real-host lane loads (extension/substrate/discoveryPilot.test.ts measures the resolved selection: seeded ⇒ after = before + tool_search, untouched ⇒ after = before); the rest are Python-only (tests/test_init_idempotent.py). Test-only — read at runtime by neither plane.",
+  "description": "The `defaultTools` discovery seed (contracts.md §8.10 \"`defaultTools` discovery convergence\"): each case pairs a project `.pi/settings.json` `defaultTools` value (`live`; omitted = key absent) with what `perk init` / `perk doctor --fix` converges it to (`converged`, byte-equal JSON) and whether the seed fired (`seeded` — the `defaultTools: +tool_search` change fragment). `host_check` marks the cases the real-host lane loads — the key absent or a JSON array, fed to Pi raw (extension/substrate/discoveryPilot.test.ts measures the resolved selection: seeded ⇒ after = before + tool_search, untouched ⇒ after = before, and a list with no string entries resolves to no builtins, which a naive append would turn into the four defaults); the non-array cases are Python-only (tests/test_init_idempotent.py). Test-only — read at runtime by neither plane.",
   "cases": [
     {
       "case": "absent",
@@ -26,12 +26,19 @@
       "live": ["+codemode", 7],
       "converged": ["+codemode", 7, "+tool_search"],
       "seeded": true,
-      "host_check": false
+      "host_check": true
     },
     {
       "case": "empty selection",
       "live": [],
       "converged": [],
+      "seeded": false,
+      "host_check": true
+    },
+    {
+      "case": "no string entries",
+      "live": [7, null],
+      "converged": [7, null],
       "seeded": false,
       "host_check": true
     },

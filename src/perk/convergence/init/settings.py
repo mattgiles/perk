@@ -586,10 +586,12 @@ def _converge_discovery(settings: dict[str, object]) -> list[str]:
     - key absent → `["+tool_search"]` (a modifier-only list inherits the user-scope selection, or
       Pi's four defaults, and adds the tool);
     - present but not a list → untouched, not drift (outside Pi's schema; no vote is readable);
-    - present and empty → untouched, not drift: Pi resolves `[]` to *no* builtin tools, while a
+    - a list with no string entries (`[]`, or only non-strings, which Pi's `getDefaultTools`
+      drops) → untouched, not drift: on its own it resolves to *no* builtin tools, while a
       nonempty modifier-only list starts from the four defaults — appending would switch on
       `read`/`bash`/`edit`/`write` too (discovery there is the operator's plain
-      `["tool_search"]`);
+      `["tool_search"]`). Leaving it alone suppresses only the seed; it is not an opt-out (Pi
+      appends an empty project list to the user-scope one);
     - nonempty and some entry names the tool → untouched: the operator's vote stands, whichever
       sign (`-tool_search` is the opt-out, effective at the next launch — `/reload` keeps an
       active tool active);
@@ -605,9 +607,11 @@ def _converge_discovery(settings: dict[str, object]) -> list[str]:
         settings["defaultTools"] = [DISCOVERY_DEFAULT_TOOLS_ENTRY]
         return [f"defaultTools: {DISCOVERY_DEFAULT_TOOLS_ENTRY}"]
     existing = settings["defaultTools"]
-    if not isinstance(existing, list) or not existing:
+    if not isinstance(existing, list):
         return []
     entries: list[object] = list(existing)
+    if not any(isinstance(entry, str) for entry in entries):
+        return []
     if any(_names_discovery_tool(entry) for entry in entries):
         return []
     settings["defaultTools"] = [*entries, DISCOVERY_DEFAULT_TOOLS_ENTRY]

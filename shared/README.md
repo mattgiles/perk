@@ -46,10 +46,10 @@ Contents:
   regenerates); read by both planes' prompt guards (`tests/test_tool_matrix_prompts.py`), the
   docs-site census test and the prose-map governed-tool census. See `contracts.md` §8.40.
   `default-tools-seed.json` pairs project `defaultTools` shapes (absent, modifier list,
-  plain-name list, empty, each `tool_search` vote form, ill-typed) with what the discovery seed
-  converges them to (`tests/test_init_idempotent.py` pins the JSON delta) and, for the string-array
-  cases, lets `extension/substrate/discoveryPilot.test.ts` measure on the real host that the seed
-  adds `tool_search` and nothing else to the resolved selection. See `contracts.md` §8.10
+  plain-name list, empty, no string entries, each `tool_search` vote form, ill-typed) with what the
+  discovery seed converges them to (`tests/test_init_idempotent.py` pins the JSON delta) and, for
+  the absent and array cases, lets `extension/substrate/discoveryPilot.test.ts` measure on the real
+  host that the seed adds `tool_search` and nothing else to the resolved selection. See `contracts.md` §8.10
   "`defaultTools` discovery convergence".
 
 Resolution goes through the per-plane resolvers (`src/perk/_resources.py`,

@@ -212,6 +212,8 @@ def _shape_class(case: dict) -> str:
         return "non-list"
     if not live:
         return "empty"
+    if not any(isinstance(entry, str) for entry in live):
+        return "no string entries"
     for vote in ("+tool_search", "-tool_search", "tool_search"):
         if vote in live:
             return f"vote {vote}"
@@ -229,6 +231,7 @@ def test_default_tools_seed_fixture_covers_every_shape_class():
         "modifier list",
         "plain list",
         "empty",
+        "no string entries",
         "vote +tool_search",
         "vote -tool_search",
         "vote tool_search",

@@ -2365,7 +2365,9 @@ def test_discovery_default_removed_is_drift_and_fixed(scaffolded_perk_repo):
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
 
 
-@pytest.mark.parametrize("selection", [["-tool_search"], []], ids=["opt-out", "empty"])
+@pytest.mark.parametrize(
+    "selection", [["-tool_search"], [], [7]], ids=["opt-out", "empty", "no-string-entries"]
+)
 def test_discovery_opt_out_and_empty_selection_are_not_drift(scaffolded_perk_repo, selection):
     # The operator's `-tool_search` vote and Pi's explicit "no builtin tools" selection are both
     # left alone (the seed never changes what the list resolves to beyond adding `tool_search`).
