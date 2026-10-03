@@ -531,7 +531,7 @@ export default function perk(
     // arms settle. Fail-closed on the gate: if the sync throws, leave it as-is (a failed sync
     // never opens it).
     const toolScope = sessionStartToolScope(identity);
-    // The discovery cohort join (contracts.md §8.40 "The discovery pilot"), BEFORE the first sync
+    // The discovery cohort join (contracts.md §8.40 "Native discovery"), BEFORE the first sync
     // so the family's one-time deactivation rides that sync's single install. Only a host with
     // Pi's builtin `tool_search` registered and active qualifies; every other session stays a
     // nonparticipant. A failure leaves the session a nonparticipant.

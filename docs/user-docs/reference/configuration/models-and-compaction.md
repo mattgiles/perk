@@ -74,6 +74,15 @@ thinking = "high"
 > absent. To opt out, set `"tuiMode": "regular"` in `.pi/settings.json`; the value survives init
 > and doctor. Pi's `/settings` toggle writes the global settings file, which the committed project
 > key overrides, so the durable opt-out is the project key itself.
+>
+> perk also **seeds** `"defaultTools": ["+tool_search"]` (Pi's native tool discovery) into the
+> same slice. With an existing `defaultTools` list it appends the entry and never reorders or
+> removes yours; a list with no string entries (such as `[]`) is left alone, though that only
+> stops the seed and is not an opt-out (Pi adds an empty project list onto your user-scope list).
+> To opt out, add `"-tool_search"` to the list in the repo's `.pi/settings.json`; the entry
+> survives init and doctor. The project entry
+> beats user scope, so a user-global `-tool_search` does not opt a repo out. Enabling applies on
+> `/reload` or the next launch; opting out needs a new launch.
 
 ## `[models.stages.<id>]`
 

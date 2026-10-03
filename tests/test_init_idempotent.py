@@ -17,6 +17,10 @@ from perk.convergence.init.settings import (
 )
 from perk.substrate import git, paths
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_TOOLS_SEED_FIXTURE = REPO_ROOT / "shared" / "fixtures" / "default-tools-seed.json"
+DISCOVERY_FRAGMENT = "defaultTools: +tool_search"
+
 
 @pytest.mark.parametrize(
     "artifact",
@@ -128,6 +132,10 @@ def test_init_converges_and_is_idempotent(tmp_path):
         "prompts": [],
         "themes": [],
     }
+    # The fresh-repo settings seeds: Pi's native tool discovery and the fullscreen TUI mode.
+    assert settings["defaultTools"] == ["+tool_search"]
+    assert settings["tuiMode"] == "fullscreen"
+    assert settings["subagents"] == {"disableBuiltins": True}
 
     # The whole `.perk/workflow/` cache tree is gitignored — no committed `.gitkeep`; init creates
     # the four cache subtrees on demand.
@@ -171,54 +179,132 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert before == after
 
 
-def test_init_preserves_local_default_tools_opt_in(tmp_path):
-    """The discovery-pilot opt-in (contracts.md §8.40) is hand-written and unmanaged: `perk init`
-    never writes, orders or removes a `defaultTools` entry, and the key is invisible to the
-    managed `settings-wiring` portion (no drift, no hash change)."""
+def _default_tools_seed_cases() -> list[dict]:
+    return json.loads(DEFAULT_TOOLS_SEED_FIXTURE.read_text(encoding="utf-8"))["cases"]
+
+
+def _settings_changes(changes: list[str]) -> list[str]:
+    return [line for line in changes if line.startswith(".pi/settings.json:")]
+
+
+def test_init_seeds_discovery_default(tmp_path):
+    """A bare repo gains Pi's native tool discovery (contracts §8.10, `defaultTools` discovery
+    convergence); the seed's fragment is delta-gated, so the second run reports nothing."""
+    first = run_init(tmp_path, verify=False)
+    assert first.ok
+    settings_path = tmp_path / ".pi" / "settings.json"
+    assert json.loads(settings_path.read_text(encoding="utf-8"))["defaultTools"] == ["+tool_search"]
+    assert any(DISCOVERY_FRAGMENT in line for line in _settings_changes(first.changes))
+
+    before = _snapshot(tmp_path)
+    second = run_init(tmp_path, verify=False)
+    assert second.ok
+    assert second.changes == []
+    assert _snapshot(tmp_path) == before
+
+
+def _shape_class(case: dict) -> str:
+    """The `defaultTools` shape class a fixture case exercises, derived from its value."""
+    if "live" not in case:
+        return "absent"
+    live = case["live"]
+    if not isinstance(live, list):
+        return "non-list"
+    if not live:
+        return "empty"
+    if not any(isinstance(entry, str) for entry in live):
+        return "no string entries"
+    for vote in ("+tool_search", "-tool_search", "tool_search"):
+        if vote in live:
+            return f"vote {vote}"
+    strings = [entry for entry in live if isinstance(entry, str)]
+    if strings and all(entry.startswith(("+", "-")) for entry in strings):
+        return "modifier list"
+    return "plain list"
+
+
+def test_default_tools_seed_fixture_covers_every_shape_class():
+    # A trimmed fixture must not pass the matrix below vacuously.
+    classes = {_shape_class(case) for case in _default_tools_seed_cases()}
+    assert classes == {
+        "absent",
+        "modifier list",
+        "plain list",
+        "empty",
+        "no string entries",
+        "vote +tool_search",
+        "vote -tool_search",
+        "vote tool_search",
+        "non-list",
+    }
+
+
+@pytest.mark.parametrize("case", _default_tools_seed_cases(), ids=lambda case: case["case"])
+def test_init_default_tools_seed_matches_the_shared_fixture(tmp_path, case):
+    """The JSON delta of the seed, byte-equal against `shared/fixtures/default-tools-seed.json`:
+    the prefix is preserved, never reordered or rewritten; `[]`, ill-typed values and every vote
+    form are left alone; the fragment fires iff the entry was written."""
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    settings_path = pi_dir / "settings.json"
+    if "live" in case:
+        settings_path.write_text(
+            json.dumps({"defaultTools": case["live"]}, indent=2) + "\n", encoding="utf-8"
+        )
+
+    report = run_init(tmp_path, verify=False)
+    assert report.ok
+
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert json.dumps(settings["defaultTools"]) == json.dumps(case["converged"])
+    seeded = any(DISCOVERY_FRAGMENT in line for line in _settings_changes(report.changes))
+    assert seeded is case["seeded"]
+
+
+def test_discovery_default_is_invisible_to_the_settings_portion(tmp_path):
+    """`defaultTools` stays out of the managed `settings-wiring` portion (the `tuiMode` reason):
+    a seeded, an opted-out and a key-deleted repo share one observed hash, equal to the desired
+    and recorded hashes. Drift comes from the convergence dry-run, never from the lens."""
     from perk.convergence.doctor import run_doctor
     from perk.convergence.managed_state import load_managed_state, managed_artifacts
 
-    def settings_wiring_hashes(root: Path) -> tuple[str | None, str]:
-        descriptor = next(d for d in managed_artifacts() if d.key == "settings-wiring")
-        return descriptor.observed_hash(root), descriptor.desired_hash(root, self_repo=False)
+    descriptor = next(d for d in managed_artifacts() if d.key == "settings-wiring")
 
-    # The control: the same convergence without the opt-in.
-    control = tmp_path / "control"
-    control.mkdir()
-    assert run_init(control, verify=False).ok
+    seeded = tmp_path / "seeded"
+    seeded.mkdir()
+    assert run_init(seeded, verify=False).ok
 
-    repo = tmp_path / "repo"
-    pi_dir = repo / ".pi"
-    pi_dir.mkdir(parents=True)
-    settings_path = pi_dir / "settings.json"
-    settings_path.write_text(
-        json.dumps({"defaultTools": ["+tool_search"]}, indent=2) + "\n", encoding="utf-8"
+    opted_out = tmp_path / "opted-out"
+    (opted_out / ".pi").mkdir(parents=True)
+    (opted_out / ".pi" / "settings.json").write_text(
+        json.dumps({"defaultTools": ["-tool_search"]}, indent=2) + "\n", encoding="utf-8"
     )
-    opt_in = json.dumps(["+tool_search"])
+    assert run_init(opted_out, verify=False).ok
 
-    assert run_init(repo, verify=False).ok
-    first = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert json.dumps(first["defaultTools"]) == opt_in, "preserved by the first run"
-    assert f"npm:@mgiles/perk@{__version__}" in first["packages"], "the run still converged"
+    deleted = tmp_path / "deleted"
+    deleted.mkdir()
+    assert run_init(deleted, verify=False).ok
+    deleted_settings = deleted / ".pi" / "settings.json"
+    settings = json.loads(deleted_settings.read_text(encoding="utf-8"))
+    del settings["defaultTools"]
+    deleted_settings.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 
-    # The second run is a no-op on disk, and the entry survives byte-equal.
-    before = _snapshot(repo)
-    second = run_init(repo, verify=False)
-    assert second.ok
-    assert second.changes == []
-    assert _snapshot(repo) == before
-    assert json.dumps(json.loads(settings_path.read_text())["defaultTools"]) == opt_in
-
-    # The managed settings portion never sees the key: observed == desired == the control's.
-    observed, desired = settings_wiring_hashes(repo)
-    assert observed == desired
-    assert observed == settings_wiring_hashes(control)[0]
-    state = load_managed_state(repo)
-    assert state is not None
-    recorded = next(a for a in state.artifacts if a.key == "settings-wiring")
-    assert recorded.hash == desired
-    wiring = next(c for c in run_doctor(repo, verify=False).checks if c.name == "settings-wiring")
-    assert wiring.status == "ok", wiring.detail
+    expected_status = {seeded: "ok", opted_out: "ok", deleted: "fail"}
+    observed_hashes = set()
+    for repo, status in expected_status.items():
+        observed = descriptor.observed_hash(repo)
+        desired = descriptor.desired_hash(repo, self_repo=False)
+        assert observed == desired, repo.name
+        observed_hashes.add(observed)
+        state = load_managed_state(repo)
+        assert state is not None
+        recorded = next(a for a in state.artifacts if a.key == "settings-wiring")
+        assert recorded.hash == desired, repo.name
+        wiring = next(
+            c for c in run_doctor(repo, verify=False).checks if c.name == "settings-wiring"
+        )
+        assert wiring.status == status, (repo.name, wiring.detail)
+    assert len(observed_hashes) == 1
 
 
 def test_managed_agents_scan_timeout_matches_extension_constant():

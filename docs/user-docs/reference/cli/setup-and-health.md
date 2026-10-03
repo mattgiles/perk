@@ -77,6 +77,10 @@ entry is kept ahead of `npm:pi-subagents` and `npm:pi-web-access`, because perk'
 serves packages Pi loads after perk. perk listed after either package is `settings-wiring` drift —
 `fail`, with the detail naming the move — and `perk doctor --fix` (like `perk init`) moves perk's
 entry to just before the first of the two, leaving every other entry's relative order unchanged.
+`settings-wiring` also seeds the `defaultTools` `+tool_search` entry (Pi's native tool discovery —
+see [Model tools](../in-session/model-tools.md#native-tool-discovery-default)): an absent entry is
+drift that `perk doctor --fix` appends, while a `-tool_search` opt-out (or a list with no string
+entries, such as `[]`) is never touched.
 The `package` group's `extension-install` check verifies perk's own `@mgiles/perk` npm extension is
 **physically installed** under `.pi/npm/` at the pinned version (the install also carries perk's
 `perk.*` agent definitions, which pi-subagents discovers as package agents). Because pi installs a missing

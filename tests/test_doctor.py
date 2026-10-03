@@ -2347,6 +2347,41 @@ def test_tui_mode_opt_out_is_not_drift(scaffolded_perk_repo):
     assert json.loads(settings_path.read_text())["tuiMode"] == "regular"  # untouched
 
 
+def test_discovery_default_removed_is_drift_and_fixed(scaffolded_perk_repo):
+    # `defaultTools` is seed-when-unnamed inside `settings-wiring`: an absent key is drift the
+    # convergence dry-run reports, and `--fix` seeds Pi's native tool discovery again.
+    settings_path = scaffolded_perk_repo / ".pi" / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    assert settings["defaultTools"] == ["+tool_search"]  # init seeded it
+    del settings["defaultTools"]
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    wiring = next(c for c in report.checks if c.name == "settings-wiring")
+    assert wiring.status == "fail"
+    assert "defaultTools: +tool_search" in wiring.detail
+    run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert json.loads(settings_path.read_text())["defaultTools"] == ["+tool_search"]
+    again = run_doctor(scaffolded_perk_repo, verify=False)
+    assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
+
+
+@pytest.mark.parametrize(
+    "selection", [["-tool_search"], [], [7]], ids=["opt-out", "empty", "no-string-entries"]
+)
+def test_discovery_opt_out_and_empty_selection_are_not_drift(scaffolded_perk_repo, selection):
+    # The operator's `-tool_search` vote and Pi's explicit "no builtin tools" selection are both
+    # left alone (the seed never changes what the list resolves to beyond adding `tool_search`).
+    settings_path = scaffolded_perk_repo / ".pi" / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings["defaultTools"] = selection
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    wiring = next(c for c in report.checks if c.name == "settings-wiring")
+    assert wiring.status == "ok", wiring.detail
+    run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert json.loads(settings_path.read_text())["defaultTools"] == selection  # untouched
+
+
 def test_unreadable_managed_file_is_fail_not_crash(scaffolded_perk_repo):
     agents = scaffolded_perk_repo / "AGENTS.md"
     agents.chmod(0o000)

@@ -205,6 +205,9 @@ join the cohort when nothing deferred.
 - **The adoption follow-up:** a plan for `perk init` convergence of
   `defaultTools: ["+tool_search"]` and the matching `perk-expert` reference update (not performed
   here — the node forbids it before an adopt decision).
+  *Performed (2026-10-02) — `perk init` now seeds the entry (contracts §8.10, `defaultTools`
+  discovery convergence; the §8.40 paragraph is now titled **Native discovery**); the opt-out is a
+  committed `-tool_search`, effective at the next launch.*
 - **Broad searches spend the saving** (§5's observation): worth a look if `tool_search` gains a
   per-call cap, or if family growth makes over-activation costly.
 - **The session parser** counts Pi's `role: "system"` message entries as malformed lines (found

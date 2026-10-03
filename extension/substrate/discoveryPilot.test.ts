@@ -1,6 +1,6 @@
-// The native-discovery pilot (contracts.md §8.40 "The discovery pilot"), driven through REAL
+// Native discovery (contracts.md §8.40 "Native discovery"), driven through REAL
 // bound AgentSessions (Mode A, fully offline) with Pi's real builtin `tool_search` loaded. A
-// cohort session opts in with `defaultTools: ["+tool_search"]`; a nonparticipant session loads
+// cohort session carries the converged `defaultTools: ["+tool_search"]`; a nonparticipant loads
 // the SAME extension set without it, so the registries are identical and only activation differs.
 // The nested-execution probe lives in its own file (`discoveryNested.test.ts`) so its fixture
 // registration never enters this process's census.
@@ -35,6 +35,7 @@ import {
 } from "../testing/harness.ts";
 import { ensureToolCatalog } from "../testing/toolCatalog.ts";
 import type { PlanRef } from "./cache.ts";
+import { sharedDir } from "./resources.ts";
 import {
   discoveryFamily,
   isEligible,
@@ -795,5 +796,84 @@ test("census and savings (A): per-stage request bytes with and without the cohor
     const eligible = members.some((name) => isEligible(name, undefined, r.stage, "read-write"));
     if (eligible) assert.ok(r.net >= 4096, `S1: ${r.stage} net ${r.net} ≥ 4096`);
     else assert.equal(r.net, -fixedCost, `${r.stage}: no member eligible, net is -fixedCost`);
+  }
+});
+
+// --- 9. the converged seed resolves additively on the real host -----------------------------------
+
+/** One `shared/fixtures/default-tools-seed.json` case (`live` omitted = the key is absent). */
+interface SeedCase {
+  case: string;
+  live?: unknown;
+  converged: unknown;
+  seeded: boolean;
+  host_check: boolean;
+}
+
+const SEED_CASES = (
+  JSON.parse(readFileSync(join(sharedDir(), "fixtures", "default-tools-seed.json"), "utf8")) as {
+    cases: SeedCase[];
+  }
+).cases;
+
+/** A host-checkable `defaultTools` value: absent (`undefined`) or a raw JSON array. */
+function hostList(value: unknown, label: string): readonly unknown[] | undefined {
+  if (value === undefined) return undefined;
+  assert.ok(Array.isArray(value), `${label}: a host_check value is an array`);
+  return value;
+}
+
+/** Whether a raw `defaultTools` array carries no string entry (`[]`, or only non-strings). */
+const noStringEntries = (value: unknown): boolean =>
+  Array.isArray(value) && !value.some((entry) => typeof entry === "string");
+
+/** Pi's own startup selection under `defaultTools` (absent = no key): the non-perk active set. */
+async function resolvedSelection(defaultTools: readonly unknown[] | undefined): Promise<string[]> {
+  const h = await loadAt(scaffoldRepo(), {
+    headful: false,
+    env: { PERK_RUN_ID: undefined },
+    extraExtensions: [toolSearch()],
+    // Pi's `Settings` type says `string[]`, but a project file is raw JSON: feed it unchanged so
+    // Pi's own `getDefaultTools` filtering (non-strings dropped) is what gets measured.
+    ...(defaultTools !== undefined ? { settings: { defaultTools: defaultTools as string[] } } : {}),
+  });
+  try {
+    return h.session
+      .getActiveToolNames()
+      .filter((name) => !isPerkTool(name))
+      .sort();
+  } finally {
+    h.dispose();
+  }
+}
+
+// The Python plane proves the seed's JSON delta; this lane proves the resolved selection, because
+// Pi's modifier semantics make the two differ for a list with no string entries (no builtins,
+// while a nonempty modifier-only list starts from the four defaults).
+test("converged seed (A): for every host-checkable fixture case the seed adds tool_search and nothing else to Pi's resolved selection; an untouched list with no string entries still resolves to no builtins, which a naive append would widen", async () => {
+  const rows = SEED_CASES.filter((c) => c.host_check);
+  assert.ok(rows.some((c) => c.seeded) && rows.some((c) => !c.seeded), "both arms are exercised");
+  assert.ok(
+    rows.some((c) => Array.isArray(c.live) && c.live.length === 0) &&
+      rows.some((c) => noStringEntries(c.live) && Array.isArray(c.live) && c.live.length > 0),
+    "the empty and the all-non-string cases are exercised",
+  );
+  for (const row of rows) {
+    const live = hostList(row.live, `${row.case} live`);
+    const before = await resolvedSelection(live);
+    const after = await resolvedSelection(hostList(row.converged, `${row.case} converged`));
+    if (row.seeded) {
+      assert.ok(!before.includes("tool_search"), `${row.case}: tool_search was not selected`);
+      assert.deepEqual(after, [...before, "tool_search"].sort(), `${row.case}: additive`);
+    } else {
+      assert.deepEqual(after, before, `${row.case}: untouched`);
+    }
+    if (live !== undefined && noStringEntries(live)) {
+      assert.equal(row.seeded, false, `${row.case}: never seeded`);
+      assert.deepEqual(before, [], `${row.case}: resolves to no builtin tools`);
+      // Why it is left alone: appending the modifier would switch on Pi's four defaults too.
+      const naive = await resolvedSelection([...live, "+tool_search"]);
+      assert.deepEqual(naive, ["bash", "edit", "read", "tool_search", "write"], row.case);
+    }
   }
 });

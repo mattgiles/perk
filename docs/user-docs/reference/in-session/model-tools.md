@@ -393,7 +393,7 @@ delegation and the checklist.
 
 The diet is presentation for foreign tools: a `subagent` the model enabled in a `plan` session
 stays active but is not declared to the model, and a late-registering tool (the delegation
-supervisor) is shown or hidden by its posture the moment it appears. In a discovery-pilot session (below), a deferred perk tool that
+supervisor) is shown or hidden by its posture the moment it appears. In a discovery-cohort session (below), a deferred perk tool that
 `tool_search` activates stays while it is eligible; where it is not, it is hidden from the very
 next request and switched off when the next prompt starts (until then it stays callable — the
 read-write diet has no call-time check). Pi restores such activations only when you navigate
@@ -403,17 +403,34 @@ One composition limit: `codemode` writes its own description from every callable
 read-write stage session with codemode active, that description may name a tool the diet hides.
 This affects only what the model reads; under the gate codemode is switched off.
 
-### Discovery pilot (opt-in)
+### Native tool discovery (default)
 
-A repo can opt its interactive sessions into Pi's native tool discovery by adding one hand-written
-entry to its tracked `.pi/settings.json`:
+Perk turns on Pi's native tool discovery for a repo's interactive sessions with one entry in its
+tracked `.pi/settings.json`:
 
 ```json
 "defaultTools": ["+tool_search"]
 ```
 
-`perk init` never writes, reorders or removes this entry, and `perk doctor` does not report it as
-drift. A session whose Pi has its builtin `tool_search` registered **and** active at startup joins
+`perk init` writes it. It only ever appends to an existing `defaultTools` list; it never reorders
+or removes your entries. A list with no string entries (such as `[]`, which on its own means "no
+builtin tools") or a value that is not a list is left alone; if you want discovery on an empty
+selection, write `["tool_search"]` yourself. Leaving an empty list alone only stops perk from
+seeding it — it is not an opt-out: Pi adds an empty project list onto your user-scope list, so a
+user-scope `+tool_search` still turns discovery on. `perk doctor` reports a missing entry as
+`settings-wiring` drift and `perk doctor --fix` appends it. **A new entry applies at the next launch
+or `/reload`.**
+
+To opt out, commit `"-tool_search"` in the repo's tracked `.pi/settings.json` (for example
+`"defaultTools": ["-tool_search"]`). It must be the project file: Pi applies project entries after
+user-scope ones, so a `-tool_search` in your user `~/.pi/agent/settings.json` is overridden by the
+project entry. **Opting out applies at the next launch only** — `/reload` keeps `tool_search`
+active, and the session re-joins. One layering consequence: if your user settings carry an
+explicit `"defaultTools": []` and the repo has no entry of its own, the seeded project entry
+resolves to Pi's four default tools plus `tool_search`; commit a project `[]` to keep that repo's
+empty selection.
+
+A session whose Pi has its builtin `tool_search` registered **and** active at startup joins
 the **discovery cohort**: perk re-registers four optional, schema-heavy tools as deferred and
 switches them off once — `objective_stack_status`, `collect_review_wave`,
 `collect_draft_review_wave` and `push_annotations`. Their schemas, snippets and guidelines leave
@@ -437,9 +454,9 @@ Resume and fork start without it (re-run the door or search again); `/reload` de
 four again; navigating the session tree restores whatever the transcript had and perk keeps it.
 `/perk-selfcheck` reports `discovery: cohort (family: …)` or `discovery: nonparticipant`.
 
-Who never participates: a session without the entry (or whose `tool_search` comes from some other
-extension), the headless worker, `/btw`'s side session and spawned subagent children — they keep
-every perk tool declared as before. The pilot's measurements and its adopt/retire decision are
+Who never participates: a session of a repo that opted out with `-tool_search` (or whose resolved
+selection is empty), a session whose `tool_search` comes from some other extension, the headless worker, `/btw`'s side
+session and spawned subagent children — they keep every perk tool declared as before. The pilot's measurements and its adopt/retire decision are
 recorded in `docs/design/native-discovery-pilot.md`.
 
 Pi owns its builtins (`read`, `edit`, `write`, `bash`, `grep`, `find`, and related host tools); this

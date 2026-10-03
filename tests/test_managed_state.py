@@ -170,12 +170,16 @@ class TestDesiredPayloads:
         # `tuiMode` is deliberately excluded: seed-when-absent means the key is user-ownable
         # after the seed, so including it would misclassify an opt-out as locally-modified.
         assert "tuiMode" not in portion
+        # `defaultTools` likewise: seed-when-unnamed is user-ownable via `-tool_search`.
+        assert "defaultTools" not in portion
 
     def test_settings_self_payload_wires_the_local_package(self, tmp_path):
         payload = _descriptor("settings-wiring").desired_payload(tmp_path, self_repo=True)
         portion = json.loads(payload)
         assert ".." in portion["packages"]
         assert portion["subagents"] == {"disableBuiltins": True}  # self-repo arm carries it too
+        # Seed-when-unnamed is user-ownable via `-tool_search`, so the portion never carries it.
+        assert "defaultTools" not in portion
 
     def test_settings_hash_moves_with_the_committed_config(self, tmp_path):
         descriptor = _descriptor("settings-wiring")
