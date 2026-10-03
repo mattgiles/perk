@@ -3625,10 +3625,14 @@ shape, the list-valued variant of seed-when-absent: the guard is the presence of
 `tool_search` in any of Pi's three forms (`tool_search`, `+tool_search`, `-tool_search`), and the
 seed *appends* (the operator's entries keep their order and text; perk never rewrites, reorders
 or removes one). An absent key becomes `["+tool_search"]`. The invariant: the seed never changes
-what the operator's list resolves to beyond adding `tool_search` — so a present-but-**empty**
-list (Pi's "no builtin tools" selection, which a nonempty modifier-only list would silently turn
-into the four defaults) and an ill-typed value (present, not an array) are left untouched and are
-not drift; discovery on an empty selection is the operator's plain `["tool_search"]`.
+what the operator's list resolves to beyond adding `tool_search` — so a list with **no string
+entries** (`[]`, or only non-strings, which Pi's `getDefaultTools` drops; on its own it resolves to
+no builtin tools, which a nonempty modifier-only list would silently turn into the four defaults)
+and an ill-typed value (present, not an array) are left untouched and are not drift; discovery on
+an empty selection is the operator's plain `["tool_search"]`. Leaving such a list alone only
+suppresses perk's seed; it is not a discovery opt-out — Pi treats an empty project list as
+modifier-only and appends it to the user-scope list, so a user-scope `+tool_search` still
+activates discovery.
 Python-plane-only (Pi consumes `settings.json` at startup; the extension never reads it — the
 cohort is keyed on host capability at `session_start`), composed inside `_converge_settings`
 (`perk/convergence/init/settings.py::_converge_discovery`), so it rides the `settings-wiring`
@@ -7850,9 +7854,12 @@ qualifies). The entry that activates it is `defaultTools: ["+tool_search"]` in a
 `.pi/settings.json`, init-converged seed-when-unnamed (§8.10 **`defaultTools` discovery
 convergence**): `perk init` appends it when no entry names `tool_search`, `perk doctor` reports its
 absence as `settings-wiring` drift and `--fix` appends it, and the key stays outside the managed
-`settings-wiring` portion. An opted-out repo commits `"-tool_search"` (effective at the next
-launch — `/reload` keeps an active `tool_search` active, so the session re-joins); an explicit
-empty selection (`[]`) is likewise left alone and is a nonparticipant. The **pilot family** is the catalogued
+`settings-wiring` portion. The discovery opt-out is a committed project `"-tool_search"`
+(effective at the next launch — `/reload` keeps an active `tool_search` active, so the session
+re-joins). A project list with no string entries (`[]`) is likewise left unseeded, but that only
+suppresses perk's seed: the session is a nonparticipant only when its **resolved** selection lacks
+`tool_search` (an empty project list is appended to the user-scope one, so a user-scope
+`+tool_search` still activates it). The **pilot family** is the catalogued
 `declared: deferred` names (`discoveryFamily()`, catalog order): `objective_stack_status`,
 `collect_review_wave`, `collect_draft_review_wave`, `push_annotations` — each optional (opened
 only by a primed carrier), self-guarding outside its flow (`no_objective`, the pending-wave guard,
@@ -7881,8 +7888,9 @@ primer that runs BEFORE the carrier reaches the model, with an exported constant
 | `start_review_wave` | `REVIEW_LAUNCH_PRIMES` = `collect_review_wave` | on a successful launch (reachable without a door) |
 | `start_draft_review_wave` | `DRAFT_LAUNCH_PRIMES` = `collect_draft_review_wave` | on a successful launch (covers a resume between door and launch) |
 
-A failed launch primes nothing. **Nonparticipants by construction:** a session of an opted-out
-repo (or one whose selection is empty) or with a foreign namesake, the headless worker (its runtime loads no `tool_search` factory),
+A failed launch primes nothing. **Nonparticipants by construction:** a session whose resolved
+selection leaves `tool_search` inactive (a project `-tool_search`, or an empty resolved selection)
+or with a foreign namesake, the headless worker (its runtime loads no `tool_search` factory),
 `/btw`'s side session (`sideSessionTools` carries no extension builtin) and every spawned report
 child (it registers no perk tool) keep the always-declared loadout — every family member stays
 `direct`, and a nonparticipant census request is byte-identical to the pre-pilot one. **Resets:**

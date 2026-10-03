@@ -370,8 +370,10 @@ Any entry naming `tool_search` (`-tool_search`, `+tool_search`, plain `tool_sear
 so it survives init/doctor. It must be the **project** entry — Pi applies project modifiers after
 user-scope ones, so a user-global `-tool_search` is overridden. The opt-out takes effect at the
 **next launch**; `/reload` is not enough (Pi keeps an already-active tool active, and the session
-re-joins). An explicit empty selection (`"defaultTools": []`, Pi's "no builtin tools") is also
-left alone. Opting out makes the repo's sessions nonparticipants: every perk tool stays declared
+re-joins). A list with no string entries (such as `"defaultTools": []`, on its own Pi's "no
+builtin tools") is also left alone, but it is **not** a discovery opt-out: Pi appends an empty
+project list to your user-scope list, so a user-scope `+tool_search` would still apply — use
+`-tool_search`. Opting out makes the repo's sessions nonparticipants: every perk tool stays declared
 and there is no `tool_search`.
 
 ## Read the footer's cache-hit rate; diagnose misses (`showCacheMissNotices`)

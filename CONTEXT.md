@@ -120,8 +120,9 @@ _Avoid_: snapshot restore, baseline, admitted set, perk-owned allowlist
 The sessions in which perk re-registers the pilot family (`declared: deferred`) deferred and
 switches it off once: those where Pi's builtin `tool_search` is registered and active at
 `session_start` (the init-converged `defaultTools: ["+tool_search"]`; opt-out `-tool_search`,
-effective at the next launch). The headless worker, `/btw` and any session of a repo that opted
-out or keeps an empty `defaultTools` selection (or whose `tool_search` is a foreign namesake) are
+effective at the next launch). The headless worker, `/btw` and any session whose *resolved*
+selection leaves `tool_search` out (a project `-tool_search`, or an empty resolved selection — a
+project `[]` alone suppresses only perk's seed) or whose `tool_search` is a foreign namesake are
 nonparticipants by construction and keep every perk tool declared.
 _Avoid_: pilot sessions, tool_search sessions, opt-in
 

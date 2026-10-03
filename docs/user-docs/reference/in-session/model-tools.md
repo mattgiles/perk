@@ -413,10 +413,13 @@ tracked `.pi/settings.json`:
 ```
 
 `perk init` writes it. It only ever appends to an existing `defaultTools` list; it never reorders
-or removes your entries. An explicit empty list (`[]`, Pi's "no builtin tools") or a value that is
-not a list is left alone; if you want discovery on an empty selection, write `["tool_search"]`
-yourself. `perk doctor` reports a missing entry as `settings-wiring` drift and `perk doctor --fix`
-appends it. **A new entry applies at the next launch or `/reload`.**
+or removes your entries. A list with no string entries (such as `[]`, which on its own means "no
+builtin tools") or a value that is not a list is left alone; if you want discovery on an empty
+selection, write `["tool_search"]` yourself. Leaving an empty list alone only stops perk from
+seeding it — it is not an opt-out: Pi adds an empty project list onto your user-scope list, so a
+user-scope `+tool_search` still turns discovery on. `perk doctor` reports a missing entry as
+`settings-wiring` drift and `perk doctor --fix` appends it. **A new entry applies at the next launch
+or `/reload`.**
 
 To opt out, commit `"-tool_search"` in the repo's tracked `.pi/settings.json` (for example
 `"defaultTools": ["-tool_search"]`). It must be the project file: Pi applies project entries after
@@ -451,8 +454,8 @@ Resume and fork start without it (re-run the door or search again); `/reload` de
 four again; navigating the session tree restores whatever the transcript had and perk keeps it.
 `/perk-selfcheck` reports `discovery: cohort (family: …)` or `discovery: nonparticipant`.
 
-Who never participates: a session of a repo that opted out (or whose selection is empty), a
-session whose `tool_search` comes from some other extension, the headless worker, `/btw`'s side
+Who never participates: a session of a repo that opted out with `-tool_search` (or whose resolved
+selection is empty), a session whose `tool_search` comes from some other extension, the headless worker, `/btw`'s side
 session and spawned subagent children — they keep every perk tool declared as before. The pilot's measurements and its adopt/retire decision are
 recorded in `docs/design/native-discovery-pilot.md`.
 
