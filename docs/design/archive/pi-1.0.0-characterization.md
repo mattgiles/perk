@@ -19,14 +19,31 @@ implements plan #2657 (Objective #2656, node 1.1). The precedents are
   does not provide @earendil-works/pi-agent-core/node.` One lane was measured. The check runs
   per lane in `spawnRunner` (source-derived), so on a 1.0.0 host with perk's pinned pi-subagents
   0.73.1, every background wave lane should refuse the same way.
-- **Interim operator risk (D5, owner 4.1).** The remote runner action installs Pi unversioned
-  (`npm install -g @earendil-works/pi-coding-agent`). npm `latest` was 1.0.1 at Step 0 and is
-  1.0.2 at authoring time. Neither patch release was measured here. Their registry
-  `pi-agent-core` manifests also omit the `./node` export (source-derived, see the snapshot
-  matrix). The remote runner pairs that host with the repo's pinned `npm:pi-subagents@0.73.1`.
-  Until 1.2 lands, remote wave lanes should therefore refuse the way A11 did. A11x also shows
-  that, on the one refused lane measured, the headless print-mode parent **did not exit** (killed
-  after about 7 minutes). The fix belongs to 4.1 and 1.2; this record states the exposure.
+- **Interim operator risk (D5, owner 4.1). Source-derived and unverified; the remote runner was
+  not measured.** Remote drives do not host their sessions in the global `pi` CLI. They run the
+  Node worker (`node <entry>/extension/workerMain.ts`, `src/perk/run/run_worker.py:235`), which
+  imports the Pi SDK from its own install. Which Pi that is depends on the repo kind:
+  - **perk self-repo.** The worker-deps step is `npm ci` (`action.yml:48`), so the worker's SDK
+    is the committed 0.99.2 pin.
+  - **Consumer repos.** The worker-deps step is `_WORKER_DEPS_CONSUMER`
+    (`src/perk/run/workflow_artifacts.py:182–185`), which installs an **unpinned**
+    `@earendil-works/pi-coding-agent` into `.pi/npm`. npm `latest` was 1.0.1 at Step 0 and is
+    1.0.2 at authoring time; neither patch was measured here. Their registry `pi-agent-core`
+    manifests also omit `./node` (see the snapshot matrix).
+
+  In such an embedded host, pi-subagents 0.73.1 picks its Pi package root by
+  `resolveAsyncPiPackageRoot` (`src/runs/background/async-execution.js:74–75`). The precedence
+  is the `process.argv[1]` package walk (the worker entry is not inside a Pi package), then
+  `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT`, then `import.meta.resolve` from pi-subagents' own
+  location. It never consults the PATH CLI. So the predicted exposure is consumer remote waves
+  with the pinned 0.73.1, provided pi-subagents loads in the worker and resolves to the floating
+  `.pi/npm` SDK: those lanes would refuse the way A11 did. The self-repo worker should resolve the
+  0.99.2 pin and not refuse. Its `.pi/npm` installs no Pi SDK (the main checkout's
+  `.pi/npm/node_modules/@earendil-works/` is empty), so `import.meta.resolve` walks up to the root
+  `node_modules`. A11x's non-exit was measured only on a print-mode CLI parent; whether
+  the worker parent behaves the same is unknown. The global `npm install -g` (`action.yml:28`) is
+  also unpinned, but it is not the worker's host. Pinning only that install would leave the
+  consumer worker SDK floating. The fix belongs to 4.1 and 1.2; this record states the exposure.
 - **No pin moved and nothing landed.** Every `package.json`/`package-lock.json`/`.pi/settings.json`
   edit was a throwaway edit inside the detached worktree, and the experiment ran on an
   independent copy of `.pi/npm`. Both were deleted at teardown. The main checkout's supplier
@@ -274,7 +291,8 @@ OK
   assistant-message event reached stdout); and whether a refused lane would wedge a 0.99.2 parent
   too. That last control cannot be built, because 0.99.2 never refuses. Owner 1.2 adopts 0.75.0,
   which does not refuse on 1.0.0 (B5a). The remaining exposure is the interim remote-runner risk
-  in the header.
+  in the header. That risk is a source-derived prediction for consumer worker hosts; neither the
+  refusal nor this non-exit was measured on a worker.
 - **A12: doctor reds outside the two named rows.** `✗ config: config missing —
   .perk/local.toml` is also red in the baseline doctor run in the implement worktree (0.99.2 PATH
   host, `$MAIN/.worktrees/plan-2657`). That run reported `✗ 1 check(s) failed`, i.e. this red is
@@ -298,7 +316,7 @@ anchor (read at `8ddbc2ad`), and one verdict with one owner.
 | D2 `quietStartup: "header"` | `core/settings-manager.ts@v1.0.0:112` `export type QuietStartup = boolean \| "header";` (`:150` `quietStartup?: QuietStartup; // default: false`); dist `core/settings-manager.d.ts:78` same | `git grep -i quietStartup -- src extension shared .pi tests`: no match; `.pi/settings.json` has no key | PASS → no-action |
 | D3 codemode `"name" in tools` | `packages/codemode/src/runtime/prelude-source.ts@v1.0.0:116–133`: `guard()` wraps `tools` in a `Proxy` whose only trap is `get`, which throws `tools.<x> does not exist. …` for an unknown member. The source comment reads "`in` checks still work." Installed `pi-codemode/dist/runtime/prelude-source.js:117` `return new Proxy(target, {` | perk authors no codemode fragment probing an optional member. `git grep -E '"[a-z_]+" in tools'` finds none; the only executable fragments (`extension/pi/perkToolSeam.test.ts:470–473`) call the registered `tools.probe_action`/`tools.probe_query`, green in A6 (`ok 802`) | PASS → no-action |
 | D4 Node `>=22.19.0` | `packages/coding-agent/package.json@v1.0.0:106–107` `"node": ">=22.19.0"`, identical at `v0.99.2` (not a 1.0.0 change); installed `{"node":">=22.19.0"}`; also `1.0.2` (registry) | `>=22` everywhere: `src/perk/convergence/env.py:15` `_MIN_NODE_MAJOR = 22` (+ `:5`, `:54`, `:62`, `:106` messages); `package.json` `"engines": {"node": ">=22"}`; `.github/actions/perk-remote-setup/action.yml:20`, `src/perk/run/workflow_artifacts.py:207`, `.github/workflows/ci.yml:31`, `.github/workflows/release.yml:151,183` `node-version: "22"`; `docs/user-docs/reference/requirements-and-compatibility.md:20` "Version 22 or newer" and `:80` "Node 22.15 or newer"; `README.md:59` `node >= 22`; `docs/site/package.json` `>=22.12.0`; `docs/site/README.md:173,313` already names `>=22.19.0`; `.npmrc` `engine-strict=true` | FAIL → 4.1 |
-| D5 remote Pi install is unversioned | — (npm `latest` moved 1.0.0 → 1.0.1 → 1.0.2 within three days) | `.github/actions/perk-remote-setup/action.yml:28` and `src/perk/run/workflow_artifacts.py:215` `run: npm install -g @earendil-works/pi-coding-agent`; `requirements-and-compatibility.md:21` "Version 0.99.2 or newer". The remote host gets `latest` (1.0.2 today) with the pinned pi-subagents 0.73.1. That should give A11's refusal and possibly A11x's non-exit (interim operator risk, header) | FAIL → 4.1 |
+| D5 remote Pi installs are unversioned | — (npm `latest` moved 1.0.0 → 1.0.1 → 1.0.2 within three days) | Two separate remote installs. (a) **Consumer worker SDK, the wave host:** `src/perk/run/workflow_artifacts.py:182–185` `_WORKER_DEPS_CONSUMER` = `npm install @mgiles/perk@<version> @earendil-works/pi-coding-agent --prefix .pi/npm --legacy-peer-deps`. The SDK spec is unpinned, so consumer workers (`run_worker.py:235` `node <entry> …`, entry staged under `.pi/npm` by `_stage_consumer_entry`) import `latest` (1.0.2 today). (b) **Global CLI, not the worker's host:** `.github/actions/perk-remote-setup/action.yml:28` and `workflow_artifacts.py:215` `npm install -g @earendil-works/pi-coding-agent`. The self-repo worker instead runs on `npm ci` (`action.yml:48`, `_WORKER_DEPS_SELF`): the committed 0.99.2 pins. `requirements-and-compatibility.md:21` says "Version 0.99.2 or newer". The prediction that (a) plus pinned 0.73.1 refuses like A11 rests on 0.73.1's `resolveAsyncPiPackageRoot` precedence (header). It is source-derived and was not measured on a worker host; A11x is unverified there | FAIL → 4.1 |
 | D6 fullscreen default | `core/settings-manager.ts@v1.0.0:184` `tuiMode?: TuiMode; // default: "fullscreen"`, `:1349` `=== "regular" ? "regular" : "fullscreen"`; `cli/args.ts@v1.0.0:326` `--tui-mode <mode>              TUI mode: fullscreen (default) or regular`; dist `core/settings-manager.js:951` | `src/perk/convergence/init/settings.py:543–561` `_converge_tui_mode` seeds `"fullscreen"` when absent, which is now the default value. Pi 1.0.0 did not rewrite `.pi/settings.json` (throwaway `git diff` showed only the B-arm pin edit) | OBSERVED → 4.4 |
 | D7 MCP factory defaults | `extensions/mcp/index.ts@v1.0.0:69–80` `McpExtensionOptions` defaults: `mcp.json` from the agent dir + trusted project, `credentials` → `mcp-auth.json` in the agent dir, `logPath` → `mcp.log` (`:342` `join(getAgentDir(), "mcp.log")`); `src/index.ts@v1.0.0:408` exports `createMcpExtension, type McpExtensionOptions, type McpTransportFactory`, not `McpOAuthCredentialStore`; dist `index.d.ts:32` same, `grep -c McpOAuthCredentialStore dist/index.d.ts` = 0; `extensions/mcp/oauth.d.ts:9` "Credentials live in `<agent-dir>/mcp-auth.json`, keyed by server name and URL." | perk has no MCP code (`git grep -i -e createMcpExtension -e McpExtensionOptions -e mcp-auth -- src extension`: no match); the worker supplies no factories | OBSERVED → 3.3 |
 | D8 MCP restoration window | `core/agent-session.ts@v1.0.0:431` `private _pendingToolNames = new Set<string>();`, `:1494` `if (previous.some((name) => !active.has(name))) this._pendingToolNames.clear();`, `:3542` `nextActiveToolNames.push(...this._pendingToolNames);` (0 occurrences at `v0.99.2`); dist `core/agent-session.js:141,1091,2852` | perk reconciles active tools with `pi.setActiveTools` (`extension/substrate/toolGating.ts:247,249,417`). A reconciliation that deactivates any tool clears Pi's pending-restoration set | OBSERVED → 2.2 |
@@ -368,7 +386,7 @@ measured row and appear here only through that row.
 | D2 | `QuietStartup` gains `"header"`; perk never touches it | PASS | no-action |
 | D3 | codemode `tools` Proxy throws on unknown members; perk has no optional-member probe | PASS | no-action |
 | D4 | Pi requires Node `>=22.19.0`; perk declares `>=22` at every site | FAIL | 4.1 |
-| D5 | remote runner installs Pi `latest` unversioned (interim risk with 0.73.1) | FAIL | 4.1 |
+| D5 | remote Pi installs float: the consumer worker SDK (`_WORKER_DEPS_CONSUMER`, the wave host; predicted, unmeasured A11 exposure with 0.73.1) and the global CLI; the self-repo worker stays on the `npm ci` pins | FAIL | 4.1 |
 | D6 | `tuiMode` fullscreen is now Pi's default; perk still seeds it | OBSERVED | 4.4 |
 | D7 | MCP factory defaults to the global agent dir; `McpOAuthCredentialStore` not root-exported | OBSERVED | 3.3 |
 | D8 | `_pendingToolNames` restoration set cleared on any deactivation | OBSERVED | 2.2 |
@@ -405,6 +423,12 @@ UNOBSERVED 0. Every planned row ran, so none is a dependent `UNOBSERVED — NOT 
    and the lane failed in 48 ms.
 3. **"Pi latest = 1.0.0 today" (D5).** npm `latest` was 1.0.1 at Step 0 (published
    2026-10-03T12:35Z) and 1.0.2 at authoring time (published 2026-10-04T00:56Z).
+   **D5's premise that the remote action's global Pi install is what makes remote waves fail.**
+   This is wrong per source (from PR review; not measured). Remote waves run in the Node worker,
+   whose SDK comes from `npm ci` in the self-repo (pinned 0.99.2) or from the unpinned
+   `_WORKER_DEPS_CONSUMER` install in consumer repos. pi-subagents 0.73.1 resolves its host
+   package from those, never from the PATH CLI. D5 now names the consumer worker SDK as the
+   exposure and marks the remote outcome unverified.
 4. **An implicit expectation that a refused lane would let the print-mode parent exit like a
    completed one.** A11x: it did not. This was not stated in the plan, but the procedure (one
    command per row, no watchdog) assumed it. B4–B6 then ran under a watchdog (methodology).
