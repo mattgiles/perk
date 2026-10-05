@@ -339,7 +339,11 @@ test("stage change, late registration, initially inactive and unknown provenance
     const landing = async (entry: string, view: readonly string[], label: string) => {
       const foreignBefore = foreignActive(h);
       await h.navigateTo(entry);
-      assertPerkSubset(h, view, label);
+      // The restoration-window rule (contracts.md §8.40): a /tree restore only adds; perk's
+      // removals land when the next run starts, so the exact subset is checked after the census.
+      const registered = new Set(h.session.getAllTools().map((t) => t.name));
+      for (const name of view.filter((n) => registered.has(n)))
+        assert.ok(h.session.getActiveToolNames().includes(name), `${label}: ${name} added at once`);
       // The only foreign moves at a navigation are the subagents owner's replay of its own
       // selection on a message-less branch (subagent hidden, loader kept).
       assert.deepEqual(
@@ -350,6 +354,7 @@ test("stage change, late registration, initially inactive and unknown provenance
       for (const name of NEVER_ACTIVATED) assert.ok(!h.session.getActiveToolNames().includes(name));
       rt.census();
       await h.session.prompt("census");
+      assertPerkSubset(h, view, `${label} (removals landed when the run started)`);
       return rt.last().tools;
     };
 

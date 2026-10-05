@@ -15,10 +15,13 @@
 //    `setActiveTools` call (a bare session — no stage, read-write, no floor, default registration
 //    — gets none at all).
 //  - PRESENTATION is the loadout host's (`perk_stage`, registered by index.ts through
-//    `registerLoadoutHost`): its `prepareLoadout` hides every declared tool ineligible in the
-//    landing (by provenance — `hiddenDeclarationsFor`), so the gate and the diet reach foreign
-//    tools without touching their activation. Hidden tools stay active and callable; their
-//    prompt snippets drop out of the request, their guidelines do not. Fail-open.
+//    `registerLoadoutHost`): its `prepareLoadout` hides, by name, every registered tool
+//    ineligible in the landing (by provenance — `hiddenDeclarationsFor`) and every
+//    cohort-deferred member outside the loadout being applied, so the gate and the diet reach
+//    foreign tools without touching their activation, and a name removed at the restoration
+//    window's close stays hidden in the first request Pi builds from the pre-removal snapshot.
+//    Hidden tools stay active and callable; their prompt snippets drop out of the request, their
+//    guidelines do not. Fail-open.
 //  - ENFORCEMENT is the read-only `tool_call` backstop: under the gate, edit/write, an
 //    unregistered name, an ineligible tool and an unsafe bash command are blocked. Fail-closed.
 //  - THE DISCOVERY COHORT: a session whose host has Pi's builtin `tool_search` registered and
@@ -32,17 +35,30 @@
 //    wave launcher activates the members its carrier names. Every other session is a
 //    nonparticipant and keeps today's always-declared loadout. Resets: resume/fork start from the
 //    host's defaults (a primed or searched member is gone); `/reload` re-runs the factory, which
-//    re-joins and re-deactivates; `/tree` restores the transcript's loadout and perk keeps it.
+//    re-joins and re-deactivates when the next run starts; `/tree` restores the transcript's
+//    loadout and perk keeps it.
 //
 // The reconciliation points: `syncFromState` (session_start, session_tree, the doors' stage
 // syncs), `enter`, `exit`, the `resources_discover` re-apply (after every extension's
-// session_start — late registrants), and `before_agent_start` (ahead of the mode-context
+// session_start — late registrants), `before_agent_start` (ahead of the mode-context
 // injection; Pi emits it once when a prompt starts, so a tool activated during the previous
 // prompt — a `tool_search` hit — meets the policy before the next prompt's first request; within
-// a prompt only the host's per-request hiding applies). The presented mode LEADS each install:
-// the host's hook runs inside
+// a prompt only the host's per-request hiding applies), and `agent_start` (the restoration
+// window's close, below). The presented mode LEADS each install: the host's hook runs inside
 // the install, and Pi rebuilds the prompt's snippet map from that run, so a gate exit restores
 // edit/write's snippets in the same install.
+//
+// THE RESTORATION WINDOW (contracts.md §8.40): Pi ≥ 1.0 keeps restored-but-unregistered tools
+// pending from `/reload` (it adds the whole active set) or a `/tree` restore until the next agent
+// run starts — an MCP server still reconnecting gets its saved tools back when it registers them.
+// Any `setActiveTools` that deactivates a name drops that pending set; an identical or additive
+// one keeps it. So between a `session_start` with reason `reload` (or a `session_tree`) and the
+// next `agent_start`, perk only adds: a removal-bearing reconciliation installs the live set plus
+// its additions (an identical list included, so Pi re-runs the loadout hooks for the new
+// landing), and the removals — the cohort's family deferral, the stage diet, the codemode
+// suspension — land at `agent_start`, the first event after Pi's own clear, emitted for prompted
+// and `sendMessage`-triggered runs alike. Enforcement and presentation follow the new landing at
+// once; only the deactivation waits.
 //
 // The exclusion contract: Pi's `--tools`/`--exclude-tools` (the SDK's `tools`/`excludeTools`)
 // are registry filters — a filtered-out perk tool is never registered and never installed; a
@@ -155,9 +171,11 @@ export interface ToolGating {
   /** Whether the gate is currently active (in-memory source of truth for `tool_call`). */
   isActive(): boolean;
   /**
-   * The loadout host's hook: hide every declared tool ineligible in the presented landing, plus
-   * the host itself. Never throws — a failure hides only the host (presentation is fail-open; the
-   * backstop still enforces). It only ever hides — never a `descriptions` rewrite.
+   * The loadout host's hook: hide, by name, every registered tool ineligible in the presented
+   * landing and every cohort-deferred member the loadout does not declare, plus the host itself —
+   * declared or not (Pi masks by name across the whole transcript). Never throws — a failure
+   * hides only the host (presentation is fail-open; the backstop still enforces). It only ever
+   * hides — never a `descriptions` rewrite.
    */
   prepareLoadout(loadout: ToolLoadout): LoadoutPresentation;
   /**
@@ -169,7 +187,10 @@ export interface ToolGating {
   joinDiscoveryCohort(family: readonly string[]): void;
   /**
    * Primed activation: activate the members deferred in this session among `names` that are registered,
-   * eligible in the presented landing and not yet active, in catalog order; returns them. A no-op
+   * eligible in the presented landing and not yet active, in catalog order; returns them. A primed
+   * member's deferral still pending in the restoration window is lifted, so it survives the
+   * window's close — a member still active only because of that deferral is primed this way
+   * and returned too. A no-op
    * (`[]`, no install) outside the cohort. Never throws — a failure is reported and returns `[]`
    * (presentation is fail-open: the model can still `tool_search`; enforcement is untouched).
    */
@@ -204,6 +225,13 @@ export function registerToolGating(
   let cohort = false;
   let deferred: string[] = [];
   let pendingDeferral: string[] = [];
+  // Whether Pi's restoration window is open: from a `reload` session_start or a session_tree
+  // until the next agent_start. Pi ≥ 1.0 keeps restored tools whose registrant has not registered
+  // them yet (a reconnecting MCP server's) pending until the next run starts, and any
+  // deactivating `setActiveTools` drops them — so inside the window every install only adds and
+  // the removals (with the `suspended`/`pendingDeferral` memos) complete at agent_start.
+  // startup/resume/new/fork never open it: Pi restores nothing there.
+  let restorationWindow = false;
 
   function hasFloor(): boolean {
     try {
@@ -223,7 +251,9 @@ export function registerToolGating(
    * when perk's names must change or a suspended builtin must be switched off or back on — or
    * when the presented mode flips under an active host, so Pi rebuilds the prompt's snippet map
    * for the new presentation (a gate exit restores edit/write's snippets even when no perk name
-   * changed).
+   * changed). Inside the restoration window a removal-bearing reconciliation installs the live
+   * set plus its additions instead — unconditionally, so Pi re-runs the loadout hooks for the
+   * new landing — and leaves the memos for the closing apply.
    */
   function apply(nextActive: boolean, nextStage: string | null): void {
     if (nextActive) active = true;
@@ -244,12 +274,18 @@ export function registerToolGating(
           presentedMode,
           deferred,
         ) ?? joined;
-      if (!sameNames(target, live)) pi.setActiveTools(target);
-      else if (presentedMode !== previousMode && live.includes(LOADOUT_HOST_NAME)) {
-        pi.setActiveTools(live);
+      const removals = live.filter((name) => !target.includes(name));
+      if (restorationWindow && removals.length > 0) {
+        // Only add; the removals and their memos wait for the closing apply at agent_start.
+        pi.setActiveTools([...live, ...target.filter((name) => !live.includes(name))]);
+      } else {
+        if (!sameNames(target, live)) pi.setActiveTools(target);
+        else if (presentedMode !== previousMode && live.includes(LOADOUT_HOST_NAME)) {
+          pi.setActiveTools(live);
+        }
+        suspended = step.suspended;
+        pendingDeferral = [];
       }
-      suspended = step.suspended;
-      pendingDeferral = [];
     } catch (error) {
       presentedMode = isActive() ? "read-only" : "read-write";
       throw error;
@@ -263,6 +299,51 @@ export function registerToolGating(
   pi.on("resources_discover", async () => {
     apply(active, stageId);
   });
+
+  // The restoration window opens where Pi restores a loadout (`/reload`, a `/tree` restore). These
+  // handlers are registered before index.ts subscribes its own, so the flag is set before that
+  // event's `syncFromState` reconciles.
+  pi.on("session_start", async (event) => {
+    if (event.reason === "reload") restorationWindow = true;
+  });
+  pi.on("session_tree", async (_event, ctx) => {
+    restorationWindow = true;
+    // A restore that replaced the loadout supersedes a reload's still-pending family deferral:
+    // the members the transcript declared are active by that history's choice (perk keeps what
+    // Pi restored), the rest are already off. Without a restore the reload's live set stands, so
+    // the deferral stays pending for the close.
+    if (pendingDeferral.length > 0 && restoredLoadout(ctx)) pendingDeferral = [];
+  });
+
+  // The closing point: Pi has dropped its pending set by the time a run emits agent_start (for a
+  // prompt and for a `sendMessage`-triggered turn alike), so the deferred removals land here.
+  // Idempotent — a run that opened no window computes the live set and installs nothing. The
+  // first request still declares what the run's snapshot held; the host hides the removed names
+  // by name, so none of them reaches it.
+  pi.on("agent_start", async () => {
+    restorationWindow = false;
+    try {
+      apply(active, stageId);
+    } catch (error) {
+      console.error(`perk: tool reconciliation failed as the run started — ${error}`);
+    }
+  });
+
+  /**
+   * Whether this navigation restored the selected branch's declared loadout. Pi restores exactly
+   * when the branch's projection carries a system message (its replayed declarations replace the
+   * active set before `session_tree` handlers run). An unreadable projection reads as no restore,
+   * which keeps the reload's deferral pending.
+   */
+  function restoredLoadout(ctx: ExtensionContext): boolean {
+    try {
+      return ctx.sessionManager
+        .buildSessionProjection()
+        .messages.some((message) => (message as { role?: unknown }).role === "system");
+    } catch {
+      return false;
+    }
+  }
 
   /** Every registered tool's provenance, by name. */
   function provenanceMap(): Map<string, Provenance> {
@@ -407,14 +488,22 @@ export function registerToolGating(
         const wanted = new Set(names);
         const live = pi.getActiveTools();
         const registered = new Set(pi.getAllTools().map((t) => t.name));
+        const pending = new Set(pendingDeferral);
         const targets = deferred.filter(
           (name) =>
             wanted.has(name) &&
             registered.has(name) &&
             isEligible(name, undefined, stageId, presentedMode) &&
-            !live.includes(name),
+            (!live.includes(name) || pending.has(name)),
         );
-        if (targets.length > 0) pi.setActiveTools([...live, ...targets]);
+        const additions = targets.filter((name) => !live.includes(name));
+        // A prime supersedes the one-time deferral the restoration window still holds for the
+        // member — whether it was still live or is activated now — so the closing apply keeps it
+        // (reconcileTarget keeps an active deferred member). When nothing needs adding, the
+        // identical install lets Pi re-run the loadout hooks.
+        pendingDeferral = pendingDeferral.filter((name) => !targets.includes(name));
+        if (additions.length > 0) pi.setActiveTools([...live, ...additions]);
+        else if (targets.length > 0) pi.setActiveTools(live);
         return targets;
       } catch (error) {
         console.error(`perk: priming failed — ${error}`);
@@ -425,15 +514,22 @@ export function registerToolGating(
       return { cohort, family: [...deferred] };
     },
     prepareLoadout(loadout: ToolLoadout): LoadoutPresentation {
+      // By name, independent of the declared list: Pi replaces its mask on every loadout
+      // application from that application's hook results and applies it to the whole
+      // transcript. The hook run inside the restoration window's closing install sees the
+      // post-removal declared list while the run's first request — built from the pre-removal
+      // snapshot — still declares the removed names; naming every registered ineligible tool and
+      // every deferred member outside this loadout keeps them out of it. Masking an undeclared
+      // name is a no-op, and a deferred member is unmasked by the very application that
+      // activates it (a `tool_search` hit, a prime).
       try {
-        return {
-          hiddenDeclarations: hiddenDeclarationsFor(
-            loadout.declared.map((t) => t.name),
-            provenanceMap(),
-            stageId,
-            presentedMode,
-          ),
-        };
+        const infos = provenanceMap();
+        const hidden = hiddenDeclarationsFor([...infos.keys()], infos, stageId, presentedMode);
+        const declared = new Set(loadout.declared.map((t) => t.name));
+        for (const name of deferred) {
+          if (!declared.has(name) && !hidden.includes(name)) hidden.push(name);
+        }
+        return { hiddenDeclarations: hidden };
       } catch (error) {
         console.error(`perk: loadout presentation failed — ${error}`);
         return { hiddenDeclarations: [LOADOUT_HOST_NAME] };

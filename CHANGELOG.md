@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of f03b171 -->
 
+### Fixed
+
+- Keep MCP tools that Pi restores after `/reload` or tree navigation active in perk sessions on Pi 1.0: perk no longer switches tools off before the next run starts inside Pi's restoration window. (d1a7d263)
+
 ## [3.9.0] - 2026-10-01
 
 ### Fixed

@@ -7737,8 +7737,9 @@ transcript restore); priming is perk's only activation of a deferred tool. The r
 `session_start` and `session_tree` rebuilds and the doors' stage syncs), the gate's `enter`/
 `exit`, the `resources_discover` re-apply (Pi fires it after every extension's `session_start` —
 where startup-late registrants such as pi-subagents' `subagent_supervisor` meet the landing; a
-no-op when nothing changed), and `before_agent_start` (ahead of the read-only context injection,
-gated or not, inside its own `try/catch` that reports and continues). Pi emits
+no-op when nothing changed), `before_agent_start` (ahead of the read-only context injection,
+gated or not, inside its own `try/catch` that reports and continues), and `agent_start` (the
+**Restoration window**'s close, below; its own `try/catch` likewise). Pi emits
 `before_agent_start` once when a prompt starts — not between the model requests of one prompt's
 tool loop — so a tool activated during a prompt meets the landing when the NEXT prompt starts;
 within a prompt only the host's per-request hiding applies (hidden is not deactivated, and the
@@ -7753,10 +7754,45 @@ reconciling, a builtin row marked `suspendedUnderGate` (only `codemode`, matched
 `source: "builtin"` — a foreign namesake is governed by its provenance) is switched off while the
 presented mode is read-only, and the gate remembers it; when the presentation turns read-write
 it is switched back on if still registered and inactive (`suspensionStep`, pure). The memo is
-updated only after a successful install. **Zero-call guarantee:** a session whose live set
+updated only after a successful install. When the gate is entered inside the **Restoration
+window** (below), codemode is switched off at the window's close; until then it is hidden by
+eligibility and blocked by the backstop. **Zero-call guarantee:** a session whose live set
 already matches, with no suspension to apply or release and no presented-mode flip, gets no
 `setActiveTools` call; a bare session (no stage, read-write, no floor, default registration —
 every perk tool active) gets none at all.
+
+**Restoration window.** Pi ≥ 1.0 keeps a **pending-restoration set**: the names a loadout
+restore carries over that are not registered yet — a reconnecting MCP server's tools — each
+activated when it registers. `/reload` populates it (every active name, just before the registry
+rebuild) and so does a `/tree` restore (the transcript's declared loadout, before `session_tree`
+handlers); SDK/CLI resume populates nothing at 1.0.0 (`createAgentSession` always passes an
+initial active set — measured, row S1 of `docs/design/archive/pi-1.0.0-mcp-restoration.md`). Pi
+drops the set on any `setActiveTools` that deactivates a previously active name (an identical or
+purely additive list keeps it) and when the next agent run starts (`_runAgentPrompt`, after every
+`before_agent_start` handler — the MCP extension's wait for its `direct` servers included). perk's
+rule: between a `session_start` with reason `reload` (or a `session_tree`) and the next
+`agent_start`, every install adds only — a removal-bearing reconciliation installs the live set
+plus its additions, one install, an identical list included, so Pi re-runs the loadout hooks and
+rebuilds the prompt for the new landing — and the removals land at `agent_start`: the cohort's
+family deferral, the stage diet and the codemode suspension, their memos completing only then.
+`agent_start` is the first extension event after Pi's clear and fires for a prompt and for a
+`sendMessage`-triggered turn alike (which has no `before_agent_start`); a removal there cannot
+change the declarations of the run's first request (Pi snapshots them before the emit), so the host
+hides the removed names by name (**The loadout host**, below). Residual: that first request's
+system prompt is built before the close too, so it still carries the prompt guidelines of every
+name the close removes and the snippets of the eligible family members (their declarations are
+hidden); from the second request on the prompt follows the live set. Gate enforcement is immediate —
+the latch and the backstop never wait. A user gesture that changes the landing inside the window
+(a `/plan` toggle, a stage change by `/tree`) falls under the same rule. A prime inside the window
+lifts the primed member's pending deferral \u2014 whether the member was still active or the prime
+activates it \u2014 so it survives the close. A `/tree` restore that replaces the loadout (the
+selected branch's projection carries a system message, so Pi restored its replayed declarations;
+`sessionManager.buildSessionProjection()`) supersedes a reload's still-pending family deferral:
+the members the transcript declared stay while eligible and the rest are already off; a
+navigation that restores nothing leaves the deferral pending. `startup`,
+`resume`, `new` and `fork` open no window. Pi 0.99.2 has no pending set; there the rule only moves
+the removals to the next run's start. The measurements are recorded in
+`docs/design/archive/pi-1.0.0-mcp-restoration.md`.
 
 **The exclusion contract.** Pi's `--tools`/`--exclude-tools` (the SDK's `tools`/`excludeTools`)
 are REGISTRY filters: a filtered-out tool is not registered, absent from `getAllTools()`, and its
@@ -7821,9 +7857,13 @@ only other production `pi.registerTool(` there) catalogues `perk_stage` with `ki
 registry stage, `gated: allowed`, `modeOverStage: true` (so own-names-only activation keeps it
 active wherever it is registered — Pi runs `prepareLoadout` only for ACTIVE tools), and registers
 it `model-only` with an empty parameter schema, no prompt snippet, no guidelines and a no-op
-`execute`. Its hook returns `hiddenDeclarationsFor(declared, provenance, stage, presentedMode)`:
-itself always, plus every declared tool ineligible in the landing by its provenance (a bare
-landing hides only the host). Pi runs every active hook on each `setActiveTools` and again right
+`execute`. Its hook hides, by name: itself always, every REGISTERED tool ineligible in the landing
+by its provenance (`hiddenDeclarationsFor` over `getAllTools()`), and every cohort-deferred member
+the loadout being applied does not declare (a bare landing hides only the host). Pi masks by name
+across the whole transcript and replaces the mask on every loadout application, so a name removed
+at the **Restoration window**'s close is absent from the first request Pi builds from the
+pre-removal snapshot; masking an undeclared name is a no-op, and a deferred member is unmasked by
+the very application that activates it (a `tool_search` hit, a prime). Pi runs every active hook on each `setActiveTools` and again right
 before each request (after `before_agent_start`), over the same unfiltered loadout, and unions the
 hidden sets. A hidden tool stays active, callable and declared in the transcript; Pi strips it
 from the request's declarations, and (verified on 0.99.2) its `promptSnippet` is dropped from the
@@ -7856,8 +7896,8 @@ is never absent. Residual: on a pre-change transcript where a later handler does
 — its declaration is hidden throughout. `tool_search` activates its matches through
 `setActiveTools` outside perk's other points; the host's hook runs inside that install, so an
 ineligible match is hidden on the very next request and deactivated when the next prompt starts
-(`before_agent_start`). **Resume/fork (host behaviour):** Pi 0.99.2 always passes an initial active
-set at construction, so a resumed or forked session starts from the defaults plus
+(`before_agent_start`). **Resume/fork (host behaviour):** Pi 0.99.2 and 1.0.0 always pass an
+initial active set at construction, so a resumed or forked session starts from the defaults plus
 registration-activated tools; the transcript's declared loadout is restored only by `/tree`
 navigation (which runs before `session_tree` handlers). perk preserves what the host restored (the
 third term) and adds nothing — a `tool_search` activation or a priming does not survive resume or
@@ -7905,9 +7945,13 @@ this re-registers this activation's retained family members with `exposure: "def
 already-deferred member is skipped; a per-name failure reports `perk: could not defer <name> — …`
 and is skipped) — then, when at least one member deferred, `ToolGating.joinDiscoveryCohort(deferred)`
 with exactly the names that deferred: the next install removes them from the live set once (a cohort startup is still ONE perk install; a throwing install
-leaves the deferral pending for the next point). **Primed activation:**
+leaves the deferral pending for the next point; inside the **Restoration window** the removal waits
+for `agent_start`). **Primed activation:**
 `ToolGating.primeDeferred(names)` activates the named members deferred in this session that are registered, eligible
-in the presented landing and inactive, in catalog order, in one install; it is a no-op outside the
+in the presented landing and inactive, in catalog order, in one install (a primed member's
+deferral still pending in the restoration window is lifted; a member still active only because of
+that deferral is primed this way, with an identical install so the hooks re-run); it is a no-op
+outside the
 cohort and never throws (`perk: priming failed — …`; presentation is fail-open — the model can
 still `tool_search`, and enforcement is untouched). Every carrier that names a deferred tool has a
 primer that runs BEFORE the carrier reaches the model, with an exported constant:
@@ -7928,7 +7972,8 @@ or with a foreign namesake, the headless worker (its runtime loads no `tool_sear
 child (it registers no perk tool) keep the always-declared loadout — every family member stays
 `direct`, and a nonparticipant census request is byte-identical to the pre-pilot one. **Resets:**
 resume and fork start from the host's defaults and re-join (a primed or searched member is gone
-until re-primed or re-searched); `/reload` re-runs the factory, which re-joins and re-deactivates;
+until re-primed or re-searched); `/reload` re-runs the factory, which re-joins and re-deactivates
+when the next run starts (the **Restoration window**);
 `/tree` restores the transcript's loadout and perk keeps a restored member while it is eligible.
 A nested `ctx.executeTool` reaches a deferred inactive member (Pi's callable set includes every
 registered deferred tool; the call is recorded on the parent result's `nestedCalls`), which widens

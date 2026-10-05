@@ -1177,21 +1177,26 @@ export async function recordingRuntime() {
 /**
  * Record every install perk itself makes (attributed by stack to the gating module) while the
  * test runs — Pi's own installs (registration refreshes, transcript restores) are not perk's.
+ * Each record carries the live set the install replaced, so a pin can prove an install only added
+ * (the restoration-window rule, contracts.md §8.40).
  */
-export function recordPerkInstalls(t: TestContext): string[][] {
-  const installs: string[][] = [];
+export function recordPerkInstalls(t: TestContext): PerkInstall[] {
+  const installs: PerkInstall[] = [];
   const original = AgentSession.prototype.setActiveToolsByName;
   t.mock.method(
     AgentSession.prototype,
     "setActiveToolsByName",
     function (this: AgentSession, names: string[]) {
       if (new Error().stack?.includes("substrate/toolGating.ts") === true)
-        installs.push([...names]);
+        installs.push({ names: [...names], before: this.getActiveToolNames() });
       return original.call(this, names);
     },
   );
   return installs;
 }
+
+/** One install perk made: the names it installed and the live active set it replaced. */
+export type PerkInstall = { names: string[]; before: string[] };
 
 /** Pi's real builtin `tool_search`, loaded through the CLI's builtin path (`source: "builtin"`). */
 export const toolSearch = (): InlineExtension => ({

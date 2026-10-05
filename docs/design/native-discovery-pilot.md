@@ -29,7 +29,9 @@ tolerates it and never converges it (P5).
 
 In the cohort, perk re-registers the family deferred at `session_start` (before the first sync),
 switches it off in that same single install, and thereafter keeps a member exactly while it is
-active and eligible. A member comes back only by **primed activation** (a door or launcher whose
+active and eligible. After `/reload` the re-join's switch-off waits for the next run's start (the
+restoration-window rule, added later — `docs/design/archive/pi-1.0.0-mcp-restoration.md`); the
+startup measurements below are unaffected. A member comes back only by **primed activation** (a door or launcher whose
 carrier names it) or by `tool_search` / a `/tree` restore.
 
 **Nonparticipants by construction** keep today's always-declared loadout: a session without the

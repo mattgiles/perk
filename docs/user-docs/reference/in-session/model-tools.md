@@ -399,6 +399,15 @@ next request and switched off when the next prompt starts (until then it stays c
 read-write diet has no call-time check). Pi restores such activations only when you navigate
 the session tree, not on resume or fork; perk keeps what Pi restored and adds nothing.
 
+On Pi 1.0, tools Pi restores after `/reload` or tree navigation survive perk's reconciliation —
+for example an MCP server's tools that reconnect before your next prompt. Until that prompt starts,
+perk only adds tools; anything it would switch off (a tool the new stage or mode does not allow,
+the deferred discovery tools, a suspended `codemode`) waits for the next prompt. Meanwhile that
+tool is not declared to the model, though its usage notes can still appear in the system prompt
+of that one prompt. Waiting changes no permission: a tool read-only mode does not allow is
+blocked at once, while a deferred discovery tool the stage and mode allow stays callable as
+before.
+
 One composition limit: `codemode` writes its own description from every callable tool, so in a
 read-write stage session with codemode active, that description may name a tool the diet hides.
 This affects only what the model reads; under the gate codemode is switched off.
@@ -451,7 +460,7 @@ They come back in two ways:
 
 An activated tool stays only while the stage and mode allow it, exactly like any perk tool.
 Resume and fork start without it (re-run the door or search again); `/reload` deactivates the
-four again; navigating the session tree restores whatever the transcript had and perk keeps it.
+four again when your next prompt starts; navigating the session tree restores whatever the transcript had and perk keeps it.
 `/perk-selfcheck` reports `discovery: cohort (family: …)` or `discovery: nonparticipant`.
 
 Who never participates: a session of a repo that opted out with `-tool_search` (or whose resolved
