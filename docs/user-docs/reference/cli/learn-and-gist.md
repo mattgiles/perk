@@ -212,7 +212,11 @@ dedup, prune, per-payload truncation, then split-by-budget at entry boundaries (
 elided). Nested tool calls recorded on a tool result (`message.nestedCalls`, Pi ≥ 0.99 — codemode
 scripts and other `ctx.executeTool` callers) render inside their parent `<tool_result>` as a
 `<nested_calls>` element with each call's status and the record's completeness; the parent's own
-`error` flag is unchanged. With `--json`, a stable normalization report (per-role counters + chunk
+`error` flag is unchanged. Pi system messages (the leading prompt/tool snapshot and later
+prompt-section or tool-set deltas, Pi ≥ 0.99) are accepted as context evidence — their ancestry
+keeps the active branch intact, any instruction text renders as `<message role="system">` bounded
+like other payloads, and their `sections`/`toolsAdded`/`toolsRemoved` are tolerated but not
+interpreted. With `--json`, a stable normalization report (per-role counters + chunk
 paths) rides the envelope's `render` field (`null` unless `--render`); with the human summary, one
 `render:` line per role. `--render` and `--json` are independent.
 

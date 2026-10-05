@@ -11,6 +11,11 @@ Nested-call evidence (a toolResult's projected ``message.nestedCalls``) renders 
 outer result's own flag, never derived from its children, and omitted arguments are never
 invented. A transcript without the record renders byte-identically to one predating it.
 
+System entries (Pi's persisted system prompt/tool snapshot and its deltas) render through the
+generic ``<message role="system">`` arm with their text bounded like any payload; an empty
+snapshot/delta is pruned as non-substantive (its ``sections``/tool deltas are not projected); a
+system entry is never rendered as ``<user>``.
+
 This is the **serialize-edge** companion to the lenient parser: the report shapes here are frozen
 domain dataclasses; their ``OutputModel`` projection lives in the command file
 (``perk/cli/commands/learn/evidence_cmd.py``). This module imports the parser; it does **not**
@@ -234,13 +239,20 @@ def _dedup(entries: list[SessionEntry]) -> tuple[list[SessionEntry], int]:
     """Step 4a — collapse byte-identical EVIDENCE payloads: keep the first, replace each later
     occurrence with a one-line ``↑ duplicate of entry <id>`` pointer (which stands for the whole
     payload, nested calls included). One duplicate-group is counted per collapsed set. PRESERVED
-    entries are exempt."""
+    entries are exempt.
+
+    An entry :func:`_is_substantive` would drop is never a dedup candidate — it is appended
+    untouched, neither registered as a signature nor matched against one. Dedup runs before the
+    substantiveness prune, so an empty entry (a system delta with ``content: ""``, an empty
+    toolResult) that matched an earlier empty entry would otherwise become a ``↑ duplicate``
+    pointer that survives the prune as a dangling reference to an entry that was itself pruned.
+    """
     seen: dict[tuple[object, ...], str | None] = {}
     collapsed: set[tuple[object, ...]] = set()
     groups = 0
     out: list[SessionEntry] = []
     for entry in entries:
-        if not _is_evidence(entry):
+        if not _is_evidence(entry) or not _is_substantive(entry):
             out.append(entry)
             continue
         sig = _signature(entry)
@@ -490,6 +502,7 @@ def _render_message(entry: SessionEntry) -> str:
         return _render_tool_result(entry)
     if entry.role == "assistant":
         return _render_assistant(entry)
+    # `system` lands here on purpose: context evidence, never a `<user>` turn.
     role = escape_xml(entry.role or "unknown")
     return f'<message role="{role}" id="{eid}">{escape_xml(entry.text)}</message>'
 

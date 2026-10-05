@@ -612,9 +612,9 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   from a read-write session, the constant bump + its test pin, an archive record). Body version
   numbers are event stamps, never currency claims. Guidance baseline (doctor constant): 0.75.0
   (`docs/design/archive/pi-subagents-0.75.0-reverify.md` — stamped on the source re-read, the
-  offline/doctor/scout halves and the Pi 1.0.0 trust rows, with the owner's `/pr-review-browser`
-  on the change's PR as the merge-blocking gate; the plan-door browser half is **owed** by owner
-  election and is appended from the first planning session on 0.75.0). Earlier baselines: 0.73.1
+  offline/doctor/scout halves and the Pi 1.0.0 trust rows; the change merged without its PR-door
+  browser outcome, so a follow-up PR carried both browser legs, and the plan-door and PR-door
+  halves both **passed** on the Pi 0.99.2 host). Earlier baselines: 0.73.1
   (every live half passed), 0.70.1. Last source re-read of the mechanics
   in this doc: the installed 0.75.0 (compiled `src/**/*.js`; body paths name the upstream `.ts`
   modules, whose anchors survive compilation) — provenance, not a currency promise.

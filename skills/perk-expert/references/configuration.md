@@ -105,8 +105,9 @@ own committed entry until rebased. perk's waves need pi-subagents' workflow scri
 `disabledFeatures` entry of `workflow-scripts` in pi-subagents' `config.json` fails every wave with
 the engine's own setting-naming message (per the engine source, `missions` and
 `extension-bindings` refuse every wave too). The doctor `subagent-compat` stamp
-(`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`, currently 0.75.0 — source re-verified; doctor, scout and
-PR-door browser waves on the Pi 0.99.2 host; the plan-door browser half is owed) records what
+(`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`, currently 0.75.0 — source re-verified; the Pi 1.0.0 trust
+matrix passed, and the doctor and scout waves and both browser-door waves, plan door and PR door,
+passed on the Pi 0.99.2 host) records what
 perk's guidance was verified against — a separate fact from this pin
 (`docs/design/archive/pi-subagents-0.75.0-reverify.md`).
 
