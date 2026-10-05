@@ -115,7 +115,7 @@ function decoded(raw: unknown, manifestPath: string = MANIFEST_PATH): DreamManif
   return (result as { ok: true; manifest: DreamManifest }).manifest;
 }
 
-/** Parse the lane items the module rendered into the spawned workflowScript (the established
+/** Parse the lane items the module rendered into the spawned script (the established
  * `runs.all(` … `);\nreturn` slice — lane planning is module-private, so composition is
  * asserted through the injected adapter's recorded spawn). */
 function spawnedLaneItems(
@@ -479,7 +479,7 @@ test("lane composition: code-owned keys, semantic labels, per-key task identity 
   const manifest = decoded(TWO_LANE_RAW);
   const adapter = createMemoryWaveAdapter();
   await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
-  const items = spawnedLaneItems(adapter.calls.spawn[0]?.workflowScript ?? "");
+  const items = spawnedLaneItems(adapter.calls.spawn[0]?.script ?? "");
   assert.deepEqual(
     items.map((item) => item.key),
     ["lane.1", "lane.2"],
@@ -522,7 +522,7 @@ test("lane composition: hostile ids never reach the key — fixed lane.<ordinal>
   );
   const adapter = createMemoryWaveAdapter();
   await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
-  const items = spawnedLaneItems(adapter.calls.spawn[0]?.workflowScript ?? "");
+  const items = spawnedLaneItems(adapter.calls.spawn[0]?.script ?? "");
   const keys = items.map((item) => item.key);
   assert.deepEqual(keys, ["lane.1", "lane.2", "lane.3", "lane.4"]);
   for (const [i, key] of keys.entries()) {
@@ -1022,12 +1022,12 @@ test("runDreamAnalystWave: all-valid multi-lane → complete, analyses under sem
   assert.equal(spawn?.context, "fresh");
   assert.equal(spawn?.model, "faux/dream", "the caller's model reaches the spawn params");
   assert.deepEqual(spawn?.outputSchema, DREAM_ANALYST_REPORT_SCHEMA);
-  assert.match(spawn?.workflowScript ?? "", /perk\.dream-analyst/);
+  assert.match(spawn?.script ?? "", /perk\.dream-analyst/);
   // The orchestration keys AND the semantic labels both ride the spawned items.
-  assert.match(spawn?.workflowScript ?? "", /"lane\.1"/);
-  assert.match(spawn?.workflowScript ?? "", /"lane\.2"/);
-  assert.match(spawn?.workflowScript ?? "", /"pi-extension-1"/);
-  assert.match(spawn?.workflowScript ?? "", /"workflow-1"/);
+  assert.match(spawn?.script ?? "", /"lane\.1"/);
+  assert.match(spawn?.script ?? "", /"lane\.2"/);
+  assert.match(spawn?.script ?? "", /"pi-extension-1"/);
+  assert.match(spawn?.script ?? "", /"workflow-1"/);
 });
 
 test("runDreamAnalystWave: STRICT — one failed lane ⇒ incomplete, surviving analyses retained", async () => {

@@ -2,7 +2,7 @@
   "packages": [
     "..",
     "npm:@tombell/pi-diff",
-    "npm:pi-subagents@0.73.1",
+    "npm:pi-subagents@0.75.0",
     "npm:@ff-labs/pi-fff",
     "npm:pi-web-access",
     {

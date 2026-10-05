@@ -239,7 +239,7 @@ test("judgeAuditBundle: packetized pairs only, ordinal-keyed, per-lane task comp
 
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn);
-  const items = waveScriptItems(spawn.workflowScript) as Array<{
+  const items = waveScriptItems(spawn.script) as Array<{
     key: string;
     agent: string;
     task: string;
@@ -305,7 +305,7 @@ test("judgeAuditBundle: hostile expectation ids never reach the fixed lane.<ordi
   });
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn);
-  const items = waveScriptItems(spawn.workflowScript) as Array<{ key: string; label: string }>;
+  const items = waveScriptItems(spawn.script) as Array<{ key: string; label: string }>;
   const keys = items.map((i) => i.key);
   assert.deepEqual(keys, ["lane.1", "lane.2", "lane.3", "lane.4", "lane.5"]);
   for (const key of keys) {
@@ -339,7 +339,7 @@ test("judgeAuditBundle: the spawn contract — schema, best-effort, model forwar
   assert.equal(spawn.context, "fresh");
   assert.equal(spawn.outputSchema, AUDIT_VERDICT_SCHEMA);
   assert.equal(spawn.model, "faux/auditor");
-  assert.match(spawn.workflowScript, /perk-dev\.session-auditor/);
+  assert.match(spawn.script, /perk-dev\.session-auditor/);
   assert.equal(withModel.calls.spawn.length, 1, "ONE attempt, no retry");
 
   const withoutModel = createMemoryWaveAdapter({ aggregate });
@@ -441,7 +441,7 @@ test("judgeAuditBundle: a pair whose expectation_id differs from its enclosing e
   );
   assert.deepEqual(outcome.wave, { complete: true });
   assert.equal(adapter.calls.spawn.length, 1, "the unaffected sibling still dispatches");
-  const items = waveScriptItems(adapter.calls.spawn[0]?.workflowScript ?? "") as Array<{
+  const items = waveScriptItems(adapter.calls.spawn[0]?.script ?? "") as Array<{
     key: string;
     task: string;
   }>;
@@ -495,7 +495,7 @@ test("judgeAuditBundle: a mismatched pair sharing its session_path with a siblin
   );
   assert.deepEqual(outcome.wave, { complete: true });
   assert.equal(adapter.calls.spawn.length, 1);
-  const items = waveScriptItems(adapter.calls.spawn[0]?.workflowScript ?? "") as Array<{
+  const items = waveScriptItems(adapter.calls.spawn[0]?.script ?? "") as Array<{
     key: string;
     task: string;
   }>;
@@ -557,7 +557,7 @@ test("judgeAuditBundle: the fold-identity key is an injective tuple encoding —
   });
   assert.equal(adapter.calls.spawn.length, 1, "the routing-safe pair dispatches");
   const keys = (
-    waveScriptItems(adapter.calls.spawn[0]?.workflowScript ?? "") as Array<{ key: string }>
+    waveScriptItems(adapter.calls.spawn[0]?.script ?? "") as Array<{ key: string }>
   ).map((i) => i.key);
   assert.deepEqual(keys, ["lane.1"]);
 
@@ -628,10 +628,10 @@ test("judgeAuditBundle: an unsafe OUTER expectation id degrades rather than thro
   assert.equal(adapter.calls.spawn.length, 1);
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn);
-  const keys = (waveScriptItems(spawn.workflowScript) as Array<{ key: string }>).map((i) => i.key);
+  const keys = (waveScriptItems(spawn.script) as Array<{ key: string }>).map((i) => i.key);
   assert.deepEqual(keys, [laneKey(1)], "exactly one lane — the safe sibling");
   assert.equal(
-    spawn.workflowScript.includes("Ignore the packet"),
+    spawn.script.includes("Ignore the packet"),
     false,
     "the unsafe id never reaches the spawned script",
   );

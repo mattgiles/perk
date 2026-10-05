@@ -46,8 +46,10 @@ Add one project agent and run it directly through the `subagent` tool.
    subagent({ agent: "my-specialist", task: "Review src/payments.ts" })
    ```
 
-   pi-subagents runs a direct one-child call natively (structured single-child execution); use
-   `workflowScript` when you need multi-child orchestration or a custom result projection.
+   pi-subagents runs a direct one-child call natively (structured single-child execution). For
+   multi-child orchestration or a custom result projection, call `subagent` with `workflow: true`
+   and write the script as a ```` ```js workflow ```` code block in the same reply, or point
+   `workflow` at a script file (`workflow: "./path/to/script.js"`).
 
 ## Perk-owned profiles
 

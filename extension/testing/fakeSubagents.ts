@@ -3,7 +3,10 @@
 // door/pi suites previously hand-rolled per file. It answers `ping` with the advertised
 // capabilities, answers `spawn` by materializing a durable `status.json` aggregate in a real
 // temp `asyncDir` and replying with the run handle, records `stop` requests, and delivers the
-// async-complete event per the spawn's `FakeSpawnPlan` delivery mode:
+// async-complete event per the spawn's `FakeSpawnPlan` delivery mode. The inline script text is
+// read from the `script` key; like pi-subagents ≥ 0.74.0's `spawnParams`, a spawn carrying a
+// `workflowScript` key (any value, `undefined` included — the check is `Object.hasOwn`) is
+// rejected `invalid_params` with the engine's exact message and prepares no run:
 //
 //   - `"auto"` (default): the completion is emitted on a post-reply macrotask — the ordinary
 //     "run finished after the spawn reply" shape every happy-path suite drives.
@@ -146,13 +149,23 @@ export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents 
       const index = spawns.length;
       spawns.push(params);
       const plan = plans[Math.min(index, plans.length - 1)] ?? {};
+      if (Object.hasOwn(params, "workflowScript")) {
+        reply({
+          success: false,
+          error: {
+            code: "invalid_params",
+            message: "RPC spawn workflowScript was removed; pass inline script text as script.",
+          },
+        });
+        return;
+      }
       // Preparation owns a single rejection boundary. A failed assertion/evaluator is a
       // failed RPC reply, never invented settlement data or an unhandled detached rejection.
       const prepare = async (): Promise<WaveRunHandle> => {
         const asyncDir = mkdtempSync(join(tmpdir(), "perk-fake-subagents-"));
         const asyncId = basename(asyncDir);
         const handle = Object.freeze({ asyncId, asyncDir });
-        const script = String(params.workflowScript ?? "");
+        const script = String(params.script ?? "");
         let aggregate: WaveAggregate;
         let completion: Record<string, unknown>;
         if (plan.executeSettlement !== undefined) {

@@ -67,7 +67,7 @@ const CHILD_KEYS = ["key", "agent", "runId", "success", "outputState", "artifact
 
 function minimalSpawnParams(): WaveSpawnParams {
   return {
-    workflowScript: "return [];",
+    script: "return [];",
     async: true,
     mission: false,
     context: "fresh",

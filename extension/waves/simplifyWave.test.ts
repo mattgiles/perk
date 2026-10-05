@@ -318,7 +318,7 @@ test("simplifyLaneTask: a hostile draft and focus land verbatim inside their fen
   assert.equal(result.complete, true);
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn !== undefined);
-  const items = waveScriptItems(spawn.workflowScript);
+  const items = waveScriptItems(spawn.script);
   assert.equal(items.length, 1);
   assert.equal(items[0]?.task, task);
 });
@@ -354,9 +354,14 @@ test("runSimplifyWave: ONE source-bound perk.simplifier lane, module contract + 
   assert.equal(spawn.outputSchema, SIMPLIFY_REPORT_SCHEMA);
   assert.equal(spawn.model, "anthropic/claude-opus-5-5");
   assert.equal(spawn.timeoutMs, 1_234);
-  const items = waveScriptItems(spawn.workflowScript).map(
-    ({ key, agent, task, label, phase, skill }) => ({ key, agent, task, label, phase, skill }),
-  );
+  const items = waveScriptItems(spawn.script).map(({ key, agent, task, label, phase, skill }) => ({
+    key,
+    agent,
+    task,
+    label,
+    phase,
+    skill,
+  }));
   assert.deepEqual(items, [
     {
       key: "simplify",
@@ -368,8 +373,8 @@ test("runSimplifyWave: ONE source-bound perk.simplifier lane, module contract + 
     },
   ]);
   // Preflight metadata is never serialized into the workflow script.
-  assert.doesNotMatch(spawn.workflowScript, /skillFile/);
-  assert.doesNotMatch(spawn.workflowScript, /requiredSkill/);
+  assert.doesNotMatch(spawn.script, /skillFile/);
+  assert.doesNotMatch(spawn.script, /requiredSkill/);
   assert.deepEqual(preflighted, [PONYTAIL_CORE_SKILL]);
 });
 

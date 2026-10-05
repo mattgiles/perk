@@ -760,11 +760,7 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 # re-verify of the guidance. Distinct from the settings pin (`init.SUBAGENTS_PACKAGE`, what
 # consumers install, converged by `settings-wiring`): the two facts coincide today but move
 # independently.
-_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.73.1"
-
-# The first pi-subagents release perk's report waves cannot drive (it removed the
-# `workflowScript` RPC `spawn` parameter perk sends).
-_SUBAGENTS_FIRST_INCOMPATIBLE_VERSION = "0.74.0"
+_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.75.0"
 
 
 def _installed_subagents_version(pkg_dir: Path) -> str | None:
@@ -825,8 +821,7 @@ def _subagent_compat_check(root: Path) -> Check:
             f"pi-subagents {version} installed — perk's guidance was verified against {verified}",
             f"{init.SUBAGENTS_PACKAGE} is the settings pin (settings-wiring); mechanics perk's "
             "guidance leans on are source-read-derived at the verified version and unverified "
-            f"at the installed one; {_SUBAGENTS_FIRST_INCOMPATIBLE_VERSION}+ is known "
-            "incompatible (it removed the workflowScript RPC spawn parameter perk's waves send)",
+            "at the installed one",
             "Run perk doctor --fix to restore the pinned entry if settings-wiring reports drift "
             "(Pi reinstalls the pinned version at the next launch); otherwise re-verify perk's "
             "subagent guidance against the installed pi-subagents "

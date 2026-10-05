@@ -1,4 +1,4 @@
-// The report-wave module's own suite: the rendered-script shape pins (the tested workflowScript
+// The report-wave module's own suite: the rendered-script shape pins (the tested script
 // is the module's headline artifact — observed through the adapter seam's spawn params, since the
 // renderer is module-private), the hostile-task embedding proof, and the full lifecycle
 // normalization matrix driven through the in-memory adapter (wrapped via `reportWaveOver`) —
@@ -236,7 +236,7 @@ test("completion-before-reply retains the first match, discarding foreign and du
         return handle;
       },
     },
-    { flow: "race", workflowScript: "return [];", outputSchema: {} },
+    { flow: "race", script: "return [];", outputSchema: {} },
   );
   assert.ok(start.ok);
   memory.emitCompletion({ ...start.handle, children: [{ key: "late" }] });
@@ -277,7 +277,7 @@ for (const outcome of ["timeout", "cancelled"] as const) {
           return memory.readAggregate(handle);
         },
       },
-      { flow: "stop", workflowScript: "return [];", outputSchema: {}, timeoutMs: 30 },
+      { flow: "stop", script: "return [];", outputSchema: {}, timeoutMs: 30 },
       controller.signal,
     );
     assert.ok(start.ok);
@@ -391,12 +391,12 @@ const PREFLIGHT_OK = async (): Promise<{ ok: true }> => ({ ok: true });
 
 /**
  * Render through the seam: the renderer is module-private, so the script bytes are observed the
- * only way production can — as the spawned `workflowScript` on the adapter's spawn params.
+ * only way production can — as the spawned `script` on the adapter's spawn params.
  */
 async function renderedScript(overrides: Partial<ReportWaveRequest>): Promise<string> {
   const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
   await reportWaveOver(adapter).run(makeSpec({ completeness: "best-effort", ...overrides }));
-  const script = adapter.calls.spawn[0]?.workflowScript;
+  const script = adapter.calls.spawn[0]?.script;
   assert.ok(script !== undefined, "the wave spawned no script");
   return script;
 }
@@ -441,7 +441,7 @@ for (const method of ["start", "run"] as const) {
     assert.deepEqual(spawn.outputSchema, spec.outputSchema);
     assert.equal("extensionBindings" in spawn, false);
     assert.equal("execution" in spawn, false);
-    const items = waveScriptItems(spawn.workflowScript);
+    const items = waveScriptItems(spawn.script);
     assert.deepEqual(
       items.map((item) => item.agent),
       REPORT_ROLES,
@@ -460,7 +460,7 @@ for (const method of ["start", "run"] as const) {
         assert.equal(field in item, false, field);
     }
     assert.ok(
-      spawn.workflowScript.endsWith(
+      spawn.script.endsWith(
         "return reports.map(({key, ok, error, structuredOutput}) => " +
           "({key, ok, error: error ?? null, report: structuredOutput ?? null}));",
       ),
@@ -692,9 +692,11 @@ test("wave.run: spawn params carry the fixed module contract + spec fields", asy
   assert.equal(adapter.calls.spawn.length, 1);
   const spawned = adapter.calls.spawn[0];
   assert.ok(spawned !== undefined);
-  const { workflowScript, ...params } = spawned;
+  // pi-subagents ≥ 0.74.0 rejects any `workflowScript` key (even `undefined`-valued).
+  assert.equal(Object.hasOwn(spawned, "workflowScript"), false);
+  const { script, ...params } = spawned;
   assert.deepEqual(
-    waveScriptItems(workflowScript).map((item) => item.key),
+    waveScriptItems(script).map((item) => item.key),
     ["plan-fidelity", "custom-scope", "ponytail"],
   );
   assert.deepEqual(params, {
@@ -744,7 +746,7 @@ test("wave.run: failed required-skill preflight skips only that lane and stays u
   ]);
   const spawned = adapter.calls.spawn[0];
   assert.ok(spawned !== undefined);
-  assert.doesNotMatch(spawned.workflowScript, /ponytail/);
+  assert.doesNotMatch(spawned.script, /ponytail/);
   const attempt = toAttemptReceipt(
     "pr-review",
     1,
@@ -1325,7 +1327,7 @@ test("receipt data never alters complete/reports/failures (behavior parity)", as
 function makeScriptSpec(overrides: Partial<WaveScriptSpec> = {}): WaveScriptSpec {
   return {
     flow: "adversarial-review",
-    workflowScript: "return runs.all([]);",
+    script: "return runs.all([]);",
     outputSchema: { type: "object", properties: { angle: { type: "string" } } },
     timeoutMs: 5_000,
     ...overrides,

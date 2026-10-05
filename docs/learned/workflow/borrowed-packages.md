@@ -51,7 +51,7 @@ Adding (or removing) a borrowed package touches a fixed set of surfaces **in one
 1. `BORROWED_PACKAGES` in `src/perk/convergence/init/settings.py` — normally a plain unpinned
    `npm:` string plus one rationale line. A borrow that must be installed but ambiently disabled
    uses the filtered object-form exception described below. A borrow whose upstream breaks a
-   surface perk sends carries a version (`SUBAGENTS_PACKAGE = "npm:pi-subagents@0.73.1"`, the one
+   surface perk sends carries a version (`SUBAGENTS_PACKAGE = "npm:pi-subagents@0.75.0"`, the one
    today): a version-carrying desired spec is reconciled forward in place by
    `_merge_static_packages` (contracts §8.6a), so an existing consumer's unpinned entry is
    `settings-wiring` drift — update every test that matches the borrowed entry by exact string.

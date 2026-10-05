@@ -1037,7 +1037,7 @@ def test_subagent_compat_version_mismatch_is_warn_never_fail(scaffolded_perk_rep
     assert compat.status == "warn" and compat.group == "package"
     assert "9.9.9" in compat.message and _SUBAGENTS_GUIDANCE_VERIFIED_VERSION in compat.message
     assert init.SUBAGENTS_PACKAGE in compat.detail
-    assert "0.74.0+ is known incompatible" in compat.detail
+    assert "known incompatible" not in compat.detail  # no version ceiling: the pin is the floor
     assert "perk doctor --fix" in compat.remediation
     assert "pi-subagents-reverify.md" in compat.remediation
     assert "_SUBAGENTS_GUIDANCE_VERIFIED_VERSION" in compat.remediation
@@ -1070,7 +1070,7 @@ def test_subagent_compat_unreadable_package_json_is_warn(scaffolded_perk_repo, m
 
 def test_subagent_compat_verified_version_stamp_is_pinned():
     # Only a full re-verify (docs/developers/pi-subagents-reverify.md) moves the stamp.
-    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.73.1"
+    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.75.0"
 
 
 # --- subagent-package-scope: a user-scope pi-subagents entry beside the project entry --------

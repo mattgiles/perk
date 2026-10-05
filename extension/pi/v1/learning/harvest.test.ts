@@ -600,10 +600,10 @@ test("tool e2e: typed reports flow through, and the configured model rides the s
     );
     // The "pin the glue" rule: the configured model reaches the real spawn params.
     assert.equal(fake.spawns.length, 1);
-    const spawn = fake.spawns[0] as { workflowScript?: string; model?: string };
+    const spawn = fake.spawns[0] as { script?: string; model?: string };
     assert.equal(spawn.model, "faux/harvester-model");
-    assert.match(spawn.workflowScript ?? "", /perk\.harvest-analyst/);
-    assert.ok(spawn.workflowScript?.includes(manifestPath), "the task carries the BOUND path");
+    assert.match(spawn.script ?? "", /perk\.harvest-analyst/);
+    assert.ok(spawn.script?.includes(manifestPath), "the task carries the BOUND path");
   } finally {
     h.dispose();
   }

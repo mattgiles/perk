@@ -131,7 +131,7 @@ test("scoutLaneTask: a hostile brief lands verbatim between the fixed prefix/suf
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn !== undefined);
   // The rendered script still parses (JSON.stringify fenced the body into the array literal).
-  const items = waveScriptItems(spawn.workflowScript);
+  const items = waveScriptItems(spawn.script);
   assert.equal(items.length, 1);
   const task = items[0]?.task;
   assert.equal(typeof task, "string");
@@ -174,7 +174,7 @@ test("runScoutWave: one perk.scout lane per brief in order, module contract + ac
   assert.equal(spawn.outputSchema, SCOUT_REPORT_SCHEMA);
   assert.equal(spawn.model, "anthropic/claude-haiku-4-5");
   assert.equal(spawn.timeoutMs, 1_234);
-  const items = waveScriptItems(spawn.workflowScript);
+  const items = waveScriptItems(spawn.script);
   assert.deepEqual(
     items.map(({ key, agent, task, label }) => ({ key, agent, task, label })),
     THREE_BRIEFS.map((b) => ({

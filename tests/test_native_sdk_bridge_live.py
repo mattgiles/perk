@@ -7,10 +7,10 @@ a fixture "Pi"; this smoke drives the REAL ``pi`` bin over this checkout (its in
 requested export names must all agree with the running bundle. A facade named-export mismatch
 would surface as Pi's per-extension ``Failed to load extension`` line while perk kept running —
 so the absence of that line, plus both consumers having registered tools, is the assertion. The
-installed pi-subagents must also BE the managed pin: a stale install (say 0.74.0, which dropped the
-RPC parameter perk's waves send) would still load and register tools, so a version check on the
-artifact itself — not the configured source label — is what keeps this proof about the pinned
-engine.
+installed pi-subagents must also BE the managed pin: a stale install (an older release left in
+``.pi/npm`` that the waves were never re-verified against) would still load and register tools,
+so a version check on the artifact itself — not the configured source label — is what keeps this
+proof about the pinned engine.
 
 Hermetic like the rest of the suite: the agent dir is the throwaway ``PI_CODING_AGENT_DIR`` the
 autouse fixture sets (resolved through :func:`launch_pi_agent_dir`, the precedence ``exec_pi``
@@ -112,7 +112,7 @@ def test_real_pi_selfcheck_reports_the_bridge_installed_and_both_consumers_loade
     per_source = next((line for line in stderr.splitlines() if "per source:" in line), None)
     assert per_source is not None, f"no per-source tool row:\n{stderr}"
     for name in CONSUMERS:
-        # A version-pinned source (`npm:pi-subagents@0.73.1`) carries its spec in the row.
+        # A version-pinned source (`npm:pi-subagents@0.75.0`) carries its spec in the row.
         match = re.search(rf"npm:{re.escape(name)}(?:@[^=;\s]+)?=(\d+)", per_source)
         assert match is not None and int(match.group(1)) >= 1, (
             f"{name} registered no tools through the facades:\n{per_source}"

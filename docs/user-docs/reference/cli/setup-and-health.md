@@ -65,9 +65,9 @@ Diagnose the perk-managed repo, reporting a grouped health view. `--fix` re-conv
 managed pieces (and seeds missing config) without ever mutating GitHub or overwriting your config
 edits. `--fix` also **reconciles perk's own npm version pin** (`npm:@mgiles/perk`) in
 `.pi/settings.json` to the version this perk wants (e.g. a stale `npm:@mgiles/perk@0.0.0` → the
-pinned `@{version}`), and the borrowed `npm:pi-subagents` entry to its pin (`npm:pi-subagents@0.73.1`
-— an unpinned or differently pinned entry is rewritten in place; pi-subagents 0.74.0 removed the
-RPC spawn parameter perk's report waves send). perk's own extension is delivered as the pinned `npm:@mgiles/perk` install
+pinned `@{version}`), and the borrowed `npm:pi-subagents` entry to its pin (`npm:pi-subagents@0.75.0`
+— an unpinned or differently pinned entry is rewritten in place; perk's report waves send the
+`script` RPC spawn key, which releases before 0.74.0 do not accept). perk's own extension is delivered as the pinned `npm:@mgiles/perk` install
 (below); the older `git:`-clone delivery path has been retired. If your repo was previously on the
 git clone, `perk doctor --fix` **migrates it forward** by removing the now-orphaned
 `.pi/git/<host>/<path>` clone (filesystem-only; idempotent — a no-op once gone).
@@ -131,8 +131,7 @@ pi-subagents version. `info` when the package is not installed (pi lazy-installs
 version perk's guidance was verified against (`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`). The install
 itself is pinned by `settings-wiring` (repaired by `--fix`); the guidance stamp is a distinct fact —
 what perk's guidance was re-read against, not what consumers install — so a mismatch says
-"re-verify" (`docs/developers/pi-subagents-reverify.md`), not "broken"; the warn detail names
-0.74.0 and newer as known incompatible.
+"re-verify" (`docs/developers/pi-subagents-reverify.md`), not "broken".
 The `package` group also carries the report-only `subagent-package-scope` check: it reads the
 user-scope `settings.json` in the launch-precedence agent dir (`PI_CODING_AGENT_DIR` → `[pi]
 agent_dir` → `~/.pi/agent`) beside the project `.pi/settings.json`, and warns — never fails, no

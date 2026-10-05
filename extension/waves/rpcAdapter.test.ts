@@ -95,7 +95,7 @@ function pingData(overrides: Record<string, unknown> = {}): Record<string, unkno
 
 function spawnParams(): WaveSpawnParams {
   return {
-    workflowScript: "return [];",
+    script: "return [];",
     async: true,
     mission: false,
     context: "fresh",
@@ -280,7 +280,7 @@ test("a success:false reply narrows to a typed throw carrying code and message",
   respond(bus, (request) =>
     request.method === "ping"
       ? { success: true, data: pingData() }
-      : { success: false, error: { code: "invalid_params", message: "workflowScript required" } },
+      : { success: false, error: { code: "invalid_params", message: "script required" } },
   );
   const events: DuplicateResponderEvent[] = [];
   const adapter = createRpcWaveAdapter(bus, { onDuplicateResponder: (e) => events.push(e) });
@@ -289,7 +289,7 @@ test("a success:false reply narrows to a typed throw carrying code and message",
   // duplicate-responder callback.
   await assert.rejects(adapter.spawn(spawnParams()), (error: unknown) => {
     assert.ok(error instanceof Error);
-    assert.equal(error.message, "invalid_params: workflowScript required");
+    assert.equal(error.message, "invalid_params: script required");
     return true;
   });
   assert.deepEqual(events, []);
@@ -426,7 +426,7 @@ test("hold: a ghost no_active_session then a DIFFERENT live error rejects immedi
       captured.push(request);
       return request.method === "ping"
         ? { success: true, data: pingData() }
-        : { success: false, error: { code: "invalid_params", message: "workflowScript required" } };
+        : { success: false, error: { code: "invalid_params", message: "script required" } };
     });
     const events: DuplicateResponderEvent[] = [];
     const adapter = createRpcWaveAdapter(bus, { onDuplicateResponder: (e) => events.push(e) });
@@ -434,7 +434,7 @@ test("hold: a ghost no_active_session then a DIFFERENT live error rejects immedi
     const started = Date.now();
     await assert.rejects(adapter.spawn(spawnParams()), (error: unknown) => {
       assert.ok(error instanceof Error);
-      assert.equal(error.message, "invalid_params: workflowScript required");
+      assert.equal(error.message, "invalid_params: script required");
       return true;
     });
     assert.ok(Date.now() - started < 2000, "the live error settles the request, not the timeout");

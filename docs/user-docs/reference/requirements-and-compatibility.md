@@ -112,15 +112,28 @@ The perk CLI and the `@mgiles/perk` Pi extension are expected to have matching v
 mismatch produces a soft, non-fatal launch warning. `perk doctor --fix` reconverges the
 repo-managed package pin and reinstalls the matching extension.
 
-`pi-subagents` is pinned to 0.73.1: `perk init` writes `npm:pi-subagents@0.73.1` into
+`pi-subagents` is pinned to 0.75.0: `perk init` writes `npm:pi-subagents@0.75.0` into
 `.pi/settings.json` and rewrites an existing unpinned or differently pinned entry in place, and
-`perk doctor` reports such an entry as `settings-wiring` drift that `perk doctor --fix` repairs (Pi
-then installs the pinned version at the next launch). The pin exists because pi-subagents 0.74.0
-removed the `workflowScript` RPC spawn parameter perk's report waves send, so every perk wave
-fails on 0.74.0 or newer until perk migrates. Separately, `perk doctor`'s `subagent-compat` check
-compares the installed version with the version perk's engine guidance was last re-verified
-against (currently 0.73.1, see `docs/design/archive/pi-subagents-0.73.1-reverify.md`) and warns
-on any other version; it is an early-warning check that never fails the doctor run.
+`perk doctor` reports such an entry as `settings-wiring` drift that `perk doctor --fix` repairs.
+The pin exists because perk's report waves send the inline script text under pi-subagents' RPC
+spawn key `script`, which releases before 0.74.0 do not accept; 0.75.0 is also the first release
+whose background children start on Pi 1.0.0. Pi installs the version that the checkout's own
+committed `.pi/settings.json` names, at launch. An existing repo gets the new entry from
+`perk init` or `perk doctor --fix` after you upgrade perk. An older branch or worktree keeps its
+own committed entry (and its older perk) until it is rebased.
+
+perk's waves need pi-subagents' workflow scripts. A `disabledFeatures` list in pi-subagents'
+`config.json` that contains `workflow-scripts` fails every wave with the engine's own message
+naming that setting. Per the engine source, `missions` (perk spawns with `mission: false`) and
+`extension-bindings` (every perk lane carries its read-only restriction packet) also refuse
+every wave.
+
+Separately, `perk doctor`'s `subagent-compat` check compares the installed version with the
+version perk's engine guidance was last re-verified against, and warns on any other version. It
+is an early-warning check that never fails the doctor run. The stamp is currently 0.75.0: the
+source was re-verified, and the doctor, scout and PR-door browser waves passed on the Pi 0.99.2
+host. The plan-door browser half is owed and will be appended when the first planning session on
+0.75.0 runs it. See `docs/design/archive/pi-subagents-0.75.0-reverify.md`.
 
 Plannotator 0.27.16 or newer is required by the stack review browser (`/stack-review-browser`,
 `perk objective stack review`), which opens Plannotator's static-patch mode over the pinned

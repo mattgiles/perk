@@ -12,7 +12,9 @@
 // pinned here (only the versioned request/reply literals are; that is what the versioned
 // envelope is for). `pi-subagents` is not an allowed bare import (`bareImportGuard.test.ts`), so
 // its constants/types cannot be imported — the doctor `subagent-compat` version warning is the
-// drift tripwire, and every pi-subagents bump warrants an adapter re-verify.
+// drift tripwire, and every pi-subagents bump warrants an adapter re-verify. Re-verified at
+// 0.75.0: `spawn` takes the inline script text as `script` (0.74.0 removed `workflowScript`/
+// `workflowScriptPath`; 0.75.0 rejects them `invalid_params` with the message naming `script`).
 //
 // REPLY SELECTION (the context-less hold): pi's two-phase trust load (pi 0.85.1,
 // `loadProjectTrustExtensions` → `loadFinalExtensionSet`) loads the USER-scope packages'
@@ -372,6 +374,10 @@ export function createRpcWaveAdapter(bus: WaveBus, options?: RpcWaveAdapterOptio
       return advertised;
     },
 
+    // The params object is forwarded verbatim as the request's `params`, so the wire key is
+    // `WaveSpawnParams.script`. A `success: false` reply's `code: message` (the engine's
+    // `disabledFeatures` setting-naming error included) surfaces verbatim as the `spawn-failed`
+    // detail — no perk-side mapping, no retry under another parameter dialect.
     async spawn(params: WaveSpawnParams): Promise<WaveRunHandle> {
       const data = await call("spawn", params, replyTimeoutMs());
       const details = isRecord(data) && isRecord(data.details) ? data.details : {};

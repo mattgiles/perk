@@ -439,19 +439,15 @@ test("catalog ordinals take precedence over colliding owner-local module aliases
 function nested() {
   client.complete("nested call");
   pi.on("before_agent_start", () => "nested event");
-  return { workflowScript: "nested workflow" };
 }
 client.complete("module call");
-pi.on("before_agent_start", () => "module event");
-const workflow = { workflowScript: "module workflow" };`;
+pi.on("before_agent_start", () => "module event");`;
 
   const expectations = [
     ["symbol:module/call:complete/0/argument:0", '"nested call"'],
     ["symbol:module/call:complete/1/argument:0", '"module call"'],
     ["symbol:module/event:before_agent_start/0/handler", '() => "nested event"'],
     ["symbol:module/event:before_agent_start/1/handler", '() => "module event"'],
-    ["symbol:module/property:workflowScript/0", '"nested workflow"'],
-    ["symbol:module/property:workflowScript/1", '"module workflow"'],
   ] as const;
   for (const [selector, expected] of expectations) {
     assert.equal(focus(source, selector), expected);
@@ -460,7 +456,6 @@ const workflow = { workflowScript: "module workflow" };`;
   for (const [selector, expected] of [
     ["symbol:nested/call:complete/0/argument:0", '"nested call"'],
     ["symbol:nested/event:before_agent_start/0/handler", '() => "nested event"'],
-    ["symbol:nested/property:workflowScript/0", '"nested workflow"'],
   ] as const) {
     assert.equal(focus(source, selector), expected);
   }
@@ -480,13 +475,12 @@ test("delimiter-bearing owners resolve by exact identity before fallback parsing
   assert.equal(focus(source, selectors[0] ?? ""), '"text"');
 });
 
-test("event handlers and workflow properties use exact callback and initializer targets", () => {
+test("event handlers use exact callback targets", () => {
   const source = `
 function install() {
   pi.on("before_agent_start", ((event) => ({ event })) satisfies Handler);
   pi.on("before_agent_start");
   pi.on("before_agent_start", handler);
-  return { workflowScript: "run workflow" };
 }`;
   assert.equal(
     focus(source, "symbol:install/event:before_agent_start/0/handler"),
@@ -501,7 +495,6 @@ function install() {
     assert.equal(unsupported.status, "unresolved");
     assert.equal(unsupported.reason, "unsupported-source-shape");
   }
-  assert.equal(focus(source, "symbol:install/property:workflowScript/0"), '"run workflow"');
 });
 
 test("focused expression ranges exclude surrounding comments and trivia", () => {
@@ -512,13 +505,9 @@ pi.registerTool({
 });
 function owner() {
   client.complete( /* call leading */ ("call") /* call trailing */ );
-  return {
-    workflowScript: /* property leading */ ("workflow") /* property trailing */,
-  };
 }`;
   assert.equal(focus(source, "tool:demo.description"), '("tool")');
   assert.equal(focus(source, "symbol:owner/call:complete/0/argument:0"), '("call")');
-  assert.equal(focus(source, "symbol:owner/property:workflowScript/0"), '("workflow")');
 });
 
 test("direct prose accepts literals, templates, plus builders, and transparent wrappers only", () => {
@@ -558,7 +547,6 @@ test("fallback grammar separates unsupported selectors from stale supported sele
     "tool:demo.description",
     "symbol:owner/call:complete/0/argument:0",
     "symbol:owner/event:before_agent_start/0/handler",
-    "symbol:owner/property:workflowScript/0",
   ];
   for (const selector of notFound) {
     const unresolved = result(source, selector);
@@ -574,7 +562,6 @@ test("fallback grammar separates unsupported selectors from stale supported sele
     "symbol:module",
     "symbol:owner/call:unknown/0/argument:0",
     "symbol:owner/call:completeStructured/system",
-    "symbol:owner/property:workflowScript/00",
   ]) {
     const unresolved = result(source, selector);
     assert.ok(unresolved);
@@ -627,7 +614,7 @@ test("diagnostic locations honor every TypeScript line break and EOF insertion",
 
 test("real discovery output stays resolver-covered and all resolved ranges recompose", async () => {
   const catalog = scanRepository(ROOT);
-  assert.equal(catalog.candidates.length, 98);
+  assert.equal(catalog.candidates.length, 97);
   assert.ok(
     catalog.candidates.some(
       (candidate) => candidate.id === "typescript-tool:resolve_submit_conflicts",

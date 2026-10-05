@@ -864,7 +864,7 @@ test("tool: explore_objective_node end-to-end — trimmed params in the task, mo
     assert.equal(fake.spawns.length, 1);
     assert.equal(fake.spawns[0]?.model, "test-explorer-model");
     assert.deepEqual(fake.spawns[0]?.outputSchema, OBJECTIVE_EXPLORER_REPORT_SCHEMA);
-    const lanes = waveScriptItems(String(fake.spawns[0]?.workflowScript ?? "")) as Array<{
+    const lanes = waveScriptItems(String(fake.spawns[0]?.script ?? "")) as Array<{
       key: string;
       agent: string;
       task: string;

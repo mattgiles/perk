@@ -458,7 +458,7 @@ test("runSimplifyAndInject: nodeScoped + model thread into the one spawn", async
     assert.equal(adapter.calls.spawn.length, 1);
     const spawn = adapter.calls.spawn[0];
     assert.equal(spawn?.model, "test-simplifier-model");
-    const task = String(waveScriptItems(spawn?.workflowScript ?? "")[0]?.task ?? "");
+    const task = String(waveScriptItems(spawn?.script ?? "")[0]?.task ?? "");
     assert.equal(task.includes(SIMPLIFY_NODE_SCOPE_LINE), nodeScoped);
   }
 });
@@ -838,7 +838,7 @@ test("doors: /simplify-plan in objective-plan — the configured model, the sche
     assert.equal(fake.spawns.length, 1);
     assert.equal(fake.spawns[0]?.model, "test-simplifier-model");
     assert.deepEqual(fake.spawns[0]?.outputSchema, SIMPLIFY_REPORT_SCHEMA);
-    const lanes = waveScriptItems(String(fake.spawns[0]?.workflowScript ?? "")) as {
+    const lanes = waveScriptItems(String(fake.spawns[0]?.script ?? "")) as {
       key: string;
       agent: string;
       task: string;
@@ -907,7 +907,7 @@ test("doors: /simplify-objective — the RENDERED draft is cut; the live preserv
     const draft = decodedArtifact(cwd);
     await h.runCommandHandler("simplify-objective", "");
     await until(() => injected.length === 1, "the injection");
-    const lanes = waveScriptItems(String(fake.spawns[0]?.workflowScript ?? ""));
+    const lanes = waveScriptItems(String(fake.spawns[0]?.script ?? ""));
     assert.equal(
       lanes[0]?.task,
       simplifyLaneTask({
@@ -950,7 +950,7 @@ test("doors: a plan draft rewritten mid-run → the moved note; stage plan → n
     await h.invokeTool("plan_draft", { plan: DRAFT_MD });
     await h.runCommandHandler("simplify-plan", "full");
     await until(() => fake.spawns.length === 1, "the spawn");
-    const task = String(waveScriptItems(String(fake.spawns[0]?.workflowScript ?? ""))[0]?.task);
+    const task = String(waveScriptItems(String(fake.spawns[0]?.script ?? ""))[0]?.task);
     assert.equal(task.includes(SIMPLIFY_NODE_SCOPE_LINE), false);
     await h.invokeTool("plan_draft", { plan: `${DRAFT_MD}3. Three.\n` });
     fake.complete(0);

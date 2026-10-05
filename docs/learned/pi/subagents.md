@@ -287,8 +287,9 @@ promised the staging directory was still there; review caught it
 
 **Surfaces.** Direct `{agent, task}` is the idiomatic one-child shape — a native structured single
 mode (`normalizePublicSubagentExecution`; `output: true` by default; synchronous under
-`asyncByDefault: false`). `workflowScript`, `workflowScriptPath` and named
-`workflow` resources are the multi-agent surfaces; mixing execution fields is rejected (`action` has
+`asyncByDefault: false`). The tool's `workflow` field is the multi-agent surface (`true` runs the
+reply's ```` ```js workflow ```` block, a string with `/` loads a script file, any other string
+names a workflow resource); the RPC `spawn` takes inline script text as `script`; mixing execution fields is rejected (`action` has
 `validate` / `schedule.create` exceptions). A
 fan-out is ONE async workflow: `runs.all` over **config-object** items is all-settled — a failed lane
 resolves `{key, ok: false, output, error}`, siblings never sink; `runs.run(…)` thenables instead run
@@ -554,6 +555,16 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   rewriting the system prompt. 2026-10-01: perk pinned consumers to 0.73.1 because 0.74.0 removed
   the `workflowScript` RPC spawn parameter (record:
   `docs/design/archive/pi-subagents-0.73.1-reverify.md`).
+- **0.74.0 / 0.75.0 (2026-10) — source re-read at 0.75.0; pin moved** — 0.74.0 renames the RPC
+  spawn's inline script key to `script` (a `workflowScript`/`workflowScriptPath` key is rejected
+  `invalid_params`; the tool takes `workflow: true|path|name`), forwards the parent's project
+  trust into each child's `SettingsManager`, keeps background workflows running across `/reload`
+  or a resume and reuses their finished children on an identical relaunch (`stopCause:
+  "runtime-replaced"`), adds `toolActivation` and `disabledFeatures`, and fixes short-id stops;
+  0.75.0 makes the `pi-agent-core/node` host alias optional, so background children start on Pi
+  1.0.0, and adds `requireForAllRunners` to required child extensions. 2026-10-05: perk moved its
+  wave spawn to `script` and the consumer pin and guidance stamp to 0.75.0 (record:
+  `docs/design/archive/pi-subagents-0.75.0-reverify.md`).
 - **2026-09 — `simplifier`** — the def landed dormant (#2557) and flipped live (#2561); the census
   site list grew to the realized set above. Size watch: this doc is ~46 KB — a split is due at the
   next dream pass.
@@ -587,27 +598,25 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   `src/runs/{foreground,background,shared}/`, `src/intercom/`, `src/extension/rpc.ts`,
   `src/workflows/{scripted-workflow,workflow-child-summary}.ts`,
   `src/shared/{artifacts,types,fork-context,pruned-fork}.ts`, `CHANGELOG.md`. The package is
-  **pinned** to `npm:pi-subagents@0.73.1` (`SUBAGENTS_PACKAGE`, reconciled forward by
+  **pinned** to `npm:pi-subagents@0.75.0` (`SUBAGENTS_PACKAGE`, reconciled forward by
   `settings-wiring`): pi's `installedNpmMatchesConfiguredVersion` accepts any installed version for
   an unranged source (installs a missing package, never refreshes an installed one) but reinstalls a
-  ranged source that no longer matches, so the pin both protects a fresh install from 0.74.0 (which
-  removed the `workflowScript` RPC spawn parameter perk's waves send) and walks a 0.74.0 install
-  back; the guidance baseline is the doctor constant
+  ranged source that no longer matches the checkout's own committed spec, so the pin walks an older
+  install (0.73.1, which cannot accept the `script` spawn key perk's waves send) forward once a
+  checkout's settings carry it; the guidance baseline is the doctor constant
   `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` (`src/perk/convergence/doctor/checks.py`, pinned by
   `tests/test_doctor.py::test_subagent_compat_verified_version_stamp_is_pinned`), and `perk doctor`'s
   `subagent-compat` warns whenever the installed version differs from it.
 - **Re-verify at each bump.** A new installed version silently re-asserts every engine fact here:
   follow `docs/developers/pi-subagents-reverify.md` (source re-read, `just ci`, a live report wave
   from a read-write session, the constant bump + its test pin, an archive record). Body version
-  numbers are event stamps, never currency claims. Guidance baseline (doctor constant): 0.73.1
-  (`docs/design/archive/pi-subagents-0.73.1-reverify.md` — stamped on the source re-read, the
-  doctor, scout-lane and offline conflict-engine halves, and both browser-door waves: the owner's
-  `/pr-review-browser` on the change's PR on the Pi 0.99.2 host, and the planning session's
-  `/plan-review-browser` accepted by the owner with its 0.87.1-host caveat). The baseline was
-  deliberately NOT moved at the 0.71.0 source re-read (owner decision); the 0.73.1 re-verify
-  moved it from 0.70.1 only once every half of its live leg — doctor, scout wave, both browser
-  waves — had passed. Last source re-read of the mechanics
-  in this doc: the installed 0.73.1 (compiled `src/**/*.js`; body paths name the upstream `.ts`
+  numbers are event stamps, never currency claims. Guidance baseline (doctor constant): 0.75.0
+  (`docs/design/archive/pi-subagents-0.75.0-reverify.md` — stamped on the source re-read, the
+  offline/doctor/scout halves and the Pi 1.0.0 trust rows, with the owner's `/pr-review-browser`
+  on the change's PR as the merge-blocking gate; the plan-door browser half is **owed** by owner
+  election and is appended from the first planning session on 0.75.0). Earlier baselines: 0.73.1
+  (every live half passed), 0.70.1. Last source re-read of the mechanics
+  in this doc: the installed 0.75.0 (compiled `src/**/*.js`; body paths name the upstream `.ts`
   modules, whose anchors survive compilation) — provenance, not a currency promise.
 
 ## Cross-references

@@ -5,7 +5,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **248** canonical source units
+- **247** canonical source units
 - **1290** logical fragments
 - **16** session shapes and **12** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
@@ -1002,7 +1002,6 @@ Automated, terminal, and browser PR-review families.
 | `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/terminal.ts`](../../extension/pi/v1/codeReview/terminal.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/providers/annotations.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/annotations.ts`](../../extension/pi/v1/providers/annotations.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/providers/annotations.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/annotations.ts`](../../extension/pi/v1/providers/annotations.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/waves/transport.ts:module:workflow-script:0` | `tool-contract` | `shipped` | [`extension/waves/transport.ts`](../../extension/waves/transport.ts) · `symbol:module/property:workflowScript/0` | — |
 | `typescript-tool:collect_review_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/reviewWave.ts`](../../extension/pi/v1/codeReview/reviewWave.ts) · `tool:collect_review_wave` | — |
 | `typescript-tool:open_stack_review` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/stack.ts`](../../extension/pi/v1/codeReview/stack.ts) · `tool:open_stack_review` | — |
 | `typescript-tool:post_pr_review` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/automated.ts`](../../extension/pi/v1/codeReview/automated.ts) · `tool:post_pr_review` | pr-review.warm |
@@ -1108,8 +1107,6 @@ Automated, terminal, and browser PR-review families.
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/providers/annotations.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/waves/transport.ts:module:workflow-script:0`
-  - `workflowScript` — Subagent workflow script (`symbol:module/property:workflowScript/0`)
 - `typescript-tool:collect_review_wave`
   - `description` — description (`tool:collect_review_wave.description`)
   - `promptSnippet` — promptSnippet (`tool:collect_review_wave.promptSnippet`)
@@ -2223,6 +2220,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-customization-recipes/write-a-custom-subagent-pi-agents-name-md` — Write a custom subagent (`.pi/agents/<name>.md`) (`heading:perk-customization-recipes/write-a-custom-subagent-pi-agents-name-md`)
   - `section:perk-customization-recipes/keep-an-offline-reference-of-a-dependency-perk-librarian` — Keep an offline reference of a dependency (`perk librarian`) (`heading:perk-customization-recipes/keep-an-offline-reference-of-a-dependency-perk-librarian`)
   - `section:perk-customization-recipes/prefer-pi-s-regular-tui-mode-tuimode` — Prefer pi's regular TUI mode (`tuiMode`) (`heading:perk-customization-recipes/prefer-pi-s-regular-tui-mode-tuimode`)
+  - `section:perk-customization-recipes/opt-out-of-native-tool-discovery-defaulttools` — Opt out of native tool discovery (`defaultTools`) (`heading:perk-customization-recipes/opt-out-of-native-tool-discovery-defaulttools`)
   - `section:perk-customization-recipes/read-the-footer-s-cache-hit-rate-diagnose-misses-showcachemissnotices` — Read the footer's cache-hit rate; diagnose misses (`showCacheMissNotices`) (`heading:perk-customization-recipes/read-the-footer-s-cache-hit-rate-diagnose-misses-showcachemissnotices`)
 - `markdown:skills/perk-expert/references/mental-model.md`
   - `section:perk-mental-model-orientation` — perk mental model (orientation) (`heading:perk-mental-model-orientation`)

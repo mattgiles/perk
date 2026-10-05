@@ -105,16 +105,14 @@ for (const handoff of [false, true]) {
       await sibling.invokeTool("collect_review_wave", {});
       const packet = { "perk.parent-restrictions/1": { readOnly: true } };
       assert.deepEqual(
-        fake.spawns.map(
-          (spawn) => waveScriptItems(String(spawn.workflowScript))[0]?.extensionBindings,
-        ),
+        fake.spawns.map((spawn) => waveScriptItems(String(spawn.script))[0]?.extensionBindings),
         [packet, packet],
       );
       assert.deepEqual(
-        waveScriptItems(String(siblingFake.spawns[0]?.workflowScript))[0]?.extensionBindings,
+        waveScriptItems(String(siblingFake.spawns[0]?.script))[0]?.extensionBindings,
         packet,
       );
-      const renderedBindings = waveScriptItems(String(fake.spawns[1]?.workflowScript))[0]
+      const renderedBindings = waveScriptItems(String(fake.spawns[1]?.script))[0]
         ?.extensionBindings;
       assert.ok(renderedBindings, "consume the packet from the actual rendered fake-RPC item");
       const child = await loadPerkSession({
@@ -322,8 +320,8 @@ test("two sessions share no draft-review context: each wave receives its own pri
     );
     assert.equal(fakeA.spawns.length, 1);
     assert.equal(fakeB.spawns.length, 1);
-    const scriptA = String(fakeA.spawns[0]?.workflowScript ?? "");
-    const scriptB = String(fakeB.spawns[0]?.workflowScript ?? "");
+    const scriptA = String(fakeA.spawns[0]?.script ?? "");
+    const scriptB = String(fakeB.spawns[0]?.script ?? "");
     assert.match(scriptA, /Draft type: plan\./);
     assert.match(scriptA, /# The session-A plan draft/);
     assert.doesNotMatch(scriptA, /Ship retries/, "A's wave never sees B's primed bytes");

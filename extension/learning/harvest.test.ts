@@ -424,7 +424,7 @@ test("analyzeHarvest: fixed lane.<ordinal> keys, semantic ids on label + task (v
     manifestPath: MANIFEST_PATH,
     checkoutRoot: "/checkout",
   });
-  const lanes = waveScriptItems(adapter.calls.spawn[0]?.workflowScript ?? "") as {
+  const lanes = waveScriptItems(adapter.calls.spawn[0]?.script ?? "") as {
     key: string;
     label: string;
     agent: string;
@@ -475,7 +475,7 @@ test("analyzeHarvest: a run-key-hostile producer id (space, @) launches under la
     },
   });
   const outcome = await analyzed(adapter, { manifest });
-  const items = waveScriptItems(adapter.calls.spawn[0]?.workflowScript ?? "") as {
+  const items = waveScriptItems(adapter.calls.spawn[0]?.script ?? "") as {
     key: string;
     label: string;
     task: string;
@@ -801,12 +801,12 @@ test("analyzeHarvest: the spawn contract over the memory adapter (schema, best-e
   assert.equal(spawn?.context, "fresh");
   assert.equal(spawn?.model, "faux/analyst");
   assert.deepEqual(spawn?.outputSchema, HARVEST_ANALYST_REPORT_SCHEMA);
-  assert.match(spawn?.workflowScript ?? "", /perk\.harvest-analyst/);
+  assert.match(spawn?.script ?? "", /perk\.harvest-analyst/);
   // The orchestration keys AND the semantic labels both ride the spawned items.
-  assert.match(spawn?.workflowScript ?? "", /"lane\.1"/);
-  assert.match(spawn?.workflowScript ?? "", /"lane\.2"/);
-  assert.match(spawn?.workflowScript ?? "", /"pi-1"/);
-  assert.match(spawn?.workflowScript ?? "", /"workflow-1"/);
+  assert.match(spawn?.script ?? "", /"lane\.1"/);
+  assert.match(spawn?.script ?? "", /"lane\.2"/);
+  assert.match(spawn?.script ?? "", /"pi-1"/);
+  assert.match(spawn?.script ?? "", /"workflow-1"/);
 });
 
 test("analyzeHarvest: the unavailable arm is wave_failed carrying the attempt receipt", async () => {

@@ -122,7 +122,7 @@ for exactly one goal.
 - [How to author a repo-specific skill](./author-a-repo-skill.md) — create, publish, synchronize,
   refine, or remove a skill under `.perk/skills/<name>/`.
 - [How to write a custom subagent](./write-a-custom-subagent.md) — add a project agent under
-  `.pi/agents/`, list it, and run it through `workflowScript`.
+  `.pi/agents/`, list it, and run it directly or from a `workflow: true` script.
 - [How to scope Pi resources per project](./scope-pi-resources-per-project.md) — filter one
   package's extensions, skills, prompts, or themes with `pi config -l`.
 - [How to enable shell completion](./enable-shell-completion.md) — activate TAB completion so

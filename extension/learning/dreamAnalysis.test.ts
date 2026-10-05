@@ -537,7 +537,7 @@ test("analyzeDream: the happy path — analyst write, reducers read it, finalize
   assert.equal(adapter.calls.spawn[1]?.model, "faux/reducer");
   assert.deepEqual(
     adapter.calls.spawn.map((spawn) =>
-      waveScriptItems(spawn.workflowScript).map(({ key, agent }) => [key, agent]),
+      waveScriptItems(spawn.script).map(({ key, agent }) => [key, agent]),
     ),
     [
       [
@@ -548,10 +548,10 @@ test("analyzeDream: the happy path — analyst write, reducers read it, finalize
     ],
   );
   assert.ok(
-    adapter.calls.spawn[1]?.workflowScript.includes(BUNDLE_PATH),
+    adapter.calls.spawn[1]?.script.includes(BUNDLE_PATH),
     "the reducer lanes read the written bundle path",
   );
-  assert.ok(adapter.calls.spawn[1]?.workflowScript.includes(MANIFEST_PATH));
+  assert.ok(adapter.calls.spawn[1]?.script.includes(MANIFEST_PATH));
   assert.equal(details.reducers.launched, true);
   assert.equal(details.reducers.skip_reason, null);
   assert.equal(details.reducers.complete, true);

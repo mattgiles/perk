@@ -680,6 +680,14 @@ valid `/1`), or `/1` with anything but exactly one own `readOnly: boolean` is **
 fail closed); `/1 = {readOnly: b}` is **valid** (`b`). Unrelated namespaces are opaque. `index.ts`
 reads both at the top of every `session_start` and **latches** the floor for the activation (`||=`)
 before lifecycle or gate sync; no session-key binding, status vocabulary, size bound or warning.
+Packet delivery under trust forwarding: pi-subagents ≥ 0.74.0 forwards the parent's
+`ctx.isProjectTrusted()` into the child's `SettingsManager` (`projectTrusted`), so perk's extension
+(the packet's consumer) loads in the child exactly where the project tier loaded in the parent;
+every state in which a perk parent runs (`--approve` worktree stages, a remembered or session-only
+trust decision, `defaultProjectTrust: "always"`, the SDK worker's default-trusted
+`SettingsManager.create`) forwards `true`, and an untrusted project loads neither perk nor
+pi-subagents, so no perk wave originates there (record:
+`docs/design/archive/pi-subagents-0.75.0-reverify.md`).
 
 After unchanged `establishSessionIdentity`, `reflectSessionReadOnlyFloor` runs only for a latched
 floor. Unclaimed/already-read-only outcomes append nothing. Other established outcomes use one
@@ -2897,8 +2905,8 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   exists but the full spec differs from the desired pin — so a stale `npm:@mgiles/perk@0.0.0` is
   reconciled to `@{__version__}` (extra string duplicates of that identity collapse to one).
   perk's own identity and any **version-carrying** desired borrowed spec (today
-  `npm:pi-subagents@0.73.1` — `SUBAGENTS_PACKAGE`, pinned because pi-subagents 0.74.0 removed the
-  `workflowScript` RPC `spawn` parameter perk's report waves send) are version-reconciled
+  `npm:pi-subagents@0.75.0` — `SUBAGENTS_PACKAGE`, the re-verified release perk's `script` RPC
+  spawn targets) are version-reconciled
   forward through the same in-place rewrite (`_reconcile_pinned_entry`, selected by the desired
   spec carrying an `_npm_version`), so an existing consumer's unversioned or stale-pinned entry is
   `settings-wiring` drift that `perk init` converges and `doctor --fix` repairs; unversioned
@@ -3463,7 +3471,7 @@ ignores the keys (the documented fail-safe posture, pinned by test on both plane
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
 `_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
-`npm:pi-subagents@0.73.1` (the one version-pinned borrow, §8.6a), `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
+`npm:pi-subagents@0.75.0` (the one version-pinned borrow, §8.6a), `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
 perk injects **no** pi-fff search mode at either spawn site (local `_exec_pi`, remote
 `_spawn_worker`): pi-fff runs under its own precedence (CLI flag → `PI_FFF_MODE` → `pi-fff.json`
 → its additive `tools-and-ui` default, which keeps pi's builtin `find`/`grep` beside
@@ -6944,8 +6952,8 @@ a materialized bundle, deterministic (no wall-clock); no write on a skip.
 **The analyst wave (the report-wave module).** The multi-angle analyst fan-out runs through the
 Perk-owned report-wave module (`extension/waves/reportWave.ts`) via the flow-scoped
 **`run_learn_wave`** tool (`extension/pi/v1/learning/learn.ts` — non-terminating; the parent continues to
-reconcile): the module renders the tested `workflowScript`, spawns it async over the pi-subagents
-v1 extension RPC (`mission: false`, `context: "fresh"`, and the fixed
+reconcile): the module renders the tested script and spawns it async as the RPC `script` over the
+pi-subagents v1 extension RPC (`mission: false`, `context: "fresh"`, and the fixed
 `acceptance: {level: "none", reason}` disable — delivered onto every lane child via pi-subagents'
 workflow-defaults spread, suppressing the auto-inferred acceptance contract whose fenced
 `acceptance-report` completion instruction competes with the engine-validated `structured_output`
@@ -7816,7 +7824,8 @@ the posture table makes ineligible.
 **Ordering facts.** `before_agent_start` handlers run in extension order over a copy of the prompt
 options; afterwards an explicit edit to `event.systemPromptOptions.selectedTools` wins, otherwise
 the live loadout is authoritative, so perk's pre-request install is not undone. The installed
-owners edit `selectedTools` only when their loader is absent from it (pi-subagents 0.73.1;
+owners edit `selectedTools` only when their loader is absent from it (pi-subagents 0.75.0, which
+under an eager `toolActivation` does not edit it at all;
 pi-web-access re-adds its loader only when selected and absent); under own-names-only the loader
 is never absent. Residual: on a pre-change transcript where a later handler does edit
 `selectedTools`, perk's deactivation of an ineligible deferred tool takes effect one request later

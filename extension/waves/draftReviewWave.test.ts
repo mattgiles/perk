@@ -295,7 +295,7 @@ test("startDraftReviewWave: spawn params pin the module contract, the schema, an
   assert.equal(spawn.model, "openai/gpt-5.2");
   assert.equal(spawn.timeoutMs, 1_234);
   // Every lane rides the perk.draft-reviewer agent (the rendered script names it).
-  assert.match(spawn.workflowScript, /perk\.draft-reviewer/);
+  assert.match(spawn.script, /perk\.draft-reviewer/);
 });
 
 test("startDraftReviewWave: failed Ponytail preflight omits only that child and stays incomplete without retry", async () => {
@@ -331,7 +331,7 @@ test("startDraftReviewWave: failed Ponytail preflight omits only that child and 
     },
   ]);
   assert.equal(adapter.calls.spawn.length, 1, "zero-retry wave launches once");
-  const script = adapter.calls.spawn[0]?.workflowScript ?? "";
+  const script = adapter.calls.spawn[0]?.script ?? "";
   assert.doesNotMatch(script, /"key":\s*"ponytail"/, "the unavailable child never spawns");
   assert.match(script, /"key":\s*"grounding"/);
   assert.match(script, /"key":\s*"scope"/);

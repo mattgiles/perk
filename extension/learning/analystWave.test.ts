@@ -240,10 +240,10 @@ test("runLearnAnalystWave: the spawn carries the module contract + the flow-owne
   assert.equal(spawn.outputSchema, LEARN_ANALYST_REPORT_SCHEMA);
   assert.equal(spawn.model, "google/gemini-3.5-flash");
   // The rendered script names every angle key and the analyst agent.
-  assert.match(spawn.workflowScript, /"key": "session-deviations"/);
-  assert.match(spawn.workflowScript, /"key": "existing-docs"/);
-  assert.match(spawn.workflowScript, /"agent": "perk\.learn-analyst"/);
-  assert.match(spawn.workflowScript, /"phase": "learn"/);
+  assert.match(spawn.script, /"key": "session-deviations"/);
+  assert.match(spawn.script, /"key": "existing-docs"/);
+  assert.match(spawn.script, /"agent": "perk\.learn-analyst"/);
+  assert.match(spawn.script, /"phase": "learn"/);
 });
 
 test("runLearnAnalystWave: no configured model → no model key on the spawn", async () => {
@@ -264,7 +264,7 @@ test("runLearnAnalystWave: the composed task derives the manifest path and appen
       { angle: "existing-docs" },
     ],
   });
-  const script = adapter.calls.spawn[0]?.workflowScript ?? "";
+  const script = adapter.calls.spawn[0]?.script ?? "";
   const items = waveScriptItems(script) as Array<{ key: string; task: string }>;
   const deviations = items.find((i) => i.key === "session-deviations");
   assert.ok(deviations !== undefined);

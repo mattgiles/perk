@@ -110,30 +110,15 @@ function recordCandidate(record: SelectorRecord, sourcePath: string): Discovered
       ],
     };
   }
-  if (record.kind === "event-handler") {
-    return {
-      id: `typescript-model-call:${sourcePath}:${record.catalogOwner}:before-agent-start:${record.catalogOrdinal}`,
-      kind: "typescript-model-call",
-      path: sourcePath,
-      selector: `symbol:${record.catalogOwner}/event:before_agent_start/${record.catalogOrdinal}`,
-      fragments: [
-        {
-          id: "handler",
-          label: "before_agent_start injected context",
-          selector: record.site.catalogSelector,
-        },
-      ],
-    };
-  }
   return {
-    id: `typescript-model-call:${sourcePath}:${record.catalogOwner}:workflow-script:${record.catalogOrdinal}`,
+    id: `typescript-model-call:${sourcePath}:${record.catalogOwner}:before-agent-start:${record.catalogOrdinal}`,
     kind: "typescript-model-call",
     path: sourcePath,
-    selector: record.site.catalogSelector,
+    selector: `symbol:${record.catalogOwner}/event:before_agent_start/${record.catalogOrdinal}`,
     fragments: [
       {
-        id: "workflowScript",
-        label: "Subagent workflow script",
+        id: "handler",
+        label: "before_agent_start injected context",
         selector: record.site.catalogSelector,
       },
     ],

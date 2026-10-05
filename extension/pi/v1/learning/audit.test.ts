@@ -393,13 +393,10 @@ test("tool e2e: the bound bundle dir is the write target; spawn params sink the 
 
     // Spawn contract: the auditor agent + the configured model + the packet-path task.
     assert.equal(fake.spawns.length, 1);
-    const spawn = fake.spawns[0] as { workflowScript?: string; model?: string };
+    const spawn = fake.spawns[0] as { script?: string; model?: string };
     assert.equal(spawn.model, "faux/auditor-model");
-    assert.match(spawn.workflowScript ?? "", /perk-dev\.session-auditor/);
-    assert.match(
-      spawn.workflowScript ?? "",
-      new RegExp(`packets/${GRILL.replace(".", "\\.")}/s1\\.md`),
-    );
+    assert.match(spawn.script ?? "", /perk-dev\.session-auditor/);
+    assert.match(spawn.script ?? "", new RegExp(`packets/${GRILL.replace(".", "\\.")}/s1\\.md`));
     assert.match(result.content[0]?.text ?? "", /untrusted DATA/);
   } finally {
     h.dispose();

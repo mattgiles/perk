@@ -20,11 +20,13 @@ import {
   waveScriptItems,
 } from "../testing/fakeSubagents.ts";
 import { createReportWave, type ReportWaveRequest, type WaveNotice } from "./reportWave.ts";
+import { createRpcWaveAdapter } from "./rpcAdapter.ts";
 import {
   WAVE_ACCEPTANCE,
   WAVE_INTERCOM_BRIDGE,
   WAVE_SETTLEMENT_GRACE_MS,
   type WaveBus,
+  type WaveSpawnParams,
 } from "./transport.ts";
 
 /** A synchronous in-memory bus (the adapter-contract suite's shape). */
@@ -90,7 +92,7 @@ test("rpc round-trip: every child carries the constant packet and caller-checkou
   // The spawn crossed the real v1 envelope with the fixed module contract.
   assert.equal(fake.spawns.length, 1);
   const spawn = fake.spawns[0] as {
-    workflowScript?: string;
+    script?: string;
     async?: boolean;
     mission?: boolean;
     context?: string;
@@ -109,14 +111,20 @@ test("rpc round-trip: every child carries the constant packet and caller-checkou
   assert.equal(spawn.model, "anthropic/claude-sonnet-4");
   assert.equal(spawn.timeoutMs, 5_000);
   assert.deepEqual(
-    waveScriptItems(String(spawn.workflowScript ?? "")).map(({ key }) => key),
+    waveScriptItems(String(spawn.script ?? "")).map(({ key }) => key),
     ["plan-fidelity", "correctness"],
   );
 
-  for (const item of waveScriptItems(String(spawn.workflowScript))) {
+  for (const item of waveScriptItems(String(spawn.script))) {
     assert.deepEqual(item.extensionBindings, { "perk.parent-restrictions/1": { readOnly: true } });
     assert.equal(item.worktree, false);
   }
+
+  // The wire key is pi-subagents' current RPC `script`; the removed `workflowScript` key is
+  // absent outright (the engine rejects even an `undefined`-valued one via `Object.hasOwn`).
+  assert.equal(Object.hasOwn(fake.spawns[0] ?? {}, "workflowScript"), false);
+  assert.equal(typeof fake.spawns[0]?.script, "string");
+  assert.ok(String(fake.spawns[0]?.script).startsWith("const reports = await runs.all("));
 
   // The aggregate was read from the run's REAL temp status.json through the adapter.
   assert.equal(result.complete, true);
@@ -127,6 +135,52 @@ test("rpc round-trip: every child carries the constant packet and caller-checkou
   assert.deepEqual(result.failures, []);
   assert.equal(result.receipt.state, "complete");
 });
+
+/** A valid spawn body for the hand-built rejection cases (the producer never builds these). */
+const VALID_SPAWN: WaveSpawnParams = {
+  script: "return [];",
+  async: true,
+  mission: false,
+  context: "fresh",
+  acceptance: WAVE_ACCEPTANCE,
+  intercomBridge: WAVE_INTERCOM_BRIDGE,
+  outputSchema: { type: "object" },
+  timeoutMs: 5_000,
+};
+
+const { script: _validScript, ...SPAWN_WITHOUT_SCRIPT } = VALID_SPAWN;
+
+for (const [label, legacy] of [
+  [
+    "a workflowScript key in place of script",
+    { ...SPAWN_WITHOUT_SCRIPT, workflowScript: "return [];" },
+  ],
+  [
+    "an undefined-valued workflowScript key beside a valid script",
+    { ...VALID_SPAWN, workflowScript: undefined },
+  ],
+] as const) {
+  test(`rpc spawn: ${label} is rejected invalid_params and surfaced verbatim`, async () => {
+    // The shape a reverted producer hits offline: the fake mirrors pi-subagents ≥ 0.74.0's
+    // `Object.hasOwn` rejection and the real adapter surfaces `code: message` untouched.
+    const bus = createFakeBus();
+    const fake = createFakeSubagents();
+    fake.attach(bus);
+    const adapter = createRpcWaveAdapter(bus);
+    // Deliberately off-contract: `WaveSpawnParams` has no `workflowScript` field.
+    const params = legacy as unknown as WaveSpawnParams;
+    await assert.rejects(adapter.spawn(params), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(
+        error.message,
+        "invalid_params: RPC spawn workflowScript was removed; pass inline script text as script.",
+      );
+      return true;
+    });
+    assert.equal(fake.spawns.length, 1);
+    assert.equal(Object.hasOwn(fake.spawns[0] ?? {}, "workflowScript"), true);
+  });
+}
 
 for (const shape of [
   "current",

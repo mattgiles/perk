@@ -880,7 +880,7 @@ test("tool: classify_review_feedback end-to-end — configured model threads, fl
     assert.equal(fake.spawns.length, 1);
     assert.equal(fake.spawns[0]?.model, "test-classifier-model");
     assert.deepEqual(fake.spawns[0]?.outputSchema, REVIEW_CLASSIFIER_REPORT_SCHEMA);
-    const script = String(fake.spawns[0]?.workflowScript ?? "");
+    const script = String(fake.spawns[0]?.script ?? "");
     assert.match(script, /"agent": "perk\.review-classifier"/);
     assert.match(script, /Fetch \+ classify the review feedback on this plan's PR\./);
   } finally {
