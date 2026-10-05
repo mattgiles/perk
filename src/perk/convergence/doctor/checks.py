@@ -760,7 +760,7 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 # re-verify of the guidance. Distinct from the settings pin (`init.SUBAGENTS_PACKAGE`, what
 # consumers install, converged by `settings-wiring`): the two facts coincide today but move
 # independently.
-_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.73.1"
+_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.75.0"
 
 
 def _installed_subagents_version(pkg_dir: Path) -> str | None:
