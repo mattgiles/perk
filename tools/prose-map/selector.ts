@@ -121,14 +121,6 @@ export type SelectorRecord =
       ordinal: number;
       catalogOrdinal: number;
       site: SelectorSite;
-    }
-  | {
-      kind: "workflow-property";
-      owner: string;
-      catalogOwner: string;
-      ordinal: number;
-      catalogOrdinal: number;
-      site: SelectorSite;
     };
 
 export interface SelectorEnumeration {
@@ -486,22 +478,6 @@ export function enumerateSelectorSites(
       }
     }
 
-    if (ts.isPropertyAssignment(node) && propertyName(node) === "workflowScript") {
-      const owner = enclosingSymbol(node);
-      const catalogOwner = "module";
-      const ordinal = nextOrdinal(`${sourceIdentity}:${owner}:workflow-script`, ownerOrdinals);
-      const catalogOrdinal = nextOrdinal(`${sourceIdentity}:${catalogOwner}:workflow-script`);
-      const site = expressionSite(
-        `symbol:${owner}/property:workflowScript/${ordinal}`,
-        node.initializer,
-        node.initializer,
-        "prose-expression",
-        `symbol:${catalogOwner}/property:workflowScript/${catalogOrdinal}`,
-      );
-      addRecord({ kind: "workflow-property", owner, catalogOwner, ordinal, catalogOrdinal, site }, [
-        site,
-      ]);
-    }
     ts.forEachChild(node, visit);
   }
 
@@ -787,20 +763,13 @@ const MODEL_CALL_SELECTOR = new RegExp(
 const EVENT_HANDLER_SELECTOR = new RegExp(
   `^symbol:(.+)/event:before_agent_start/${CANONICAL_ORDINAL}/handler$`,
 );
-const WORKFLOW_PROPERTY_SELECTOR = new RegExp(
-  `^symbol:(.+)/property:workflowScript/${CANONICAL_ORDINAL}$`,
-);
 
 function isMissingSupportedSelector(selector: string): boolean {
   if (selector.startsWith("tool:")) {
     const payload = selector.slice("tool:".length);
     return payload.length > 0 && payload.includes(".");
   }
-  return (
-    MODEL_CALL_SELECTOR.test(selector) ||
-    EVENT_HANDLER_SELECTOR.test(selector) ||
-    WORKFLOW_PROPERTY_SELECTOR.test(selector)
-  );
+  return MODEL_CALL_SELECTOR.test(selector) || EVENT_HANDLER_SELECTOR.test(selector);
 }
 
 /** Resolve an ordered selector batch against one supplied source parse and site enumeration. */

@@ -86,13 +86,17 @@ def _perk_npm_entry() -> str:
 # `@dietrichgebert/ponytail` is the borrowed *review-lane context source*. It is the sole
 # filtered-borrow exception: `_reconcile_ponytail_entry` keeps all four Pi resource classes
 # disabled in ordinary sessions while exact review-agent paths opt one skill into one lane.
-# `pi-subagents` is the one VERSION-CARRYING borrow: pi-subagents 0.74.0 removed the
-# `workflowScript` RPC `spawn` parameter perk's report waves send, so consumers stay on 0.73.1
-# until the wave-RPC migration lands. A pinned spec is reconciled forward like perk's own entry
-# (`_merge_static_packages`); Pi reinstalls a ranged npm source whose installed version no longer
-# matches, so the pin also walks a 0.74.0 install back. The doctor `subagent-compat` stamp
-# records what perk's guidance was verified against — a distinct fact that coincides today.
-SUBAGENTS_PACKAGE = "npm:pi-subagents@0.73.1"
+# `pi-subagents` is the one VERSION-CARRYING borrow: perk's report waves drive the engine's v1
+# RPC (the inline script text travels as the `spawn` key `script` since 0.74.0) and perk's
+# guidance is re-verified per release (docs/developers/pi-subagents-reverify.md), so consumers
+# install exactly the re-verified release. A pinned spec is reconciled forward like perk's own
+# entry (`_merge_static_packages`), and Pi reinstalls a ranged npm source whose installed version
+# no longer matches its OWN checkout's configured spec
+# (`package-manager.ts::installedNpmMatchesConfiguredVersion`, verified at Pi v1.0.0), so the pin
+# walks an older install (0.73.1, which cannot accept `script`) forward once the checkout's
+# settings carry it. The doctor `subagent-compat` stamp records what perk's guidance was verified
+# against — a distinct fact that coincides today.
+SUBAGENTS_PACKAGE = "npm:pi-subagents@0.75.0"
 PONYTAIL_PACKAGE = "npm:@dietrichgebert/ponytail"
 PONYTAIL_NPM_NAME = "@dietrichgebert/ponytail"
 PACKAGE_RESOURCE_FILTERS = ("extensions", "skills", "prompts", "themes")

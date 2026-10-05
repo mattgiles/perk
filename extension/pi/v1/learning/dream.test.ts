@@ -738,17 +738,17 @@ test("tool e2e: both configured models ride their wave's spawn; analyst complete
     // the analyst wave completed before any reducer spawn (the spawn order is the proof — the
     // op awaits the first wave and composes the bundle before the second spawn exists).
     assert.equal(spawns.length, 2);
-    const analystSpawn = spawns[0] as { workflowScript?: string; model?: string };
-    const reducerSpawn = spawns[1] as { workflowScript?: string; model?: string };
+    const analystSpawn = spawns[0] as { script?: string; model?: string };
+    const reducerSpawn = spawns[1] as { script?: string; model?: string };
     assert.equal(analystSpawn.model, "faux/dream-analyst-model");
-    assert.match(analystSpawn.workflowScript ?? "", /perk\.dream-analyst/);
+    assert.match(analystSpawn.script ?? "", /perk\.dream-analyst/);
     assert.equal(reducerSpawn.model, "faux/dream-reducer-model");
-    assert.match(reducerSpawn.workflowScript ?? "", /perk\.dream-reducer/);
+    assert.match(reducerSpawn.script ?? "", /perk\.dream-reducer/);
     // The written bundle is REAL on this path (the production atomicWriteFileSync wiring): the
     // reducer task names it, and — both waves complete — it holds the FINALIZED shape (the
     // analyst reports plus the reducers section).
     const bundlePath = join(runScratchDir(cwd, RUN_ID), DREAM_ANALYSES_FILENAME);
-    assert.ok(reducerSpawn.workflowScript?.includes(bundlePath));
+    assert.ok(reducerSpawn.script?.includes(bundlePath));
     const finalizedBytes = readFileSync(bundlePath, "utf8");
     const bundle = JSON.parse(finalizedBytes) as {
       lanes: { lane: string }[];

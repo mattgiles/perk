@@ -1,6 +1,6 @@
 // The report-wave TRANSPORT tier: the adapter seam, the receipt primitives, and the script
-// runner — everything that knows a wave is realized as one detached pi-subagents
-// `workflowScript` run. The logical tier (`reportWave.ts`: assignments, normalization,
+// runner — everything that knows a wave is realized as one detached pi-subagents `script` run
+// (the RPC spawn's inline script text). The logical tier (`reportWave.ts`: assignments, normalization,
 // completeness policy) sits strictly above this module; nothing here imports back into it, so
 // the dependency is one-directional by construction (type-only edges count).
 //
@@ -141,7 +141,13 @@ export const WAVE_INTERCOM_BRIDGE = { mode: "off" } as const;
 
 /** The full spawn params the runner fixes: async-only, ephemeral, fresh-context by definition. */
 export interface WaveSpawnParams {
-  workflowScript: string;
+  /**
+   * The inline script text — pi-subagents ≥ 0.74.0's RPC `spawn` key (`src/extension/rpc.ts::
+   * spawnParams` maps it onto the executor's internal `workflowScript` carrier). A request
+   * carrying a `workflowScript`/`workflowScriptPath` key — even with an `undefined` value, the
+   * check is `Object.hasOwn` — is rejected `invalid_params` before normalization.
+   */
+  script: string;
   async: true;
   /** Waves are ephemeral by explicit decision — never mission-attached. */
   mission: false;
@@ -167,7 +173,7 @@ export interface WaveSpawnParams {
 export interface WaveAdapter {
   /** Capability-checked ping; null ⇒ unavailable (loud degrade upstream). Must be called first. */
   ping(): Promise<WavePing | null>;
-  /** Launch the async workflowScript run; throws ⇒ spawn-failed. */
+  /** Launch the async `script` run; throws ⇒ spawn-failed. */
   spawn(params: WaveSpawnParams): Promise<WaveRunHandle>;
   /** Subscribe to run completions (any run — the runner matches the handle); returns unsubscribe. */
   onComplete(handler: (completion: WaveCompletion) => void): () => void;
@@ -232,8 +238,8 @@ function waveTimeoutMs(): number {
 export interface WaveScriptSpec {
   /** Flow name for error detail/trace (e.g. "pr-review"). */
   flow: string;
-  /** The complete, module-rendered workflowScript (never model-authored). */
-  workflowScript: string;
+  /** The complete, module-rendered inline script text (never model-authored). */
+  script: string;
   /** Workflow-level default → the engine injects a `structured_output` tool into each child. */
   outputSchema: object;
   /** Workflow-level model default (per-item `model` fields in the script override it). */
@@ -266,7 +272,7 @@ function errorDetail(error: unknown): string {
 }
 
 /**
- * Start one module-rendered workflowScript through the adapter — the non-blocking front half:
+ * Start one module-rendered `script` run through the adapter — the non-blocking front half:
  * capability ping → subscribe-before-spawn (the completion-before-reply buffer) → async spawn.
  * On success the back half (block on the async-complete event under the engine deadline +
  * settlement grace, abortable → best-effort stop on timeout/cancel → read the durable aggregate → the
@@ -364,7 +370,7 @@ export async function startWaveScript(
   const timeoutMs = spec.timeoutMs ?? waveTimeoutMs();
   try {
     handle = await adapter.spawn({
-      workflowScript: spec.workflowScript,
+      script: spec.script,
       async: true,
       mission: false,
       context: "fresh",
@@ -508,7 +514,7 @@ export async function startWaveScript(
 }
 
 /**
- * Run one module-rendered workflowScript to completion — the blocking form: `startWaveScript` +
+ * Run one module-rendered `script` run to completion — the blocking form: `startWaveScript` +
  * await its `result` (one operational core, behavior identical to the historical blocking
  * runner).
  */

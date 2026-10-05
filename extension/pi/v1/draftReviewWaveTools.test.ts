@@ -583,7 +583,7 @@ test("executeStartDraftReviewWave: happy path stores the pending wave, primes it
   assert.match(text, /matching native workflow-completion notice/);
   assert.match(text, /collect_draft_review_wave/);
   // The primed draft (never a tool param) reached the lane tasks.
-  const script = (adapter.calls.spawn[0]?.workflowScript as string) ?? "";
+  const script = (adapter.calls.spawn[0]?.script as string) ?? "";
   assert.match(script, /# The draft/);
   assert.match(script, /Draft type: plan\./);
 
@@ -635,7 +635,7 @@ test("executeStartDraftReviewWave: a primed custom lane rides the launch and the
     /grounding, risk, custom, ponytail/,
     "the ok text names the custom lane",
   );
-  const script = (adapter.calls.spawn[0]?.workflowScript as string) ?? "";
+  const script = (adapter.calls.spawn[0]?.script as string) ?? "";
   assert.match(script, /check the rollback story/, "the primed custom definition reached the lane");
 
   const collected = await executeCollectDraftReviewWave(state, wave, target);
@@ -665,7 +665,7 @@ test("primeDraftReviewContext resets the pending wave (a new browser session sup
     angles: TWO_ANGLES,
   });
   assert.equal(second.details.ok, true, "priming reset the pending wave");
-  const script = (adapter.calls.spawn[1]?.workflowScript as string) ?? "";
+  const script = (adapter.calls.spawn[1]?.script as string) ?? "";
   assert.match(script, /# Draft v2/, "the new session's draft rides the new wave");
   // The re-prime replaces the context wholesale: the first session's custom lane is gone, and a
   // prime without `custom` leaves no custom key at all (the key-absence representation the
@@ -1190,7 +1190,7 @@ test("tools: start_draft_review_wave threads the configured model over the prime
     // reached the actual spawn (config → execute → startDraftReviewWave → adapter).
     assert.equal(fake.spawns.length, 1);
     assert.equal(fake.spawns[0]?.model, "test-draft-model");
-    const lanes = waveScriptItems(String(fake.spawns[0]?.workflowScript ?? "")) as Array<{
+    const lanes = waveScriptItems(String(fake.spawns[0]?.script ?? "")) as Array<{
       key: string;
       agent: string;
       task: string;
@@ -1262,7 +1262,7 @@ test("tools: missing exact Ponytail core skill omits only that child and collect
     assert.match(startText, /Preflight skipped: ponytail: skill-unavailable/);
     assert.doesNotMatch(startText, /ponytail.*launched/i);
     assert.equal(fake.spawns.length, 1);
-    const script = String(fake.spawns[0]?.workflowScript ?? "");
+    const script = String(fake.spawns[0]?.script ?? "");
     assert.doesNotMatch(script, /"key":\s*"ponytail"/, "Ponytail never reaches runs.all");
     assert.match(script, /"key":\s*"grounding"/);
     assert.match(script, /"key":\s*"scope"/);

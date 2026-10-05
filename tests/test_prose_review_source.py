@@ -1184,12 +1184,12 @@ def test_typescript_adapter_real_helper_resolves_and_recomposes_representative_s
     extended_text = """
 function owner() {
   pi.on("before_agent_start", () => "event handler");
-  return { workflowScript: "workflow body" };
+  pi.sendUserMessage("follow-up body");
 }
 """
     for selector, expected in (
         ("symbol:owner/event:before_agent_start/0/handler", '() => "event handler"'),
-        ("symbol:owner/property:workflowScript/0", '"workflow body"'),
+        ("symbol:owner/call:sendUserMessage/0/argument:0", '"follow-up body"'),
     ):
         extraction = adapter.extract(extended_text, selector)
         assert extraction.focus == expected
@@ -1519,7 +1519,7 @@ def test_every_real_typescript_fragment_is_batch_covered_through_the_python_adap
             selectors.append(routed_fragment.fragment.selector)
             total += 1
 
-    assert total == 325
+    assert total == 324
     assert "extension/pi/v1/delivery/submitConflict.ts" in selectors_by_path
     adapter = _typescript_adapter()
     for relative, selectors in selectors_by_path.items():

@@ -437,7 +437,7 @@ test("tool: run_pr_review_wave end-to-end happy path; a following clean post is 
     // reached the actual spawn (config → execute → runPrReviewWave → adapter).
     assert.equal(fake.spawns.length, 1);
     assert.equal(fake.spawns[0]?.model, "test-wave-model");
-    const lanes = waveScriptItems(String(fake.spawns[0]?.workflowScript ?? "")) as Array<{
+    const lanes = waveScriptItems(String(fake.spawns[0]?.script ?? "")) as Array<{
       key: string;
       task: string;
       skill?: string;
@@ -919,7 +919,7 @@ test("tool: a deadline partial's retained actionable report survives the uncover
     assert.equal(details.ok, true);
     assert.equal(fake.spawns.length, 2, "exactly one bounded retry");
     assert.deepEqual(
-      waveScriptItems(String(fake.spawns[1]?.workflowScript)).map(({ key }) => key),
+      waveScriptItems(String(fake.spawns[1]?.script)).map(({ key }) => key),
       ["tests", "ponytail"],
       "the retry relaunches only the lanes without a report",
     );

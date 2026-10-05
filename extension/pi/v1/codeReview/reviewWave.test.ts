@@ -231,7 +231,7 @@ test("start with stack: true against the matching pin launches lanes whose tasks
   assert.equal(collected.details.ok, true, collected.content[0]?.text);
   assert.equal(state.pending, null);
   assert.equal(stackPin.inFlight, null, "a settled stack wave releases its pin");
-  const script = adapter.calls.spawn[0]?.workflowScript ?? "";
+  const script = adapter.calls.spawn[0]?.script ?? "";
   const command = pinnedReviewContextCommand(PINNED);
   assert.ok(script.includes(command), "the lane tasks embed the pinned review-context command");
   assert.doesNotMatch(
@@ -251,7 +251,7 @@ test("start with stack: true against the matching pin launches lanes whose tasks
   );
   assert.equal(plainResult.details.ok, true);
   assert.equal(plainPin.inFlight, null, "a non-stack wave never locks the pin");
-  const plainScript = plainAdapter.calls.spawn[0]?.workflowScript ?? "";
+  const plainScript = plainAdapter.calls.spawn[0]?.script ?? "";
   assert.equal(plainScript.includes("--pin-base"), false);
   assert.ok(plainScript.includes("Review PR #42 at /abs/wt."));
 });
@@ -1243,7 +1243,7 @@ test("tools: start_review_wave threads the configured model + directive; collect
     // actual spawn (config → execute → startAdversarialReviewWave → adapter).
     assert.equal(fake.spawns.length, 1);
     assert.equal(fake.spawns[0]?.model, "test-adv-model");
-    const lanes = waveScriptItems(String(fake.spawns[0]?.workflowScript ?? "")) as Array<{
+    const lanes = waveScriptItems(String(fake.spawns[0]?.script ?? "")) as Array<{
       key: string;
       agent: string;
       task: string;
@@ -1312,7 +1312,7 @@ test("tools: missing exact Ponytail skill omits only that child and collects exp
     assert.match(startText, /Preflight skipped: ponytail: skill-unavailable/);
     assert.doesNotMatch(startText, /ponytail.*launched/i);
     assert.equal(fake.spawns.length, 1);
-    const script = String(fake.spawns[0]?.workflowScript ?? "");
+    const script = String(fake.spawns[0]?.script ?? "");
     assert.doesNotMatch(script, /"key":\s*"ponytail"/, "Ponytail never reaches runs.all");
     assert.match(script, /"key":\s*"claimed-intent"/);
     assert.match(script, /"key":\s*"correctness"/);

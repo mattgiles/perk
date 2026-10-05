@@ -58,8 +58,8 @@ export interface PerkConfig {
    * dev-only `session-auditor`, whose def is repo-local to perk's own repository
    * (`.pi/agents/perk-dev/session-auditor.md`, a project agent, never shipped), so the key is
    * dormant in consumer repos. Each configured
-   * value is injected as the top-level workflow-level `model` on that agent's one `subagent`
-   * workflowScript call — a default flowing onto every lane, single-child runs included (as
+   * value is injected as the top-level workflow-level `model` on that agent's wave RPC spawn
+   * (`script`) — a default flowing onto every lane, single-child runs included (as
    * /pr-review does); when a key is absent the agent's frontmatter `model` (in the shipped
    * `agents/<name>.md`, discovered by pi-subagents as a package agent; the session-auditor's in
    * its repo-local def) is the default.

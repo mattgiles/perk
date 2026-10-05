@@ -201,8 +201,8 @@ class ProvidersTable(LenientParseModel):
 class SubagentsTable(LenientParseModel):
     """The agent-keyed `[models.subagents]` table — a per-agent model override for each perk-owned
     agent (the shipped package agents + the repo-local dev-only auditor), injected as the
-    top-level workflow-level ``model`` default on that agent's
-    ``workflowScript`` launch (a default applied to every lane — single-child runs included).
+    top-level workflow-level ``model`` default on that agent's wave RPC spawn
+    (``script``) (a default applied to every lane — single-child runs included).
     Absent/blank keys mean "use the agent's frontmatter default";
     unknown agent keys stay ignored (``extra="ignore"``). The field set is the SSOT for the
     known agent keys."""

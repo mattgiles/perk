@@ -139,7 +139,7 @@ test("runObjectiveExplorerWave: ONE lane with the fixed flow/key/agent, module c
   assert.equal(spawn.outputSchema, OBJECTIVE_EXPLORER_REPORT_SCHEMA);
   assert.equal(spawn.model, "anthropic/claude-haiku-4-5");
   assert.equal(spawn.timeoutMs, 1_234);
-  const items = waveScriptItems(spawn.workflowScript).map(({ key, agent, task, label, phase }) => ({
+  const items = waveScriptItems(spawn.script).map(({ key, agent, task, label, phase }) => ({
     key,
     agent,
     task,

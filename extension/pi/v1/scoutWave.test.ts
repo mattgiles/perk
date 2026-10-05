@@ -364,7 +364,7 @@ test("tool: run_scout_wave complete — trimmed briefs in the tasks, model threa
     assert.equal(fake.spawns.length, 1);
     assert.equal(fake.spawns[0]?.model, "test-scout-model");
     assert.deepEqual(fake.spawns[0]?.outputSchema, SCOUT_REPORT_SCHEMA);
-    const lanes = waveScriptItems(String(fake.spawns[0]?.workflowScript ?? "")) as Array<{
+    const lanes = waveScriptItems(String(fake.spawns[0]?.script ?? "")) as Array<{
       key: string;
       agent: string;
       task: string;

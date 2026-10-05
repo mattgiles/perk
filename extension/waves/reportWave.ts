@@ -2,7 +2,7 @@
 // typed outcomes under stable assignment keys. Report waves were previously model-authored
 // prompt mechanics (a script skeleton the parent model had to transcribe faithfully — the known
 // prompt-drift risk); this module makes the mechanics CODE. It renders the complete, tested
-// `workflowScript`, launches it through a `WaveAdapter` (async-only, `mission: false`), waits on
+// script, launches it through a `WaveAdapter` (async-only, `mission: false`), waits on
 // the run's async-complete event until the engine deadline plus a fixed settlement grace, reads the durable `status.json`
 // `workflow.value` aggregate, and normalizes `{complete, reports[], failures[]}` under a
 // flow-specific completeness policy. Each launch additionally records an OUTPUT-FREE
@@ -249,7 +249,7 @@ function validateAssignments(assignments: ReportAssignment[]): void {
 }
 
 /**
- * Render the wave `workflowScript`: an explicit-return, all-settled `runs.all` over the
+ * Render the wave script (the RPC spawn's inline `script` text): an explicit-return, all-settled `runs.all` over the
  * assignment items, projected to the compact typed aggregate only (assignment key, outcome,
  * error, and the schema-validated report — children's prose never enters the aggregate beyond
  * `error`/`output` on failure). Every report child is read-only under perk's floor and runs in
@@ -271,6 +271,9 @@ function renderWaveScript(assignments: ReportAssignment[]): string {
     ...(assignment.phase !== undefined ? { phase: assignment.phase } : {}),
     ...(assignment.outputSchema !== undefined ? { outputSchema: assignment.outputSchema } : {}),
   }));
+  // `reports` is a script-local JS binding, not a workflow-resource name: pi-subagents reserves
+  // `tasks`/`chain` only against `registerWorkflowResources` (`src/workflows/workflow-resources.ts`,
+  // `STRUCTURED_WORKFLOW_RESOURCE_NAMES`), which perk never calls — no collision.
   return (
     `const reports = await runs.all(${JSON.stringify(items, null, 2)});\n` +
     "return reports.map(({key, ok, error, structuredOutput}) => " +
@@ -589,13 +592,13 @@ async function startWave(
 
   // Required-skill metadata never reaches the renderer; only runnable assignments spawn.
   const runnableRequest: ReportWaveRequest = { ...request, assignments: runnable };
-  const workflowScript = renderWaveScript(runnable);
+  const script = renderWaveScript(runnable);
 
   const start = await startWaveScript(
     supplyAdapter(),
     {
       flow: request.flow,
-      workflowScript,
+      script,
       outputSchema: request.outputSchema,
       ...(request.model !== undefined ? { model: request.model } : {}),
       ...(request.timeoutMs !== undefined ? { timeoutMs: request.timeoutMs } : {}),

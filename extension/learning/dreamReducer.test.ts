@@ -191,7 +191,7 @@ function reducerReportOf(
   };
 }
 
-/** Parse the lane items the module rendered into the spawned workflowScript. */
+/** Parse the lane items the module rendered into the spawned script. */
 function spawnedLaneItems(
   script: string,
 ): { key: string; agent: string; task: string; label: string; phase?: string }[] {
@@ -910,7 +910,7 @@ test("runDreamReducerWave: three fixed lanes — key = label = angle slug, the t
   assert.equal(spawn?.context, "fresh");
   assert.equal(spawn?.model, "faux/reducer", "the caller's model reaches the spawn params");
   assert.deepEqual(spawn?.outputSchema, DREAM_REDUCER_REPORT_SCHEMA);
-  const items = spawnedLaneItems(spawn?.workflowScript ?? "");
+  const items = spawnedLaneItems(spawn?.script ?? "");
   assert.deepEqual(
     items.map((item) => item.key),
     [...DREAM_REDUCER_ANGLES],

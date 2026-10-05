@@ -123,7 +123,7 @@ test("native partial evidence retries only the lanes without a report and merges
   const result = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
   assert.equal(adapter.calls.spawn.length, 2);
   assert.deepEqual(
-    laneItemsOf(adapter.calls.spawn[1]?.workflowScript ?? "").map((row) => row.key),
+    laneItemsOf(adapter.calls.spawn[1]?.script ?? "").map((row) => row.key),
     ["correctness"],
   );
   assert.deepEqual(result.retried, ["correctness"]);
@@ -191,7 +191,7 @@ test("a spawn-failed first wave retries the whole selection (no reports ⇒ ever
   const result = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
   assert.equal(memory.calls.spawn.length, 2);
   assert.deepEqual(
-    laneItemsOf(memory.calls.spawn[1]?.workflowScript ?? "").map((row) => row.key),
+    laneItemsOf(memory.calls.spawn[1]?.script ?? "").map((row) => row.key),
     ["plan-fidelity", "correctness", "ponytail"],
   );
   assert.deepEqual(result.retried, ["plan-fidelity", "correctness", "ponytail"]);
@@ -212,16 +212,14 @@ test("runPrReviewWave builds selected lanes plus one final Ponytail lane", async
   assert.equal(adapter.calls.spawn.length, 1);
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn);
-  const items = laneItemsOf(spawn.workflowScript).map(
-    ({ key, agent, task, label, phase, skill }) => ({
-      key,
-      agent,
-      task,
-      label,
-      phase,
-      ...(skill === undefined ? {} : { skill }),
-    }),
-  );
+  const items = laneItemsOf(spawn.script).map(({ key, agent, task, label, phase, skill }) => ({
+    key,
+    agent,
+    task,
+    label,
+    phase,
+    ...(skill === undefined ? {} : { skill }),
+  }));
   assert.deepEqual(items, [
     ...TWO_ANGLES.map((angle) => ({
       key: angle,
@@ -255,7 +253,7 @@ test("runPrReviewWave appends ONE uniform directive suffix to EVERY lane task wh
   });
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn);
-  const items = laneItemsOf(spawn.workflowScript);
+  const items = laneItemsOf(spawn.script);
   assert.equal(items.length, 3);
   for (const item of items) {
     const opener =
@@ -285,7 +283,7 @@ test("runPrReviewWave keeps lane tasks bound to one expected PR when no directiv
   await runPrReviewWave(adapter, { angles: ["plan-fidelity", "tests"], timeoutMs: 5_000 });
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn);
-  const items = laneItemsOf(spawn.workflowScript);
+  const items = laneItemsOf(spawn.script);
   assert.equal(items[0]?.task, `${PR_REVIEW_ANGLES["plan-fidelity"]}${reviewTargetSuffix(42)}`);
   assert.equal(items[1]?.task, `${PR_REVIEW_ANGLES.tests}${reviewTargetSuffix(42)}`);
   assert.match(items[2]?.task ?? "", /^angle: ponytail/);
@@ -468,10 +466,10 @@ for (const notes of [
       const retry = adapter.calls.spawn[1];
       assert.ok(retry);
       assert.deepEqual(
-        waveScriptItems(retry.workflowScript).map(({ key }) => key),
+        waveScriptItems(retry.script).map(({ key }) => key),
         ["plan-fidelity"],
       );
-      assert.match(retry.workflowScript, /--expected-pr 42 --json/);
+      assert.match(retry.script, /--expected-pr 42 --json/);
       assert.equal(outcome.attempts.length, 2);
     });
   }
@@ -700,7 +698,7 @@ test("one failed lane: the retry wave carries ONLY the failed key; success merge
   const retrySpawn = adapter.calls.spawn[1];
   assert.ok(retrySpawn);
   assert.deepEqual(
-    laneItemsOf(retrySpawn.workflowScript).map((item) => item.key),
+    laneItemsOf(retrySpawn.script).map((item) => item.key),
     ["correctness"],
   );
   assert.equal(outcome.complete, true);
@@ -748,7 +746,7 @@ test("wave-level run-failed: the retry re-runs the WHOLE effective selection and
   const retrySpawn = adapter.calls.spawn[1];
   assert.ok(retrySpawn);
   assert.deepEqual(
-    laneItemsOf(retrySpawn.workflowScript).map((item) => item.key),
+    laneItemsOf(retrySpawn.script).map((item) => item.key),
     ["plan-fidelity", "correctness", "ponytail"],
   );
   assert.equal(outcome.complete, true);
@@ -784,11 +782,11 @@ test("skill-unavailable is non-retryable while an ordinary failed lane still ret
   assert.ok(firstSpawn);
   assert.ok(retrySpawn);
   assert.deepEqual(
-    laneItemsOf(firstSpawn.workflowScript).map((item) => item.key),
+    laneItemsOf(firstSpawn.script).map((item) => item.key),
     ["plan-fidelity", "correctness"],
   );
   assert.deepEqual(
-    laneItemsOf(retrySpawn.workflowScript).map((item) => item.key),
+    laneItemsOf(retrySpawn.script).map((item) => item.key),
     ["correctness"],
   );
   assert.equal(outcome.complete, false);

@@ -1071,7 +1071,7 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
     angles: ["grounding", "risk"],
     gating: fakeGating(true),
   });
-  const script = spawns.calls.spawn[0]?.workflowScript ?? "";
+  const script = spawns.calls.spawn[0]?.script ?? "";
   assert.match(script, /Draft type: objective\./, "the wave reviews the objective draft type");
   assert.ok(
     script.includes(JSON.stringify(RENDERED).slice(1, -1)),
