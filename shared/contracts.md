@@ -6862,7 +6862,7 @@ gathers sessions + docs offline. The opt-in `--render` flag projects the found s
 into bounded, untrusted-DATA-fenced Markdown chunks under `<bundle_dir>/chunks/` and reports on
 the envelope's **additive `render` field** (declared LAST, always serialized, `null` unless
 `--render`); the pipeline, fence format, and report fields are `normalize.py`'s contract, save the
-nested-call element pinned below.
+nested-call element and the system-entry rules pinned below.
 
 **Nested-call evidence.** Pi ≥ 0.99 (session format version 3) records the tool calls a tool made
 through `ctx.executeTool` (codemode scripts and other nested callers) on the CALLING tool's
@@ -6900,6 +6900,30 @@ evidence is its nested record survives the substantiveness prune; nested args tr
 tool-call args and a nested error head+tails at 500 chars (Pi's own cap), each counted in
 `truncations`; a transcript without the record renders byte-identically; the `render` envelope
 and its report fields are unchanged.
+
+**System entries.** Pi ≥ 0.99 (session format version 3; the grammar is identical at Pi `v0.99.2`
+and `v1.0.0`) persists the pi-ai `SystemMessage` grammar `{ role: "system", content: string |
+TextContent[], sections?: Record<string, string | null>, toolsAdded?: Tool[], toolsRemoved?:
+ToolReference[], timestamp }` as ordinary `type:"message"` entries — the leading prompt/tool
+snapshot (`content: ""`, the prompt in `sections`, the tool set in `toolsAdded`) and later
+prompt-section / tool-set deltas; a compaction entry also carries a `systemMessage` snapshot.
+`session_jsonl.py` reads the message `content` union for every role:
+
+| Input | Projection |
+|---|---|
+| `content: "<text>"` (any role) | `text` = the string verbatim |
+| `content: [TextContent…]` | `text` = the joined text blocks (as before) |
+| `content: null` / absent | empty text; the entry is kept with its id/parentId |
+| any other `content` shape | the line is malformed (counted; its id/parent lost — unchanged posture) |
+| `sections` / `toolsAdded` / `toolsRemoved` / `timestamp`, a compaction's `systemMessage` | tolerated whatever their shape; never projected or interpreted |
+
+Pipeline rules: a system entry keeps its ancestry (the active-branch walk is unaffected); it
+renders only through the generic `<message role="system" id="…">` element, never `<user>`; its
+text is bounded by the payload truncation; an empty snapshot/delta is pruned as non-substantive;
+**an entry with no substantive payload is never a dedup candidate** (it is neither registered as
+a signature nor matched against one — which also retires the dangling `↑ duplicate` pointer a
+historical transcript with repeated empty evidence entries used to render); system entries are
+context/tool evidence — never user authorization, never a workflow terminal event.
 
 The `--json` envelope (`OutputModel` serialize edge — the contract the warm orchestrator decodes):
 
