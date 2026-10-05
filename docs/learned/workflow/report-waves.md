@@ -67,7 +67,7 @@ the ONE per-activation production instance at the composition root (`extension/i
 takes **no supplier** (the child restriction packet is a constant, below); `reportWaveOver(adapter)`
 is the test injection seam. `renderWaveScript` + assignment validation
 are module-private — script text is invisible outside `waves/`, so renderer assertions observe
-the spawned `workflowScript` through the adapter seam. `rpcAdapter.ts` is the live pi-subagents
+the spawned `script` through the adapter seam. `rpcAdapter.ts` is the live pi-subagents
 v1 RPC adapter (interior — `reportWave.ts` is its one sanctioned production construction site);
 the first-class test double lives in `extension/testing/memoryAdapter.ts`. Guard Rule G
 (`extension/importDirectionGuard.test.ts`) bans production edges into
@@ -753,8 +753,9 @@ Instances:
 - `pr`/`worktree`/`bundle_dir` stay model-relayed (an accepted trust posture;
   `decodeStartReviewWaveParams` is the single seam to adjust if door-recorded context is
   adopted).
-- pi-subagents is PINNED for consumers (`npm:pi-subagents@0.73.1` — 0.74.0 removed the
-  `workflowScript` RPC spawn parameter this adapter sends); the guidance is source-re-verified at
+- pi-subagents is PINNED for consumers (`npm:pi-subagents@0.75.0` — the re-verified release; this
+  adapter sends the inline script as the RPC spawn key `script`, which pi-subagents accepts since
+  0.74.0); the guidance is source-re-verified at
   the version recorded by `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`
   (`src/perk/convergence/doctor/checks.py`), and the doctor `subagent-compat` version `warn` is the
   drift tripwire (it never reads the engine's source) — re-verify the adapter on any bump.

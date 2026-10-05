@@ -93,13 +93,22 @@ the max perk version this user has run interactively. Self-healing (missing/garb
 silently re-recorded) and safe to delete; no doctor check or init convergence touches it.
 
 **The perk-managed `.pi/settings.json` slice pins pi-subagents.** The borrowed set is unpinned
-except `npm:pi-subagents@0.73.1`: pi-subagents 0.74.0 removed the `workflowScript` RPC spawn
-parameter perk's report waves send, so `perk init` writes the pinned spec and rewrites an existing
-unpinned or differently pinned entry in place (an object-form entry keeps its filter keys; only
-`source` changes); `perk doctor` reports such an entry as `settings-wiring` drift and `perk doctor
---fix` repairs it. Pi reinstalls the pinned version at the next launch. The doctor
-`subagent-compat` stamp (`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`) records what perk's guidance was
-verified against — a separate fact from this pin.
+except `npm:pi-subagents@0.75.0`: perk's report waves send the inline script text under the RPC
+spawn key `script`, which releases before 0.74.0 do not accept (0.75.0 is also the first release
+whose background children start on Pi 1.0.0). `perk init` writes the pinned spec and rewrites an
+existing unpinned or differently pinned entry in place (an object-form entry keeps its filter keys;
+only `source` changes); `perk doctor` reports such an entry as `settings-wiring` drift and `perk
+doctor --fix` repairs it. Pi installs the version the checkout's own committed
+`.pi/settings.json` names at the next launch, so an existing repo picks up the new entry from
+`perk init` or `perk doctor --fix` after upgrading perk, and an older branch or worktree keeps its
+own committed entry until rebased. perk's waves need pi-subagents' workflow scripts: a
+`disabledFeatures` entry of `workflow-scripts` in pi-subagents' `config.json` fails every wave with
+the engine's own setting-naming message (per the engine source, `missions` and
+`extension-bindings` refuse every wave too). The doctor `subagent-compat` stamp
+(`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`, currently 0.75.0 — source re-verified; doctor, scout and
+PR-door browser waves on the Pi 0.99.2 host; the plan-door browser half is owed) records what
+perk's guidance was verified against — a separate fact from this pin
+(`docs/design/archive/pi-subagents-0.75.0-reverify.md`).
 
 **The perk-managed `.pi/settings.json` slice keeps a load order.** Besides converging the
 `packages` set (perk's pinned entry, the borrowed set, the provider-selected packages), `perk init`

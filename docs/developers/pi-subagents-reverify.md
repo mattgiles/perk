@@ -65,7 +65,36 @@ loading a second SDK copy.
      complete on its validated `structured_output` report under `WAVE_ACCEPTANCE`;
    - the **fork-context repair** for Pi 0.87 (the checkout-only fix): confirm whether the
      installed artifact carries it; until it does, perk children stay on `context: "fresh"`
-     (the support boundary recorded in `docs/design/pi-subagents-child-execution-policy.md`).
+     (the support boundary recorded in `docs/design/pi-subagents-child-execution-policy.md`);
+   - the **RPC spawn key** (`src/extension/rpc.ts::spawnParams`): perk sends the inline script
+     text as `script`, which the engine copies onto its internal `workflowScript` carrier; since
+     0.74.0 a request carrying `workflowScript`/`workflowScriptPath` (an `Object.hasOwn` check, so
+     an `undefined` value counts) is rejected `invalid_params`. A rename here is a wire break the
+     fake responder (`extension/testing/fakeSubagents.ts`) must mirror;
+   - **project-trust forwarding** (`src/runs/foreground/subagent-executor.ts::sessionProjectTrust`
+     → `src/runs/shared/child-session.ts` `SettingsManager.create(cwd, agentDir, {projectTrusted})`):
+     perk's extension — the restriction packet's consumer — loads in a child only where the
+     project tier loads, so the parent's trust must still be forwarded unchanged (contracts §8.3);
+   - the **child prompt-runtime inline path**: `child-session.ts`
+     `CHILD_PROMPT_RUNTIME_EXTENSION_PATH` must still equal the
+     `<inline:pi-subagents:prompt-runtime>` key of `toolPolicy.ts::SYNTHETIC_PATH_TOOL_POLICY` —
+     perk's gate classifies `structured_output`/`contact_supervisor` by that provenance. A new
+     `<inline:pi-subagents:…>` extension that a perk agent's `tools:` can reach needs its own row;
+   - **`toolActivation`** (`src/extension/tool-activation.ts`, modes `auto`/`dynamic`/`eager`)
+     against perk's own-names-only reconciliation (`toolPolicy.ts::reconcileTarget` +
+     `hiddenDeclarationsFor`): `extension/substrate/ownNamesActivation.test.ts` models the
+     loader-present (`dynamic`) shape; `eager` registers no loader at all;
+   - the **`./node` host alias** (`src/runs/background/runner-aliases.ts`): optional since 0.75.0,
+     so background children start on a Pi host whose `pi-agent-core` no longer exports it;
+   - **workflow reuse** (`src/workflows/workflow-reuse.ts::findWorkflowReuseSource`): a relaunch
+     re-attaches only to the same session's newest terminal workflow with the same
+     `scriptDigest`/`argsDigest` whose `stopCause` is `runtime-replaced` (after `/reload` or a
+     resume). perk's `ReportWave` pending map is per-activation, so a wave launched before
+     `/reload` stays uncollectable afterwards; an identical relaunch after `/reload` reuses the
+     replaced run's finished lanes;
+   - the **`disabledFeatures` surfaces** (`src/shared/disabled-features.ts`): the features whose
+     parameters perk sends (`workflow-scripts`, `missions`, `extension-bindings`) refuse every
+     wave with the engine's own setting-naming message — surfaced verbatim, never mapped.
 3. **Run `just ci`.** Then run the host-SDK bridge's census drift guard against the live install
    — `node --test extension/substrate/nativeSdkBridge.test.ts` (it scans the consumers under this
    checkout's `.pi/npm/node_modules/` and skips where none are installed, so this checkout is where
@@ -102,18 +131,23 @@ loading a second SDK copy.
 6. **Record the evidence**: a dated note in `docs/design/archive/` — the source facts with
    file/function anchors, the decisions, and the live-leg outcome (PASS or FAIL, never omitted).
    `pi-subagents-native-baseline-dogfood.md` (0.65.1), `pi-subagents-0.68.0-reverify.md`
-   (0.68.0), `pi-subagents-0.70.1-reverify.md` (0.70.1) and `pi-subagents-0.73.1-reverify.md`
-   (0.73.1) are the templates.
+   (0.68.0), `pi-subagents-0.70.1-reverify.md` (0.70.1), `pi-subagents-0.73.1-reverify.md`
+   (0.73.1) and `pi-subagents-0.75.0-reverify.md` (0.75.0, with the trust matrix and the
+   headless-exit rows on a Pi 1.0.0 throwaway) are the templates.
 
 ## The standing pin decision
 
-pi-subagents is **pinned** (`SUBAGENTS_PACKAGE = "npm:pi-subagents@0.73.1"` in
-`src/perk/convergence/init/settings.py`) since pi-subagents 0.74.0 removed the `workflowScript`
-RPC `spawn` parameter perk's report waves send (`docs/design/archive/pi-subagents-0.73.1-reverify.md`).
-`perk init` writes the pinned spec and reconciles an existing unpinned or differently pinned entry
-forward; `perk doctor --fix` repairs the same drift through `settings-wiring`. The re-verify ritual
-above now also decides **moving the pin**: a release perk has re-verified (source re-read, `just
-ci`, the live leg) is the candidate for both the guidance stamp and the settings pin — two distinct
-facts (what the guidance was verified against vs. what consumers install) that move together only
-when the evidence covers both. A release that breaks a surface perk sends (as 0.74.0 does) needs
-its migration first.
+pi-subagents is **pinned** to the re-verified release (`SUBAGENTS_PACKAGE =
+"npm:pi-subagents@0.75.0"` in `src/perk/convergence/init/settings.py`). perk's report waves send
+the inline script text under the RPC spawn key `script`, which pi-subagents accepts since 0.74.0
+(`docs/design/archive/pi-subagents-0.75.0-reverify.md`). `perk init` writes the pinned spec and
+reconciles an existing unpinned or differently pinned entry forward; `perk doctor --fix` repairs
+the same drift through `settings-wiring`. Pi installs whatever the checkout's own committed
+`.pi/settings.json` names, so the pin reaches a branch only with the change that moves it.
+
+The re-verify ritual above decides **moving the pin**: the pin and the guidance stamp are two
+distinct facts (what consumers install vs. what perk's guidance was verified against) that move
+together only on evidence covering both — the source re-read, `run_ci` with the census drift
+guard, and the live leg. The PR-door browser half is merge-blocking for a change that moves them;
+an owner may elect to owe the plan-door half (step 4). A release that breaks a surface perk sends
+needs its migration first, in the same change as the pin.

@@ -236,7 +236,8 @@ stays active for the packages it already serves, and this copy installed none.
 
 ## Keep pi-subagents out of user-scope settings (`subagent-package-scope`)
 
-perk converges `npm:pi-subagents@0.73.1` (pinned — 0.74.0 breaks perk's report waves) into the
+perk converges `npm:pi-subagents@0.75.0` (pinned — the re-verified release perk's `script` RPC
+spawn targets) into the
 **project** `.pi/settings.json` on purpose: the engine is a per-repo borrow perk's `perk.*` agent
 definitions and wave RPC ride on, so it belongs beside the other project packages `perk init`
 manages. A second `npm:pi-subagents` in your **user-scope**
@@ -287,7 +288,8 @@ name — never reuse those names. `model` is set in the frontmatter (not in `[mo
 via pi's native `subagent` tool by its runtime name — `subagent({agent: "my-reviewer",
 task: "…"})` (pi-subagents ≥ 0.49 restored native structured single-child execution — a
 direct one-child call runs natively, never converted onto the workflow path);
-use `workflowScript` for multi-child orchestration or a custom result projection;
+for multi-child orchestration or a custom result projection, call `subagent` with `workflow: true`
+and a ```` ```js workflow ```` block in the same reply, or `workflow: "./path/to/script.js"`;
 `subagent { action: "list" }` still enumerates discovered agents. pi-subagents' **builtin** agents don't appear: perk converges
 the constant `"subagents": {"disableBuiltins": true}` into `.pi/settings.json` in every perk repo (engine-only
 borrow — perk ships its own `perk.*` agents as package agents). To re-enable one builtin, add a project-settings
