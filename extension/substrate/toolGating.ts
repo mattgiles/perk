@@ -187,9 +187,10 @@ export interface ToolGating {
   joinDiscoveryCohort(family: readonly string[]): void;
   /**
    * Primed activation: activate the members deferred in this session among `names` that are registered,
-   * eligible in the presented landing and not yet active, in catalog order; returns them. A member
-   * still active only because the restoration window deferred its deactivation is primed by
-   * lifting that pending deferral (it survives the window's close) and is returned too. A no-op
+   * eligible in the presented landing and not yet active, in catalog order; returns them. A primed
+   * member's deferral still pending in the restoration window is lifted, so it survives the
+   * window's close — a member still active only because of that deferral is primed this way
+   * and returned too. A no-op
    * (`[]`, no install) outside the cohort. Never throws — a failure is reported and returns `[]`
    * (presentation is fail-open: the model can still `tool_search`; enforcement is untouched).
    */
@@ -305,8 +306,13 @@ export function registerToolGating(
   pi.on("session_start", async (event) => {
     if (event.reason === "reload") restorationWindow = true;
   });
-  pi.on("session_tree", async () => {
+  pi.on("session_tree", async (_event, ctx) => {
     restorationWindow = true;
+    // A restore that replaced the loadout supersedes a reload's still-pending family deferral:
+    // the members the transcript declared are active by that history's choice (perk keeps what
+    // Pi restored), the rest are already off. Without a restore the reload's live set stands, so
+    // the deferral stays pending for the close.
+    if (pendingDeferral.length > 0 && restoredLoadout(ctx)) pendingDeferral = [];
   });
 
   // The closing point: Pi has dropped its pending set by the time a run emits agent_start (for a
@@ -322,6 +328,22 @@ export function registerToolGating(
       console.error(`perk: tool reconciliation failed as the run started — ${error}`);
     }
   });
+
+  /**
+   * Whether this navigation restored the selected branch's declared loadout. Pi restores exactly
+   * when the branch's projection carries a system message (its replayed declarations replace the
+   * active set before `session_tree` handlers run). An unreadable projection reads as no restore,
+   * which keeps the reload's deferral pending.
+   */
+  function restoredLoadout(ctx: ExtensionContext): boolean {
+    try {
+      return ctx.sessionManager
+        .buildSessionProjection()
+        .messages.some((message) => (message as { role?: unknown }).role === "system");
+    } catch {
+      return false;
+    }
+  }
 
   /** Every registered tool's provenance, by name. */
   function provenanceMap(): Map<string, Provenance> {
@@ -475,13 +497,13 @@ export function registerToolGating(
             (!live.includes(name) || pending.has(name)),
         );
         const additions = targets.filter((name) => !live.includes(name));
-        const lifted = targets.filter((name) => live.includes(name));
-        // A member live only because the restoration window deferred its deactivation: lifting
-        // the pending deferral keeps it through the closing apply (reconcileTarget keeps an
-        // active deferred member). The identical install lets Pi re-run the loadout hooks.
-        if (lifted.length > 0) pendingDeferral = pendingDeferral.filter((n) => !lifted.includes(n));
+        // A prime supersedes the one-time deferral the restoration window still holds for the
+        // member — whether it was still live or is activated now — so the closing apply keeps it
+        // (reconcileTarget keeps an active deferred member). When nothing needs adding, the
+        // identical install lets Pi re-run the loadout hooks.
+        pendingDeferral = pendingDeferral.filter((name) => !targets.includes(name));
         if (additions.length > 0) pi.setActiveTools([...live, ...additions]);
-        else if (lifted.length > 0) pi.setActiveTools(live);
+        else if (targets.length > 0) pi.setActiveTools(live);
         return targets;
       } catch (error) {
         console.error(`perk: priming failed — ${error}`);

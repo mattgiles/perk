@@ -7783,8 +7783,13 @@ system prompt is built before the close too, so it still carries the prompt guid
 name the close removes and the snippets of the eligible family members (their declarations are
 hidden); from the second request on the prompt follows the live set. Gate enforcement is immediate —
 the latch and the backstop never wait. A user gesture that changes the landing inside the window
-(a `/plan` toggle, a stage change by `/tree`) falls under the same rule, and a prime inside the
-window lifts the member's pending deferral, so the member survives the close. `startup`,
+(a `/plan` toggle, a stage change by `/tree`) falls under the same rule. A prime inside the window
+lifts the primed member's pending deferral \u2014 whether the member was still active or the prime
+activates it \u2014 so it survives the close. A `/tree` restore that replaces the loadout (the
+selected branch's projection carries a system message, so Pi restored its replayed declarations;
+`sessionManager.buildSessionProjection()`) supersedes a reload's still-pending family deferral:
+the members the transcript declared stay while eligible and the rest are already off; a
+navigation that restores nothing leaves the deferral pending. `startup`,
 `resume`, `new` and `fork` open no window. Pi 0.99.2 has no pending set; there the rule only moves
 the removals to the next run's start. The measurements are recorded in
 `docs/design/archive/pi-1.0.0-mcp-restoration.md`.
@@ -7943,9 +7948,10 @@ with exactly the names that deferred: the next install removes them from the liv
 leaves the deferral pending for the next point; inside the **Restoration window** the removal waits
 for `agent_start`). **Primed activation:**
 `ToolGating.primeDeferred(names)` activates the named members deferred in this session that are registered, eligible
-in the presented landing and inactive, in catalog order, in one install (a member still active
-only because the restoration window deferred its deactivation is primed by lifting that pending
-deferral, with an identical install so the hooks re-run); it is a no-op outside the
+in the presented landing and inactive, in catalog order, in one install (a primed member's
+deferral still pending in the restoration window is lifted; a member still active only because of
+that deferral is primed this way, with an identical install so the hooks re-run); it is a no-op
+outside the
 cohort and never throws (`perk: priming failed — …`; presentation is fail-open — the model can
 still `tool_search`, and enforcement is untouched). Every carrier that names a deferred tool has a
 primer that runs BEFORE the carrier reaches the model, with an exported constant:

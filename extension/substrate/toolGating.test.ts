@@ -145,6 +145,10 @@ function gateFixture(
   sessionManager.getBranch = () => {
     throw new Error("branch unavailable");
   };
+  // The branch projection Pi's `/tree` restore reads: empty (no declared loadout) until `restore`.
+  let projected: unknown[] = [];
+  sessionManager.buildSessionProjection = () =>
+    ({ messages: projected }) as unknown as ReturnType<SessionManager["buildSessionProjection"]>;
   const context: Pick<ExtensionContext, "sessionManager"> = { sessionManager };
   const ctx = context as ExtensionContext;
   return {
@@ -164,6 +168,14 @@ function gateFixture(
     register: (tool: FakeTool, activate = true) => {
       registry = [...registry, tool];
       if (activate) active = [...active, tool.name];
+    },
+    /**
+     * Pi's `/tree` restore of a branch that declares a loadout: the live set becomes `names` and
+     * the branch projection now carries a system message. Fire `session_tree` after it.
+     */
+    restore: (names: readonly string[]) => {
+      active = [...names];
+      projected = [{ role: "system", content: "", timestamp: 1 }];
     },
     call: (name: string, event: Parameters<Hook>[0] = {}) => hooks.get(name)?.(event, ctx),
   };
@@ -1160,6 +1172,78 @@ test("the restoration window's close: agent_start installs the pre-change target
   h.gate.exit();
   assert.ok(h.active().includes("codemode"), "restored at release");
   assertForeignInvariance(h, ["codemode"]);
+});
+
+test("the restoration window: a /tree restore that replaces the loadout supersedes the reload's pending family deferral \u2014 a restored member survives the close; a navigation without a restore leaves the deferral pending", async () => {
+  const family = discoveryFamily();
+  const opened = async (): Promise<Fixture> => {
+    const h = reloaded();
+    await h.call("session_start", { reason: "reload" });
+    h.gate.joinDiscoveryCohort(family);
+    h.gate.syncFromState("read-write", "implement");
+    return h;
+  };
+  // A branch that declares no loadout: Pi restores nothing, the reload's live set stands.
+  const unrestored = await opened();
+  await unrestored.call("session_tree");
+  unrestored.gate.syncFromState("read-write", "implement");
+  await unrestored.call("agent_start");
+  for (const name of family)
+    assert.ok(!unrestored.active().includes(name), `${name} deactivated at the close`);
+
+  // A branch whose transcript carried an activated objective_stack_status (a past search or prime).
+  const h = await opened();
+  h.restore([...h.active().filter((n) => !family.includes(n)), "objective_stack_status"]);
+  await h.call("session_tree");
+  h.gate.syncFromState("read-write", "implement");
+  await h.call("agent_start");
+  assert.ok(
+    h.active().includes("objective_stack_status"),
+    "the restored member survives the close",
+  );
+  assert.equal(
+    h.installs.at(-1)?.hidden.includes("objective_stack_status"),
+    false,
+    "and stays declared",
+  );
+  for (const name of family.filter((n) => n !== "objective_stack_status"))
+    assert.ok(!h.active().includes(name), `${name} stays off`);
+  assertForeignInvariance(h);
+});
+
+test("a prime inside the restoration window of an inactive pending member lifts its deferral: it survives the close and stays declared", async () => {
+  const family = discoveryFamily();
+  // A foreign owner switched push_annotations off while its deferral was still pending.
+  const h = reloaded();
+  await h.call("session_start", { reason: "reload" });
+  h.gate.joinDiscoveryCohort(family);
+  h.gate.syncFromState("read-write", "implement");
+  h.setActive(h.active().filter((n) => n !== "push_annotations"));
+  const live = h.active();
+  assert.deepEqual(h.gate.primeDeferred(["push_annotations"]), ["push_annotations"]);
+  assert.deepEqual(h.installs.at(-1)?.names, [...live, "push_annotations"], "one additive install");
+  await h.call("agent_start");
+  assert.ok(h.active().includes("push_annotations"), "the primed member survives the close");
+  assert.equal(h.installs.at(-1)?.hidden.includes("push_annotations"), false, "and stays declared");
+  for (const name of family.filter((n) => n !== "push_annotations"))
+    assert.ok(!h.active().includes(name), `${name} deactivated at the close`);
+
+  // After a /tree restore left one member active and another inactive: priming the inactive one.
+  const t = reloaded();
+  await t.call("session_start", { reason: "reload" });
+  t.gate.joinDiscoveryCohort(family);
+  t.gate.syncFromState("read-write", "implement");
+  t.restore([...t.active().filter((n) => !family.includes(n)), "objective_stack_status"]);
+  await t.call("session_tree");
+  t.gate.syncFromState("read-write", "implement");
+  assert.deepEqual(t.gate.primeDeferred(["push_annotations"]), ["push_annotations"]);
+  await t.call("agent_start");
+  for (const name of ["objective_stack_status", "push_annotations"]) {
+    assert.ok(t.active().includes(name), `${name} survives the close`);
+    assert.equal(t.installs.at(-1)?.hidden.includes(name), false, `${name} stays declared`);
+  }
+  assertForeignInvariance(h);
+  assertForeignInvariance(t);
 });
 
 test("the restoration window stays shut at startup, and a bare session's agent_start installs nothing", async () => {

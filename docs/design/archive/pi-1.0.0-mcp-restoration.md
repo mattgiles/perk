@@ -367,6 +367,27 @@ With the window rule kept but `prepareLoadout` reverted to the declared-list mas
 tests fail on the first-request check (`implement read-write: objective_stack_status undeclared in
 the first request`).
 
+**Post-review refinements (after the measurement; not re-measured).** The PR review found two
+edge interactions of the deferred family removal. Both are fixed, with pins:
+
+1. **A `/tree` restore inside a reload's window.** Such a restore now supersedes the reload's
+   still-pending family deferral when Pi actually restored a loadout, which happens when the
+   selected branch's `buildSessionProjection()` carries a system message. A family member the
+   transcript declared (a past search or prime) therefore survives the close. Before this
+   refinement, the reload's leftover deferral removed it. Before the fix, the reload had already
+   completed the deferral, so the restore kept it. The Mode A pin is "a /tree restore inside the
+   window", and the fake-host pin is "a /tree restore that replaces the loadout supersedes the
+   reload's pending family deferral". Each fails with this refinement reverted.
+2. **A prime inside the window.** The prime now lifts the pending deferral of an inactive member
+   too, not only of a still-active one. Before, a member switched off by a foreign owner while its
+   deferral was pending was added and reported as primed, then removed at the close. The fake-host
+   pin is "a prime inside the restoration window of an inactive pending member".
+
+No matrix row takes either path. The W2/S1 rows construct fresh sessions, whose startup install
+completes the deferral before any navigation, and no row primes. The RESULT tables above
+therefore stand. The same review corrected `model-tools.md`: waiting to switch off a deferred
+discovery tool changes no permission.
+
 ### Considered and rejected
 
 - **`defaultActive: false` registration**, with perk adding the eligible set. It still needs an

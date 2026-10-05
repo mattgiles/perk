@@ -403,8 +403,10 @@ On Pi 1.0, tools Pi restores after `/reload` or tree navigation survive perk's r
 for example an MCP server's tools that reconnect before your next prompt. Until that prompt starts,
 perk only adds tools; anything it would switch off (a tool the new stage or mode does not allow,
 the deferred discovery tools, a suspended `codemode`) waits for the next prompt. Meanwhile that
-tool is not declared to the model and, in read-only mode, is blocked; its usage notes can still
-appear in the system prompt of that one prompt.
+tool is not declared to the model, though its usage notes can still appear in the system prompt
+of that one prompt. Waiting changes no permission: a tool read-only mode does not allow is
+blocked at once, while a deferred discovery tool the stage and mode allow stays callable as
+before.
 
 One composition limit: `codemode` writes its own description from every callable tool, so in a
 read-write stage session with codemode active, that description may name a tool the diet hides.

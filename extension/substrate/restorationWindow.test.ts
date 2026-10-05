@@ -168,6 +168,47 @@ test("the window after /reload (A): every perk install only adds until the run s
   }
 });
 
+test("a /tree restore inside the window (A): after /reload, navigating back to a leaf whose transcript declared an activated family member keeps it through the next run; the rest of the family is switched off", async () => {
+  const family = discoveryFamily();
+  const restored = "objective_stack_status";
+  const rt = await recordingRuntime();
+  const h = await staged("implement", "read-write", {
+    headful: false,
+    model: rt.reg.getModel(),
+    modelRuntime: rt.reg.modelRuntime,
+    extraExtensions: [toolSearch()],
+    settings: COHORT_SETTINGS,
+  });
+  try {
+    const [first] = h.entryIds() as [string];
+    // A past activation (a `tool_search` hit), recorded in the transcript by the next prompt.
+    h.session.setActiveToolsByName([...h.session.getActiveToolNames(), restored]);
+    rt.census();
+    await h.session.prompt("census");
+    assert.ok(rt.last().tools.includes(restored), `${restored} declared in the transcript`);
+    const leaf = h.session.sessionManager.getLeafId();
+    assert.ok(leaf !== null);
+
+    await h.reload();
+    for (const name of family) assert.ok(isActive(h, name), `${name} active inside the window`);
+    await h.navigateTo(first);
+    await h.navigateTo(leaf);
+    const before = rt.requests.length;
+    rt.census();
+    await h.session.prompt("census");
+    const request = rt.requests[before];
+    assert.ok(request !== undefined, "the census made a request");
+    assert.ok(request.tools.includes(restored), `${restored}, restored by /tree, is declared`);
+    assert.ok(isActive(h, restored), `${restored} survives the window's close`);
+    for (const name of family.filter((n) => n !== restored)) {
+      assert.ok(!request.tools.includes(name), `${name} undeclared`);
+      assert.ok(!isActive(h, name), `${name} switched off`);
+    }
+  } finally {
+    h.dispose();
+  }
+});
+
 test("a sendMessage-triggered turn inside the window (A): no before_agent_start, yet its first request declares none of the removed names and the removals land", async (t) => {
   const installs = recordPerkInstalls(t);
   const family = discoveryFamily();
