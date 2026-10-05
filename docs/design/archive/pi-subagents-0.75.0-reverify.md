@@ -28,7 +28,7 @@ appended from the first planning session on 0.75.0, `perk objective plan 2656`).
   after `dispose()` in every row. A print-mode CLI parent exits after a lane whose model does not
   resolve, but loops until killed after a lane refused at worktree admission. It loops the same
   way on the Pi 0.99.2 host and with perk absent, so it is neither a 1.0.0 regression nor
-  perk-attributable: out of scope, filed as a follow-up issue.
+  perk-attributable: out of scope, filed as follow-up #2660.
 
 Measured rows quote command output. Source-derived statements cite the installed compiled 0.75.0
 (`.pi/npm/node_modules/pi-subagents/src/**/*.js` in `$WT`, the primary witness; upstream `.ts`
@@ -310,7 +310,8 @@ therefore neither a Pi 1.0.0 regression nor perk-attributable. perk's stale-ctx 
 `prepareLoadout`'s `perk: loadout presentation failed`, `extension/substrate/toolGating.ts`) are a
 symptom of the loop, not its cause: X3 loops with no perk handler present. **Routing (owner
 decision): out of scope — follow-up.** A one-file perk guard would not stop the loop, so no fix
-lands here. A GitHub issue references this record. A11's own trigger (0.73.1's `./node` refusal
+lands here. Follow-up #2660 references this record and also notes the worker's `[object Object]`
+`onError` formatting (`extension/worker/sdkAdapter.ts`). A11's own trigger (0.73.1's `./node` refusal
 on 1.0.0) is gone with 0.75.0 (B3, T1).
 
 #### 1.1's rows this node owns — dispositions
