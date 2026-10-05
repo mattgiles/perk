@@ -1,7 +1,7 @@
 # Re-verify: pi-subagents 0.75.0 — the `script` spawn key, the pin move, trust forwarding, and the headless exit
 
-**Status:** dated evidence record. Measured 2026-10-05 (D2 00:48 local; D5, D7 and D8 13:20–13:59Z);
-authored 2026-10-05. It implements plan #2659 (Objective #2656, node 1.2): perk's report-wave RPC
+**Status:** dated evidence record. Measured 2026-10-05 (D2 00:48 local; D5, D7 and D8 13:20–13:59Z;
+D6's plan-door leg 17:32–17:40Z, appended by node 2.1); authored 2026-10-05. It implements plan #2659 (Objective #2656, node 1.2): perk's report-wave RPC
 spawn moves from `workflowScript` to pi-subagents' `script` key, the consumer pin
 (`SUBAGENTS_PACKAGE`) and the guidance stamp (`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`) move from
 0.73.1 to 0.75.0, and the 0.74.0 "known incompatible" doctor ceiling is retired. The templates are
@@ -11,13 +11,16 @@ quotes, scrubbed environment, watchdog, teardown proof). The procedure is
 `docs/developers/pi-subagents-reverify.md`.
 
 **Verdict: PASS on the source, offline, doctor and scout halves and on the Pi 1.0.0 trust matrix;
-PR-door browser half pending (merge-blocking); plan-door browser half owed** (owner election:
-appended from the first planning session on 0.75.0, `perk objective plan 2656`).
+plan-door browser half PASS (node 2.1's planning session, `perk objective plan 2656`, Pi 0.99.2
+host); PR-door browser half PENDING — it runs on plan #2662's PR, which holds until the record
+shows it PASS** (D6).
 
 - **The stamp moved on that evidence** (one commit with its test pin). The owner's
   `/pr-review-browser` on this change's PR is the merge gate: PASS ⇒ its outcome is appended here
   and the PR merges; a second FAIL holds the PR, reverts the stamp and its pin to 0.73.1, and
-  rewrites the baseline-asserting prose.
+  rewrites the baseline-asserting prose. **Correction (2026-10-05):** #2661 merged on 2026-10-05
+  (15:28Z) without the PR-door outcome. Node 2.1 (plan #2662's PR) carried both browser legs
+  (D6), and the docs that claimed a PR-door pass were corrected there.
 - **The restriction packet reaches its consumer under trust forwarding.** In every trusted
   parent state measured on the 1.0.0 host (`--approve`, remembered trust, `defaultProjectTrust:
   "always"`, and the production SDK-worker factory), the child carried
@@ -54,7 +57,9 @@ Apart from these substitutions, quotes are verbatim.
 | Pi (host, D2–D5, X2) | 0.99.2, `~/.local/share/mise/installs/node/26.3.0/bin/pi` | `which pi`, `pi --version` |
 | Pi (throwaway, D7) | 1.0.0 — `@earendil-works/{pi-coding-agent,pi-ai,pi-agent-core,pi-tui,pi-client,pi-server}` exact 1.0.0 as throwaway edits (`package-lock.json` 453 lines changed, as in 1.1); `which pi` = `$TW/node_modules/.bin/pi` → `$TW/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js` | `npm install --save-dev --save-exact …@1.0.0`; each `package.json` `version` |
 | pi-subagents (installed, now pinned) | 0.75.0 in `$WT` (independent copy of `.pi/npm`, inode 461007794, link count 1) and in `$TW` (independent copy, inode 461387694) | `package.json` after `rm -rf` + `npm install pi-subagents@0.75.0 --prefix .pi/npm --legacy-peer-deps` |
-| pi-subagents (main checkout) | 0.73.1, untouched | `$MAIN/.pi/npm/node_modules/pi-subagents/package.json` |
+| pi-subagents (main checkout) | 0.73.1, untouched during D2–D8 | `$MAIN/.pi/npm/node_modules/pi-subagents/package.json` |
+| Browser-door host, plan-door (D6) | Pi 0.99.2 PATH host (`~/.local/share/mise/installs/node/26.3.0/bin/pi`); pi-subagents 0.75.0 in `$MAIN/.pi/npm` (after #2661 merged); perk 3.9.0 at the planning session's HEAD `9c4e52c0` (#2661's merge commit); session format `version: 3` | `which pi`, `pi --version`, `$MAIN/.pi/npm/node_modules/pi-subagents/package.json` at planning time; the session header and its `perk:workflow-state` `perk_version` |
+| Browser-door host, PR-door (D6) | PENDING — recorded from the implement worktree (`$MAIN/.worktrees/plan-2662`) when the leg runs | `.pi/npm/node_modules/pi-subagents/package.json`, `pi --version`, `perk doctor --verbose` |
 | npm registry (D7 start, 2026-10-05T13:31Z) | pi-coding-agent ends `1.0.1, 1.0.2, 1.0.3`; pi-subagents ends `0.75.0, 0.76.0` — **0.76.0 is published and NOT adopted**; the subject stays exact 0.75.0 | `npm view … versions --json` |
 | node | v26.3.0 | `node --version` |
 | `$MODEL` | `anthropic/claude-opus-5-5` (lane and parent model for every spawn leg) | `$PI_PROVIDER/$PI_MODEL` of the implement session |
@@ -330,11 +335,66 @@ on 1.0.0) is gone with 0.75.0 (B3, T1).
 
 ### Browser doors (D6)
 
-- **PR-door half — PENDING, merge-blocking.** The owner's `/pr-review-browser` on this change's
-  PR (its `review-<N>` worktree installs the branch's 0.75.0 pin) to N/N coverage. The outcome is
-  appended here before merge.
-- **Plan-door half — OWED** (owner election, recorded in the plan's `## Assumptions`), appended
-  from Phase 2's first planning session on 0.75.0 (`perk objective plan 2656`).
+**Appended 2026-10-05 (node 2.1, plan #2662's PR).** #2661 merged before either browser leg was
+recorded, so node 2.1 carried both. The instrument for each leg is three kinds of tool result in
+the session JSONL. The launch tool's result carries the manifest (`launch.requested` /
+`launch.runnable` / `launch.preflightFailures`) and the run handle. The collect tool's result
+carries `complete`, `covered`, `failures` and `attempts`; collection settles the wave marker and
+carries no delivery outcome. The per-angle `push_annotations` calls show `angle` and `replace` in
+their arguments, and their receipts carry `pushed`, `held` and `held_batches`. PASS needs all of:
+(1) every requested lane runnable with no preflight failure; (2) `complete: true`, N/N covered, no
+failures; (3) exactly one `replace: true` push per covered angle, every receipt the ok arm with
+`held == 0` and `held_batches == 0` (an empty replacement's `pushed: 0` is healthy); (4) the
+browser decision after the last push receipt in file order; (5) the owner's observation of the
+`perk:wave` marker and the annotations. A DENY is a valid decision: the leg measures the door, not
+the verdict.
+
+- **Plan-door browser wave — PASS.** Host: Pi 0.99.2 PATH host, pi-subagents 0.75.0 in
+  `$MAIN/.pi/npm`, perk 3.9.0 at `9c4e52c0` (matrix). Session: node 2.1's planning session
+  (`perk objective plan 2656`, run `01M46BHY259EYTNF86152ER374`, Pi session
+  `01a10cb8-fb7c-716c-8602-f7c2d8194607`). Its JSONL is
+  `$MAIN/.pi/agent/sessions/--Users-mattgiles-dev-github-mattgiles-perk--/2026-10-05T15-40-12-028Z_01a10cb8-fb7c-716c-8602-f7c2d8194607.jsonl`
+  (211 lines, header `version: 3`, sha1 `39010981f2731c303ff6c7fefd9481bd531a40cd`). The
+  `planning-session/main` artifact of `perk learn evidence --json`, run from the implement
+  worktree, is a byte-identical copy. The leg is the first review round's `/plan-review-browser`,
+  the only wave in the session; the second round (`plan_review`, line 205 → "plan APPROVED by
+  reviewer." at line 211) ran none.
+  - **Launch (criterion 1).** Line 178 calls `start_draft_review_wave {"angles": ["grounding",
+    "decision-completeness", "risk"]}`. Its result (line 179, 17:32:57Z) reads "Draft-review
+    workflow accepted with 4/4 post-preflight runnable lane(s) — grounding,
+    decision-completeness, risk, ponytail (asyncId 8002b79a-4ef3-460a-8a1e-0131d3a76d0e)."
+    `details.launch`: `requested` and `runnable` are both `["grounding",
+    "decision-completeness", "risk", "ponytail"]`, and `preflightFailures` is `[]`.
+  - **Collect (criterion 2).** Collection followed the matching workflow-completion notice (line
+    185). The result (line 187, 17:37:29Z) reads "Draft-review wave complete: covered 4/4
+    lane(s)." with `complete: true`, all four angles in `covered`, and `failures: []`. It records
+    one attempt (`state: "complete"`) whose four `perk.draft-reviewer` children are each
+    `success: true`.
+  - **Delivery (criterion 3).** One assistant entry (line 188) carries four `push_annotations`
+    calls, one per covered angle, each with `replace: true`. The receipts are lines 189–192
+    (17:37:48Z), and each is the ok arm (`ok: true`, `mode: "plan"`, `skipped: []`):
+
+    | Angle | Findings sent | Receipt | `pushed` | `held` | `held_batches` | `deleted` |
+    |---|---|---|---|---|---|---|
+    | grounding | 2 | "Annotations — perk:grounding: pushed 2." | 2 | 0 | 0 | 0 |
+    | decision-completeness | 1 | "Annotations — perk:decision-completeness: pushed 1." | 1 | 0 | 0 | 0 |
+    | risk | 1 | "Annotations — perk:risk: pushed 1." | 1 | 0 | 0 | 0 |
+    | ponytail | 0 | "Annotations — nothing to push." | 0 | 0 | 0 | 0 |
+
+    The risk lane reported two findings. The planner's reconciliation folded the second, which
+    was anchored on the same phrase as decision-completeness's finding, into that annotation's
+    body. All five reviewer findings therefore reached the browser as four annotations.
+  - **Decision order (criterion 4).** The owner **DENIED** in the browser. The DENY feedback turn
+    is line 201 (17:40:37Z), after the last push receipt (line 192). It quotes all four
+    annotations back ("I've reviewed this plan and have 4 pieces of feedback").
+  - **Owner observation (criterion 5).** Asked once while this row was written, the owner
+    confirmed that the `perk:wave` marker showed after launch and cleared at collection, and that
+    all four annotations were visible in the browser before the DENY.
+  - The planner's post-collection `PLAN-DOOR-LEG-OUTCOME:` line (line 193) and the plan's
+    Assumptions bullet served as finders; neither is the instrument.
+- **PR-door browser wave — PENDING.** It runs on node 2.1's PR (plan #2662) as the owner's
+  `/pr-review-browser` in the implement session, judged by the same five criteria. The PR holds
+  until this row records a PASS.
 
 ## Operator notes — the host move is per checkout
 
