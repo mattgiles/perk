@@ -1,11 +1,11 @@
 # A shared decision foundation for v1 and v2
 
-2026-10-05. A proposed investment before the Durable integration. This document specifies
+2026-10-05. A proposed v1 investment independent of the Durable experiments. This document specifies
 direction and acceptance criteria; it introduces no runtime behavior.
 
 **Make questions and review decisions explicit enough to resolve through delegated policy or
 a human channel, then validate them before they affect the workflow.** The initial v1 pilot
-would answer narrowly delegated questions and prepare human plan review. It would not grant
+would prepare an existing draft for human plan review under explicit authority. It would not grant
 plan approval or save a plan on policy authority. Existing saves following human approval
 would retain their feature-owned path.
 
@@ -13,7 +13,7 @@ This develops the decision boundary behind the [working vision][vision], the
 [workflow walkthrough][workflows], and the [parallel v2 workspace][v2]. The
 [strategy proposal][strategy] explains the larger opportunity.
 
-## Why invest before v2
+## Why share decision semantics
 
 Headless v1 and Durable v2 encounter the same domain problem: work needs a decision, and the
 person who could make it may not be attached. Headless execution can sometimes use authority
@@ -27,11 +27,10 @@ conductor, an execution ledger, and autonomous plan approval after a critic wave
 Keep that distinction, explicit delegation, and bounded outcomes. Building the whole conductor
 and ledger now would commit to orchestration that the Durable proposal may replace.
 
-Decision handling offers an independent v1 benefit. A supported unattended session could
-continue through authorized preference questions and stop with a useful account of the human
-review it still needs. V2 could reuse the meaning and validation of those interactions while
-extending their lifetime. This is smaller than general unattended workflow recipes, which
-remain a possible next investment once the decision boundary works.
+Review preparation offers an independent v1 benefit: gather authorized critic evidence for
+an existing draft and stop with a useful account of the human review it still needs. V2 could
+reuse those semantics while extending their lifetime. General unattended recipes and question
+resolution remain separate investments; neither blocks the early Durable decision proof.
 
 ## Where the concerns overlap today
 
@@ -40,7 +39,7 @@ Python doors. A missing terminal currently stands for several different limitati
 
 | Current interaction | Evidence and behavior | Consequence for this investment |
 | --- | --- | --- |
-| Structured questions | Perk [installs a required borrowed questionnaire][borrow]. Its [reconciler][question-reconcile] removes the tool without UI; its [handler][question-handler] also refuses. | Availability and resolution need an explicit adapter; a headless model cannot simply call the current tool. |
+| Structured questions | Perk [installs a required borrowed questionnaire][borrow]. Its [reconciler][question-reconcile] removes the tool without UI; its [handler][question-handler] also refuses. | A separate compatibility investigation is needed; this is not the first pilot's caller. |
 | Review launch and verdict | [Launch selection][review-launch] asks about critics and an optional angle. The [headless review test][review-skip] expects a soft skip. [Plan review][plan-review] already has distinct approval, denial, dismissal, abort, and unavailable outcomes. | Choosing review preparation is separate from authorizing a save. Preserve the feature operation. |
 | Project CI | [CI policy][ci] runs for existing trust, an explicit allow flag, or prior approval; otherwise it confirms with UI and refuses without it. | Existing authorization has meaning independent of presentation. |
 | Formal GitHub reviews | The [submission operation][formal-review] refuses headless formal approval/request-changes; comment submission follows different rules. | A questionnaire default cannot supply formal review authority. |
@@ -66,8 +65,8 @@ answers; plan review judges particular bytes and may lead to a backend save. The
 effects, and recovery differ. Follow the existing [module-contract guidance][module-contracts]:
 named feature inputs and outcomes, with validation at transport boundaries.
 
-Candidate responsibilities are “resolve these authoring questions within this delegation” and
-“prepare this plan for human review.” These are conceptual interface sketches, not exported
+The first responsibility is “prepare this plan for human review”; a later one could be
+“resolve these authoring questions within this delegation.” These are conceptual sketches, not exported
 names or a public schema. Share request identity, provenance, and lifecycle checks only where
 working callers establish the same semantics. Avoid a universal prompt handler or an approval
 policy object containing switches for every feature.
@@ -104,72 +103,42 @@ flowchart LR
 “Accept once” concerns the logical decision. It does not promise exactly-once effects in an
 issue backend. Approval, attempted save, and confirmed save remain distinct facts.
 
-### Treat recommendations as advice within delegated scope
+### Establish delegation at the feature boundary
 
-The initial policy would accept an unambiguous recommendation only for a question within an
-explicitly delegated class of choices. For single-select, exactly one eligible recommended
-option is required. For multi-select, the explicitly supported policy can select all recommended
-options only when their combination is permitted. No recommendation, conflicting recommendations,
-incomplete context, or an unsupported question produces an unresolved outcome.
+The pilot's trusted caller identifies the review-preparation operation and supplies explicit
+authority for its allowed choices. A model-authored question category or `(Recommended)` label
+cannot establish scope. Only preparation choices already owned by that feature can be delegated;
+plan scope, delivery policy, approval, and save authority do not follow from them.
 
-For an authorized export change, a permitted choice between test-fixture naming schemes might
-be delegated. A question about customer retention periods requires information or authority
-the policy may not possess. Appending `(Recommended)` changes neither case.
-
-The borrowed package encodes recommendation in option text, not a typed authority or
-recommendation field. Its adapter must validate that convention and retain the complete
-questionnaire, including relevant previews. Selection order alone is insufficient.
-
-Unlike the old headless proposal, the first pilot would not ask the model to invent a missing
-recommendation and retry. It would retain the unresolved question and the reason. It would
-also distinguish an unavailable route from a human declining to answer. An answer accepted
-from policy must say so in both its receipt and the model-facing result.
+Missing authority, facts, or supported execution capability produces an unresolved outcome.
+Record policy identity and the actual actor in both the receipt and any model-facing result.
+Do not describe a policy choice as a human answer, or re-prompt the model to invent missing
+authority. Recommendation handling belongs to the separate questionnaire investigation below.
 
 ## A bounded v1 pilot
 
-### First prove the borrowed question bridge
+### Prepare an existing draft
 
-The current [worker binding][worker-binding] uses JSON mode with no UI context. The older
-[session-driving proposal][session-driving] suggested an in-process SDK binding with RPC
-semantics and a policy-backed UI. This remains a plausible compatibility adapter.
+Build one bounded preparation caller around an already-authored plan, its review/save
+destination, and explicit preparation authority. The caller would validate the exact subject,
+resolve only authorized preparation choices, gather the requested critic evidence, and hand
+that same subject and evidence to an existing human review route when available. It would
+not drive plan authoring or treat completed critics as approval.
 
-The inspected official SDK documentation says [RPC dialogs][sdk-rpc] use correlated request
-and response IDs, and [`hasUI`][sdk-ui] is true in RPC mode. The borrowed package's
-[RPC walker][question-rpc] uses select/input calls. Those facts justify a spike, not a claim
-that the bridge already works against Perk's declared runtime.
+The existing [launch chooser][review-launch] owns browser review with or without a reviewer
+wave and an optional custom angle. That is the initial policy seam. No critic work starts
+without explicit authority naming the permitted standard critic set and resource bounds;
+custom angles must be supplied explicitly, not invented by the resolver. Absent critic
+authorization, preparation can hand off the draft without launching a wave. Retain requested
+reports and expose incomplete or unavailable coverage honestly.
 
-Two concrete gaps must be solved:
+The current [worker drive][worker-outcome] supports only `implement` and `address` and lacks a
+pending-decision outcome. Giving its [JSON-mode SDK binding][worker-binding] UI callbacks does
+not create a review-preparation workflow. Give this bounded caller a supported v1 binding and
+typed prepared/pending, cancelled, and failed outcomes; any new cross-plane invocation must
+deliberately extend the contract and callers. This proposal chooses no command or wire shape.
 
-1. The borrowed [prompt event][question-event] supplies questions and options, but no stable
-   request ID, tool-call identity, reply channel, or preview content beyond a presence flag.
-   It is a notification event, not a complete decision interface. The tool handler also leaves
-   its tool-call ID and cancellation signal unused. Matching the next dialog by title or
-   emission order cannot establish safe ownership under concurrent calls.
-2. The [response envelope][question-envelope] describes successful answers as coming from the
-   user and cancellation as a user declining. Supplying policy choices through UI callbacks
-   alone would misattribute them. A side receipt does not correct what the model is told.
-
-Characterize the actual supported SDK and borrowed package together. Prove tool-call
-correlation, cancellation, full semantic input capture, truthful output, and cleanup when the
-SDK replaces a session. The [SDK replacement contract][sdk-replacement] requires rebinding
-extensions and subscriptions. A transient RPC dialog ID is not a durable workflow identity.
-
-Use supported adapter seams where sufficient. If the borrowed package needs a small versioned
-integration seam, establish that dependency explicitly before claiming the pilot is shippable.
-Do not compensate with English-title matching, localized sentinel parsing, or a second
-first-party questionnaire. Unsupported previews or interaction forms stay unresolved until
-their complete meaning can be carried.
-
-RPC semantics can also make other UI-dependent branches reachable. The pilot must recognize
-its supported question operation and report other interactions as unsupported; it must not
-answer arbitrary confirm/editor/custom calls. Bind the behavior only for the opt-in pilot.
-
-### Prepare review and preserve human authority
-
-The review half should take an already-authored plan, prepare its review context and any
-explicitly requested critic evidence, then route to an existing human review surface when
-available. It would not build an autonomous authoring recipe or approve a plan because a
-critic wave completed.
+### Preserve human review and save semantics
 
 The valuable existing boundary is [`reviewPlanDraft`][plan-review], with its typed reviewer
 result, cancellation checkpoint, and feature-owned completion logic. Its approval/save path
@@ -187,73 +156,88 @@ Do not replace them with one generic digest comparison. Likewise, an unknown sav
 retain the existing refusal to retry automatically; a fresh receipt format cannot eliminate
 Linear's create/marker uncertainty.
 
-If no human route is available, the pilot should return the review subject, evidence
-references, and the required next action as unresolved. It must not fabricate approval or
-interpret the current headless soft skip as completion. The existing [worker outcome][worker-outcome]
-has no first-class pending-decision case. Any production integration that crosses the Python/
-TypeScript boundary must deliberately extend its contract and callers; this document chooses
-no new wire shape. Ordinary v1 behavior remains unchanged outside the opt-in pilot.
+If no human route is available, return the exact review subject, retained evidence references,
+destination, and pending human-review requirement. Preparation may be complete while review
+remains pending; the current headless soft skip cannot stand for approval or completed review.
+The v1 record can remain session-bound. Restart persistence is a v2 proof, not a prerequisite
+for this pilot. Ordinary v1 behavior remains unchanged outside the opt-in caller.
+
+## Separate questionnaire compatibility investigation
+
+The older [session-driving proposal][session-driving] suggests an SDK binding with RPC
+semantics and policy-backed UI. Official docs say [RPC dialogs][sdk-rpc] have correlated IDs
+and [`hasUI`][sdk-ui] is true in RPC mode; the borrowed [walker][question-rpc] uses select/input.
+These facts justify a separate spike against supported package versions, not a pilot dependency.
+
+Two gaps remain concrete. The [prompt event][question-event] lacks stable request/tool-call
+identity, a reply channel, and full preview content; the handler ignores its tool-call ID and
+cancellation signal. The [response envelope][question-envelope] attributes successful answers
+to the user and cancellation to user refusal. UI callbacks alone cannot safely correlate or
+truthfully attribute delegated answers. A side receipt does not fix the model-facing result.
+
+Prove full semantic input, correlation, cancellation, provenance, and [session replacement][sdk-replacement]
+cleanup through a supported or explicitly versioned supplier seam. Do not match English titles
+or dialog order, parse localized sentinels, or build a second first-party questionnaire. RPC
+also exposes other UI branches; no generic auto-answering of confirm/editor/custom calls follows.
+
+A later recommendation policy needs a trusted, feature-owned category and explicit delegation.
+Single-select needs exactly one eligible recommendation; multi-select must validate the combined
+scope. Missing facts, ambiguous recommendations, or unsupported previews remain unresolved.
+The borrowed package's recommendation-in-option-text convention supplies advice, not authority.
 
 ## How Durable extends the same decisions
 
-A future v2 execution could reach a question outside delegated scope, commit its identity and
-context, and ask the owner through Slack or text messaging. The owner could answer later;
-Perk would authenticate the reply, recover the pending request, revalidate its authority and
-subject, and consume a valid answer once. A changed plan, cancelled execution, or superseding
-request would prevent an old response from advancing the work.
+The early v2 proof is a pending human decision over fixture evidence, with no model or UI
+transport. The [workflow companion][persisted-decisions] owns its protocol: retain identity and
+authority, validate an authorized reply, and consume it while creating one continuation in a
+single local commit. The pending decision survives the task that requested it. The experimental
+continuation is conversation-owned in the retained execution conversation, so replying does not
+require a live requester or waiter. Application cancellation governs new admission across tasks.
 
-The same question could therefore resolve immediately through an authorized v1 policy, reach
-a human in an attached session, or remain pending in v2. The feature meaning survives while
-the channel and lifetime change.
+A lost acknowledgment may follow a successful commit. The feature must distinguish definite
+rejection from uncertain acceptance and recover the retained receipt before retrying. The
+companion's [commit-recovery rules][commit-outcomes] belong inside the decision module, keeping
+each caller from reconstructing them. Reply-before-wait, reply-after-requester-completion,
+duplicates, supersession, changed subject, cancellation, and lost acknowledgment are required
+cases in the [validation sequence][validation]. This proof can proceed independently of both
+the v1 pilot and questionnaire investigation.
 
-Upstream [application documents][durable-docs] can participate in atomic commits alongside
-entries and tasks. [Task waits][durable-tasks] wait on task identities. These are useful
-mechanisms; they do not constitute a demonstrated human-question or messaging API. Perk still
-needs persisted decision records, identity and authorization mapping, notification delivery,
-reply correlation, duplicate handling, supersession, and a tested way to wake the appropriate
-work.
-
-Record the policy version and authority used for a pending request. Durable
-[settings][durable-settings] are not persisted, so host configuration alone cannot explain an
-older decision after restart. Notifications and backend saves are external effects: record
-intent, use stable identities where supported, and reconcile ambiguous results. The upstream
-[recovery test][durable-recovery] explicitly exercises two service calls producing one applied
-effect through an idempotency key. It does not prove arbitrary external operations execute once.
-
-This future adapter belongs with the [v2 integration][v2], using its storage and host ownership.
-The upstream [storage contract][durable-storage] permits one owner process per store and has
-backend-specific crash guarantees. Start with a pending decision that survives a process
-restart; shared access, remote hosting, and messaging delivery require additional proofs.
+Later, the same feature meaning could reach a human through an attached client or messaging
+adapter. Those channels would add authentication, notification delivery, and reply correlation.
+Persisting a decision does not make a backend save atomic or preserve unrecorded policy;
+the companion's [resume rules][resume-rules] still apply. Shared access, remote hosting, and
+messaging require their own proofs rather than being prerequisites for decision persistence.
 
 ## Sequence, acceptance, and deferred work
 
 Implement in four increments, each with a working caller:
 
-1. **Characterize dependencies and behavior.** Resolve the runtime-version mismatch below;
-   reproduce questionnaire, RPC, and review behavior with the supported packages. Establish
-   whether the borrowed integration seam is sufficient.
-2. **Define feature-specific decisions.** Introduce only the identity, delegation, outcomes,
-   and provenance needed by the pilot; extract review comparisons without changing existing
-   guard behavior.
-3. **Ship delegated question resolution.** Bind the SDK adapter for an opt-in bounded session,
-   with supported recommendation handling and truthful policy receipts/results.
-4. **Ship human review preparation.** Prepare the reviewed subject and evidence, route through
-   existing human surfaces, and expose unresolved review when none is available.
+1. **Characterize supported review behavior.** Resolve the runtime-version mismatch below
+   for the selected v1 binding; establish the existing review and save guards as the baseline.
+2. **Define the preparation request.** Supply an existing draft, destination, trusted feature
+   identity, explicit preparation authority, and bounded outcomes through one opt-in caller.
+3. **Prepare authorized evidence.** Resolve only permitted launch choices, run explicitly
+   authorized critics, and retain their reports against the exact subject.
+4. **Hand off to human review.** Use existing review/save semantics when a route is available;
+   otherwise return evidence and a pending review requirement without approval or save.
 
 Implementation acceptance should exercise these observable outcomes:
 
 | Scenario | Required result |
 | --- | --- |
-| Valid delegated recommendation | Exact allowed answer; policy identity/version and context recorded; model told the actual actor. |
-| Missing facts, ambiguous recommendation, or choice beyond delegation | Unresolved with reason; no invented answer or model re-prompt loop. |
-| Concurrent questions, cancellation, or session replacement | No cross-delivery, late acceptance, or orphaned ownership. |
-| Plan prepared; no human approval | No policy-authorized approval/save; the review remains required. |
+| Valid delegated preparation choice | Only the authorized feature choice is applied; policy identity/version and context recorded; actual actor identified. |
+| Missing critic authority | No critic work; permitted plain preparation remains available. |
+| Custom angle absent | Run only the authorized standard critics; do not invent an angle. |
+| Requested critic fails or is unavailable | Retain completed evidence and report incomplete coverage; no implied clean review. |
+| Cancellation, supersession, or session replacement | No late acceptance, cross-delivery, or orphaned ownership. |
+| Plan prepared; no human route or approval | Evidence and pending review requirement returned; no policy-authorized approval/save. |
 | Changed artifact or destination; superseded review | Existing source-sensitive rejection behavior preserved. |
 | Save outcome unknown | No blind retry or gate release. |
 | CI, formal review, stack authorization, and ordinary v1 | Existing policies preserved; enabling the pilot grants no incidental authority. |
-| Later v2 restart and repeated reply | Pending request recovered; only one valid logical acceptance; external effects reconciled separately. |
+| Independent v2 restart and repeated reply | Pending request survives its requesting task; one valid acceptance creates one continuation; acknowledgment loss is reconciled before retry; external effects reconciled separately. |
 
-The final row is a later Durable proof, not a condition for shipping the bounded v1 pilot.
+The final row is the independent early Durable proof, not a condition for shipping the v1 pilot.
+Questionnaire recommendation and RPC compatibility tests belong to their separate investigation.
 A later delegated plan-approval policy would require **full coverage from the four standard
 critics plus Ponytail**, with every finding dispositioned and the final reviewed subject
 identified. This explicitly tightens the old memo's partial-coverage-with-warning policy.
@@ -274,10 +258,12 @@ development dependency **0.99.2**. Installed-package links identify local inspec
 not files guaranteed in a fresh checkout. That mismatch prevents treating this inspection as
 compatibility proof for the declared pin or the ongoing Pi 1.0 work.
 
-Durable citations use the library mirror at `b7dfc049e917a265a5aefa9f3952a2dec9b81cfd`,
+Durable evidence in the linked companions uses the library mirror at
+`b7dfc049e917a265a5aefa9f3952a2dec9b81cfd`,
 package 1.0.3. Cited tests were inspected, not executed for this proposal. The proposed policy
 and adapters remain Perk work; upstream persistence establishes mechanisms, not their product
-semantics.
+semantics. The [strategy evidence appendix][evidence] records the technical manual's snapshot,
+its captured experiment, and the limits of that evidence.
 
 [vision]: vision.md
 [workflows]: pi-durable-workflows.md#each-fact-keeps-one-owner
@@ -311,11 +297,11 @@ semantics.
 [review-guards]: ../../../extension/pi/v1/draftReview.ts#L1-L20
 [review-tests]: ../../../extension/pi/v1/draftReview.test.ts
 [worker-outcome]: ../../../extension/worker/stageExecution.ts#L60-L96
-[durable-docs]: https://github.com/earendil-works/pi/blob/b7dfc049e917a265a5aefa9f3952a2dec9b81cfd/packages/durable/README.md#your-own-state
-[durable-tasks]: https://github.com/earendil-works/pi/blob/b7dfc049e917a265a5aefa9f3952a2dec9b81cfd/packages/durable/README.md#child-tasks
-[durable-settings]: https://github.com/earendil-works/pi/blob/b7dfc049e917a265a5aefa9f3952a2dec9b81cfd/packages/durable/README.md#settings
-[durable-recovery]: https://github.com/earendil-works/pi/blob/b7dfc049e917a265a5aefa9f3952a2dec9b81cfd/packages/durable/test/harness-tasks-recovery.test.ts#L111-L144
-[durable-storage]: https://github.com/earendil-works/pi/blob/b7dfc049e917a265a5aefa9f3952a2dec9b81cfd/packages/durable/README.md#storage
 [question-package]: ../../../.pi/npm/node_modules/@juicesharp/rpiv-ask-user-question/package.json
 [sdk-package]: ../../../node_modules/@earendil-works/pi-coding-agent/package.json
 [manifest]: ../../../package.json#L66
+[persisted-decisions]: pi-durable-workflows.md#persisted-decisions
+[commit-outcomes]: pi-durable-workflows.md#commit-outcomes-and-recovery
+[evidence]: pi-in-the-sky.md#appendix-evidence-and-boundaries
+[resume-rules]: pi-durable-workflows.md#resuming-safely
+[validation]: pi-durable-v2.md#validation-sequence

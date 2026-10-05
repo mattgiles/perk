@@ -14,20 +14,20 @@ Perk shows the affected revision, the correction, and the decision waiting for y
 inspect the evidence, ask for a change, or take the next human delivery step. You spend your
 attention on the work's quality and direction.
 
-The first useful v2 should make that continuity ordinary for a plan, an objective, and a
+The first usable v2 should make that continuity ordinary for a plan, an objective, and a
 learning pass. As the product matures, the same foundation could support collaboration,
 comparisons between implementations, and richer learning across completed work.
 
-For the bounded pre-v2 investment in questions, delegation, and human review behind this
-experience, see [A shared decision foundation for v1 and v2](decision-foundation.md).
+For the independent v1 pilot in delegated review preparation, see
+[A shared decision foundation for v1 and v2](decision-foundation.md).
 
 ## The first v2: three ordinary workflows
 
 The following stories use an illustrative application adding export support. They describe a
 target experience, not an account of an actual Perk run. Here, “first v2” means a usable
-integration supporting all three workflows. The [parallel-development proposal][v2] currently
-ends its validation sequence at one approved node and a persisted human decision. Shipping
-the experience below also requires proving objective coordination and learning continuity.
+integration supporting all three workflows. The [validation sequence][v2] distinguishes an
+earlier **experimental plan workflow** milestone from **first usable v2**, which also proves
+multi-node objective coordination and learning continuity. Both remain future acceptance work.
 
 ### A plan you can leave and return to
 
@@ -48,9 +48,12 @@ can finish while review and subsequent decisions remain part of the same work.
 
 Suppose the implementation reaches a draft PR and two reviewers start. One report has been
 accepted when the host process stops. After the host restarts with its execution data and
-workspace available, Perk checks the plan and code revisions. It retains the accepted report
-for unchanged work, then recovers the outstanding assignment or explains why intervention is
+workspace available, Perk checks runtime and policy compatibility, authorization, and the actual
+workspace and plan/code revisions before resuming work. It retains the accepted report for
+unchanged work, then recovers the outstanding assignment or explains why intervention is
 needed. Review restrictions and consumed budgets continue to govern the work.
+Perk checks each report against its assignment before counting it as completed review. A worker
+that stops without a usable report leaves visible unfinished work; it does not imply a clean review.
 
 You return to a specific finding: the implementation buffers the whole export in memory.
 You request a correction within the approved scope. The changed code receives the required
@@ -58,10 +61,12 @@ checks and review; the earlier report remains historical evidence, clearly assoc
 the revision it assessed. A decision left open on an older revision cannot approve the new one.
 
 Once the evidence is ready, Perk waits for your delivery judgment. You can close the view and
-return to the same pending decision. Marking ready and landing remain explicit human actions.
-If publication was interrupted, Perk reconciles GitHub's actual state through its existing
-delivery machinery before deciding what remains to do. That [recovery discipline][publication]
-already matters today and carries into v2.
+return to the same pending decision even after the worker that requested it has finished.
+If your reply is interrupted, Perk checks whether it was accepted before asking you to retry
+or continuing the work. Marking ready and landing remain explicit human actions.
+If incremental publication was interrupted, Perk reconciles GitHub's actual state through
+that submit path before deciding what remains to do. Stacked publication has a separate
+journal and recovery path. These [route-specific responsibilities][publication] carry into v2.
 
 The benefit is a shorter path back into the work: the relevant change, completed evidence,
 and next decision are retained together. Pi Durable's [scheduler][scheduler] and
@@ -85,11 +90,13 @@ remain pending. It can continue eligible, authorized work after a wait without m
 reconstruct which supervisor action comes next. You still author and approve the bounded
 plans that authorize implementation.
 
-The objective view should make three different conditions obvious: something is running,
-something is waiting for your judgment, or something cannot proceed because a prerequisite
-is unmet. For export support, you might see the backend node complete, CSV export awaiting
-review, and interface work waiting on that change. Selecting a node reveals its plan, current
-revision, evidence, and reason for waiting.
+The objective view should distinguish running work, a wait for your judgment, and an unmet
+prerequisite. For export support, you might see the backend node complete, CSV export awaiting
+review, and interface work waiting on that change. A failed assignment, incompatible runtime,
+or outcome still being recovered needs a different explanation and next action. Perk should
+show when resuming requires repair and when it is checking whether an action succeeded.
+Selecting a node reveals its plan, current revision, evidence, and reason for waiting. That
+account should be available from the terminal as well as a future shared workspace.
 
 Each implementation and independent reviewer gets the appropriate fresh context. The shared
 execution record carries the relationships between those conversations. You can discuss a
@@ -97,15 +104,16 @@ design question without turning that conversation into every worker's inherited 
 The objective stays coherent as the number of conversations grows.
 
 Suppose priorities change while CSV export awaits review. You revise the remaining objective
-through the backend workflow. Perk notices the changed scope and pauses affected advancement
-for reconciliation and any required plan review. The old checkpoint cannot authorize expanded
+through the backend workflow. An explicit refresh or external-change check triggers a fresh
+backend read; Perk pauses affected advancement for reconciliation and any required plan review.
+Revalidation also occurs before advancement. The old checkpoint cannot authorize expanded
 work. If you cancel execution instead, Perk stops further admission, addresses active owned
 work, and keeps evidence of external effects already attempted.
 
-After you land a node and its required follow-up is reconciled, the coordinator can identify
-the next eligible action. A missing plan remains a planning decision; a completed worker does
-not establish a merge or finish the objective. This story uses incremental delivery to keep
-the sequence clear, without redefining Perk's stacked-delivery rules.
+After you land a node, a fresh GitHub read and reconciliation of its required follow-up let the
+coordinator identify the next eligible action. A missing plan remains a planning decision;
+a completed worker does not establish a merge or finish the objective. This story uses
+incremental delivery to keep the sequence clear, without redefining Perk's stacked-delivery rules.
 
 The practical change is sustained coordination. You retain control over scope and delivery,
 while Perk retains the waits, completed assignments, remaining dependencies, and reasons it
@@ -127,7 +135,10 @@ In the proposed v2 flow, Perk assembles a retained evidence bundle for the lande
 Alongside the approved plan and final diff, it can include recorded attempts, relevant
 conversation evidence, accepted reviews, and decisions associated with their revisions. You
 can trace the memory problem from the original assumption through the review finding to the
-correction that shipped.
+correction that shipped. Failed approaches and later corrections remain available even when
+a worker's active context has been shortened. The learning pass uses retained source history
+and verified outcomes, with their provenance; a model's compacted working context cannot replace
+that record.
 
 Fresh analysts consider what diverged from the plan, which course corrections matter, and
 where an insight belongs in the existing documentation or code. They share the same evidence
@@ -165,8 +176,9 @@ progress, and decisions under Perk policy. The [workflow companion][workflows] e
 these responsibilities fit together.
 
 Continuity requires an available host and retained data. Closing a client can leave execution
-running; stopping its host pauses local work until recovery. Resuming elsewhere needs the
-execution store and a suitable workspace. Checkpoints do not back up uncommitted files, and
+running; stopping its host stops the scheduler, while surviving children and remote effects
+still require reconciliation. Resuming elsewhere needs the execution store and a suitable
+workspace. Checkpoints do not back up uncommitted files, and
 cancellation cannot undo a published PR. Durable's [storage contract][storage] requires one
 owning process per store and distinguishes process-crash recovery from host or power failure.
 
@@ -277,20 +289,23 @@ of real engineering decisions.
 For the strategic choices and evidence assessment, read [Pi in the sky][strategy]. For Python
 doors, state authority, and the worked old/new flow, read [How a durable perk would work][workflows].
 For developing and proving the integration alongside the current runtime, read
-[A parallel path to Pi Durable][v2]. This vision adds the intended user experience, including
-the objective and learning acceptance work needed beyond that memo's initial proofs.
+[A parallel path to Pi Durable][v2]. Its final acceptance stage covers the objective and
+learning continuity needed for the first usable v2 described here.
 
 Current-behavior observations use Perk `91719e4933389fece395cd570d0b8a0f7506b7b8`; upstream
 citations pin Pi `b7dfc049e917a265a5aefa9f3952a2dec9b81cfd`. Official documentation describes
 mechanisms, linked source identifies inspected implementations, and the linked recovery test
 was read rather than run. The stories and future capabilities are product proposals. This
 document introduces no command syntax, deployment decision, or runtime implementation.
+The [strategy evidence appendix][evidence] also identifies the technical manual's source
+snapshot and captured experiment, which was inspected rather than reproduced.
 
 [strategy]: pi-in-the-sky.md
+[evidence]: pi-in-the-sky.md#appendix-evidence-and-boundaries
 [workflows]: pi-durable-workflows.md
-[v2]: pi-durable-v2.md#four-validation-stages
+[v2]: pi-durable-v2.md#validation-sequence
 [current-model]: ../../user-docs/explanation/how-perk-thinks.md#where-the-truth-lives-the-state-tiers
-[publication]: ../../../src/perk/delivery/publish.py#L879-L925
+[publication]: pi-durable-workflows.md#each-fact-keeps-one-owner
 [supervisor]: ../../../src/perk/cli/commands/objective/run_cmd.py#L1-L8
 [objective-guide]: ../../user-docs/how-to/advance-an-objective-headlessly.md
 [learn-evidence]: ../../../src/perk/learn/evidence.py#L1-L22
