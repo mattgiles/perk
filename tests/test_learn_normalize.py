@@ -15,6 +15,7 @@ from perk.learn.normalize import (
     render_entry,
     render_evidence,
     sanitize_surrogates,
+    select_active_branch,
     split_to_chunks,
 )
 from perk.learn.session_jsonl import (
@@ -595,3 +596,208 @@ def test_render_evidence_renders_nested_calls_and_keeps_the_report_shape(tmp_pat
         "boilerplate",
         "chunk_paths",
     ]
+
+
+# --- system entries ------------------------------------------------------------------
+
+
+def _write_jsonl(path: Path, records: list[dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+
+def _msg(entry_id: str, parent_id: str | None, message: dict[str, object]) -> dict[str, object]:
+    return {"type": "message", "id": entry_id, "parentId": parent_id, "message": message}
+
+
+def _system(entry_id: str, parent_id: str | None, **fields: object) -> dict[str, object]:
+    return _msg(entry_id, parent_id, {"role": "system", "content": "", **fields})
+
+
+# The leading snapshot Pi >= 0.99 persists: empty `content`, the prompt in `sections`, the tool
+# set in `toolsAdded`.
+def _snapshot(entry_id: str, parent_id: str | None) -> dict[str, object]:
+    return _system(
+        entry_id,
+        parent_id,
+        sections={"preamble": "You are an expert coding assistant.", "rules": "Be concise."},
+        toolsAdded=[{"name": "read", "description": "Read a file.", "parameters": {}}],
+        timestamp=1,
+    )
+
+
+def test_branch_walk_survives_a_system_entry_between_branch_nodes(tmp_path: Path):
+    log = tmp_path / "s.jsonl"
+    _write_jsonl(
+        log,
+        [
+            {"type": "session", "id": "S", "version": 3},
+            {
+                "type": "custom",
+                "id": "e0",
+                "parentId": None,
+                "customType": "perk:workflow-state",
+                "data": {"stage": "plan"},
+            },
+            _snapshot("e1", "e0"),
+            _msg("e2", "e1", {"role": "user", "content": [{"type": "text", "text": "go"}]}),
+            _msg("e3", "e2", {"role": "assistant", "content": [{"type": "text", "text": "dead"}]}),
+            _msg("e4", "e2", {"role": "assistant", "content": [{"type": "text", "text": "live"}]}),
+        ],
+    )
+    parsed = parse_session_jsonl(log)
+    assert parsed.malformed_lines == 0
+    assert parsed.entries[1].role == "system" and parsed.entries[1].text == ""
+    assert [e.entry_id for e in select_active_branch(parsed.entries)] == ["e0", "e1", "e2", "e4"]
+    n = normalize_session(parsed, source="s.jsonl")
+    assert [e.entry_id for e in n.entries] == ["e2", "e4"]
+    assert [(b.label, b.count) for b in n.boilerplate] == [("custom:perk:workflow-state", 1)]
+    # e0 (boilerplate), e1 (empty system snapshot), e3 (off-branch).
+    assert n.entries_read == 5 and n.entries_kept == 2 and n.entries_pruned == 3
+
+
+def test_system_text_is_bounded_and_rendered_as_system_never_user():
+    sys_entry = _entry(0, "message", entry_id="s1", role="system", text="x" * 10_000)
+    n = _norm(sys_entry, source="s.jsonl")
+    assert n.truncations == 1
+    rendered = render_entry(n.entries[0])
+    assert rendered.startswith('<message role="system" id="s1">')
+    removed = 10_000 - _MAX_PAYLOAD_CHARS
+    assert f"… [truncated {removed} chars; see entry s1 in s.jsonl] …" in rendered
+    chunk = split_to_chunks("planning-session/main", "s.jsonl", n.entries)[0]
+    assert "<user" not in chunk
+
+
+def test_empty_system_deltas_are_never_dedup_candidates():
+    e0 = _entry(0, "message", role="user", text="q", parent_id=None)
+    e1 = _entry(1, "message", role="system", text="", parent_id="e0")
+    e2 = _entry(2, "message", role="system", text="", parent_id="e1")
+    # The same rule retires the dangling pointer for repeated empty historical evidence.
+    e3 = _tool_result(3, "", None, parent_id="e2", tool_name="bash")
+    e4 = _tool_result(4, "", None, parent_id="e3", tool_name="bash")
+    e5 = _entry(5, "message", role="assistant", text="done", parent_id="e4")
+    n = _norm(e0, e1, e2, e3, e4, e5)
+    assert n.duplicate_groups == 0
+    assert [e.entry_id for e in n.entries] == ["e0", "e5"]
+    assert not any("↑ duplicate" in e.text for e in n.entries)
+
+
+def test_historical_transcript_renders_byte_identically_with_a_spliced_system_snapshot(
+    tmp_path: Path,
+):
+    def transcript(*, with_snapshot: bool) -> list[dict[str, object]]:
+        user_parent = "s1" if with_snapshot else None
+        records: list[dict[str, object]] = [{"type": "session", "id": "S", "version": 3}]
+        if with_snapshot:
+            records.append(_snapshot("s1", None))
+        records += [
+            _msg("u1", user_parent, {"role": "user", "content": [{"type": "text", "text": "hi"}]}),
+            _msg(
+                "a1",
+                "u1",
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "listing"},
+                        {"type": "toolCall", "id": "k1", "name": "bash", "arguments": {"c": "ls"}},
+                    ],
+                },
+            ),
+            _msg(
+                "t1",
+                "a1",
+                {
+                    "role": "toolResult",
+                    "toolName": "bash",
+                    "toolCallId": "k1",
+                    "content": [{"type": "text", "text": "a.py"}],
+                },
+            ),
+        ]
+        return records
+
+    source = "bundle/planning-main.jsonl"
+    role = "planning-session/main"
+    reports: list[SessionReport] = []
+    chunks: list[bytes] = []
+    for name, with_snapshot in (("h", False), ("m", True)):
+        repo = tmp_path / name
+        _write_jsonl(repo / source, transcript(with_snapshot=with_snapshot))
+        (session,) = render_evidence(repo, repo / "bundle", ((role, source),)).sessions
+        reports.append(session)
+        chunks.append((repo / session.chunk_paths[0]).read_bytes())
+    historical, modern = reports
+    assert chunks[0] == chunks[1]
+    assert historical.malformed_lines == 0 and modern.malformed_lines == 0
+    assert modern.entries_read == historical.entries_read + 1
+    assert modern.entries_pruned == historical.entries_pruned + 1
+    assert (
+        replace(
+            modern,
+            entries_read=historical.entries_read,
+            entries_pruned=historical.entries_pruned,
+        )
+        == historical
+    )
+
+
+def test_render_evidence_system_snapshot_and_incomplete_nested_calls(tmp_path: Path):
+    source = "bundle/planning-main.jsonl"
+    records: list[dict[str, object]] = [
+        {"type": "session", "id": "S", "version": 3},
+        _snapshot("s1", None),
+        _msg("u1", "s1", {"role": "user", "content": [{"type": "text", "text": "run it"}]}),
+        _msg(
+            "a1",
+            "u1",
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "toolCall", "id": "tc1", "name": "codemode", "arguments": {"s": "x"}}
+                ],
+            },
+        ),
+        _msg(
+            "t1",
+            "a1",
+            {
+                "role": "toolResult",
+                "toolName": "codemode",
+                "toolCallId": "tc1",
+                "isError": False,
+                "content": [{"type": "text", "text": "Script completed"}],
+                "nestedCalls": {
+                    "calls": [
+                        {"id": "tc1/1", "name": "read", "arguments": {"p": "a"}, "status": "ok"},
+                        {
+                            "id": "tc1/2",
+                            "name": "write",
+                            "arguments": {"p": "b"},
+                            "status": "error",
+                            "error": "write is blocked (read-only)",
+                        },
+                        {"id": "tc1/3", "name": "bash", "arguments": {}, "status": "unfinished"},
+                    ],
+                    "complete": False,
+                },
+            },
+        ),
+        _system("s2", "t1", toolsRemoved=[{"name": "edit"}], sections={"rules": None}),
+        _msg("a2", "s2", {"role": "assistant", "content": [{"type": "text", "text": "done"}]}),
+    ]
+    _write_jsonl(tmp_path / source, records)
+    (session,) = render_evidence(
+        tmp_path, tmp_path / "bundle", (("planning-session/main", source),)
+    ).sessions
+    chunk = (tmp_path / session.chunk_paths[0]).read_text(encoding="utf-8")
+    assert session.malformed_lines == 0
+    assert session.entries_read == len(records) - 1
+    assert '<tool_result tool="codemode" error="false" id="t1">Script completed' in chunk
+    tool_result = chunk[chunk.index('<tool_result tool="codemode"') : chunk.index("</tool_result>")]
+    assert '<nested_calls complete="false">' in tool_result
+    assert tool_result.count('status="error"') == 1
+    assert "<error>write is blocked (read-only)</error>" in tool_result
+    assert tool_result.count('status="unfinished"') == 1
+    assert 'id="s1"' not in chunk and 'id="s2"' not in chunk
+    assert 'role="system"' not in chunk
+    assert chunk.count("<user") == 1 and '<user id="u1">' in chunk

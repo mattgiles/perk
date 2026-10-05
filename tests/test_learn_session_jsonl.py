@@ -584,3 +584,219 @@ def test_parse_file_nested_calls_never_make_the_line_malformed(tmp_path: Path):
     assert parsed.entries[1].raw_chars == len(nested_line)
     assert parsed.entries[2].text == "next"
     assert parsed.entries[0].nested_calls is None
+
+
+# --- system entries (Pi's persisted `SystemMessage` grammar) --------------------------------------
+
+# Modelled on the real leading entry Pi >= 0.99 writes: the prompt lives in `sections`, the tool
+# set in `toolsAdded`, and `content` is the empty string.
+_SYSTEM_SNAPSHOT_FIXTURE: dict[str, object] = {
+    "type": "message",
+    "id": "s1",
+    "parentId": "c0",
+    "message": {
+        "role": "system",
+        "content": "",
+        "sections": {"preamble": "You are an expert coding assistant.", "rules": "Be concise."},
+        "toolsAdded": [
+            {"name": "read", "description": "Read a file.", "parameters": {"type": "object"}}
+        ],
+        "timestamp": 1,
+    },
+}
+
+
+def _message_line(entry_id: str, parent_id: str | None, message: dict[str, object]) -> str:
+    return json.dumps(
+        {"type": "message", "id": entry_id, "parentId": parent_id, "message": message}
+    )
+
+
+def _system_delta(entry_id: str, parent_id: str | None, **fields: object) -> str:
+    return _message_line(entry_id, parent_id, {"role": "system", "content": "", **fields})
+
+
+def test_parse_system_snapshot_projects_ancestry_and_empty_text():
+    e = _entry(json.dumps(_SYSTEM_SNAPSHOT_FIXTURE))
+    assert e.kind == "message" and e.role == "system"
+    assert e.text == "" and e.thinking == "" and e.tool_calls == ()
+    assert e.entry_id == "s1" and e.parent_id == "c0"
+    assert e.content is None and e.data is None and e.tool_name is None
+
+
+def test_parse_system_delta_tolerates_section_and_tool_deltas():
+    e = _entry(
+        _system_delta(
+            "s2",
+            "s1",
+            sections={"rules": None, "tools": "Use the read tool."},
+            toolsAdded=[{"name": "bash", "description": "Run.", "parameters": {}}],
+            toolsRemoved=[{"name": "edit"}],
+            timestamp=2,
+        )
+    )
+    assert e.role == "system" and e.text == "" and e.entry_id == "s2" and e.parent_id == "s1"
+    # Hostile shapes of the tolerated-not-projected fields never fail the line.
+    hostile = _entry(
+        _system_delta("s3", "s2", sections=42, toolsAdded="x", toolsRemoved={}, timestamp="t")
+    )
+    assert hostile.role == "system" and hostile.entry_id == "s3" and hostile.parent_id == "s2"
+
+
+def test_parse_string_content_is_the_text_for_any_role():
+    system = _entry(_message_line("s1", None, {"role": "system", "content": "You are perk."}))
+    assert system.role == "system" and system.text == "You are perk."
+    user = _entry(_message_line("u1", "s1", {"role": "user", "content": "You are perk."}))
+    assert user.role == "user" and user.text == "You are perk."
+    assert user.thinking == "" and user.tool_calls == ()
+
+
+def test_parse_system_text_blocks_join():
+    e = _entry(
+        _message_line(
+            "s1",
+            None,
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}],
+            },
+        )
+    )
+    assert e.text == "a\n\nb"
+
+
+def test_parse_null_content_is_empty_never_malformed():
+    system = _entry(_message_line("s1", "c0", {"role": "system", "content": None}))
+    assert system.text == "" and system.entry_id == "s1" and system.parent_id == "c0"
+    user = _entry(_message_line("u1", "s1", {"role": "user", "content": None}))
+    assert user.role == "user" and user.text == ""
+    assert user.entry_id == "u1" and user.parent_id == "s1"
+
+
+def test_parse_file_malformed_content_counts_the_line(tmp_path: Path):
+    # A content shape outside the union (a number, an object) still fails the line — the
+    # existing malformed posture, which loses the line's id/parent.
+    bad_lines = [
+        _message_line("m1", "u0", {"role": "system", "content": 42}),
+        _message_line("m2", "m1", {"role": "user", "content": {"type": "text", "text": "x"}}),
+    ]
+    good_before = _message_line("u0", None, {"role": "user", "content": "hi"})
+    good_after = _message_line("a1", "m2", {"role": "assistant", "content": []})
+    log = tmp_path / "s.jsonl"
+    log.write_text(
+        "\n".join([json.dumps({"type": "session", "id": "S"}), good_before, *bad_lines, good_after])
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed = parse_session_jsonl(log)
+    assert parsed.malformed_lines == 2
+    assert parsed.malformed_chars == sum(len(line) for line in bad_lines)
+    assert [e.entry_id for e in parsed.entries] == ["u0", "a1"]
+    # The survivor keeps the dangling parent string; the branch walk stops there by design.
+    assert parsed.entries[1].parent_id == "m2"
+
+
+def test_parse_file_mixed_historical_and_system_entries(tmp_path: Path):
+    lines = [
+        json.dumps({"type": "session", "id": "S", "version": 3}),
+        _message_line("u1", None, {"role": "user", "content": [{"type": "text", "text": "hi"}]}),
+        _message_line(
+            "a1",
+            "u1",
+            {
+                "role": "assistant",
+                "content": [{"type": "toolCall", "id": "c1", "name": "ls", "arguments": {}}],
+            },
+        ),
+        _message_line(
+            "t1",
+            "a1",
+            {
+                "role": "toolResult",
+                "toolName": "ls",
+                "toolCallId": "c1",
+                "content": [{"type": "text", "text": "a.py"}],
+            },
+        ),
+        json.dumps({**_SYSTEM_SNAPSHOT_FIXTURE, "parentId": "t1"}),
+        _system_delta("s2", "s1", sections={"rules": "Be terse."}),
+        _system_delta("s3", "s2", toolsRemoved=[{"name": "read"}]),
+    ]
+    log = tmp_path / "s.jsonl"
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    parsed = parse_session_jsonl(log)
+    assert parsed.malformed_lines == 0
+    assert [(e.entry_id, e.kind, e.role) for e in parsed.entries] == [
+        ("u1", "message", "user"),
+        ("a1", "message", "assistant"),
+        ("t1", "message", "toolResult"),
+        ("s1", "message", "system"),
+        ("s2", "message", "system"),
+        ("s3", "message", "system"),
+    ]
+    assert [e.index for e in parsed.entries] == list(range(6))
+    assert parsed.entries[0].text == "hi"
+    assert parsed.entries[1].tool_calls[0].name == "ls"
+    assert parsed.entries[2].text == "a.py" and parsed.entries[2].tool_call_id == "c1"
+
+
+def test_parse_file_resume_tree_compaction_with_system_entries(tmp_path: Path):
+    lines = [
+        json.dumps({"type": "session", "id": "S", "cwd": "/repo", "version": 3}),
+        json.dumps({"type": "model_change", "id": "c0", "parentId": None, "modelId": "m"}),
+        json.dumps(_SYSTEM_SNAPSHOT_FIXTURE),
+        _message_line("u1", "s1", {"role": "user", "content": [{"type": "text", "text": "go"}]}),
+        _message_line(
+            "a1",
+            "u1",
+            {
+                "role": "assistant",
+                "content": [{"type": "toolCall", "id": "k1", "name": "read", "arguments": {}}],
+            },
+        ),
+        _message_line(
+            "t1",
+            "a1",
+            {"role": "toolResult", "toolName": "read", "toolCallId": "k1", "content": []},
+        ),
+        # A fork: two assistant children of the same toolResult.
+        _message_line("a2", "t1", {"role": "assistant", "content": "abandoned"}),
+        _message_line(
+            "a3", "t1", {"role": "assistant", "content": [{"type": "text", "text": "kept"}]}
+        ),
+        json.dumps(
+            {
+                "type": "compaction",
+                "id": "k0",
+                "parentId": "a3",
+                "summary": "compacted so far",
+                "tokensBefore": 4321,
+                "firstKeptEntryId": "a3",
+                "systemMessage": {
+                    "role": "system",
+                    "content": "snapshot prompt",
+                    "sections": {"preamble": "You are an expert coding assistant."},
+                },
+            }
+        ),
+        _system_delta("s2", "k0", toolsRemoved=[{"name": "edit"}]),
+        json.dumps({"type": "branch_summary", "id": "b1", "parentId": "s2", "summary": "fork"}),
+        _message_line(
+            "a4", "b1", {"role": "assistant", "content": [{"type": "text", "text": "leaf"}]}
+        ),
+    ]
+    log = tmp_path / "s.jsonl"
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    parsed = parse_session_jsonl(log)
+    assert parsed.malformed_lines == 0
+    assert parsed.header is not None and parsed.header.version == 3
+    assert len(parsed.entries) == len(lines) - 1
+    by_id = {e.entry_id: e for e in parsed.entries}
+    compaction = by_id["k0"]
+    assert compaction.kind == "compaction"
+    assert compaction.summary == "compacted so far" and compaction.tokens_before == 4321
+    # The compaction's system snapshot is dropped, never projected.
+    assert not hasattr(compaction, "system_message")
+    assert compaction.text == ""
+    assert by_id["s1"].parent_id == "c0" and by_id["s2"].parent_id == "k0"
+    assert by_id["a2"].text == "abandoned" and by_id["a3"].text == "kept"

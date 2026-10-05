@@ -32,6 +32,16 @@ message as ``message.nestedCalls`` — the pi-ai ``NestedToolCalls`` grammar
 (omitted arguments stay ``None``; absence never claims completeness), never raises (it runs
 outside the parser's per-line ``except`` arm — a raise would abort the whole parse), and degrades
 an unreadable block or record into an explicit ``malformed`` count rather than a malformed line.
+
+**System entries.** Pi ≥ 0.99 (session format version 3) persists the pi-ai ``SystemMessage``
+grammar ``{role: "system", content: string | TextContent[], sections?: Record<string,
+string|null>, toolsAdded?: Tool[], toolsRemoved?: ToolReference[], timestamp}`` as ordinary
+``type:"message"`` entries: the leading snapshot (``content: ""``, the prompt in ``sections``, the
+tool set in ``toolsAdded``) and later prompt-section / tool-set deltas; a compaction entry also
+carries a ``systemMessage`` snapshot. The parser accepts them as context/tool evidence with their
+ancestry intact (a rejected line would lose its ``id``/``parentId`` and cut the active branch
+short). The string ``content`` arm is role-agnostic — it is the message's display text verbatim
+for any role; the delta fields are tolerated, never projected.
 """
 
 import json
@@ -165,16 +175,32 @@ class _ContentItem(LenientParseModel):
 
 
 class _MessageModel(LenientParseModel):
-    """The nested ``AgentMessage`` of a ``message`` entry (role + content + tool-result fields)."""
+    """The nested ``AgentMessage`` of a ``message`` entry (role + content + tool-result fields).
+
+    A system message's ``sections`` / ``toolsAdded`` / ``toolsRemoved`` (and every message's
+    ``timestamp``) are deliberately undeclared: ``extra="ignore"`` drops them whatever their shape,
+    so no form of them can fail the line. They are tolerated, not projected — interpreting them is
+    follow-up work.
+    """
 
     role: str | None = None
-    content: tuple[_ContentItem, ...] = ()
+    # The released `AgentMessage` content union. A `str` is the message's display text verbatim
+    # (system instructions, or an SDK-authored user message); the tuple is the block form; `null`
+    # (which Pi's own session loader maps to empty) and an absent key both project as empty. Any
+    # other shape (a number, a bool, an object) fails validation — the line stays malformed.
+    content: str | tuple[_ContentItem, ...] | None = None
     tool_name: str | None = Field(default=None, alias="toolName")
     tool_call_id: str | None = Field(default=None, alias="toolCallId")
     is_error: bool = Field(default=False, alias="isError")
     # Typed `object` so NO shape of the record can fail the line's validation: a malformed block
     # must degrade inside the projection, never turn a readable toolResult into a malformed line.
     nested_calls: object | None = Field(default=None, alias="nestedCalls")
+
+    def blocks(self) -> tuple[_ContentItem, ...]:
+        """The block-form content, or ``()`` for the string / ``None`` arms."""
+        if isinstance(self.content, tuple):
+            return self.content
+        return ()
 
 
 class _CompactionDetails(LenientParseModel):
@@ -187,7 +213,8 @@ class _CompactionDetails(LenientParseModel):
 class SessionEntryModel(LenientParseModel):
     """The untrusted read-edge over one session-log line. Only ``type`` is required; every other
     field is optional so a quirky entry degrades gracefully rather than raising. Camel-cased
-    grammar keys map through ``Field(alias=…)`` (the base sets ``populate_by_name``)."""
+    grammar keys map through ``Field(alias=…)`` (the base sets ``populate_by_name``). A compaction
+    entry's ``systemMessage`` snapshot is deliberately undeclared — dropped, never projected."""
 
     type: str
     id: str | None = None
@@ -249,17 +276,20 @@ class SessionEntryModel(LenientParseModel):
         )
 
     def _joined_text(self) -> str:
-        """The message's display text — every ``text`` content block joined by blank lines."""
+        """The message's display text — the string ``content`` verbatim, else every ``text``
+        content block joined by blank lines (``""`` for ``null``/absent content)."""
         if self.message is None:
             return ""
-        parts = [c.text for c in self.message.content if c.type == "text" and c.text]
+        if isinstance(self.message.content, str):
+            return self.message.content
+        parts = [c.text for c in self.message.blocks() if c.type == "text" and c.text]
         return "\n\n".join(parts)
 
     def _joined_thinking(self) -> str:
         """The assistant's reasoning — every ``thinking`` content block joined by blank lines."""
         if self.message is None:
             return ""
-        parts = [c.thinking for c in self.message.content if c.type == "thinking" and c.thinking]
+        parts = [c.thinking for c in self.message.blocks() if c.type == "thinking" and c.thinking]
         return "\n\n".join(parts)
 
     def _tool_calls(self) -> tuple[ToolCall, ...]:
@@ -267,7 +297,7 @@ class SessionEntryModel(LenientParseModel):
         if self.message is None:
             return ()
         calls: list[ToolCall] = []
-        for c in self.message.content:
+        for c in self.message.blocks():
             if c.type != "toolCall":
                 continue
             args_text = json.dumps(c.arguments, sort_keys=True) if c.arguments else "{}"
