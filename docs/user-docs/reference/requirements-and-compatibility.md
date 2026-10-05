@@ -131,9 +131,9 @@ every wave.
 Separately, `perk doctor`'s `subagent-compat` check compares the installed version with the
 version perk's engine guidance was last re-verified against, and warns on any other version. It
 is an early-warning check that never fails the doctor run. The stamp is currently 0.75.0: the
-source was re-verified, the Pi 1.0.0 trust matrix passed, and the doctor and scout waves and the
-plan-door browser wave passed on the Pi 0.99.2 host. The PR-door browser half is pending on the
-PR that carries this correction. See `docs/design/archive/pi-subagents-0.75.0-reverify.md`.
+source was re-verified, the Pi 1.0.0 trust matrix passed, and the doctor and scout waves and both
+browser-door waves (the plan door and the PR door) passed on the Pi 0.99.2 host. See
+`docs/design/archive/pi-subagents-0.75.0-reverify.md`.
 
 Plannotator 0.27.16 or newer is required by the stack review browser (`/stack-review-browser`,
 `perk objective stack review`), which opens Plannotator's static-patch mode over the pinned
