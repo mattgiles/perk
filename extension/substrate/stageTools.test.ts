@@ -51,6 +51,7 @@ import {
   loadAt,
   type PerkSession,
   plantSession,
+  recordingRuntime,
   registerFakeTool,
   scaffoldRepo,
 } from "../testing/harness.ts";
@@ -309,9 +310,12 @@ test("tree navigation: gate/stage recompute across mode entries", async () => {
   const cwd = scaffoldRepo();
   // stage=plan rides the branch (per-field LWW); the two mode entries flip the gate across it.
   const file = plantSession(cwd, [{ stage: "plan", mode: "read-only" }, { mode: "read-write" }]);
+  const rt = await recordingRuntime();
   const h = await loadAt(cwd, {
     sessionManager: SessionManager.open(file),
     env: { PERK_RUN_ID: undefined },
+    model: rt.reg.getModel(),
+    modelRuntime: rt.reg.modelRuntime,
   });
   try {
     const ids = h.entryIds();
@@ -319,8 +323,14 @@ test("tree navigation: gate/stage recompute across mode entries", async () => {
 
     // Navigate to the read-only entry → gate ON → perk's subset is the plan stage's gated view.
     await h.navigateTo(readOnlyId);
-    assert.deepEqual(activePerk(h), registeredSubset(h, gatedToolsFor("plan")));
+    // The restoration-window rule (contracts.md §8.40): a /tree restore only adds and the
+    // gate's enforcement is immediate; the gate-blocked plan_save is switched off when the next
+    // run starts.
     assert.equal((await h.emitToolCall("edit", {}))?.block, true);
+    assert.equal((await h.emitToolCall("plan_save", {}))?.block, true, "blocked at once");
+    rt.census();
+    await h.session.prompt("census");
+    assert.deepEqual(activePerk(h), registeredSubset(h, gatedToolsFor("plan")));
 
     // Navigate to the read-write entry → gate OFF + stage plan → the stage-filtered set.
     await h.navigateTo(readWriteId);

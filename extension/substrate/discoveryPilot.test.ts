@@ -150,7 +150,7 @@ test("cohort join (A): the family re-registers deferred and leaves the request; 
   }
 });
 
-test("reload (A): a real /reload re-runs the factory — the family is deferred and inactive again, tool_search stays declared, a primed member is gone", async () => {
+test("reload (A): a real /reload re-runs the factory — the family is deferred again and deactivated when the next run starts, never declared, tool_search stays declared, a primed member is gone", async () => {
   const family = discoveryFamily();
   const { h, rt } = await pilotSession("implement", "read-write", true);
   try {
@@ -164,12 +164,19 @@ test("reload (A): a real /reload re-runs the factory — the family is deferred 
         "deferred",
         `${name} re-deferred by the new activation`,
       );
-      assert.ok(!isActive(h, name), `${name} inactive after the reload`);
+      // The restoration-window rule (contracts.md §8.40): inside the window perk only adds.
+      assert.ok(isActive(h, name), `${name} stays active until the next run starts`);
     }
     rt.census();
     await h.session.prompt("census");
     assert.ok(rt.last().tools.includes("tool_search"), "tool_search stays declared");
-    for (const name of family) assert.ok(!rt.last().tools.includes(name), `${name} undeclared`);
+    for (const name of family) {
+      assert.ok(!rt.last().tools.includes(name), `${name} undeclared (hidden by name)`);
+      assert.ok(
+        !isActive(h, name),
+        `${name} deactivated when the run started (the window's close)`,
+      );
+    }
   } finally {
     h.dispose();
   }
@@ -534,7 +541,7 @@ test("priming resets (A): resume and fork from the primed leaf start without it 
       assert.ok(!isActive(resumed, "objective_stack_status"));
       assert.ok(installs.length > 0, "the recorder sees perk's startup install (non-vacuous)");
       assert.deepEqual(
-        installs.filter((names) => names.includes("objective_stack_status")),
+        installs.filter((install) => install.names.includes("objective_stack_status")),
         [],
         "perk never installs it",
       );
@@ -555,6 +562,12 @@ test("priming resets (A): resume and fork from the primed leaf start without it 
     await h.navigateTo(planted);
     await h.navigateTo(toPlan);
     assert.equal(h.workflowState().stage, "plan");
+    // The restoration-window rule (contracts.md §8.40): a /tree restore only adds; the
+    // ineligible member is hidden at once and dropped when the next run starts.
+    assert.ok(isActive(h, "objective_stack_status"), "still active inside the window");
+    rt.census();
+    await h.session.prompt("census");
+    assert.ok(!rt.last().tools.includes("objective_stack_status"), "never declared in plan");
     assert.ok(!isActive(h, "objective_stack_status"), "dropped where it is ineligible");
   } finally {
     h.dispose();
