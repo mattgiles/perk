@@ -272,7 +272,7 @@ function renderWaveScript(assignments: ReportAssignment[]): string {
     ...(assignment.outputSchema !== undefined ? { outputSchema: assignment.outputSchema } : {}),
   }));
   // `reports` is a script-local JS binding, not a workflow-resource name: pi-subagents reserves
-  // `tasks`/`chain` only against `registerWorkflowResources` (`src/workflows/workflow-resources.ts`,
+  // `tasks`/`chain` only against `registerWorkflowResource` (`src/workflows/workflow-resources.ts`,
   // `STRUCTURED_WORKFLOW_RESOURCE_NAMES`), which perk never calls — no collision.
   return (
     `const reports = await runs.all(${JSON.stringify(items, null, 2)});\n` +
