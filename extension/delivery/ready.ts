@@ -90,7 +90,7 @@ export interface ReadyDeps {
 }
 
 /**
- * The validated drive evidence — NOMINAL and mint-only (the WorkerModelSelection precedent):
+ * The validated drive evidence — NOMINAL and mint-only (the WorkerModelRequest precedent):
  * the `#private` field makes structural forgery impossible, the constructor is unreachable
  * outside this module, and `readyChange` mints it from the SAME facts value the `stamped` arm
  * carries, only after the strict evidence vocabulary passed. Every field is a validated

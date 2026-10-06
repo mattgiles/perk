@@ -3,12 +3,14 @@
 // A THIN CLI over the stage-execution seam's `runStage`. It does NO positioning, dispatch, or
 // model fiction — positioning is the cold-door/runner's job (Gap 7): this shim consumes a PREPARED
 // worktree (handoff/plan-ref/plan-body already materialized, `PERK_RUN_ID` already in the env) and
-// FAILS CLOSED if `PERK_RUN_ID` is absent (it never mints). It resolves the model/auth headlessly
-// (env-var key resolution, Gap 5) through the seam-re-exported `resolveWorkerModel` — this file
-// imports ONLY the seam and carries ZERO SDK imports (guard Rule F) — re-derives the seeded prompt
-// from the worktree's `cache.plan-ref`, wires SIGINT/SIGTERM to an AbortController, drives the
-// stage, prints the `RunOutcome` JSON to stdout (a human summary to stderr), and exits 0 on
-// `completed` else non-zero. Runs as `.ts` under node 22 type-stripping.
+// FAILS CLOSED if `PERK_RUN_ID` is absent (it never mints). It hands the raw `--model` text to
+// the drive as a seam-re-exported `WorkerModelRequest`: model resolution and auth admission run
+// inside the drive, after the worktree's extensions registered their providers, so an unknown
+// `--model` is a typed `RunOutcome` (exit 1), not a usage error. This file imports ONLY the seam
+// and carries ZERO SDK imports (guard Rule F). It re-derives the seeded prompt from the
+// worktree's `cache.plan-ref`, wires SIGINT/SIGTERM to an AbortController, drives the stage,
+// prints the `RunOutcome` JSON to stdout (a human summary to stderr), and exits 0 on `completed`
+// else non-zero. Runs as `.ts` under node 22 type-stripping.
 
 import { argv, env, exit, stderr, stdout } from "node:process";
 import { runEventsPath, workflowDir } from "./substrate/cache.ts";
@@ -17,8 +19,8 @@ import {
   type DriveStage,
   initialPromptForWorktree,
   type RunOutcome,
-  resolveWorkerModel,
   runStage,
+  WorkerModelRequest,
 } from "./worker/stageExecution.ts";
 
 /** Documented defaults for the budget watchdog (overridable via flags). */
@@ -96,18 +98,10 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  // Headless auth/model (Gap 5): env-var key resolution; an explicit `--model` resolves with
-  // pi's CLI semantics (fuzzy matching, `provider/pattern`, a `:thinking` suffix —
-  // `resolveWorkerModel`), else the SDK's default resolution at session creation (settings
-  // default → pi's per-provider defaults → first available) — the deferral is unchanged. The
-  // warning is printed only when proceeding (an `ok: false` exits before it).
-  const resolved = await resolveWorkerModel(parsed.model);
-  if (!resolved.ok) {
-    stderr.write(`perk worker: ${resolved.error}\n`);
-    return 2;
-  }
-  if (resolved.warning) stderr.write(`perk worker: ${resolved.warning}\n`);
-
+  // Headless model/auth: the raw `--model` text rides the request unresolved. Inside the drive it
+  // resolves with pi's CLI semantics (fuzzy matching, `provider/pattern`, a `:thinking` suffix)
+  // AFTER extension registration, else the SDK's default chain picks at session creation;
+  // an unknown model or a provider without configured auth is a zero-turn typed outcome.
   const controller = new AbortController();
   const onSignal = (): void => controller.abort();
   process.on("SIGINT", onSignal);
@@ -119,7 +113,7 @@ async function main(): Promise<number> {
       worktree: parsed.worktree,
       stage: parsed.stage,
       initialPrompt,
-      model: resolved.selection,
+      model: new WorkerModelRequest({ pattern: parsed.model }),
       budget: parsed.budget,
       signal: controller.signal,
     });
