@@ -609,8 +609,8 @@ export type RuntimeConstruction =
  * and `agentDir = throwaway` (user-global RESOURCES out — the throwaway dir carries exactly one
  * global setting, `cacheWarming: "off"` (Pi reads warming from global settings only, so the
  * merged-view overrides cannot reach it; warming is the only out-of-turn usage source left once
- * compaction is off), and no extensions or skills, so the global resource tier is empty). Auth + `models.json` come from the
- * worker-minted `ModelRuntime` instead: `request.modelRuntime ?? ModelRuntime.create()` (the global
+ * compaction is off), and no extensions or skills, so the global resource tier is empty). Auth +
+ * `models.json` come from the worker-minted `ModelRuntime` instead: `request.modelRuntime ?? ModelRuntime.create()` (the global
  * agent dir's `auth.json`/`models.json`, `PI_CODING_AGENT_DIR`-aware, plus env keys; offline),
  * minted INSIDE this function's failure-cleanup guard so a rejection is the seam's
  * `runtime_init`. Settings are DISK-LAYERED (`SettingsManager.create` + `applyOverrides`, the

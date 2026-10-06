@@ -9,7 +9,9 @@
 // Asserts both the structured run-event stream (§8.12) and the terminal `RunOutcome`
 // (§8.11). The model-selection scenarios plant a project-tier provider extension and drive a
 // bare hermetic runtime, so registration really happens through the production order (services →
-// selection → admission → construction).
+// selection → admission → construction). The model-accounting scenarios register a recording faux
+// classifier on the injected runtime and plant model-using tools plus Pi's real codemode, pinning
+// `budget.tokens` against Pi's own session census.
 
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
