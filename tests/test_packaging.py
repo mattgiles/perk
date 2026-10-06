@@ -409,8 +409,9 @@ def test_docs_site_publish_isolation():
     # - axe-core/jsdom are dev-only, plan-selected accessibility tooling (the static a11y gate
     #   in docs/site/checks/a11y.test.mjs) under the objective's "accessibility-test tool
     #   selection may remain plan-time" allowance — still exact-pinned. jsdom stays on 29.x:
-    #   30.x's engines floor (^22.22.2 || …) exceeds the repo's documented effective dev floor
-    #   (>=22.19.0, docs/site/README.md) under the root .npmrc's engine-strict=true.
+    #   30.x's engines floor (^22.22.2 || …) exceeds the repo's Node floor (>=22.19.0,
+    #   shared/host-floor.yaml + docs/site/package.json engines) under the root .npmrc's
+    #   engine-strict=true.
     site = json.loads((REPO_ROOT / "docs/site/package.json").read_text(encoding="utf-8"))
     assert site["private"] is True
     assert "dependencies" not in site, site.get("dependencies")

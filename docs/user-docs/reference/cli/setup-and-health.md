@@ -40,9 +40,10 @@ The managed `.gitignore` block also carries the perk library rules `/docs/librar
 
 Run **interactively**, `perk init` is also a guided onboarding flow. It offers to install the
 missing *supported* required tools — `gh` via `brew install gh` (when brew is on PATH), `pi` via
-`npm install -g @earendil-works/pi-coding-agent` (when node ≥ 22 is present), `skills` via
+`npm install -g @earendil-works/pi-coding-agent` (when node ≥ 22.19.0 is present; the same
+command upgrades a Pi older than the 1.0.0 floor), `skills` via
 its official installer script on macOS / `go install` elsewhere, and `cloc` via `brew install
-cloc` (when brew is on PATH) or `npm install -g cloc` (when node ≥ 22 is present) (`git` and
+cloc` (when brew is on PATH) or `npm install -g cloc` (when node ≥ 22.19.0 is present) (`git` and
 `node` stay guide-only — the failure report carries their install commands). It offers to run `gh auth
 login` when the GitHub CLI is unauthenticated, checks your git commit identity
 (`user.name`/`user.email`) and prompts to set it (globally by default, or repo-local), and —
@@ -189,7 +190,11 @@ or drifted (`--fix` restores it), and the report-only, offline `library` check (
 and leftover staging directories as info.
 The
 `environment` group reports required tools as `fail` when missing and optional tools
-(e.g. `ast-grep`) as `warn`. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.
+(e.g. `ast-grep`) as `warn`; the `node` and `pi` rows also compare against the host floor
+(Node ≥ 22.19.0, Pi ≥ 1.0.0 — see
+[Requirements and compatibility](../requirements-and-compatibility.md)), so an outdated or
+unverifiable Node/Pi is a `fail` with the floor in its detail, exactly like a missing one (and a
+`missing_tool` exit 2 for `perk init`). `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.
 This is a group whose bare invocation runs the health report.
 
 ### `perk doctor workflow`
