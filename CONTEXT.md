@@ -437,6 +437,25 @@ resolution → admission (`no_model` / `model_not_found` / `model_auth`) → ses
 with Pi's default chain → bind.
 _Avoid_: auth preflight, model preflight
 
+**Fresh tokens**:
+The worker's budgeted token sum, read from Pi's usage records — per turn the assistant's input +
+output plus every tool result's reported usage (Pi has already folded nested calls into the
+parent result); never cache reads/writes, reasoning breakdowns, compaction summaries or
+report-wave children. Equal to Pi's `getSessionStats()` input + output for a worker session.
+_Avoid_: total tokens, context tokens, cost
+
+**Model-call policy**:
+The worker's fixed rule for model calls from its own codemode — no `models` namespace
+(`WORKER_CODEMODE_MODELS = false`, the worker's own codemode only), and any `codemode` call,
+whatever its registrar, naming `models.classify(` or `models.generateImages(` refused before it
+runs with a typed reason.
+_Avoid_: model gate, classifier opt-out
+
+**Constrained capability**:
+A capability shipped narrower than intended because public interfaces cannot deliver its safety
+bar; recorded with its retirement condition, never a floor hold.
+_Avoid_: hold, deferral
+
 ### TUI surfaces
 
 **Display sink**:

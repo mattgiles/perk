@@ -656,6 +656,58 @@ test("runStage: fresh tokens one below maxTokens never trip → completed", asyn
   assert.equal(session.abortCalls, 0, "the watchdog never tripped below the limit");
 });
 
+test("runStage: tool-result usage crossing maxTokens trips → budget_exhausted, tokens = assistant + tool", async () => {
+  // The assistant alone (10) is far below the cap; the turn's tool result (a model-using tool,
+  // or a codemode script's folded `models.*` aggregate) carries it over.
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "turn_end",
+      message: { role: "assistant", usage: { input: 6, output: 4 } },
+      toolResults: [{ usage: { input: 60, output: 30 } }],
+    });
+  });
+  const outcome = await runStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: { ...baseBudget, maxTokens: 100 },
+    },
+    { createRuntime: async () => fakeRuntime(session) },
+  );
+  assert.equal(outcome.status, "budget_exhausted");
+  assert.equal(outcome.terminal_signal, "budget");
+  assert.equal(outcome.budget.tokens, 100);
+  assert.equal(session.abortCalls, 1);
+});
+
+test("runStage: tool-result usage below maxTokens is counted and never trips → completed", async () => {
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "turn_end",
+      message: { role: "assistant", usage: { input: 6, output: 4 } },
+      toolResults: [{ usage: { input: 50, output: 39 } }, {}],
+    });
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
+    });
+  });
+  const outcome = await runStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: { ...baseBudget, maxTokens: 100 },
+    },
+    { createRuntime: async () => fakeRuntime(session) },
+  );
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.budget.tokens, 99, "assistant 10 + tool 89");
+  assert.equal(session.abortCalls, 0);
+});
+
 test("runStage: a wall-clock timeout trips → budget_exhausted", async () => {
   const session = new FakeSession(async () => {
     await new Promise((r) => setTimeout(r, 40));
