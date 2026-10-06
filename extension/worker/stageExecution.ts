@@ -4,8 +4,8 @@
 // running the SAME `@mgiles/perk` extension package, with a locked resource set, Pi's compaction
 // and auto-retry following the merged settings (as in a warm session), and a budget/timeout
 // watchdog. It seeds the stage's initial prompt, lets the model work (calling perk's real tools),
-// detects the stage's terminal signal, and returns a structured `RunOutcome`. This implements the contract locked in
-// `docs/design/headless-worker.md` §B — the event-stream substrate and the e2e
+// detects the stage's terminal signal, and returns a structured `RunOutcome`. This implements the
+// contract locked in `docs/design/headless-worker.md` §B — the event-stream substrate and the e2e
 // harness consume.
 //
 // Scope here is the in-process drive primitive only. Positioning (worktree create, handoff/plan-ref

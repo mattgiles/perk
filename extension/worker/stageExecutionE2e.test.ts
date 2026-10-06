@@ -13,7 +13,10 @@
 // classifier on the injected runtime and plant model-using tools plus Pi's real codemode, pinning
 // `budget.tokens` against Pi's own session census. The builtin-factory scenarios read the live
 // session on a real request: the worker's own `tool_search`/`codemode` builtins (activation,
-// opt-out, disable, replacement) and the absence of any MCP handler.
+// opt-out, disable, replacement) and the absence of any MCP handler. The compaction and retry
+// scenarios drive the settings-following behavior on real sessions: an in-drive compaction counted
+// at its boundary, a project opt-out, a compaction that trips the token cap with no further
+// provider request, and retried, exhausted and non-retryable provider errors.
 
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
