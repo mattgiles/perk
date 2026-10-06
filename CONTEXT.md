@@ -120,7 +120,7 @@ _Avoid_: snapshot restore, baseline, admitted set, perk-owned allowlist
 The sessions in which perk re-registers the pilot family (`declared: deferred`) deferred and
 switches it off once: those where Pi's builtin `tool_search` is registered and active at
 `session_start` (the init-converged `defaultTools: ["+tool_search"]`; opt-out `-tool_search`,
-effective at the next launch) {D} the headless worker included, through its own builtin
+effective at the next launch) — the headless worker included, through its own builtin
 `tool_search`. `/btw` and any session whose *resolved* selection leaves `tool_search` out (a project `-tool_search`, or an empty resolved selection — a
 project `[]` alone suppresses only perk's seed) or whose `tool_search` is a foreign namesake are
 nonparticipants by construction and keep every perk tool declared.
@@ -438,10 +438,11 @@ with Pi's default chain → bind.
 _Avoid_: auth preflight, model preflight
 
 **Fresh tokens**:
-The worker's budgeted token sum, read from Pi's usage records — per turn the assistant's input +
-output plus every tool result's reported usage (Pi has already folded nested calls into the
-parent result); never cache reads/writes, reasoning breakdowns, compaction summaries or
-report-wave children. Equal to Pi's `getSessionStats()` input + output for a worker session.
+The worker's budgeted token sum, read from Pi's usage records at the boundary that produces each —
+per turn the assistant's input + output plus every tool result's reported usage (Pi has already
+folded nested calls into the parent result), and per `compaction_end` the compaction summary's
+usage; never cache reads/writes, reasoning breakdowns, branch summaries or report-wave children.
+Equal to Pi's `getSessionStats()` input + output for a worker session.
 _Avoid_: total tokens, context tokens, cost
 
 **Model-call policy**:

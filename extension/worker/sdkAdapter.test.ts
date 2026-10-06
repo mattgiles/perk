@@ -285,8 +285,8 @@ test("translateEvent: auto_retry_start → model_retrying with its fields", () =
 });
 
 test("StageEvent: the drive vocabulary is exactly these kinds (compile-time pin)", () => {
-  // `satisfies` checks both directions: a missing kind and an extra one (e.g. the retired
-  // `model_errored`, whose error now rides `turn_ended`) both fail type-checking.
+  // `satisfies` checks both directions: a missing kind and an extra one (e.g. a standalone
+  // model-error kind — a turn's provider error rides `turn_ended`) both fail type-checking.
   const kinds = {
     turn_ended: true,
     tool_ended: true,

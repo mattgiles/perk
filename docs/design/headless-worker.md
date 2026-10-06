@@ -134,6 +134,24 @@ anchored to real symbols.
   worker must not call `/objective`/`objective_save` in the driven session, and must not seed an
   `objective_id` into the *driven* run's workflow-state). Together these two give determinism:
   settings-off kills SDK auto-compaction; objective-inactivity kills perk's threshold compaction.
+- **Revised (2026-10-06, Objective #2656 node 3.4):** the settings-off half never held and is
+  retired. The worker's pre-services `applyOverrides` was discarded by the services' resource
+  reload (`SettingsManager.reload()` recomputes the merged view from the tiers), so worker
+  sessions compacted and retried all along — un-accounted (compaction usage never reached
+  `budget.tokens`) and mis-classified (a transient error Pi retried and recovered still ended the
+  drive `model_error`). At node 3.4's planning the operator chose **settings-following behavior**
+  over restoring the override: a long drive must compact rather than fail, and a transient
+  provider error should be ridden out. Compaction and agent-level auto-retry now follow the merged
+  settings exactly as in a warm session (the worktree's project `.pi/settings.json`, including
+  perk's `[compaction]` keys, over a warming-only throwaway global tier; Pi defaults otherwise; a
+  repo may opt out through its own `compaction.enabled`/`retry.enabled`). Determinism is kept a
+  different way: every compaction's summarization usage is counted at its `compaction_end`
+  boundary (the census identity `budget.tokens === getSessionStats().tokens.input + output` holds
+  across a compaction), the watchdog checks the cap at that boundary too, and a trip there aborts
+  before the next request is dispatched — zero provider requests follow it. The terminal rule
+  rides the turn boundary: each `turn_end` replaces the recorded provider error, so a recovered
+  error is cleared and only an unrecovered one is terminal. The objective-inactivity half stands.
+  Contract: `shared/contracts.md` §8.11 *Settings-following behavior*.
 
 ### Gap 4 — Locked-down `resourceLoader` (fixed resource set, no user config)
 
@@ -269,7 +287,7 @@ This is the spec node 1.2 builds and nodes 1.3 / 4.1 consume.
 | `model` + `auth` | `Model` + `ModelRuntime` | explicit worker input or env-var key resolution (Gap 5) |
 | `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort (Gap 2) |
 | `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog |
-| resource policy | `cwd=worktree`, `agentDir=throwaway`, compaction-off, retry-off, `hasUI=false`, no active objective | fixed by the worker (Gaps 3/4/6); not caller-tunable |
+| resource policy | `cwd=worktree`, `agentDir=throwaway`, cache-warming-off, `hasUI=false`, no active objective; compaction + retry follow the merged settings (Gap 3, revised) | fixed by the worker (Gaps 3/4/6); not caller-tunable |
 
 ### Terminal-signal definition
 
@@ -294,9 +312,11 @@ The drive terminates on the **first** of:
    Idle without the predicate → `status: "failed"` with reason `incomplete`.
 3. **Budget/timeout/abort.** The watchdog or external `signal` fires → `session.abort()` →
    `status: "budget_exhausted"` (budget) or `status: "aborted"` (external signal).
-4. **Post-acceptance error.** With retry off, a model/network error after prompt acceptance surfaces
-   through the event/message stream (`agent`'s `errorMessage`/an error event), not
-   `preflightResult(false)` → `status: "failed"` with the captured error.
+4. **Post-acceptance error.** A model/network error after prompt acceptance surfaces on the turn's
+   `turn_end` (its assistant message carries `stopReason: "error"` and `errorMessage`), not
+   `preflightResult(false)`. Pi may recover it — auto-retry per the settings, or overflow
+   compaction and continue — and each `turn_end` replaces the recorded error, so only an error Pi
+   does not recover (the run's last turn) → `status: "failed"` with that error (Gap 3, revised).
 
 ### Outcome shape
 
@@ -330,13 +350,13 @@ Lock now; 1.3 builds the event stream that carries it, 4.1 asserts it.
   terminal-detection listener; re-invoked after any runtime replacement.
 - **Resource loader:** `DefaultResourceLoader({ cwd: worktree, agentDir: throwaway })` (project tier
   in, user-global tier out), `await loader.reload()` before runtime creation (Gap 4).
-- **Settings:** disk-layered — `SettingsManager.create(worktree, throwawayAgentDir)` +
-  `applyOverrides({ compaction: { enabled: false }, retry: { enabled: false } })` (Gap 3; the SDK's
-  "with overrides" shape). The overrides ride the merged view only; package resolution reads the
-  per-scope raws, so the managed `.pi/settings.json` `packages` list resolves — the project tier
-  actually loads perk + the borrowed packages. (Superseded the original `SettingsManager.inMemory`
-  recipe, which never read the disk package list — the remote-worker tool-loading gap.); the
-  no-active-objective invariant holds because positioning never sets one (Gap 3).
+- **Settings:** disk-layered — `SettingsManager.create(worktree, throwawayAgentDir)`, no overrides:
+  the managed `.pi/settings.json` `packages` list resolves — the project tier actually loads perk
+  + the borrowed packages — and compaction/retry follow the merged view like a warm session (Gap 3,
+  revised; the throwaway global tier carries only `cacheWarming: "off"`). (Superseded the original
+  `SettingsManager.inMemory` recipe, which never read the disk package list — the remote-worker
+  tool-loading gap.) The no-active-objective invariant holds because positioning never sets one
+  (Gap 3).
 - **Preflight:** post-bind, the stage's terminating perk tool (`submit` /
   `finalize_address`) must be registered, else a zero-turn `failed` outcome with
   `error.type "no_extension_tools"` under the `model_error` terminal signal (contracts.md §8.11).

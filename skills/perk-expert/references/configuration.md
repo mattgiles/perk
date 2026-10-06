@@ -321,11 +321,23 @@ model turn, with guidance naming the provider and the credential sources (env AP
 a configured credential, else falls back to another available model (pi's per-provider defaults →
 first available); the worker refuses only when no model is available at all.
 
-The worker's **token budget** counts fresh work from pi's usage records, once each: per turn the
-assistant's input + output **plus** every tool result's reported usage (pi folds a codemode
-script's nested model calls into the script's result; failed calls' usage counts). Cache
-reads/writes and reasoning breakdowns are excluded, and the worker turns pi's prompt-cache warming
-**off** for its own session (interactive sessions keep the user's setting). The worker's own
+The worker follows the repo's **compaction and retry settings** exactly like a warm session (the
+worktree's `.pi/settings.json` — perk's converged `[compaction]` keys included — else pi's
+defaults): a long drive compacts before it would overflow (`[compaction] enabled = false` turns
+that off for the worker too), a transient provider error (overloaded / rate limit / 5xx) is
+retried per pi's `retry` settings, and only an error pi gives up on ends the drive
+`failed`/`model_error`. Stderr carries the resolved posture once
+(`perk worker: compaction <on|off> (reserve <n>, keep <n>); retry <on|off> (max <n>, base <n> ms)`)
+plus `perk worker: compaction (<reason>) — <n> tokens` / `perk worker: auto-retry <a>/<max> in
+<ms> ms — <error>` lines.
+
+The worker's **token budget** counts fresh work from pi's usage records, once each, at the boundary
+that produces it: per turn the assistant's input + output **plus** every tool result's reported
+usage (pi folds a codemode script's nested model calls into the script's result; failed calls'
+usage counts), and per compaction the summary's model usage. The cap is checked after every turn
+and every compaction — once it trips, no further model request is made. Cache reads/writes and
+reasoning breakdowns are excluded, and the worker turns pi's prompt-cache warming **off** for its
+own session (interactive sessions keep the user's setting). The worker's own
 codemode has **no `models` namespace** this release (pi reports a script's model usage only at
 script end, so a running script cannot be held to the budget): classifier calls are unavailable
 and image generation is refused — a script naming `models.classify(` / `models.generateImages(`
@@ -562,8 +574,9 @@ shell for a hand-run Pi redirect.
 
 ### `[compaction]`
 
-How the session manages its context. The `enabled` / `reserve_tokens` / `keep_recent_tokens`
-settings keys are **committed-only** — converged into `.pi/settings.json`'s `compaction` object by
+How every pi session in the repo (perk stage sessions, plain `pi`, the headless worker) manages its
+context. The `enabled` / `reserve_tokens` / `keep_recent_tokens` settings keys are
+**committed-only** — converged into `.pi/settings.json`'s `compaction` object by
 `perk init` / `perk doctor --fix` (re-run to re-converge). Convergence is write-when-present and
 leave-when-absent per key: absent keys leave existing settings untouched, while removing them
 leaves previously written values in place to clean up by hand. The `objective_threshold` sibling
@@ -571,7 +584,7 @@ is **runtime-read** (overlay-aware) by the extension instead.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `enabled` | bool | _(pi default)_ | Auto-compaction on/off. |
+| `enabled` | bool | _(pi default)_ | Auto-compaction on/off — every session in the repo, the headless worker included. |
 | `reserve_tokens` | int (> 0) | _(pi default: 16384)_ | Headroom pi keeps free at the top of the context window (the auto-compaction trigger, `context > window − reserve`) **and** the output budget for compaction summaries: history summary `0.8 ×`, a split turn's turn-prefix summary `0.5 ×`; on adaptive-thinking models the summarizer's reasoning counts against it. |
 | `keep_recent_tokens` | int (> 0) | _(pi default)_ | Recent tokens kept verbatim. |
 | `objective_threshold` | float in `(0,1]` | `0.8` | Context-usage fraction that triggers compaction **while an objective is active**. A native float (`0.8`, not `"0.8"`); never converged into `settings.json`. |
