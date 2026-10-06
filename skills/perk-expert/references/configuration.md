@@ -315,8 +315,11 @@ session in the repo: perk cold doors, plain `pi`, and the headless worker (local
 the worker resolves its model from the checkout's disk-layered settings, so this is how you
 configure the worker's model). The worker loads the checkout's project extensions **first**, so an
 extension-registered provider or virtual model is selectable (as the default or via its `--model`
-flag); a model whose provider has no configured credential is refused before any model turn, with
-guidance naming the provider and the credential sources (env API key / agent dir `auth.json`).
+flag). An explicit `--model` whose provider has no configured credential is refused before any
+model turn, with guidance naming the provider and the credential sources (env API key / agent dir
+`auth.json`). The converged default is **not** fail-closed: pi uses it only when its provider has
+a configured credential, else falls back to another available model (pi's per-provider defaults →
+first available); the worker refuses only when no model is available at all.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
