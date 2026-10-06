@@ -119,6 +119,7 @@ def test_positioning_materializes_handoff_plan_ref_and_body(
     assert [(r.pr_id, base) for _root, r, base in stub_position_branch.calls] == [("42", "main")]
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_positioning_parity_local_launch_vs_remote_worker(git_repo_with_remote, monkeypatch):
     """Local launch and remote-worker positioning agree on the parity-selected
     `.perk/workflow/` artifacts (contracts.md §8.38): plan-ref and plan-body bytes plus
@@ -176,6 +177,7 @@ def test_positioning_parity_local_launch_vs_remote_worker(git_repo_with_remote, 
     )
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_positioning_parity_explicit_ref_launch_vs_remote_worker(git_repo_with_remote, monkeypatch):
     """The §8.38 parity holds on the direct-ref arm too: a local launch consuming an explicitly
     selected ref (no root selector anywhere) agrees with the remote worker on plan-ref and

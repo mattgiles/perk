@@ -230,6 +230,78 @@ def test_exec_pi_with_run_id_sets_it(tmp_path, monkeypatch, launch_exec_recorder
     assert launch_exec_recorder.calls[0][2]["PERK_RUN_ID"] == "01X"
 
 
+# --- the host admission (contracts.md §8.76) ------------------------------------------------------
+
+
+def _refuse_host(monkeypatch, events: list[str] | None = None) -> None:
+    def _refuse(pi_path: str):
+        if events is not None:
+            events.append("admit")
+        raise UserFacingCliError(
+            f"pi at {pi_path} is version 0.99.2; perk requires Pi >= 1.0.0.",
+            error_type="pi_version_unsupported",
+        )
+
+    monkeypatch.setattr(pi_exec, "_admit_pi_host", _refuse)
+
+
+def test_exec_pi_admitted_host_execs(tmp_path, launch_exec_recorder):
+    checkout = _exec_pi_direct(tmp_path, launch_exec_recorder, run_id="01X")
+    assert launch_exec_recorder.pi_version == "1.0.0"
+    assert launch_exec_recorder.chdirs == [checkout]
+    assert [call[0] for call in launch_exec_recorder.calls] == [launch_exec_recorder.pi_path]
+
+
+def test_exec_pi_refused_host_never_chdirs_or_execs(tmp_path, monkeypatch, launch_exec_recorder):
+    _refuse_host(monkeypatch)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        _exec_pi_direct(tmp_path, launch_exec_recorder, run_id="01X")
+    assert excinfo.value.error_type == "pi_version_unsupported"
+    assert launch_exec_recorder.chdirs == []
+    assert launch_exec_recorder.calls == []
+
+
+def test_exec_pi_admission_precedes_every_other_exec_phase_step(
+    tmp_path, monkeypatch, launch_exec_recorder
+):
+    """Resolve → admit → Linear-key read → env build → lock sweep → chdir → exec."""
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    events: list[str] = []
+    real_build = pi_exec._build_exec_env
+    monkeypatch.setattr(
+        pi_exec, "_resolve_pi_executable", lambda: events.append("resolve") or "/stub/bin/pi"
+    )
+    monkeypatch.setattr(pi_exec, "_admit_pi_host", lambda pi_path: events.append("admit"))
+    monkeypatch.setattr(
+        pi_exec, "load_local_linear_api_key", lambda root: events.append("linear-key")
+    )
+
+    def _build(**kwargs):
+        events.append("env")
+        return real_build(**kwargs)
+
+    monkeypatch.setattr(pi_exec, "_build_exec_env", _build)
+    monkeypatch.setattr(pi_exec, "_sweep_stale_pi_agent_locks", lambda d: events.append("sweep"))
+    monkeypatch.setattr(pi_exec.os, "chdir", lambda path: events.append("chdir"))
+    monkeypatch.setattr(pi_exec.os, "execvpe", lambda program, argv, env: events.append("exec"))
+    _exec_pi_direct(tmp_path, launch_exec_recorder, run_id="01X")
+    assert events == ["resolve", "admit", "linear-key", "env", "sweep", "chdir", "exec"]
+
+
+def test_exec_pi_refused_host_runs_no_later_phase(tmp_path, monkeypatch, launch_exec_recorder):
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    events: list[str] = []
+    _refuse_host(monkeypatch, events)
+    monkeypatch.setattr(
+        pi_exec, "load_local_linear_api_key", lambda root: events.append("linear-key")
+    )
+    monkeypatch.setattr(pi_exec, "_build_exec_env", lambda **kw: events.append("env") or {})
+    monkeypatch.setattr(pi_exec, "_sweep_stale_pi_agent_locks", lambda d: events.append("sweep"))
+    with pytest.raises(UserFacingCliError):
+        _exec_pi_direct(tmp_path, launch_exec_recorder, run_id="01X")
+    assert events == ["admit"]
+
+
 # --- the maintainer-only stop-before-exec seam (contracts.md §8.72(i)) -------------------------
 
 
@@ -266,6 +338,19 @@ def test_exec_pi_profile_handoff_records_and_exits_without_exec(
     assert record["env_keys"] == sorted(record["env_keys"])
     # Key names only — the child env's values (the CLI version stamp among them) never leak.
     assert __version__ not in target.read_text(encoding="utf-8")
+
+
+def test_exec_pi_profile_handoff_records_nothing_on_a_refused_host(
+    tmp_path, monkeypatch, launch_exec_recorder
+):
+    target = tmp_path / "profiles" / "h.json"
+    monkeypatch.setenv(PROFILE_HANDOFF_ENV, str(target))
+    _refuse_host(monkeypatch)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        _exec_pi_direct(tmp_path, launch_exec_recorder, run_id="01X")
+    assert excinfo.value.error_type == "pi_version_unsupported"
+    assert not target.exists()
+    assert launch_exec_recorder.calls == [] and launch_exec_recorder.chdirs == []
 
 
 @pytest.mark.parametrize("value", ["", "   ", "\t"])
@@ -1613,7 +1698,10 @@ def _patch_sync_git(
     ff=True,
     fetch_raises=False,
 ) -> _SyncCalls:
-    """Monkeypatch the sync helpers on `perk.run.launch.worktree.git` + record calls."""
+    """Monkeypatch the sync helpers on `perk.run.launch.worktree.git` + record calls.
+
+    Callers request ``admitted_pi_host`` (the stubbed ``/stub/bin/pi`` never answers a probe).
+    """
     calls = _SyncCalls()
 
     def _fetch(_repo, **_k):
@@ -1658,6 +1746,7 @@ def _launch_plan(tmp_path, **kwargs):
     )
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_sync_fast_forwards_clean_read_only_none_stage(tmp_path, monkeypatch, capsys):
     calls = _patch_sync_git(monkeypatch)
     _launch_plan(tmp_path)
@@ -1667,6 +1756,7 @@ def test_sync_fast_forwards_clean_read_only_none_stage(tmp_path, monkeypatch, ca
     assert "synced main → origin/main" in err
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_sync_skips_on_dirty_tree(tmp_path, monkeypatch, capsys):
     calls = _patch_sync_git(monkeypatch, dirty=True)
     _launch_plan(tmp_path)
@@ -1675,6 +1765,7 @@ def test_sync_skips_on_dirty_tree(tmp_path, monkeypatch, capsys):
     assert "uncommitted changes" in capsys.readouterr().err
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_sync_skips_on_detached_head(tmp_path, monkeypatch, capsys):
     calls = _patch_sync_git(monkeypatch, branch=None)
     _launch_plan(tmp_path)
@@ -1682,6 +1773,7 @@ def test_sync_skips_on_detached_head(tmp_path, monkeypatch, capsys):
     assert "detached HEAD" in capsys.readouterr().err
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_sync_skips_without_upstream(tmp_path, monkeypatch, capsys):
     calls = _patch_sync_git(monkeypatch, upstream=None)
     _launch_plan(tmp_path)
@@ -1690,6 +1782,7 @@ def test_sync_skips_without_upstream(tmp_path, monkeypatch, capsys):
     assert "no upstream" in capsys.readouterr().err
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_sync_noop_without_remote_is_fully_offline(tmp_path, monkeypatch):
     calls = _patch_sync_git(monkeypatch, has_remote=False)
     _launch_plan(tmp_path)
@@ -1697,6 +1790,7 @@ def test_sync_noop_without_remote_is_fully_offline(tmp_path, monkeypatch):
     assert calls.merge_ff_only == []
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_sync_skips_on_divergence_but_launch_proceeds(tmp_path, monkeypatch, capsys):
     calls = _patch_sync_git(monkeypatch, ff=False)
     _launch_plan(tmp_path)  # must NOT raise — a non-FF only warns
@@ -1704,6 +1798,7 @@ def test_sync_skips_on_divergence_but_launch_proceeds(tmp_path, monkeypatch, cap
     assert "diverged" in capsys.readouterr().err
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_sync_skips_on_fetch_failure(tmp_path, monkeypatch, capsys):
     calls = _patch_sync_git(monkeypatch, fetch_raises=True)
     _launch_plan(tmp_path)
@@ -1712,6 +1807,7 @@ def test_sync_skips_on_fetch_failure(tmp_path, monkeypatch, capsys):
     assert "STALE" in capsys.readouterr().err
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_sync_disabled_by_sync_main_false(tmp_path, monkeypatch):
     calls = _patch_sync_git(monkeypatch)
     _launch_plan(tmp_path, sync_main=False)
@@ -1719,6 +1815,7 @@ def test_sync_disabled_by_sync_main_false(tmp_path, monkeypatch):
     assert calls.merge_ff_only == []
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_sync_not_run_for_read_write_none_stage(tmp_path, monkeypatch):
     calls = _patch_sync_git(monkeypatch)
     launch_stage(
@@ -1734,6 +1831,7 @@ def test_sync_not_run_for_read_write_none_stage(tmp_path, monkeypatch):
     assert calls.merge_ff_only == []
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_sync_not_run_for_create_stage(git_repo_with_remote, monkeypatch):
     clone, _remote, _advance = git_repo_with_remote
     cache.write_plan_ref(clone, _PLAN_REF)
@@ -1751,6 +1849,7 @@ def test_sync_not_run_for_create_stage(git_repo_with_remote, monkeypatch):
     assert calls.merge_ff_only == []  # create keeps its own fresh-base path, not the sync
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_dry_run_previews_sync_for_qualifying_stage(tmp_path, monkeypatch, capsys):
     calls = _patch_sync_git(monkeypatch)
     launch_stage(
@@ -1768,6 +1867,7 @@ def test_dry_run_previews_sync_for_qualifying_stage(tmp_path, monkeypatch, capsy
     assert json.loads(out.out)["sync_main"] is True
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_dry_run_no_sync_preview_when_disabled(tmp_path, monkeypatch, capsys):
     _patch_sync_git(monkeypatch)
     launch_stage(
@@ -1785,6 +1885,7 @@ def test_dry_run_no_sync_preview_when_disabled(tmp_path, monkeypatch, capsys):
     assert "sync_main" not in json.loads(out.out)
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_dry_run_no_sync_preview_for_read_write_stage(tmp_path, monkeypatch, capsys):
     _patch_sync_git(monkeypatch)
     launch_stage(

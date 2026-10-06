@@ -34,9 +34,11 @@ class LaunchExecRecorder:
 
     ``pi_path`` is the stubbed ``_resolve_pi_executable`` result — hermetic (never the host's
     real ``shutil.which("pi")``) and absolute, so exec assertions compare against it.
+    ``pi_version`` is the version the stubbed host admission reports (the bundled Pi floor).
     """
 
     agent_dir: Path
+    pi_version: str
     chdirs: list[Path] = field(default_factory=list)
     calls: list[tuple[str, tuple[str, ...], dict[str, str]]] = field(default_factory=list)
     pi_path: str = "/stub/bin/pi"
@@ -213,12 +215,37 @@ def launch_context_factory(tmp_path, isolated_pi_agent_dir):
 
 
 @pytest.fixture
-def launch_exec_recorder(tmp_path, monkeypatch, isolated_pi_agent_dir) -> LaunchExecRecorder:
+def admitted_pi_host(monkeypatch) -> str:
+    """Stub the launch host admission to admit any resolved ``pi`` at the bundled Pi floor.
+
+    ``exec_pi`` spawns ``pi --version`` against the shared host floor before every other
+    exec-phase step; a test driving the pipeline with a stubbed ``pi`` path (or a host whose
+    real ``pi`` predates the floor) requests this to stay hermetic. Returns the admitted
+    version text. Tests exercising the real probe use an executable script instead.
+    """
+    from perk.run import pi_exec
+    from perk.substrate.host_floor import load_host_floor
+    from perk.substrate.pi_host import PiHost
+
+    version = load_host_floor().pi_min_version
+    monkeypatch.setattr(
+        pi_exec,
+        "_admit_pi_host",
+        lambda pi_path: PiHost(pi_path, "admitted", version, version, ""),
+    )
+    return version
+
+
+@pytest.fixture
+def launch_exec_recorder(
+    tmp_path, monkeypatch, isolated_pi_agent_dir, admitted_pi_host
+) -> LaunchExecRecorder:
     """Capture chdir/exec calls and isolate pi's global agent directory.
 
     ``agent_dir`` is the isolated env-arm store. ``Path.home`` is also pointed at a tmp dir so
     the tests that ``delenv`` the redirect to exercise the config/default arms sweep
-    ``<tmp>/home/.pi/agent``, never the developer's real ``~/.pi/agent``.
+    ``<tmp>/home/.pi/agent``, never the developer's real ``~/.pi/agent``. The host admission is
+    stubbed admitted (``admitted_pi_host``).
     """
     from perk.run import pi_exec
 
@@ -226,7 +253,7 @@ def launch_exec_recorder(tmp_path, monkeypatch, isolated_pi_agent_dir) -> Launch
     home.mkdir(exist_ok=True)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     isolated_pi_agent_dir.mkdir(exist_ok=True)
-    recorder = LaunchExecRecorder(agent_dir=isolated_pi_agent_dir)
+    recorder = LaunchExecRecorder(agent_dir=isolated_pi_agent_dir, pi_version=admitted_pi_host)
     monkeypatch.setattr(pi_exec, "_resolve_pi_executable", lambda: recorder.pi_path)
     monkeypatch.setattr(pi_exec.os, "chdir", lambda path: recorder.chdirs.append(Path(path)))
     monkeypatch.setattr(

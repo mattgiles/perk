@@ -516,6 +516,22 @@ def test_exec_pi_missing_refuses_typed_before_any_chdir(
     assert launch_exec_recorder.chdirs == [] and launch_exec_recorder.calls == []
 
 
+def test_exec_pi_outdated_refuses_typed_before_any_chdir(
+    tmp_path, monkeypatch, launch_exec_recorder
+):
+    def _outdated(pi_path: str):
+        raise UserFacingCliError(
+            f"pi at {pi_path} is version 0.99.2; perk requires Pi >= 1.0.0.",
+            error_type="pi_version_unsupported",
+        )
+
+    monkeypatch.setattr(pi_exec, "_admit_pi_host", _outdated)
+    with pytest.raises(UserFacingCliError) as exc:
+        session_resume.exec_session_resume(_spec(tmp_path, tmp_path))
+    assert exc.value.error_type == "pi_version_unsupported"
+    assert launch_exec_recorder.chdirs == [] and launch_exec_recorder.calls == []
+
+
 def test_exec_oserror_is_launch_failed(tmp_path, monkeypatch, launch_exec_recorder):
     def _boom(program, argv, env):
         raise OSError("exec denied")

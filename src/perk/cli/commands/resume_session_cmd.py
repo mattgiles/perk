@@ -31,8 +31,8 @@ no launch banner.
 
 Exit codes: 0 dry-run · 1 typed refusals (``not_a_tty``, ``worktree_*``, ``invalid_input``,
 ``run_not_found``, ``session_missing``, ``checkout_missing``, ``pi_cli_missing``,
-``launch_failed``, selection errors) · 2 not-a-repo · a successful exec never returns (the
-terminal receives pi's own exit status).
+``pi_version_unsupported``, ``pi_version_unverifiable``, ``launch_failed``, selection errors) ·
+2 not-a-repo · a successful exec never returns (the terminal receives pi's own exit status).
 """
 
 import shlex

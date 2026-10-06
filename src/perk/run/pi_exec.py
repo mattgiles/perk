@@ -1,18 +1,21 @@
-"""The ONE Pi exec pipeline (contracts.md §8.71(b), §8.72(b)(i)), shared by the plain session
-(bare ``perk``), the staged launch (through ``launch._exec_pi``) and the session-resume engine.
+"""The ONE Pi exec pipeline (contracts.md §8.71(b), §8.72(b)(i), §8.76), shared by the plain
+session (bare ``perk``), the staged launch (through ``launch._exec_pi``) and the session-resume
+engine.
 
 The preserved order of :func:`exec_pi`: absolute ``pi`` resolution pre-``chdir``
-(``pi_cli_missing``) → the ``LINEAR_API_KEY`` seed from the main checkout, only when the operator
-env lacks a non-blank value → :func:`_build_exec_env` (merge order ``_NPM_QUIET_ENV`` < operator
-env < perk stamps; ``run_id=None`` removes an inherited ``PERK_RUN_ID``; a blank
-``PI_CODING_AGENT_DIR`` is scrubbed) → the stale-lock sweep → the ``PERK_PROFILE_HANDOFF`` arm →
-``chdir`` + ``execvpe`` inside the ``launch_failed`` ``OSError`` arm.
+(``pi_cli_missing``) → the host admission (one bounded ``pi --version`` against the shared host
+floor; ``pi_version_unsupported`` / ``pi_version_unverifiable``) → the ``LINEAR_API_KEY`` seed
+from the main checkout, only when the operator env lacks a non-blank value →
+:func:`_build_exec_env` (merge order ``_NPM_QUIET_ENV`` < operator env < perk stamps;
+``run_id=None`` removes an inherited ``PERK_RUN_ID``; a blank ``PI_CODING_AGENT_DIR`` is
+scrubbed) → the stale-lock sweep → the ``PERK_PROFILE_HANDOFF`` arm → ``chdir`` + ``execvpe``
+inside the ``launch_failed`` ``OSError`` arm.
 
-**The test seam.** ``exec_pi`` reads :func:`_resolve_pi_executable` / :func:`_build_exec_env` /
-:func:`_sweep_stale_pi_agent_locks` / :func:`_record_profile_handoff` and ``os.chdir`` /
-``os.execvpe`` as THIS module's globals, so tests patch ``pi_exec.<name>`` / ``pi_exec.os`` —
-never a re-export on another module (a patch there would be a silent no-op against this
-pipeline).
+**The test seam.** ``exec_pi`` reads :func:`_resolve_pi_executable` / :func:`_admit_pi_host` /
+:func:`_build_exec_env` / :func:`_sweep_stale_pi_agent_locks` / :func:`_record_profile_handoff`
+and ``os.chdir`` / ``os.execvpe`` as THIS module's globals, so tests patch ``pi_exec.<name>`` /
+``pi_exec.os`` — never a re-export on another module (a patch there would be a silent no-op
+against this pipeline).
 
 **Import tier.** This module sits on the bare-``perk`` path (python-cli-guidelines §8.3): it
 imports neither the launch facade (the stage orchestrator and everything it drags in) nor any
@@ -37,7 +40,15 @@ from perk.substrate.config import (
     launch_pi_agent_dir,
     load_local_linear_api_key,
 )
+from perk.substrate.host_floor import load_host_floor
 from perk.substrate.output import log_warn, user_output
+from perk.substrate.pi_host import (
+    PI_INSTALL_COMMAND,
+    PiHost,
+    format_pi_refusal,
+    pi_refusal_error_type,
+    probe_pi_host,
+)
 from perk.substrate.proc import which_absolute
 
 # pi locks its agent-dir JSON via proper-lockfile, which holds a lock as a *directory*
@@ -179,12 +190,28 @@ def _resolve_pi_executable() -> str:
     """
     candidate = which_absolute("pi")
     if candidate is None:
+        floor = load_host_floor()
         raise UserFacingCliError(
-            "pi CLI not found on PATH — install it: "
-            "npm install -g @earendil-works/pi-coding-agent (requires Node >= 22).",
+            f"pi CLI not found on PATH — install it: {PI_INSTALL_COMMAND} "
+            f"(perk requires Pi >= {floor.pi_min_version} and Node >= {floor.node_min_version}).",
             error_type="pi_cli_missing",
         )
     return candidate
+
+
+def _admit_pi_host(pi_path: str) -> PiHost:
+    """Admit the resolved ``pi`` against the shared host floor — typed refusal otherwise.
+
+    One bounded ``pi --version`` spawn (:func:`perk.substrate.pi_host.probe_pi_host`); an
+    ``unsupported`` host refuses ``pi_version_unsupported``, an ``unverifiable`` one
+    ``pi_version_unverifiable`` — no operator override. Module-level on purpose: ``exec_pi``
+    reads it as this module's global, so tests patch ``pi_exec._admit_pi_host`` (the same rule
+    as :func:`_resolve_pi_executable`).
+    """
+    host = probe_pi_host(pi_path)
+    if host.outcome != "admitted":
+        raise UserFacingCliError(format_pi_refusal(host), error_type=pi_refusal_error_type(host))
+    return host
 
 
 def _record_profile_handoff(
@@ -230,14 +257,15 @@ def exec_pi(
     ``checkout``, and ``exec pi`` — the CLI *becomes* pi, so nothing after this runs.
 
     **The stop-before-exec arm.** When ``PERK_PROFILE_HANDOFF`` (:data:`PROFILE_HANDOFF_ENV`)
-    holds a non-blank file path, the pipeline runs every pre-exec phase as usual (env build,
-    lock sweep), then :func:`_record_profile_handoff` writes the handoff record to that file,
-    ONE stderr line names it, and the process exits ``0`` via ``SystemExit`` — no ``chdir``, no
-    exec, no env mutation. Why: the plain path ends in ``os.execvpe``, so no in-process profiler
-    survives into pi; this arm is the only exact handoff mark, and it lets cProfile / ``-X
-    importtime`` wrap a real launch (cProfile's runner swallows ``SystemExit`` and still dumps
-    its stats). Blank/whitespace values take the ordinary exec path. Every cold-local launch
-    (plain, staged, resumed) routes through here, so the arm applies to all of them.
+    holds a non-blank file path, the pipeline runs every pre-exec phase as usual (host
+    admission, env build, lock sweep), then :func:`_record_profile_handoff` writes the handoff
+    record to that file, ONE stderr line names it, and the process exits ``0`` via
+    ``SystemExit`` — no ``chdir``, no exec, no env mutation. Why: the plain path ends in
+    ``os.execvpe``, so no in-process profiler survives into pi; this arm is the only exact
+    handoff mark, and it lets cProfile / ``-X importtime`` wrap a real launch (cProfile's runner
+    swallows ``SystemExit`` and still dumps its stats). Blank/whitespace values take the
+    ordinary exec path. Every cold-local launch (plain, staged, resumed) routes through here, so
+    the arm applies to all of them.
 
     Shared verbatim by the stage launch (through the ``launch._exec_pi`` adapter) and the
     session-reopen engine (``run_id=None`` — nothing minted, an inherited ``PERK_RUN_ID``
@@ -251,6 +279,11 @@ def exec_pi(
     (pi's bin script's ``env`` still walks the unchanged ``PATH`` post-chdir — a recorded
     residual; sanitizing the operator's ``PATH`` is out of scope).
 
+    The host admission (:func:`_admit_pi_host`) runs immediately after the resolution and
+    before every other pre-exec phase, so a refused host leaves no exec-phase trace — no
+    Linear-key read, no lock sweep, no handoff record, no ``chdir``. A ``--dry-run`` preview
+    returns before this pipeline and never probes.
+
     ``LINEAR_API_KEY`` is seeded from the MAIN checkout's gitignored ``.perk/local.toml``
     `[linear] api_key` (read from ``main_root`` BEFORE the chdir) so the borrowed in-session
     ``linear_*`` tools and any ``perk <stage> --json`` cold-door worker the session spawns (they
@@ -261,13 +294,14 @@ def exec_pi(
     differs from the CLI that launched it (a stale lazy-installed npm: package) — informational
     only (not run-control data, unlike ``PERK_RUN_ID``); set at this single local-launch seam.
 
-    Reads ``_resolve_pi_executable`` / ``_build_exec_env`` / ``_sweep_stale_pi_agent_locks`` as
-    this module's globals, and ``os.chdir`` / ``os.execvpe`` off the shared ``os`` module object
-    the exec recorders patch.
+    Reads ``_resolve_pi_executable`` / ``_admit_pi_host`` / ``_build_exec_env`` /
+    ``_sweep_stale_pi_agent_locks`` as this module's globals, and ``os.chdir`` / ``os.execvpe``
+    off the shared ``os`` module object the exec recorders patch.
 
     Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execvpe`` and control returns.
     """
     pi_path = _resolve_pi_executable()  # pre-chdir: aborts the exec phase before any side effect
+    _admit_pi_host(pi_path)  # the host floor: refuses before every other exec-phase step
     local_linear_key = None
     if not os.environ.get("LINEAR_API_KEY", "").strip():
         local_linear_key = load_local_linear_api_key(main_root)

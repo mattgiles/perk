@@ -25,6 +25,8 @@ import pytest
 from perk_dev.profile_startup.handoff import parse_importtime
 from perk_dev.profile_startup.pty_session import PtySize, spawn_pty
 
+from perk.substrate.host_floor import load_host_floor
+
 pytestmark = pytest.mark.slow
 
 # The packages bare `perk` / `--version` must never pay for. `perk.cli.stages` and
@@ -58,7 +60,9 @@ _ROOT_MODULE = "perk.cli.cli"
 # The bare rows record the Pi handoff instead of exec'ing pi (the stop-before-exec arm), so the
 # matrix proves the plain session reached the shared exec seam without ever launching pi.
 _HANDOFF_ENV = "PERK_PROFILE_HANDOFF"
-_PI_STUB = "#!/bin/sh\nexit 0\n"
+# The `pi` stub answers `pi --version` with the bundled Pi floor so the launch host admission
+# (contracts.md §8.76) admits it and the bare rows still reach the handoff arm.
+_PI_STUB_TEMPLATE = "#!/bin/sh\necho {version}\n"
 
 
 def _loaded(modules: Iterable[str], prefix: str) -> set[str]:
@@ -74,7 +78,9 @@ def tier_env(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, dict[str, 
     bin_dir = scratch / "bin"
     bin_dir.mkdir()
     pi_stub = bin_dir / "pi"
-    pi_stub.write_text(_PI_STUB, encoding="utf-8")
+    pi_stub.write_text(
+        _PI_STUB_TEMPLATE.format(version=load_host_floor().pi_min_version), encoding="utf-8"
+    )
     pi_stub.chmod(pi_stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     home = scratch / "home"
     home.mkdir()

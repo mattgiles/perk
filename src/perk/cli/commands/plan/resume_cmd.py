@@ -209,7 +209,8 @@ def _open_gate_picker(
     fresh work is started). An existing checkout must validate against the resumed plan (the
     fail-closed validator's typed refusals) and the launch must compose (the agent-dir refusal)
     BEFORE anything is announced; typed refusals — the exec step's ``pi_cli_missing`` /
-    ``launch_failed`` included — exit 1 after the gate line. ``pi_args`` are never forwarded to
+    ``pi_version_unsupported`` / ``pi_version_unverifiable`` / ``launch_failed`` included — exit
+    1 after the gate line. ``pi_args`` are never forwarded to
     the picker (the reopened session keeps its own settings): one stderr note says so.
     """
     path = config.worktree_root / launch.resolve_plan_worktree_name(ref)
