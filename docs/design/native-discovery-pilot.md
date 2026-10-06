@@ -37,7 +37,9 @@ carrier names it) or by `tool_search` / a `/tree` restore.
 **Nonparticipants by construction** keep today's always-declared loadout: a session without the
 opt-in or with a foreign namesake, the headless worker (its runtime loads no `tool_search`
 factory), `/btw`'s side session (`sideSessionTools` carries no extension builtin) and every spawned
-report child (it registers no perk tool).
+report child (it registers no perk tool). The headless worker has since joined through its own
+builtin `tool_search` (contracts §8.11 *Builtin factories*); the pilot's measurements are
+historical and were taken before that change.
 
 ## 3. The family and its selection
 

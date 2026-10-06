@@ -120,8 +120,8 @@ _Avoid_: snapshot restore, baseline, admitted set, perk-owned allowlist
 The sessions in which perk re-registers the pilot family (`declared: deferred`) deferred and
 switches it off once: those where Pi's builtin `tool_search` is registered and active at
 `session_start` (the init-converged `defaultTools: ["+tool_search"]`; opt-out `-tool_search`,
-effective at the next launch). The headless worker, `/btw` and any session whose *resolved*
-selection leaves `tool_search` out (a project `-tool_search`, or an empty resolved selection — a
+effective at the next launch) {D} the headless worker included, through its own builtin
+`tool_search`. `/btw` and any session whose *resolved* selection leaves `tool_search` out (a project `-tool_search`, or an empty resolved selection — a
 project `[]` alone suppresses only perk's seed) or whose `tool_search` is a foreign namesake are
 nonparticipants by construction and keep every perk tool declared.
 _Avoid_: pilot sessions, tool_search sessions, opt-in
@@ -455,6 +455,15 @@ _Avoid_: model gate, classifier opt-out
 A capability shipped narrower than intended because public interfaces cannot deliver its safety
 bar; recorded with its retirement condition, never a floor hold.
 _Avoid_: hold, deferral
+
+**Worker builtin factories**:
+The two Pi builtin tool extensions the worker supplies beside its hidden policy extension, with
+the CLI's identity (`builtin:codemode` — built with `models: false` — and `builtin:tool-search`):
+registered inactive, activated by the repo's `defaultTools`, disabled by `-builtin:<name>`,
+replaced by a project registration of the same tool. MCP is not supplied: within the
+worker-supplied set nothing reads Pi's MCP config or credentials; a project extension that
+brings its own MCP support is outside that guarantee.
+_Avoid_: native factories (when MCP is implied), worker extensions
 
 ### TUI surfaces
 

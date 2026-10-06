@@ -3746,6 +3746,36 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
   so with it off every usage record the worker counts arrives at a turn boundary (see *Outcome
   shape*). Observable as `session.cacheWarmingStatus = { state: "inactive", reason: "cache
   warming disabled" }` (pinned in the e2e tier).
+- **Builtin factories** — `sdkAdapter.ts::workerBuiltinExtensions`. Beside `perk-worker-policy`
+  (always first, never replaced), `resourceLoaderOptions.extensionFactories` carries Pi's two
+  builtin tool extensions in the CLI's order and with the CLI's exact identity: `{ name:
+  "codemode", factory: createCodemodeExtension({ models: WORKER_CODEMODE_MODELS }), replaceable:
+  true, builtin: true }` and `{ name: "tool-search", factory: createToolSearchExtension(),
+  replaceable: true, builtin: true }`. Each loads as `builtin:<name>` with `sourceInfo.source ===
+  "builtin"` (the provenance §8.40's posture table and cohort join key on). Both register their
+  tool **inactive** — **configuration alone activates them**: the resolved `defaultTools`
+  (`perk init`'s seeded `+tool_search`, a committed `-tool_search` opt-out, a `+codemode`). A
+  project `extensions: ["-builtin:<name>"]` entry disables one (it never loads); a project
+  extension that registers the same tool name **replaces** it (Pi's loader omits the builtin and
+  records a warning, printed as `perk worker: extension warning — builtin:<name>: …`).
+  `codemode`'s `mode`/`inlineBudget` are left to the merged `codemode.*` settings. **Per-factory
+  isolation:** `tool-search` reads no file, env var or global dir; `codemode` reads the merged
+  settings (throwaway global + project) and the session's entries, its sandbox worker/wasm
+  resolving from the host package — no global-dir read. **MCP: not supplied.** The worker
+  registers no MCP factory: Pi's `createMcpExtension` defaults its server config, credential store
+  and log to the **global** agent dir, and isolating them would layer a perk `mcp.json` reader and
+  credential store on Pi's implementation — deferred. Within the **worker-supplied extension
+  set** (the policy extension + the two builtins) nothing reads the global or project `mcp.json`,
+  nothing reads or writes `mcp-auth.json`, nothing writes `mcp.log`, and a worktree's
+  `.pi/mcp.json` is inert; a project extension's `pi.registerMcpServer()` is reported by Pi at
+  bind as a `register_mcp_server` extension error (printed — see `ctx.hasUI === false`) and never
+  connected, and the drive continues. **Outside the guarantee:** a project extension that loads
+  its own MCP handler (Pi's public `createMcpExtension`, or any extension handling
+  `mcp_servers_change`) connects servers on its own account — the repo's own choice, exactly as
+  *Model-call policy*'s *Scope*. Pi's `llama.cpp` builtin is not supplied either (providers come
+  from the worker-minted `ModelRuntime` and project extensions). The e2e tier pins activation,
+  opt-out, disable and replacement on a real request, and the absence of `builtin:mcp` by a live
+  loaded-extension census (`getExtensionPaths()`).
 - **Model-call policy (a constrained capability)** — `extension/worker/modelCallPolicy.ts`. Pi
   reports a codemode script's `models.*` usage only when the script ends (its mid-script
   `tool_execution_update` partials carry per-call rows with `cost` only, never tokens), and no
@@ -3753,9 +3783,8 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
   cannot trip mid-script. Hence two layers:
   - **Hard layer** — the worker-owned codemode factory is constructed with `models: false`
     (`WORKER_CODEMODE_MODELS`): no `models` namespace exists in the sandbox, however the call is
-    spelled. *Deferred:* the worker does not yet register Pi's builtin factories itself; the
-    native-factories registration consumes this constant when it lands (until then the worker's
-    only codemode is a project-registered one — see *Scope*).
+    spelled. That factory is the worker's own builtin `codemode` (*Builtin factories*); a
+    project-registered `codemode` replaces it and is the repo's own choice (see *Scope*).
   - **Advisory layer** — the worker's hidden inline extension `perk-worker-policy` (a fixed input
     to every services build via `resourceLoaderOptions.extensionFactories`, not configurable)
     registers one `tool_call` hook: a `codemode` call (any registrar) whose script literally
@@ -3768,7 +3797,8 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
     aliasing** (`const m = models; m.classify(…)`) — the hard layer is what holds. Catalog reads
     (`getModelsOfType`/`getAvailableOfType`/`getModelOfType`) are unmetered and never screened.
   - **Scope** — the guarantee covers the worker's **own** surfaces. A project extension's tools —
-    a project-registered `codemode` left at Pi's `models: true` default, or any tool calling
+    a project-registered `codemode` (which replaces the worker's builtin) left at Pi's
+    `models: true` default, or any tool calling
     `ctx.modelRegistry.classify` — are the repo's own choice: Pi offers no mid-call hook for any
     tool, so their model usage is counted once at the turn boundary and bounded by the turn cap,
     the token cap at turn end and the wall clock. The advisory screen still applies to every
@@ -3778,7 +3808,10 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
     factory-level call bound. The e2e tier pins that no partial carries `usage`, so it fails
     loudly when this changes.
 - **`ctx.hasUI === false`**: the session binds with `{ uiContext: undefined, mode: "json" }`,
-  so every perk UI surface takes its headless `console.error` fallback.
+  so every perk UI surface takes its headless `console.error` fallback. The binding's `onError`
+  prints each bind-time extension error (Pi's `ExtensionError` payload) as `perk worker: extension
+  error — <extensionPath> (<event>): <error>` (`sdkAdapter.ts::formatExtensionError`; a payload of
+  any other shape falls back to `String(err)`).
 - **Rebind defensiveness**: the worker is built on `createAgentSessionRuntime` (the
   services/from-services factory), and the adapter's **drive-session handle**
   (`sdkAdapter.ts::createDriveSession` — which also owns bind/subscribe, the driving prompt,
@@ -3793,12 +3826,14 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
 **The model-selection ladder.** Model selection runs **inside** the SDK runtime factory, in pi's
 own CLI order, and re-runs identically on any session replacement:
 
-1. **Services** — `createAgentSessionServices({ cwd, agentDir, settingsManager, modelRuntime })`
-   loads the project extensions and applies their queued `registerProvider` (config and native)
-   and `registerVirtualModel` registrations onto the worker-minted runtime, then refreshes its
-   availability. Services **never** derive a runtime from the throwaway `agentDir` (that would be
-   an empty auth store). Extension load errors and every non-`info` registration diagnostic are
-   printed to stderr here — the cause behind a later refusal.
+1. **Services** — `createAgentSessionServices({ cwd, agentDir, settingsManager, modelRuntime,
+   resourceLoaderOptions: { extensionFactories } })` (`extensionFactories` = the policy extension
+   + the two builtins, *Builtin factories*) loads the project extensions and applies their queued
+   `registerProvider` (config and native) and `registerVirtualModel` registrations onto the
+   worker-minted runtime, then refreshes its availability. Services **never** derive a runtime
+   from the throwaway `agentDir` (that would be an empty auth store). Extension load errors, loader
+   warnings (a replaced builtin) and every non-`info` registration diagnostic are printed to stderr
+   here — the cause behind a later refusal.
 2. **Explicit resolution** — a non-empty `--model` pattern resolves through `resolveCliModel`
    over the post-registration runtime (so an extension-registered provider or virtual model is
    selectable); a miss ⇒ `error.type "model_not_found"`.
@@ -8060,10 +8095,13 @@ primer that runs BEFORE the carrier reaches the model, with an exported constant
 
 A failed launch primes nothing. **Nonparticipants by construction:** a session whose resolved
 selection leaves `tool_search` inactive (a project `-tool_search`, or an empty resolved selection)
-or with a foreign namesake, the headless worker (its runtime loads no `tool_search` factory),
-`/btw`'s side session (`sideSessionTools` carries no extension builtin) and every spawned report
+or with a foreign namesake, `/btw`'s side session (`sideSessionTools` carries no extension builtin) and every spawned report
 child (it registers no perk tool) keep the always-declared loadout — every family member stays
-`direct`, and a nonparticipant census request is byte-identical to the pre-pilot one. **Resets:**
+`direct`, and a nonparticipant census request is byte-identical to the pre-pilot one. **The
+headless worker** loads Pi's builtin `tool_search` itself (§8.11 *Builtin factories*) and joins
+under the same resolved-selection rule; with no door carrier, its deferred members come back only
+by search (`tool_search`) and by launcher priming (a successful `start_review_wave`), never by a
+door primer. **Resets:**
 resume and fork start from the host's defaults and re-join (a primed or searched member is gone
 until re-primed or re-searched); `/reload` re-runs the factory, which re-joins and re-deactivates
 when the next run starts (the **Restoration window**);

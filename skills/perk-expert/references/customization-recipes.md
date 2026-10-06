@@ -360,7 +360,8 @@ project key itself.
 
 perk seeds `"+tool_search"` into the `defaultTools` list of `.pi/settings.json` (appending to an
 existing list; never reordering or removing your entries). It turns on Pi's builtin `tool_search`,
-so the repo's interactive sessions join the **discovery cohort**: four optional, schema-heavy perk
+so the repo's sessions (interactive ones and the headless worker alike) join the **discovery
+cohort**: four optional, schema-heavy perk
 tools are deferred until a door primes them or the model searches for them, which keeps them out
 of every request. To opt out, commit `-tool_search` in the repo's project settings:
 
@@ -375,8 +376,9 @@ user-scope ones, so a user-global `-tool_search` is overridden. The opt-out take
 re-joins). A list with no string entries (such as `"defaultTools": []`, on its own Pi's "no
 builtin tools") is also left alone, but it is **not** a discovery opt-out: Pi appends an empty
 project list to your user-scope list, so a user-scope `+tool_search` would still apply — use
-`-tool_search`. Opting out makes the repo's sessions nonparticipants: every perk tool stays declared
-and there is no `tool_search`.
+`-tool_search`. Opting out makes the repo's sessions, including the headless worker,
+nonparticipants: every perk tool stays declared and `tool_search` is not declared. To keep the
+builtin out of the worker entirely, add `"extensions": ["-builtin:tool-search"]` instead.
 
 ## Read the footer's cache-hit rate; diagnose misses (`showCacheMissNotices`)
 
