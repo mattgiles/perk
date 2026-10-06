@@ -23,6 +23,8 @@
  * per-call cost, never tokens), and no public interface bounds or meters a call while a script
  * runs, so a running script cannot be held to the stage token budget. Scope: the factory the
  * worker itself constructs — a codemode a project extension registers is the repo's own choice.
+ * The worker does not yet register Pi's builtin factories itself; that registration consumes this
+ * constant when it lands.
  *
  * Retirement condition: Pi surfaces a script's per-call `models.*` usage on a public mid-script
  * surface (e.g. `usage` on `tool_execution_update` partials) or offers a public factory-level call

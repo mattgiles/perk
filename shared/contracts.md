@@ -3718,7 +3718,10 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
   the managed `AGENTS.md`/`APPEND_SYSTEM.md` and any project `.pi/extensions/` (the project tier
   is trusted for the prepared worktree), while the user-global **resource** tier
   (extensions/settings/skills) stays locked out via the throwaway `agentDir` — the isolation
-  invariant; loader/install mechanics live in `extension/worker/sdkAdapter.ts`. Auth and
+  invariant; loader/install mechanics live in `extension/worker/sdkAdapter.ts`. The throwaway dir
+  carries exactly **one** global setting, `cacheWarming: "off"`, written by the adapter at mint
+  time (Pi reads the warming mode from global settings only — see *Cache-warming-off*), and still
+  no extensions or skills. Auth and
   `models.json` are **not** throwaway-scoped: they come from the worker-minted `ModelRuntime`
   (`ModelRuntime.create()` — the global agent dir's `auth.json`/`models.json`,
   `PI_CODING_AGENT_DIR`-aware, plus provider env keys; offline), handed explicitly to the
@@ -3735,6 +3738,44 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
   never writes an `active_objective`, so `objective.ts`'s `turn_end` `ctx.compact` is inert.
   Together these kill both SDK auto-compaction and perk's threshold compaction. The worker must
   **never** call `/objective`/`objective_save` in the driven session.
+- **Cache-warming-off** (worker only — interactive sessions keep the user's setting): the
+  adapter seeds the throwaway `agentDir`'s `settings.json` with `{ "cacheWarming": "off" }`
+  before construction, because `SettingsManager.getCacheWarmingMode()` reads **global** settings
+  only (the merged-view `applyOverrides` cannot reach it). Pi's cache warmer is the only
+  out-of-turn usage source left once compaction is off, and `session.abort()` does not cancel it,
+  so with it off every usage record the worker counts arrives at a turn boundary (see *Outcome
+  shape*). Observable as `session.cacheWarmingStatus = { state: "inactive", reason: "cache
+  warming disabled" }` (pinned in the e2e tier).
+- **Model-call policy (a constrained capability)** — `extension/worker/modelCallPolicy.ts`. Pi
+  reports a codemode script's `models.*` usage only when the script ends (its mid-script
+  `tool_execution_update` partials carry per-call rows with `cost` only, never tokens), and no
+  public interface meters or bounds a classifier/image call while a script runs, so the token cap
+  cannot trip mid-script. Hence two layers:
+  - **Hard layer** — the worker-owned codemode factory is constructed with `models: false`
+    (`WORKER_CODEMODE_MODELS`): no `models` namespace exists in the sandbox, however the call is
+    spelled. *Deferred:* the worker does not yet register Pi's builtin factories itself; the
+    native-factories registration consumes this constant when it lands (until then the worker's
+    only codemode is a project-registered one — see *Scope*).
+  - **Advisory layer** — the worker's hidden inline extension `perk-worker-policy` (a fixed input
+    to every services build via `resourceLoaderOptions.extensionFactories`, not configurable)
+    registers one `tool_call` hook: a `codemode` call (any registrar) whose script literally
+    names `models.classify(` / `models.generateImages(` (first match by position) is **blocked
+    before it executes** with the typed reason `perk worker: model call refused
+    (<image_generation|classifier>) — …`, which Pi returns to the model as the call's error result
+    (never `terminate` — a refusal is non-terminal). Image generation is refused by policy this
+    release (the budget has no count/cost dimension and image usage is provider-dependent);
+    classifier calls are the constrained capability. The screen is textual and **bypassable by
+    aliasing** (`const m = models; m.classify(…)`) — the hard layer is what holds. Catalog reads
+    (`getModelsOfType`/`getAvailableOfType`/`getModelOfType`) are unmetered and never screened.
+  - **Scope** — the guarantee covers the worker's **own** surfaces. A project extension's tools —
+    a project-registered `codemode` left at Pi's `models: true` default, or any tool calling
+    `ctx.modelRegistry.classify` — are the repo's own choice: Pi offers no mid-call hook for any
+    tool, so their model usage is counted once at the turn boundary and bounded by the turn cap,
+    the token cap at turn end and the wall clock.
+  - **Retirement condition** — Pi surfaces a script's per-call `models.*` usage on a public
+    mid-script surface (e.g. `usage` on `tool_execution_update` partials) or offers a public
+    factory-level call bound. The e2e tier pins that no partial carries `usage`, so it fails
+    loudly when this changes.
 - **`ctx.hasUI === false`**: the session binds with `{ uiContext: undefined, mode: "json" }`,
   so every perk UI surface takes its headless `console.error` fallback.
 - **Rebind defensiveness**: the worker is built on `createAgentSessionRuntime` (the
@@ -3790,7 +3831,12 @@ The drive terminates on the **first** of:
 2. **Driving `prompt()` resolved (agent idle), verified against the success predicate.** Idle is
    **not** itself success — if the predicate does not hold, → `failed`/`agent_idle_incomplete`.
 3. **Budget / timeout / external abort** → `session.abort()` (hard; propagates into the in-flight
-   `ctx.signal`-aware shelled tools `submit`/`finalize_address`/`run_ci`): the watchdog →
+   `ctx.signal`-aware shelled tools `submit`/`finalize_address`/`run_ci`, and into a running
+   codemode script: Pi terminates the sandbox and aborts its pending calls' signals — an in-flight
+   model call is aborted or completes, and a queued call admitted after the abort is refused by
+   Pi's model runtime before auth resolution, never reaching the provider; the usage Pi retained
+   on the script's result reaches `turn_end` and is counted, while a call completing after Pi
+   built that result is dropped by Pi and not counted — Pi's record is the boundary): the watchdog →
    `budget_exhausted`/`budget`; the external `signal` → `aborted`/`external_abort` — an abort
    observed at the entry or pre-prompt sample returns `aborted`/`external_abort` directly (zero
    turns; no `session.abort()` is fired on an idle session). A **turn cap ends the run at the
@@ -3838,9 +3884,19 @@ a rejection after bind keeps `error.type "drive_error"`. `runStage` never reject
 }
 ```
 
-`budget.tokens` counts **fresh work only** — assistant `input + output` per `turn_end`; cache
-reads/writes and provider `reasoning` breakdowns (subsets of `output` in pi-ai's normalization)
-are deliberately excluded from the sum.
+`budget.tokens` counts **fresh work only**, read from Pi's own usage records, each exactly once:
+per `turn_end`, the assistant message's `input + output` **plus** every `toolResults[].usage`
+`input + output` — a tool's own reported usage, onto which Pi has already folded its nested calls
+(a codemode script's `models.*` aggregate, a nested `ctx.executeTool` roll-up), so nested
+`tool_execution_end` usage is never summed separately. Usage reported by failed or aborted calls
+counts (Pi records it); a call completing after Pi built its parent result is not recorded by Pi
+and not counted. No out-of-turn usage source exists in the worker (compaction off, cache warming
+off). Excluded: cache reads/writes, provider `reasoning` breakdowns (subsets of `output` in
+pi-ai's normalization), compaction/branch-summary usage, and perk's report-wave children
+(separate pi-subagents sessions, never in the worker session's records). The `finishTurn` gate
+decides on the same per-turn sum (`sdkAdapter.ts::freshTokensOf`). The reference census is Pi's
+`AgentSession.getSessionStats().tokens.input + output` — the e2e tier asserts equality for every
+scenario.
 `error.summary` is a short, model-free synthesis capped via the `route-don't-relay`/double-delivery
 discipline (`capForModel`); the PR is extracted **directly from the captured terminal tool event**,
 not a Python `find-pr-for-branch` JSON command. The run-event
@@ -3895,8 +3951,11 @@ A small, JSON-serializable, **additive-stable** discriminated union. Every event
   checklist is `hasUI`-gated and perk adds **no foreign-payload coupling** (no scraping of the
   borrowed todo tool's payloads) to synthesize one.
 - **`tool_outcome`** — one per `tool_execution_end`. `ok` = `details.ok === true` when the result
-  carries a `details.ok` boolean, else `!isError`. `summary` is `null` on success and, on failure, a
-  **capped** synthesis (`capForModel(message, EVENT_SUMMARY_CAP=2KiB).shown`) — never the raw result.
+  carries a `details.ok` boolean, else `!isError`. `summary` is `null` on success and, on failure,
+  derived in this order — `details.error` → a bare string result → the result's text content
+  (every `text` block joined by newlines: a blocked call's reason, a codemode "Script error") → a
+  generic `tool <name> failed` — and **always capped**
+  (`capForModel(message, EVENT_SUMMARY_CAP=2KiB).shown`).
 - **`run_finished`** — emitted **exactly once** at every terminal exit (natural-idle/verdict,
   budget/abort, the entry and pre-prompt abort samples, the `runtime_init` initialization failure,
   drive-error catch, AND the model-selection refusals — `no_model` / `model_not_found` /
@@ -7817,8 +7876,8 @@ name the close removes and the snippets of the eligible family members (their de
 hidden); from the second request on the prompt follows the live set. Gate enforcement is immediate —
 the latch and the backstop never wait. A user gesture that changes the landing inside the window
 (a `/plan` toggle, a stage change by `/tree`) falls under the same rule. A prime inside the window
-lifts the primed member's pending deferral \u2014 whether the member was still active or the prime
-activates it \u2014 so it survives the close. A `/tree` restore that replaces the loadout (the
+lifts the primed member's pending deferral — whether the member was still active or the prime
+activates it — so it survives the close. A `/tree` restore that replaces the loadout (the
 selected branch's projection carries a system message, so Pi restored its replayed declarations;
 `sessionManager.buildSessionProjection()`) supersedes a reload's still-pending family deferral:
 the members the transcript declared stay while eligible and the rest are already off; a
