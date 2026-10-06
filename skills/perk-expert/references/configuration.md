@@ -92,6 +92,22 @@ machine-local store behind the one-line post-upgrade notice (the `perk release-n
 the max perk version this user has run interactively. Self-healing (missing/garbled content is
 silently re-recorded) and safe to delete; no doctor check or init convergence touches it.
 
+**The host floor (Pi ≥ 1.0.0, Node ≥ 22.19.0).** perk declares its minimum supported host
+versions once in the bundled `shared/host-floor.yaml` and compares with semver precedence (a
+`1.0.0-rc.1` prerelease is below the floor; 1.0.3 or 1.10.0 is admitted — perk certifies 1.0.0 and
+admits newer Pi). Every local launch (bare `perk`, a stage launch, `perk resume`) runs `pi --version`
+once (20 s timeout) as the first exec-phase step, before any lock sweep, chdir or exec, and refuses
+`pi_version_unsupported` (older or a floor prerelease) or `pi_version_unverifiable` (non-zero exit,
+timeout, spawn failure, or output that is not a version) — exit 1, naming the executable, the
+observed version (or the reason), the required version and `npm install -g
+@earendil-works/pi-coding-agent`; no override. `--dry-run` never probes; `perk init`, `perk doctor`
+and `--help` are never gated by it. Instead the environment checks report the same floor: the `pi`
+row is presence + version and the `node` row compares the full version, and an outdated or
+unverifiable one is `ok=False` like a missing one (init exits 2 `missing_tool`; doctor `fail`). The
+managed remote runner installs exactly Pi 1.0.0 (`REMOTE_PI_VERSION`) for both the global CLI and
+the consumer worker SDK and sets up exactly Node 22.19.0. The floor is a minimum, separate from the
+development pins, the pi-subagents pin below, and that remote install pin.
+
 **The perk-managed `.pi/settings.json` slice pins pi-subagents.** The borrowed set is unpinned
 except `npm:pi-subagents@0.75.0`: perk's report waves send the inline script text under the RPC
 spawn key `script`, which releases before 0.74.0 do not accept (0.75.0 is also the first release

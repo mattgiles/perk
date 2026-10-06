@@ -105,7 +105,11 @@ note under [`[pi]`](configuration/models-and-compaction.md#pi)).
 terminal: on a pipe or in a script, bare `perk` refuses with a `not_a_tty` error that points at
 `perk --help` for the command list (exit 1). **Outside a git repository** it refuses with the
 ordinary not-a-repo error (exit 2) plus a hint: run `pi` directly there, or `perk --help` for the
-commands — perk's configured values need a checkout to read them from.
+commands — perk's configured values need a checkout to read them from. **On an older Pi** — below
+the 1.0.0 host floor, a 1.0.0 prerelease, or a `pi` whose `--version` cannot be read — the launch
+refuses after its announce line with `pi_version_unsupported` / `pi_version_unverifiable`
+(exit 1), the same check every stage launch and `perk resume` run (see
+[Requirements and compatibility](requirements-and-compatibility.md#version-compatibility)).
 
 Bare `perk` is not a command: it adds no row to the command map below, and `perk --help` still
 lists every command (its opening prose now also describes the bare form). The bare form has no
