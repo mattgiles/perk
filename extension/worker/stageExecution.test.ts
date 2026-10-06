@@ -245,6 +245,13 @@ test("runStage: implement with submit ok:false → failed/agent_idle_incomplete"
   assert.equal(outcome.terminal_signal, "agent_idle_incomplete");
 });
 
+/** An assistant turn that ended on a provider error (Pi's `turn_end` carries error turns too). */
+const errorTurn = (errorMessage: string, usage = { input: 4, output: 0 }): DriveEvent => ({
+  type: "turn_end",
+  message: { role: "assistant", stopReason: "error", errorMessage, usage },
+  toolResults: [],
+});
+
 test("runStage: a model error wins over a successful submit → failed/model_error", async () => {
   const session = new FakeSession((emit) => {
     emit({
@@ -252,15 +259,67 @@ test("runStage: a model error wins over a successful submit → failed/model_err
       toolName: "submit",
       result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
     });
-    emit({
-      type: "message_end",
-      message: { role: "assistant", stopReason: "error", errorMessage: "overloaded" },
-    });
+    emit(errorTurn("overloaded"));
   });
   const outcome = await driveFake(session);
   assert.equal(outcome.status, "failed");
   assert.equal(outcome.terminal_signal, "model_error");
   assert.equal(outcome.error?.message, "overloaded");
+});
+
+test("runStage: an error on the run's last turn is terminal with that turn's message", async () => {
+  const session = new FakeSession((emit) => {
+    emit({ type: "turn_end", message: { role: "assistant", stopReason: "toolUse" } });
+    emit(errorTurn("first failure"));
+    emit({ type: "auto_retry_start", attempt: 1, maxAttempts: 1, delayMs: 1, errorMessage: "x" });
+    emit(errorTurn("final failure"));
+  });
+  const outcome = await driveFake(session);
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.terminal_signal, "model_error");
+  assert.equal(outcome.error?.type, "model_error");
+  assert.equal(outcome.error?.message, "final failure", "the LAST unrecovered error");
+  assert.equal(outcome.budget.turns, 3, "failed attempts count as turns");
+});
+
+test("runStage: an error Pi recovers (retry → a normal turn) is cleared → the stage predicate decides", async () => {
+  const session = new FakeSession((emit) => {
+    emit(errorTurn("overloaded", { input: 7, output: 0 }));
+    emit({
+      type: "auto_retry_start",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2_000,
+      errorMessage: "overloaded",
+    });
+    emit({ type: "auto_retry_end" });
+    emit({
+      type: "turn_end",
+      message: { role: "assistant", stopReason: "toolUse", usage: { input: 10, output: 5 } },
+    });
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
+    });
+  });
+  const outcome = await driveFake(session);
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.terminal_signal, "submit_tool");
+  assert.equal(outcome.error, null);
+  // The failed attempt's turn and usage count; the scheduled retry itself changes no counter.
+  assert.equal(outcome.budget.turns, 2);
+  assert.equal(outcome.budget.tokens, 7 + 15);
+});
+
+test("runStage: a recovered error then an idle turn without submit → agent_idle_incomplete, not model_error", async () => {
+  const session = new FakeSession((emit) => {
+    emit(errorTurn("overloaded"));
+    emit({ type: "turn_end", message: { role: "assistant", stopReason: "stop" } });
+  });
+  const outcome = await driveFake(session);
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.terminal_signal, "agent_idle_incomplete");
 });
 
 test("runStage: finalized address + batch + mergeable nested submit → completed", async () => {
@@ -705,6 +764,90 @@ test("runStage: tool-result usage below maxTokens is counted and never trips →
   );
   assert.equal(outcome.status, "completed");
   assert.equal(outcome.budget.tokens, 99, "assistant 10 + tool 89");
+  assert.equal(session.abortCalls, 0);
+});
+
+test("runStage: a compaction's usage is counted without a turn and trips the watchdog at its boundary", async () => {
+  // 40 fresh tokens on the turn, then a compaction worth 60 crosses maxTokens: 100 at the
+  // compaction boundary — the trip lands there (no further turn is needed to observe it).
+  const session: FakeSession = new FakeSession((emit): void => {
+    emit({ type: "turn_end", message: { role: "assistant", usage: { input: 30, output: 10 } } });
+    assert.equal(session.abortCalls, 0, "below the cap after the turn");
+    emit({
+      type: "compaction_end",
+      reason: "threshold",
+      result: { summary: "s", usage: { input: 55, output: 5 } },
+    });
+    assert.equal(session.abortCalls, 1, "the compaction boundary tripped the watchdog");
+  });
+  const outcome = await runStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: { ...baseBudget, maxTokens: 100 },
+    },
+    { createRuntime: async () => fakeRuntime(session) },
+  );
+  assert.equal(outcome.status, "budget_exhausted");
+  assert.equal(outcome.terminal_signal, "budget");
+  assert.equal(outcome.budget.turns, 1, "a compaction is not a turn");
+  assert.equal(outcome.budget.tokens, 100);
+  assert.equal(session.abortCalls, 1);
+});
+
+test("runStage: a compaction below the cap is counted and never trips; an aborted one counts 0", async () => {
+  const session = new FakeSession((emit) => {
+    emit({ type: "turn_end", message: { role: "assistant", usage: { input: 30, output: 10 } } });
+    emit({
+      type: "compaction_end",
+      reason: "threshold",
+      result: { summary: "s", usage: { input: 50, output: 9 } },
+    });
+    emit({ type: "compaction_end", reason: "overflow", result: undefined });
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
+    });
+  });
+  const outcome = await runStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: { ...baseBudget, maxTokens: 100 },
+    },
+    { createRuntime: async () => fakeRuntime(session) },
+  );
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.budget.turns, 1);
+  assert.equal(outcome.budget.tokens, 99, "turn 40 + compaction 59 + aborted compaction 0");
+  assert.equal(session.abortCalls, 0);
+});
+
+test("runStage: a scheduled auto-retry changes no counter", async () => {
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "auto_retry_start",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2_000,
+      errorMessage: "overloaded",
+    });
+  });
+  const outcome = await runStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: { ...baseBudget, maxTurns: 1, maxTokens: 1 },
+    },
+    { createRuntime: async () => fakeRuntime(session) },
+  );
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.terminal_signal, "agent_idle_incomplete", "no model error, no trip");
+  assert.deepEqual([outcome.budget.turns, outcome.budget.tokens], [0, 0]);
   assert.equal(session.abortCalls, 0);
 });
 

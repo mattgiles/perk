@@ -3730,22 +3730,39 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
   project-scope root `.pi/npm` at session construction (an install failure throws → a loud
   `failed`/`runtime_init` outcome; installs are skipped under `PI_OFFLINE`) — §8.14's composite
   worker-deps step pre-installs the pinned `@mgiles/perk` there for consumers.
-- **Compaction-off + retry-off** via disk-layered settings — `SettingsManager.create(worktree,
-  throwawayAgentDir)` + `applyOverrides({ compaction:{enabled:false}, retry:{enabled:false} })`
-  (the SDK's sanctioned "with overrides" shape). The overrides ride the **merged** settings
-  view only (what the compaction/retry getters read); package resolution reads the per-scope raws,
-  so the overrides cannot leak into it. **AND** the **no-active-objective invariant**: positioning
-  never writes an `active_objective`, so `objective.ts`'s `turn_end` `ctx.compact` is inert.
-  Together these kill both SDK auto-compaction and perk's threshold compaction. The worker must
-  **never** call `/objective`/`objective_save` in the driven session.
+- **No active objective**: positioning never writes an `active_objective`, so `objective.ts`'s
+  `turn_end` `ctx.compact` (perk's own threshold compaction) is inert. The worker must **never**
+  call `/objective`/`objective_save` in the driven session.
 - **Cache-warming-off** (worker only — interactive sessions keep the user's setting): the
   adapter seeds the throwaway `agentDir`'s `settings.json` with `{ "cacheWarming": "off" }`
   before construction, because `SettingsManager.getCacheWarmingMode()` reads **global** settings
-  only (the merged-view `applyOverrides` cannot reach it). Pi's cache warmer is the only
-  out-of-turn usage source left once compaction is off, and `session.abort()` does not cancel it,
-  so with it off every usage record the worker counts arrives at a turn boundary (see *Outcome
-  shape*). Observable as `session.cacheWarmingStatus = { state: "inactive", reason: "cache
-  warming disabled" }` (pinned in the e2e tier).
+  only. Pi's cache warmer writes `usage` entries outside any turn or compaction, and
+  `session.abort()` does not cancel it, so with it off every usage record the worker counts
+  arrives at a boundary the seam's fold observes — a turn or a compaction (see *Outcome shape*).
+  Observable as `session.cacheWarmingStatus = { state: "inactive", reason: "cache warming
+  disabled" }` (pinned in the e2e tier).
+- **Settings-following behavior (compaction + agent auto-retry)** — deliberately **not** fixed by
+  the worker: Pi's auto-compaction and agent-level auto-retry follow the merged settings view
+  exactly as in a warm session — `SettingsManager.create(worktree, throwawayAgentDir)`, i.e. the
+  worktree's project `.pi/settings.json` (perk's converged `[compaction]` keys included) over the
+  warming-only throwaway global tier, Pi's defaults otherwise (compaction on, reserve 16 384 /
+  keep 20 000; retry on, 3 retries from a 2 000 ms base). A repo opts out through its own
+  `compaction.enabled` / `retry.enabled`. pi-ai's provider-level transport retry
+  (`retry.provider.*`, read by Pi regardless of `retry.enabled`) likewise follows the settings and
+  is a separate layer. The worker applies **no** override: a pre-services
+  `applyOverrides({ compaction:{enabled:false}, retry:{enabled:false} })` was removed — the
+  services' resource reload (`SettingsManager.reload()`) recomputes the merged view from the
+  tiers and discarded it, which is why the former *compaction-off + retry-off* invariant never
+  held. A threshold compaction runs inside the agent's turn preparation, before the next request
+  starts (nothing in flight); a post-run threshold compaction after the final idle may run too and
+  is counted like any other (every compaction's usage is folded at its `compaction_end` — see
+  *Outcome shape*; a trip there is the compaction boundary of the terminal rule's budget safety).
+  The factory prints the resolved posture once after construction —
+  `perk worker: compaction <on|off> (reserve <n>, keep <n>); retry <on|off> (max <n>, base <n> ms)`
+  (`sdkAdapter.ts::formatWorkerSettingsLine`). The e2e tier pins, on real sessions,
+  `autoCompactionEnabled`/`autoRetryEnabled` against each scenario's settings, an in-drive
+  compaction that completes, a project opt-out, a compaction that trips the token cap, a recovered
+  retry, exhausted retries and a non-retryable error.
 - **Builtin factories** — `sdkAdapter.ts::workerBuiltinExtensions`. Beside `perk-worker-policy`
   (always first, never replaced), `resourceLoaderOptions.extensionFactories` carries Pi's two
   builtin tool extensions in the CLI's order and with the CLI's exact identity: `{ name:
@@ -3811,7 +3828,11 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
   so every perk UI surface takes its headless `console.error` fallback. The binding's `onError`
   prints each bind-time extension error (Pi's `ExtensionError` payload) as `perk worker: extension
   error — <extensionPath> (<event>): <error>` (`sdkAdapter.ts::formatExtensionError`; a payload of
-  any other shape falls back to `String(err)`).
+  any other shape falls back to `String(err)`). The worker's own stderr legibility lines are the
+  chosen-model line, the settings posture line (*Settings-following behavior*),
+  `perk worker: compaction (<reason>) — <n> tokens` per `compaction_end`, and
+  `perk worker: auto-retry <attempt>/<max> in <delay> ms — <error>` per scheduled retry; none of
+  them reaches the §8.12 run-event stream.
 - **Rebind defensiveness**: the worker is built on `createAgentSessionRuntime` (the
   services/from-services factory), and the adapter's **drive-session handle**
   (`sdkAdapter.ts::createDriveSession` — which also owns bind/subscribe, the driving prompt,
@@ -3880,9 +3901,30 @@ The drive terminates on the **first** of:
    the agent's `finishTurn` hook (after the session's own) and returns `{ action: "end" }` for
    the turn whose post-turn counters trip the budget (or any turn after a trip) — no next turn
    starts and no provider request follows, so `budget.turns` never exceeds `maxTurns`. A session
-   without an `agent` (a test fake) relies on the abort alone.
-4. **Post-acceptance model error** (with retry off, an assistant `message_end` with
-   `stopReason:"error"`) → `failed`/`model_error`.
+   without an `agent` (a test fake) relies on the abort alone. **Budget safety, per usage
+   boundary** (the watchdog checks the cap at both):
+   - *Turn boundary* — the turn whose post-turn counters trip the cap is ended by the
+     `finishTurn` gate (no next request), and the trip's `session.abort()` sets Pi's run-abort
+     flag so its post-run handling returns before any retry or post-run compaction (a pending
+     retry backoff is cancelled by the same call). A model call already running inside a tool
+     when the cap trips may complete and is counted — the only in-flight exception.
+   - *Compaction boundary* — a pre-request compaction runs inside the agent's turn preparation
+     **before** its request starts. A trip on `compaction_end` aborts the agent signal
+     synchronously (session listeners are dispatched synchronously, before preparation returns),
+     so pi-ai refuses the would-be request before provider dispatch: **zero** provider requests
+     follow a compaction-boundary trip. The agent loop records the refused request as a
+     zero-usage error turn (`This operation was aborted`), counted in `budget.turns` like every
+     `turn_end`; the budget verdict stands over it. A compaction's own summarization call is
+     cancelled by the same abort when a trip (wall clock, external) lands while it runs; the
+     aborted `compaction_end` carries no usage and Pi persists no entry.
+4. **A post-acceptance provider error Pi does not recover from** → `failed`/`model_error`.
+   Pi's `turn_end` carries the turn's assistant message for error turns too, and the seam's fold
+   **replaces** its recorded error on every `turn_end` (that turn's error, or none) — so an error
+   Pi recovers, by auto-retry (`agent.continue()` → a new turn) or by overflow compaction and
+   continue, is cleared by the recovery turn, and only an error on the run's last turn (retries
+   exhausted, a non-retryable error, no overflow recovery) is terminal, carrying that last error's
+   message. `budget.turns` counts every `turn_end`, failed attempts included. A budget trip or an
+   external abort still takes precedence (item 3).
 
 **The terminating-tool preflight.** Immediately post-bind (before the driving `prompt()`), the
 stage's terminating perk tool must be registered — `implement` → `submit`, `address` →
@@ -3920,19 +3962,23 @@ a rejection after bind keeps `error.type "drive_error"`. `runStage` never reject
 }
 ```
 
-`budget.tokens` counts **fresh work only**, read from Pi's own usage records, each exactly once:
-per `turn_end`, the assistant message's `input + output` **plus** every `toolResults[].usage`
-`input + output` — a tool's own reported usage, onto which Pi has already folded its nested calls
-(a codemode script's `models.*` aggregate, a nested `ctx.executeTool` roll-up), so nested
-`tool_execution_end` usage is never summed separately. Usage reported by failed or aborted calls
-counts (Pi records it); a call completing after Pi built its parent result is not recorded by Pi
-and not counted. No out-of-turn usage source exists in the worker (compaction off, cache warming
-off). Excluded: cache reads/writes, provider `reasoning` breakdowns (subsets of `output` in
-pi-ai's normalization), compaction/branch-summary usage, and perk's report-wave children
-(separate pi-subagents sessions, never in the worker session's records). The `finishTurn` gate
-decides on the same per-turn sum (`sdkAdapter.ts::freshTokensOf`). The reference census is Pi's
-`AgentSession.getSessionStats().tokens.input + output` — the e2e tier asserts equality for every
-scenario.
+`budget.tokens` counts **fresh work only**, read from Pi's own usage records, each exactly once,
+at the boundary that produces it: per `turn_end`, the assistant message's `input + output`
+**plus** every `toolResults[].usage` `input + output` — a tool's own reported usage, onto which Pi
+has already folded its nested calls (a codemode script's `models.*` aggregate, a nested
+`ctx.executeTool` roll-up), so nested `tool_execution_end` usage is never summed separately; and
+per `compaction_end`, the compaction result's `usage` `input + output` (the summarization usage —
+the same record Pi persists on the `compaction` entry; an aborted or failed compaction carries
+none). Usage reported by failed or aborted calls counts (Pi records it); a call completing after
+Pi built its parent result is not recorded by Pi and not counted. Every out-of-turn usage record
+the worker can produce is counted at its own boundary (cache warming is off; the worker never
+navigates the session tree, so it writes no branch summary). Excluded: cache reads/writes,
+provider `reasoning` breakdowns (subsets of `output` in pi-ai's normalization), branch-summary
+usage, and perk's report-wave children (separate pi-subagents sessions, never in the worker
+session's records). The `finishTurn` gate decides on the running sum — every earlier turn and
+compaction — plus the turn's own sum (`sdkAdapter.ts::freshTokensOf`). The reference census is
+Pi's `AgentSession.getSessionStats().tokens.input + output` — the e2e tier asserts equality for
+every scenario, across an in-drive compaction and a compaction-boundary trip included.
 `error.summary` is a short, model-free synthesis capped via the `route-don't-relay`/double-delivery
 discipline (`capForModel`); the PR is extracted **directly from the captured terminal tool event**,
 not a Python `find-pr-for-branch` JSON command. The run-event

@@ -32,12 +32,20 @@ such refusal: Pi uses it only when its provider has a configured credential, and
 back to another available model (Pi's per-provider defaults, then the first available). The
 worker refuses only when no model is available at all.
 
+The worker follows the repo's **compaction and retry settings** like any other session. A long
+drive compacts before its context would overflow (the `[compaction]` keys below apply, and
+`enabled = false` turns it off for the worker too), and a transient provider error — overloaded,
+rate-limited, a 5xx — is retried per Pi's `retry` settings. Only an error Pi gives up on ends the
+drive as a model error. On stderr the worker prints its compaction and retry settings once, then
+a line for each compaction and each retry.
+
 The worker's **token budget** counts fresh work from Pi's own usage records: each turn's assistant
-input and output, plus any usage a tool reports on its result. Pi folds the model calls nested
-inside a codemode script into the script's result, so nothing counts twice, and failed calls that
-used tokens still count. Cache reads and writes and reasoning breakdowns are not counted. The
-worker turns Pi's prompt-cache warming off for its own session; your interactive sessions keep
-your setting. Codemode scripts in the worker's own codemode have **no `models` namespace** this
+input and output, plus any usage a tool reports on its result, plus the model usage of each
+compaction summary. Pi folds the model calls nested inside a codemode script into the script's
+result, so nothing counts twice, and failed calls that used tokens still count. Cache reads and
+writes and reasoning breakdowns are not counted. The budget is checked after every turn and every
+compaction: once it runs out, the worker makes no further model request. The worker turns Pi's
+prompt-cache warming off for its own session; your interactive sessions keep your setting. Codemode scripts in the worker's own codemode have **no `models` namespace** this
 release. Pi reports a script's model usage only when the script ends, so a running script cannot
 be held to the budget: classifier calls are unavailable there, and image generation is refused. A
 script that still names `models.classify(` or `models.generateImages(` is refused before it runs,
@@ -200,7 +208,8 @@ review-classifier = "anthropic/claude-haiku-4-5"
 ## `[compaction]`
 
 How a session manages its context. The `enabled`, `reserve_tokens`, and `keep_recent_tokens` keys
-tune Pi's auto-compaction for `perk <stage>` sessions. They are **committed-only**, converged into
+tune Pi's auto-compaction for every Pi session in the repo — `perk <stage>` sessions, plain `pi`,
+and the headless worker. They are **committed-only**, converged into
 `.pi/settings.json`'s `compaction` object by `perk init` and `perk doctor --fix`; editing them
 requires re-running init or doctor. Convergence is **write-when-present and leave-when-absent**
 per key: absent keys leave existing Pi settings untouched, while removing previously converged
@@ -209,7 +218,7 @@ keys leaves those settings in place to clean up by hand. The `objective_threshol
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `enabled` | bool | _(Pi default)_ | Turns Pi's auto-compaction on or off. |
+| `enabled` | bool | _(Pi default)_ | Turns Pi's auto-compaction on or off — for every session in the repo, the headless worker included. |
 | `reserve_tokens` | int (> 0) | _(Pi default: 16384)_ | Headroom Pi keeps free at the top of the context window — the auto-compaction trigger (`context > window − reserve`) — **and** the output budget for compaction summaries: the history summary may use `0.8 ×` this value, a split turn's turn-prefix summary `0.5 ×`; on adaptive-thinking models the summarizer's reasoning counts against that budget. |
 | `keep_recent_tokens` | int (> 0) | _(Pi default)_ | Recent tokens kept verbatim. |
 | `objective_threshold` | float in `(0,1]` | `0.8` | The context-usage fraction that triggers compaction **while an objective is active**. It is a native float (`0.8`, not `"0.8"`) and is never converged into `settings.json`. |

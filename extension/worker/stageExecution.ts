@@ -1,11 +1,11 @@
 // The confined stage-execution seam (`runStage`) — the headless stage-drive primitive.
 //
 // Drives ONE read-write stage (`implement`/`address`) end-to-end on an already-prepared worktree,
-// running the SAME `@mgiles/perk` extension package, with a locked resource set, auto-compaction and
-// auto-retry off, and a budget/timeout watchdog. It seeds the stage's initial prompt, lets the
-// model work (calling perk's real tools), detects the stage's terminal signal, and returns a
-// structured `RunOutcome`. This implements the contract locked in
-// `docs/design/headless-worker.md` §B — the event-stream substrate and the e2e
+// running the SAME `@mgiles/perk` extension package, with a locked resource set, Pi's compaction
+// and auto-retry following the merged settings (as in a warm session), and a budget/timeout
+// watchdog. It seeds the stage's initial prompt, lets the model work (calling perk's real tools),
+// detects the stage's terminal signal, and returns a structured `RunOutcome`. This implements the
+// contract locked in `docs/design/headless-worker.md` §B — the event-stream substrate and the e2e
 // harness consume.
 //
 // Scope here is the in-process drive primitive only. Positioning (worktree create, handoff/plan-ref
@@ -15,13 +15,15 @@
 // Budget semantics: `budget.tokens` counts FRESH WORK from Pi's own usage records, once each —
 // per `turn_end`, the assistant's `input + output` plus every tool result's reported
 // `input + output` (Pi folds a tool's nested calls — a codemode script's `models.*` aggregate, a
-// nested tool roll-up — onto the parent result, so nested ends are never summed). Usage reported
-// by failed or aborted calls counts. Excluded: cache reads/writes, the provider `reasoning`
-// breakdown (a subset of `output` in pi-ai's normalization), compaction/branch-summary usage and
-// perk's report-wave children (separate sessions). There is no out-of-turn usage source:
-// compaction and cache warming are both off in the worker, so the turn boundary is the single
-// enforcement point. Pi's `getSessionStats().tokens.input + output` is the reference census the
-// e2e tier asserts equality against; see the adapter's `freshTokensOf`.
+// nested tool roll-up — onto the parent result, so nested ends are never summed), and per
+// `compaction_end`, the summarization usage Pi also persists on the `compaction` entry. Usage
+// reported by failed or aborted calls counts. Excluded: cache reads/writes, the provider
+// `reasoning` breakdown (a subset of `output` in pi-ai's normalization), branch-summary usage (the
+// worker never navigates the tree) and perk's report-wave children (separate sessions). Cache
+// warming is off, so the fold observes every usage record the worker can produce at one of two
+// boundaries — a turn or a compaction — and the watchdog checks the cap at both. Pi's
+// `getSessionStats().tokens.input + output` is the reference census the e2e tier asserts equality
+// against; see the adapter's `freshTokensOf`.
 //
 // CONFINEMENT: this seam's caller surface carries no SDK shapes. Every `@earendil-works` import
 // AND the session-drive mechanics (construction, raw events, prompt/abort) live in the private
@@ -196,17 +198,26 @@ function freshCounters(): DriveCounters {
 
 /**
  * Fold one perk-owned drive event into the running counters (pure) — the seam's policy fold over
- * the adapter's translated `StageEvent` union. Counts turns and fresh-work tokens (the sum is
- * adapter-computed — assistant plus tool-result usage; see `StageEvent`'s `freshTokens` doc),
- * captures the `submit`/`finalize_address` terminal tool details, and records a post-acceptance
- * model error. Exhaustive over the union: a new event kind fails type-checking here.
+ * the adapter's translated `StageEvent` union. Counts turns and fresh-work tokens at both usage
+ * boundaries (a turn's sum is adapter-computed — assistant plus tool-result usage; a compaction
+ * adds its summarization usage without a turn), captures the `submit`/`finalize_address` terminal
+ * tool details, and REPLACES the recorded model error on every turn: an error Pi recovers (a
+ * retried attempt, an overflow compacted and continued) is cleared by the recovery turn, so only
+ * an error on the run's last turn survives to classification. A scheduled retry changes no
+ * counter. Exhaustive over the union: a new event kind fails type-checking here.
  */
 function applyStageEvent(counters: DriveCounters, event: StageEvent): void {
   if (event.kind === "turn_ended") {
     counters.turns += 1;
     counters.tokens += event.freshTokens;
+    counters.modelError = event.modelError;
     return;
   }
+  if (event.kind === "compaction_ended") {
+    counters.tokens += event.freshTokens;
+    return;
+  }
+  if (event.kind === "model_retrying") return;
   if (event.kind === "tool_ended") {
     if (event.tool === "submit") counters.submitDetails = event.details;
     else if (event.tool === "finalize_address") {
@@ -222,10 +233,6 @@ function applyStageEvent(counters: DriveCounters, event: StageEvent): void {
         counters.submitDetails = { ok: true, ...(nestedSubmit as Record<string, unknown>) };
       }
     }
-    return;
-  }
-  if (event.kind === "model_errored") {
-    counters.modelError = { message: event.message };
     return;
   }
   const unhandled: never = event;
@@ -250,8 +257,9 @@ function budgetTripped(counters: DriveCounters, budget: DriveBudget): boolean {
 }
 
 /**
- * Classify a natural-idle terminal from the captured state (pure). `modelError` wins (post-
- * acceptance error, §B #4); else the stage success predicate:
+ * Classify a natural-idle terminal from the captured state (pure). `modelError` wins (a
+ * post-acceptance provider error on the run's last turn — one Pi did not recover, §B #4); else
+ * the stage success predicate:
  *  - implement: a successful `submit` carrying a `pr` → completed/submit_tool;
  *  - address: `finalize_address` ok, `last_review_batch` appended, and the latest submit-bearing
  *    evidence is successful and not definitively unmergeable → completed/address_resolved;
@@ -543,10 +551,20 @@ export async function runStage(
   let settled = false;
   let bound = false;
   let handle: DriveSessionHandle | null = null;
+  // The cap is checked at BOTH usage boundaries. A pre-request compaction runs before its request
+  // starts, so a trip on `compaction_ended` aborts the agent signal before the request is
+  // dispatched: zero provider requests follow a compaction-boundary trip.
   const listener = (event: StageEvent): void => {
     applyStageEvent(counters, event);
     if (event.kind === "turn_ended") {
       if (budgetTripped(counters, opts.budget)) trip("budget");
+    } else if (event.kind === "compaction_ended") {
+      console.error(`perk worker: compaction (${event.reason}) — ${event.freshTokens} tokens`);
+      if (budgetTripped(counters, opts.budget)) trip("budget");
+    } else if (event.kind === "model_retrying") {
+      console.error(
+        `perk worker: auto-retry ${event.attempt}/${event.maxAttempts} in ${event.delayMs} ms — ${event.message}`,
+      );
     } else if (event.kind === "tool_ended") {
       const o = toolOutcomeOf(event);
       emitter.emit({ kind: "tool_outcome", tool: o.tool, ok: o.ok, summary: o.summary });
@@ -563,6 +581,7 @@ export async function runStage(
   // next turn starts (Pi's loop does not re-check the abort signal between turns). The following
   // `turn_ended` still folds the counters and trips the watchdog, which records the verdict and
   // aborts the session's post-run continuation. A run already tripped ends at the next boundary.
+  // The running `counters.tokens` already include every earlier compaction's usage.
   const endRunAfterTurn = (turn: { freshTokens: number }): boolean => {
     if (settled) return false;
     if (terminationReason !== "natural") return true;

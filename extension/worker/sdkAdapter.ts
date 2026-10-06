@@ -55,12 +55,28 @@ export interface UsageSlice {
   reasoning?: number;
 }
 
+/** Why Pi compacted (`compaction_end.reason`). */
+export type CompactionReason = "manual" | "threshold" | "overflow";
+
 /** The slice of an agent session event the worker reads (structural — see agent-session.d.ts). */
 export interface DriveEvent {
   type: string;
   toolName?: string;
+  /**
+   * `tool_execution_end`: the tool result. `compaction_end`: Pi's `CompactionResult` (its `usage`
+   * is the summarization usage Pi also persists on the `compaction` entry), absent when the
+   * compaction was aborted or failed.
+   */
   result?: unknown;
   isError?: boolean;
+  /** `compaction_end` only. */
+  reason?: CompactionReason;
+  /** `auto_retry_start` only: the retry attempt (1-based), the cap, and the backoff. */
+  attempt?: number;
+  maxAttempts?: number;
+  delayMs?: number;
+  /** `auto_retry_start` only: the failed attempt's error text. */
+  errorMessage?: string;
   message?: {
     role?: string;
     stopReason?: string;
@@ -139,6 +155,29 @@ export type StageEvent =
        * excluded (see `UsageSlice`).
        */
       freshTokens: number;
+      /**
+       * The turn's provider error (assistant `stopReason: "error"`), else null. Every turn
+       * carries it so the seam can REPLACE its recorded error: a turn Pi recovers (auto-retry, or
+       * overflow compaction + continue) is followed by a recovery turn that clears it.
+       */
+      modelError: { message: string } | null;
+    }
+  | {
+      kind: "compaction_ended";
+      /**
+       * The compaction's summarization usage (`result.usage`, clamped `input + output`) — 0 for an
+       * aborted or failed compaction, which carries no result and leaves no entry.
+       */
+      freshTokens: number;
+      reason: CompactionReason;
+    }
+  | {
+      kind: "model_retrying";
+      attempt: number;
+      maxAttempts: number;
+      delayMs: number;
+      /** The failed attempt's error text. */
+      message: string;
     }
   | {
       kind: "tool_ended";
@@ -149,8 +188,7 @@ export type StageEvent =
       details: Record<string, unknown> | null;
       /** Pre-cap error text for a failed tool (null when `ok`); the seam applies its cap. */
       errorText: string | null;
-    }
-  | { kind: "model_errored"; message: string };
+    };
 
 /** Every `{ type: "text" }` block of a tool result's `content`, joined by newlines; null if none. */
 function textContentOf(result: unknown): string | null {
@@ -177,16 +215,39 @@ function toolErrorMessage(event: DriveEvent): string {
   return textContentOf(event.result) ?? `tool ${event.toolName ?? ""} failed`;
 }
 
+/** The compaction result's usage slice (absent ⇒ undefined: an aborted/failed compaction). */
+function compactionUsageOf(result: unknown): UsageSlice | undefined {
+  if (result && typeof result === "object" && "usage" in result) {
+    const usage = (result as { usage: unknown }).usage;
+    if (usage && typeof usage === "object") return usage as UsageSlice;
+  }
+  return undefined;
+}
+
+/** A turn's provider error: the assistant message's `stopReason: "error"`, else null. */
+function modelErrorOf(message: DriveEvent["message"]): { message: string } | null {
+  return message?.stopReason === "error"
+    ? { message: message.errorMessage ?? "model error" }
+    : null;
+}
+
 /**
  * Translate one raw agent-session event into the perk-owned union (pure); `null` for event types
  * the drive does not observe. This is the entire SDK-event vocabulary the drive consumes: turn
- * completion (with the fresh-work token sum — the `sumAssistantTokens` pattern in objective.ts),
- * tool completion (with the parsed `details` block and pre-cap error text), and a
- * post-acceptance model error (assistant `message_end` with `stopReason:"error"`, surfaced with
- * retry off — audit §B #4).
+ * completion (with the fresh-work token sum — the `sumAssistantTokens` pattern in objective.ts —
+ * and the turn's provider error, which Pi's `turn_end` carries for error turns too), tool
+ * completion (with the parsed `details` block and pre-cap error text), compaction completion
+ * (with its summarization usage — the one out-of-turn usage record the worker produces), and a
+ * scheduled auto-retry (narration only).
  */
 export function translateEvent(event: DriveEvent): StageEvent | null {
-  if (event.type === "turn_end") return { kind: "turn_ended", freshTokens: freshTokensOf(event) };
+  if (event.type === "turn_end") {
+    return {
+      kind: "turn_ended",
+      freshTokens: freshTokensOf(event),
+      modelError: modelErrorOf(event.message),
+    };
+  }
   if (event.type === "tool_execution_end") {
     const details = detailsOf(event.result);
     const ok = typeof details?.ok === "boolean" ? details.ok === true : !event.isError;
@@ -198,12 +259,23 @@ export function translateEvent(event: DriveEvent): StageEvent | null {
       errorText: ok ? null : toolErrorMessage(event),
     };
   }
-  if (
-    event.type === "message_end" &&
-    event.message?.role === "assistant" &&
-    event.message.stopReason === "error"
-  ) {
-    return { kind: "model_errored", message: event.message.errorMessage ?? "model error" };
+  if (event.type === "compaction_end") {
+    return {
+      kind: "compaction_ended",
+      freshTokens: usageTokens(compactionUsageOf(event.result)),
+      // Pi's event always names its reason; the fallback only keeps the usage counted (and the
+      // stderr line well-formed) should that shape ever drift.
+      reason: event.reason ?? "threshold",
+    };
+  }
+  if (event.type === "auto_retry_start") {
+    return {
+      kind: "model_retrying",
+      attempt: event.attempt ?? 0,
+      maxAttempts: event.maxAttempts ?? 0,
+      delayMs: event.delayMs ?? 0,
+      message: event.errorMessage ?? "Unknown error",
+    };
   }
   return null;
 }
@@ -657,6 +729,23 @@ export function workerBuiltinExtensions(): InlineExtension[] {
 
 // --- the production runtime factory ---------------------------------------------------------------
 
+/**
+ * The worker's one settings legibility line, from the merged view the session actually runs on:
+ * `perk worker: compaction <on|off> (reserve <n>, keep <n>); retry <on|off> (max <n>, base <n> ms)`.
+ * Pure.
+ */
+export function formatWorkerSettingsLine(
+  compaction: { enabled: boolean; reserveTokens: number; keepRecentTokens: number },
+  retry: { enabled: boolean; maxRetries: number; baseDelayMs: number },
+): string {
+  const onOff = (enabled: boolean): string => (enabled ? "on" : "off");
+  return (
+    `perk worker: compaction ${onOff(compaction.enabled)} ` +
+    `(reserve ${compaction.reserveTokens}, keep ${compaction.keepRecentTokens}); ` +
+    `retry ${onOff(retry.enabled)} (max ${retry.maxRetries}, base ${retry.baseDelayMs} ms)`
+  );
+}
+
 /** The production factory's result: a live runtime, or a typed zero-turn selection refusal. */
 export type RuntimeConstruction =
   | { ok: true; runtime: DriveRuntimeLike }
@@ -666,18 +755,21 @@ export type RuntimeConstruction =
  * Build the asymmetric runtime: `cwd = worktree` (project tier — perk's `@mgiles/perk` extension via the
  * managed `.pi/settings.json`, any project `.pi/extensions/`, the managed `AGENTS.md`/`APPEND_SYSTEM.md`)
  * and `agentDir = throwaway` (user-global RESOURCES out — the throwaway dir carries exactly one
- * global setting, `cacheWarming: "off"` (Pi reads warming from global settings only, so the
- * merged-view overrides cannot reach it; warming is the only out-of-turn usage source left once
- * compaction is off), and no extensions or skills, so the global resource tier is empty). Auth +
- * `models.json` come from the worker-minted `ModelRuntime` instead: `request.modelRuntime ?? ModelRuntime.create()` (the global
- * agent dir's `auth.json`/`models.json`, `PI_CODING_AGENT_DIR`-aware, plus env keys; offline),
- * minted INSIDE this function's failure-cleanup guard so a rejection is the seam's
- * `runtime_init`. Settings are DISK-LAYERED (`SettingsManager.create` + `applyOverrides`, the
- * SDK's sanctioned "with overrides" shape — docs/sdk.md "Settings Management"): the project tier
- * resolves the managed `packages` list, while the compaction-off/retry-off determinism overrides
- * ride the merged view only (package resolution reads the per-scope raws — overrides cannot leak
- * into it). Missing `npm:` packages auto-install into `.pi/npm` during the loader's reload
- * (skipped under `PI_OFFLINE`); an install failure throws → the seam's catch arm → a loud
+ * global setting, `cacheWarming: "off"` (Pi reads warming from global settings only; with it off,
+ * every usage record the worker counts arrives at a boundary the seam's fold observes — a turn or
+ * a compaction — and `session.abort()` never has a warmer to cancel), and no extensions or
+ * skills, so the global resource tier is empty). Auth + `models.json` come from the
+ * worker-minted `ModelRuntime` instead: `request.modelRuntime ?? ModelRuntime.create()` (the
+ * global agent dir's `auth.json`/`models.json`, `PI_CODING_AGENT_DIR`-aware, plus env keys;
+ * offline), minted INSIDE this function's failure-cleanup guard so a rejection is the seam's
+ * `runtime_init`. Settings are DISK-LAYERED (`SettingsManager.create`): the project tier
+ * resolves the managed `packages` list, and compaction and auto-retry follow the merged view
+ * exactly as in a warm session — the worktree's project `.pi/settings.json` (perk's converged
+ * `[compaction]` keys included) over the warming-only global tier, Pi defaults otherwise. The
+ * worker overrides neither: a merged-view override would not survive anyway (the services'
+ * resource reload recomputes the merged view from the tiers), and a long drive must compact
+ * rather than fail. Missing `npm:` packages auto-install into `.pi/npm` during the loader's
+ * reload (skipped under `PI_OFFLINE`); an install failure throws → the seam's catch arm → a loud
  * `failed`/`runtime_init`. No `tools` allowlist — read-write defaults + extension tools.
  *
  * The selection ladder runs inside the SDK runtime factory, mirroring pi's own CLI order:
@@ -736,6 +828,9 @@ export async function defaultCreateRuntime(
  * extension (`workerPolicyExtension`, always first) and Pi's builtin discovery + codemode
  * factories (`workerBuiltinExtensions`) are fixed inputs to every services build; they ride
  * `resourceLoaderOptions.extensionFactories`, beside (never instead of) the project extensions.
+ * Nothing here touches compaction or retry settings: Pi compacts and retries per the merged view
+ * (logged once after construction, `formatWorkerSettingsLine`), while perk's own objective
+ * threshold compaction stays inert because the worker drives with no active objective.
  */
 async function constructRuntime(
   worktree: string,
@@ -745,7 +840,6 @@ async function constructRuntime(
   removeAgentDir: () => void,
 ): Promise<DriveRuntimeLike> {
   const settingsManager = SettingsManager.create(worktree, agentDir);
-  settingsManager.applyOverrides({ compaction: { enabled: false }, retry: { enabled: false } });
   const reportSettingsErrors = (): void => {
     for (const entry of settingsManager.drainErrors()) {
       console.error(`perk worker: settings error (${entry.scope}) — ${String(entry.error)}`);
@@ -802,6 +896,13 @@ async function constructRuntime(
     const chosen = result.session.model;
     console.error(
       `perk worker: model ${chosen ? `${chosen.provider}/${chosen.id}` : "unresolved"}`,
+    );
+    // The compaction/retry posture the drive runs under (model-resolved compaction tokens).
+    console.error(
+      formatWorkerSettingsLine(
+        settingsManager.getCompactionSettings(chosen),
+        settingsManager.getRetrySettings(),
+      ),
     );
     // Settings I/O errors are likewise recorded, not raised; drained after construction so the
     // session's own settings reads are included.

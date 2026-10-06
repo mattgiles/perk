@@ -28,6 +28,7 @@ import {
   type DriveSessionLike,
   type DriveTurn,
   formatExtensionError,
+  formatWorkerSettingsLine,
   resolveWorkerModel,
   type StageEvent,
   selectWorkerModel,
@@ -44,7 +45,7 @@ test("translateEvent: turn_end → turn_ended with the clamped input+output sum"
       type: "turn_end",
       message: { role: "assistant", usage: { input: 10, output: 5 } },
     }),
-    { kind: "turn_ended", freshTokens: 15 },
+    { kind: "turn_ended", freshTokens: 15, modelError: null },
   );
   // Negative components clamp to 0; absent usage sums to 0.
   assert.deepEqual(
@@ -52,11 +53,12 @@ test("translateEvent: turn_end → turn_ended with the clamped input+output sum"
       type: "turn_end",
       message: { role: "assistant", usage: { input: 3, output: -9 } },
     }),
-    { kind: "turn_ended", freshTokens: 3 },
+    { kind: "turn_ended", freshTokens: 3, modelError: null },
   );
   assert.deepEqual(translateEvent({ type: "turn_end", message: { role: "assistant" } }), {
     kind: "turn_ended",
     freshTokens: 0,
+    modelError: null,
   });
 });
 
@@ -69,7 +71,7 @@ test("translateEvent: usage.reasoning is NOT summed — it is a subset of output
       type: "turn_end",
       message: { role: "assistant", usage: { input: 10, output: 20, reasoning: 15 } },
     }),
-    { kind: "turn_ended", freshTokens: 30 },
+    { kind: "turn_ended", freshTokens: 30, modelError: null },
   );
 });
 
@@ -86,7 +88,7 @@ test("translateEvent: turn_end sums every tool result's reported usage onto the 
         { usage: { input: 20, output: -4, reasoning: 50 } }, // negatives clamp; reasoning excluded
       ],
     }),
-    { kind: "turn_ended", freshTokens: 15 + 1_000 + 20 },
+    { kind: "turn_ended", freshTokens: 15 + 1_000 + 20, modelError: null },
   );
   // An error/aborted assistant turn carries no tool results: the assistant usage alone.
   assert.deepEqual(
@@ -95,7 +97,7 @@ test("translateEvent: turn_end sums every tool result's reported usage onto the 
       message: { role: "assistant", usage: { input: 4, output: 2 } },
       toolResults: [],
     }),
-    { kind: "turn_ended", freshTokens: 6 },
+    { kind: "turn_ended", freshTokens: 6, modelError: null },
   );
   // Tool usage counts even when the assistant message carries none.
   assert.deepEqual(
@@ -104,7 +106,7 @@ test("translateEvent: turn_end sums every tool result's reported usage onto the 
       message: { role: "assistant" },
       toolResults: [{ usage: { input: 3, output: 4 } }],
     }),
-    { kind: "turn_ended", freshTokens: 7 },
+    { kind: "turn_ended", freshTokens: 7, modelError: null },
   );
 });
 
@@ -195,28 +197,132 @@ test("translateEvent: failed-tool error text precedence — details.error → st
   assert.equal(errorTextOf({ content: "not an array" }), "tool codemode failed");
 });
 
-test("translateEvent: assistant message_end with stopReason error → model_errored; others → null", () => {
+test("translateEvent: an error turn_end carries its error; a normal turn carries null", () => {
+  // Pi's turn_end carries the turn's assistant message for error turns too (no tool results).
   assert.deepEqual(
     translateEvent({
-      type: "message_end",
-      message: { role: "assistant", stopReason: "error", errorMessage: "net" },
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "overloaded",
+        usage: { input: 8, output: 0 },
+      },
+      toolResults: [],
     }),
-    { kind: "model_errored", message: "net" },
+    { kind: "turn_ended", freshTokens: 8, modelError: { message: "overloaded" } },
   );
   assert.deepEqual(
-    translateEvent({ type: "message_end", message: { role: "assistant", stopReason: "error" } }),
-    { kind: "model_errored", message: "model error" },
+    translateEvent({ type: "turn_end", message: { role: "assistant", stopReason: "error" } }),
+    { kind: "turn_ended", freshTokens: 0, modelError: { message: "model error" } },
   );
-  // Non-error message_end, non-assistant roles, and unobserved event types translate to null.
-  assert.equal(
-    translateEvent({ type: "message_end", message: { role: "assistant", stopReason: "stop" } }),
-    null,
-  );
-  assert.equal(
-    translateEvent({ type: "message_end", message: { role: "user", stopReason: "error" } }),
-    null,
-  );
+  for (const stopReason of ["stop", "toolUse", "aborted", "length"]) {
+    const translated = translateEvent({
+      type: "turn_end",
+      message: { role: "assistant", stopReason },
+    });
+    assert.ok(translated?.kind === "turn_ended");
+    assert.equal(translated.modelError, null, `${stopReason} is not a model error`);
+  }
+});
+
+test("translateEvent: message_end is no longer observed (the error rides turn_end); unobserved types → null", () => {
+  for (const stopReason of ["error", "stop"]) {
+    assert.equal(
+      translateEvent({
+        type: "message_end",
+        message: { role: "assistant", stopReason, errorMessage: "net" },
+      }),
+      null,
+    );
+  }
   assert.equal(translateEvent({ type: "agent_settled" }), null);
+  assert.equal(translateEvent({ type: "compaction_start", reason: "threshold" }), null);
+  assert.equal(translateEvent({ type: "auto_retry_end" }), null);
+});
+
+test("translateEvent: compaction_end → compaction_ended with the summarization usage (clamped), reason carried", () => {
+  assert.deepEqual(
+    translateEvent({
+      type: "compaction_end",
+      reason: "threshold",
+      result: { summary: "s", usage: { input: 900, output: 100, reasoning: 40 } },
+    }),
+    { kind: "compaction_ended", freshTokens: 1_000, reason: "threshold" },
+  );
+  assert.deepEqual(
+    translateEvent({
+      type: "compaction_end",
+      reason: "overflow",
+      result: { summary: "s", usage: { input: 50, output: -7 } },
+    }),
+    { kind: "compaction_ended", freshTokens: 50, reason: "overflow" },
+  );
+  // An aborted or failed compaction carries no result (Pi persists no entry): 0 tokens.
+  assert.deepEqual(translateEvent({ type: "compaction_end", reason: "manual" }), {
+    kind: "compaction_ended",
+    freshTokens: 0,
+    reason: "manual",
+  });
+  // A result without usage (an extension-supplied compaction may omit it) also counts 0.
+  assert.deepEqual(
+    translateEvent({ type: "compaction_end", reason: "threshold", result: { summary: "s" } }),
+    { kind: "compaction_ended", freshTokens: 0, reason: "threshold" },
+  );
+});
+
+test("translateEvent: auto_retry_start → model_retrying with its fields", () => {
+  assert.deepEqual(
+    translateEvent({
+      type: "auto_retry_start",
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 4_000,
+      errorMessage: "rate limit",
+    }),
+    { kind: "model_retrying", attempt: 2, maxAttempts: 3, delayMs: 4_000, message: "rate limit" },
+  );
+});
+
+test("StageEvent: the drive vocabulary is exactly these kinds (compile-time pin)", () => {
+  // `satisfies` checks both directions: a missing kind and an extra one (e.g. a standalone
+  // model-error kind — a turn's provider error rides `turn_ended`) both fail type-checking.
+  const kinds = {
+    turn_ended: true,
+    tool_ended: true,
+    compaction_ended: true,
+    model_retrying: true,
+  } satisfies Record<StageEvent["kind"], true>;
+  assert.deepEqual(Object.keys(kinds), [
+    "turn_ended",
+    "tool_ended",
+    "compaction_ended",
+    "model_retrying",
+  ]);
+});
+
+test("formatWorkerSettingsLine: the merged compaction/retry posture as one stderr line", () => {
+  assert.equal(
+    formatWorkerSettingsLine(
+      { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 },
+      { enabled: true, maxRetries: 3, baseDelayMs: 2_000 },
+    ),
+    "perk worker: compaction on (reserve 16384, keep 20000); retry on (max 3, base 2000 ms)",
+  );
+  assert.equal(
+    formatWorkerSettingsLine(
+      { enabled: false, reserveTokens: 60_000, keepRecentTokens: 0 },
+      { enabled: false, maxRetries: 1, baseDelayMs: 1 },
+    ),
+    "perk worker: compaction off (reserve 60000, keep 0); retry off (max 1, base 1 ms)",
+  );
+  assert.equal(
+    formatWorkerSettingsLine(
+      { enabled: true, reserveTokens: 1, keepRecentTokens: 2 },
+      { enabled: false, maxRetries: 0, baseDelayMs: 5 },
+    ),
+    "perk worker: compaction on (reserve 1, keep 2); retry off (max 0, base 5 ms)",
+  );
 });
 
 // --- the drive-session handle: bind/rebind structural --------------------------------------------
@@ -275,7 +381,7 @@ test("createDriveSession: rebindIfReplaced unsubscribes the prior listener (no d
   assert.equal(seen.length, 0, "prior listener was unsubscribed on rebind");
   // The live binding is s2: driving it reaches the listener exactly once — translated.
   await s2.prompt();
-  assert.deepEqual(seen, [{ kind: "turn_ended", freshTokens: 0 }]);
+  assert.deepEqual(seen, [{ kind: "turn_ended", freshTokens: 0, modelError: null }]);
   assert.equal(s1.bindCalls, 1);
   assert.equal(s2.bindCalls, 1);
   await handle.dispose();
@@ -440,6 +546,7 @@ test("createDriveSession: the gate decides on assistant + tool-result usage — 
   assert.deepEqual(translateEvent({ type: "turn_end", ...turn }), {
     kind: "turn_ended",
     freshTokens: 1_000,
+    modelError: null,
   });
   await handle.dispose();
 });

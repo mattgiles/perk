@@ -13,7 +13,10 @@
 // classifier on the injected runtime and plant model-using tools plus Pi's real codemode, pinning
 // `budget.tokens` against Pi's own session census. The builtin-factory scenarios read the live
 // session on a real request: the worker's own `tool_search`/`codemode` builtins (activation,
-// opt-out, disable, replacement) and the absence of any MCP handler.
+// opt-out, disable, replacement) and the absence of any MCP handler. The compaction and retry
+// scenarios drive the settings-following behavior on real sessions: an in-drive compaction counted
+// at its boundary, a project opt-out, a compaction that trips the token cap with no further
+// provider request, and retried, exhausted and non-retryable provider errors.
 
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -25,6 +28,7 @@ import {
   fauxText,
   fauxToolCall,
   getCurrentTools,
+  isRetryableAssistantError,
 } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { agentScratchDir, type PlanRef, runEventsPath } from "../substrate/cache.ts";
@@ -123,6 +127,11 @@ async function runDrive(opts: {
    * scenario can register its recording classifier on it before the drive.
    */
   onModelRuntime?: (modelRuntime: ModelRuntime) => void;
+  /**
+   * The default faux model's context window (the `model`-absent path). A small window lets a
+   * long prompt cross Pi's compaction threshold offline.
+   */
+  contextWindow?: number;
 }) {
   const runId = `01JE2E${String(runCounter++).padStart(20, "0")}`;
   const cwd = scaffoldWorkerWorktree({
@@ -159,7 +168,9 @@ async function runDrive(opts: {
       pattern: opts.model.pattern,
     });
   } else {
-    const reg = await fauxModelRuntime();
+    const reg = await fauxModelRuntime(
+      opts.contextWindow !== undefined ? { contextWindow: opts.contextWindow } : {},
+    );
     opts.onModelRuntime?.(reg.modelRuntime);
     reg.setResponses(opts.responses ?? []);
     const model = reg.getModel() as { provider: string; id: string };
@@ -487,18 +498,33 @@ test("e2e: FAILING-TOOL — submit fails → capped tool_outcome summary + faile
   assert.equal(outcome.terminal_signal, "agent_idle_incomplete");
 });
 
-// --- Scenario 5: MODEL_ERROR -------------------------------------------------------------------
+// --- Scenario 5: MODEL_ERROR (non-retryable) ----------------------------------------------------
+//
+// A retryable error is retried per Pi's settings (the retry scenarios below); a non-retryable one
+// ends the drive on its first turn.
 
-test("e2e: MODEL_ERROR — assistant message_end stopReason error → failed/model_error", async () => {
-  const { outcome } = await runDrive({
-    stage: "implement",
-    responses: [
-      fauxAssistantMessage([fauxText("")], { stopReason: "error", errorMessage: "overloaded" }),
-    ],
+test("e2e: MODEL_ERROR — a non-retryable provider error → failed/model_error, no retry", async () => {
+  const observed = observeSessionEvents();
+  const invalid = fauxAssistantMessage([fauxText("")], {
+    stopReason: "error",
+    errorMessage: "invalid request: malformed tool schema",
   });
+  assert.equal(isRetryableAssistantError(invalid), false, "the scripted error is not retryable");
+  const result = await runDrive({
+    stage: "implement",
+    responses: [invalid, idle()],
+    onRuntime: observed.onRuntime,
+  });
+  const { outcome } = result;
 
   assert.equal(outcome.status, "failed");
   assert.equal(outcome.terminal_signal, "model_error");
+  assert.equal(outcome.error?.type, "model_error");
+  assert.equal(outcome.error?.message, "invalid request: malformed tool schema");
+  assert.equal(result.providerCalls, 1, "never retried");
+  assert.deepEqual(observed.ofType("auto_retry_start"), [], "Pi scheduled no retry");
+  assert.equal(outcome.budget.turns, 1);
+  assertAccounted(result, observed.runtime());
 });
 
 // --- Scenario 6: NO-EXTENSION-TOOLS (the terminating-tool preflight) -----------------------------
@@ -875,6 +901,8 @@ const CTX =
 interface CensusSession {
   getSessionStats(): { tokens: { input: number; output: number } };
   readonly cacheWarmingStatus: unknown;
+  readonly autoCompactionEnabled: boolean;
+  readonly autoRetryEnabled: boolean;
   subscribe(listener: (event: unknown) => void): () => void;
 }
 
@@ -1001,7 +1029,7 @@ const submitCall = () =>
 const codemodeOutcomes = (events: RunEvent[]) =>
   events.flatMap((e) => (e.kind === "tool_outcome" && e.tool === "codemode" ? [e] : []));
 
-test("e2e: MODEL-TOOL direct — a model-using tool's reported usage is counted once; cache warming is off", async () => {
+test("e2e: MODEL-TOOL direct — a model-using tool's reported usage is counted once; warming off, compaction and retry on Pi's defaults", async () => {
   const classifier = await recordingClassifier({
     ...CLASSIFIER,
     usage: { input: 700, output: 300 },
@@ -1033,11 +1061,8 @@ test("e2e: MODEL-TOOL direct — a model-using tool's reported usage is counted 
     1_000,
     "the budget counted the tool usage exactly once",
   );
-  assert.deepEqual(
-    censusSession(runtime).cacheWarmingStatus,
-    { state: "inactive", reason: "cache warming disabled" },
-    "Pi reports warming disabled for the worker session",
-  );
+  // No project compaction/retry keys in the scaffold: Pi's defaults, honoured by the worker.
+  assertWorkerKnobs(runtime, { compaction: true, retry: true });
   assertAccounted(result, runtime);
 });
 
@@ -1518,5 +1543,336 @@ test("e2e: the worker loads no builtin:mcp — .pi/mcp.json is inert and a proje
   for (const name of ["mcp.log", "mcp-auth.json"]) {
     assert.equal(existsSync(join(result.globalAgentDir, name)), false, `no ${name} was written`);
   }
+  assertAccounted(result, observed.runtime());
+});
+
+// --- Compaction and retry follow the settings, counted at their own boundaries -----------------
+//
+// The worker honours Pi's compaction and retry settings exactly like a warm session (the merged
+// view of the throwaway global tier — warming off only — and the worktree's project settings).
+// The compaction scenarios reuse the proven compactable recipe (a small faux context window, a
+// long prompt, a large reserve and `keepRecentTokens: 0`, so Pi's estimate after the first
+// request crosses the threshold and the next request is preceded by a real compaction); a router
+// answers Pi's summarization requests so the lane script counts only the drive's own turns.
+
+/** One raw agent-session event as the production session emitted it (type + payload). */
+type RawSessionEvent = { type: string } & Record<string, unknown>;
+
+/** An `onRuntime` that keeps the production runtime and records every raw session event in order. */
+function observeSessionEvents(): {
+  runtime: () => DriveRuntimeLike;
+  events: RawSessionEvent[];
+  ofType: (type: string) => RawSessionEvent[];
+  onRuntime: (runtime: DriveRuntimeLike) => void;
+} {
+  let observed: DriveRuntimeLike | undefined;
+  const events: RawSessionEvent[] = [];
+  return {
+    runtime: () => {
+      assert.ok(observed, "the production runtime was observed");
+      return observed;
+    },
+    events,
+    ofType: (type) => events.filter((e) => e.type === type),
+    onRuntime: (runtime) => {
+      observed = runtime;
+      censusSession(runtime).subscribe((event) => {
+        events.push(event as RawSessionEvent);
+      });
+    },
+  };
+}
+
+/** The branch's `compaction` entries with the summarization usage Pi persisted on each. */
+function compactionEntries(
+  runtime: DriveRuntimeLike,
+): { usage?: { input?: number; output?: number } }[] {
+  return runtime.session.sessionManager.getBranch().flatMap((entry) => {
+    const e = entry as { type?: string; usage?: { input?: number; output?: number } };
+    return e.type === "compaction" ? [e] : [];
+  });
+}
+
+/** Σ input + output over the branch's compaction entries (Pi's census counts the same usage). */
+function compactionUsageSum(runtime: DriveRuntimeLike): number {
+  return compactionEntries(runtime).reduce(
+    (sum, e) => sum + (e.usage?.input ?? 0) + (e.usage?.output ?? 0),
+    0,
+  );
+}
+
+/** Turn 1's fresh tokens: the first assistant message's `input + output` on the branch. */
+function firstAssistantUsage(runtime: DriveRuntimeLike): number {
+  for (const entry of runtime.session.sessionManager.getBranch()) {
+    const e = entry as {
+      type?: string;
+      message?: { role?: string; usage?: { input?: number; output?: number } };
+    };
+    if (e.type === "message" && e.message?.role === "assistant") {
+      return (e.message.usage?.input ?? 0) + (e.message.usage?.output ?? 0);
+    }
+  }
+  assert.fail("the branch recorded no assistant message");
+}
+
+/** Pi's summarization system prompt — the marker every summarization request carries. */
+const SUMMARIZATION_SYSTEM_MARKER = "You are a context summarization assistant.";
+
+/**
+ * Route faux requests: a summarization request (it carries Pi's summarization system prompt) gets
+ * a fixed summary; every other request takes the next lane reply. An exhausted lane script
+ * answers `"unexpected lane turn"` and is counted, never silently absorbed.
+ */
+function summarizationRouter(laneReplies: unknown[]): {
+  responses: unknown[];
+  summaries: () => number;
+  laneRequests: () => number;
+  unexpected: () => number;
+} {
+  const script = [...laneReplies];
+  let summaries = 0;
+  let laneRequests = 0;
+  let unexpected = 0;
+  const route = (context: { messages: unknown[] }) => {
+    if (JSON.stringify(context.messages).includes(SUMMARIZATION_SYSTEM_MARKER)) {
+      summaries++;
+      return fauxAssistantMessage([fauxText("summary: the drive read its settings")]);
+    }
+    laneRequests++;
+    const reply = script.shift();
+    if (reply === undefined) {
+      unexpected++;
+      return fauxAssistantMessage([fauxText("unexpected lane turn")]);
+    }
+    return reply;
+  };
+  return {
+    responses: Array.from({ length: 16 }, () => route),
+    summaries: () => summaries,
+    laneRequests: () => laneRequests,
+    unexpected: () => unexpected,
+  };
+}
+
+/** The worker's resolved knobs on the live session: warming always off; compaction/retry as set. */
+function assertWorkerKnobs(
+  runtime: DriveRuntimeLike,
+  expected: { compaction: boolean; retry: boolean },
+): void {
+  const session = censusSession(runtime);
+  assert.deepEqual(
+    session.cacheWarmingStatus,
+    { state: "inactive", reason: "cache warming disabled" },
+    "Pi reports warming disabled for the worker session",
+  );
+  assert.equal(
+    session.autoCompactionEnabled,
+    expected.compaction,
+    "auto-compaction follows settings",
+  );
+  assert.equal(session.autoRetryEnabled, expected.retry, "auto-retry follows settings");
+}
+
+/** The proven compactable drive: a long prompt in a small window with a large compaction reserve. */
+const COMPACTION_WINDOW = 120_000;
+const LONG_PROMPT = `Drive the implement stage.\n\n<draft>\n${"a draft line\n".repeat(9500)}</draft>`;
+const COMPACTION_SETTINGS = { reserveTokens: 60_000, keepRecentTokens: 0 };
+
+/** The compaction scenarios' lane: read a file, submit, go idle. */
+const compactionLane = () => [
+  fauxAssistantMessage([fauxToolCall("read", { path: ".pi/settings.json" })], {
+    stopReason: "toolUse",
+  }),
+  submitCall(),
+  idle(),
+];
+
+test("e2e: COMPACTS IN-DRIVE AND COMPLETES — a threshold compaction runs before the next request and is counted once", async (t) => {
+  const stderr = captureStderr(t);
+  const observed = observeSessionEvents();
+  const router = summarizationRouter(compactionLane());
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: router.responses,
+    initialPrompt: LONG_PROMPT,
+    contextWindow: COMPACTION_WINDOW,
+    extraSettings: { compaction: COMPACTION_SETTINGS },
+    onRuntime: observed.onRuntime,
+  });
+  const runtime = observed.runtime();
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assert.ok(router.summaries() >= 1, "Pi summarized");
+  // `submit` terminates the run, so the trailing idle reply is never requested.
+  assert.equal(router.laneRequests(), 2);
+  assert.equal(router.unexpected(), 0);
+  assert.equal(result.providerCalls, 2 + router.summaries());
+
+  assert.ok(observed.ofType("compaction_start").length >= 1, "a compaction started");
+  const ends = observed.ofType("compaction_end");
+  const threshold = ends.find((e) => e.reason === "threshold" && e.aborted === false);
+  assert.ok(threshold, "a threshold compaction completed");
+  const usage = (threshold.result as { usage?: { input?: number; output?: number } } | undefined)
+    ?.usage;
+  assert.ok((usage?.input ?? 0) + (usage?.output ?? 0) > 0, "the compaction reports usage");
+  assert.ok(compactionEntries(runtime).length >= 1, "Pi persisted a compaction entry");
+  const endAt = observed.events.indexOf(threshold);
+  const submitAt = observed.events.findIndex(
+    (e) => e.type === "tool_execution_end" && e.toolName === "submit",
+  );
+  assert.ok(submitAt !== -1 && endAt < submitAt, "the compaction ran in-drive, before submit");
+
+  assert.equal(
+    result.outcome.budget.tokens - assistantUsageSum(runtime) - toolResultUsageSum(runtime),
+    compactionUsageSum(runtime),
+    "the compaction's usage is counted exactly once",
+  );
+  assertAccounted(result, runtime);
+  assert.ok(
+    stderr().some((line) => line.startsWith("perk worker: compaction (threshold) — ")),
+    "the compaction is legible on stderr",
+  );
+});
+
+test("e2e: RETRY RECOVERS — a retryable provider error is retried and the drive completes", async (t) => {
+  const stderr = captureStderr(t);
+  const observed = observeSessionEvents();
+  const overloaded = fauxAssistantMessage([fauxText("")], {
+    stopReason: "error",
+    errorMessage: "overloaded",
+  });
+  assert.equal(isRetryableAssistantError(overloaded), true, "the scripted error is retryable");
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [overloaded, submitCall(), idle()],
+    extraSettings: { retry: { maxRetries: 2, baseDelayMs: 1 } },
+    onRuntime: observed.onRuntime,
+  });
+  const runtime = observed.runtime();
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assert.equal(result.outcome.error, null);
+  // The failed attempt and the retried `submit` (which terminates the run; the idle reply is
+  // never requested).
+  assert.equal(result.providerCalls, 2);
+  assert.ok(
+    observed.ofType("auto_retry_start").some((e) => e.attempt === 1),
+    "Pi scheduled retry attempt 1",
+  );
+  assert.ok(
+    observed.ofType("auto_retry_end").some((e) => e.success === true),
+    "the retry succeeded",
+  );
+  assert.equal(result.outcome.budget.turns, 2, "the failed attempt counts as a turn");
+  assert.ok(
+    stderr().includes("perk worker: auto-retry 1/2 in 1 ms — overloaded"),
+    "the retry is legible on stderr",
+  );
+  assertAccounted(result, runtime);
+});
+
+test("e2e: PROJECT OPT-OUT HONOURED — compaction.enabled false in the project settings → no compaction", async () => {
+  const observed = observeSessionEvents();
+  const router = summarizationRouter(compactionLane());
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: router.responses,
+    initialPrompt: LONG_PROMPT,
+    contextWindow: COMPACTION_WINDOW,
+    extraSettings: { compaction: { enabled: false, ...COMPACTION_SETTINGS } },
+    onRuntime: observed.onRuntime,
+  });
+  const runtime = observed.runtime();
+  assertWorkerKnobs(runtime, { compaction: false, retry: true });
+  // The control for the compaction scenario: the same drive compacts only when settings allow.
+  assert.equal(router.summaries(), 0, "Pi never summarized");
+  assert.deepEqual(observed.ofType("compaction_start"), []);
+  assert.deepEqual(compactionEntries(runtime), []);
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assert.equal(result.providerCalls, 2);
+  assertAccounted(result, runtime);
+});
+
+// Measured on the compaction drive (stable run to run): turn 1 carries 43 805 fresh tokens and its
+// compaction 31 613, so a cap inside (43 805, 75 418] survives turn 1 and trips on the compaction.
+// The scenario re-validates the window against the live numbers every run: drift fails loudly.
+const COMPACTION_TRIP_MAX_TOKENS = 60_000;
+
+test("e2e: COMPACTION TRIPS THE TOKEN CAP — the run ends at the compaction boundary with zero further provider requests", async () => {
+  const observed = observeSessionEvents();
+  const router = summarizationRouter(compactionLane());
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: router.responses,
+    initialPrompt: LONG_PROMPT,
+    contextWindow: COMPACTION_WINDOW,
+    extraSettings: { compaction: COMPACTION_SETTINGS },
+    budget: { ...BUDGET, maxTokens: COMPACTION_TRIP_MAX_TOKENS },
+    onRuntime: observed.onRuntime,
+  });
+  const runtime = observed.runtime();
+  const turn1 = firstAssistantUsage(runtime);
+  const compaction = compactionUsageSum(runtime);
+  assert.ok(
+    turn1 < COMPACTION_TRIP_MAX_TOKENS && COMPACTION_TRIP_MAX_TOKENS <= turn1 + compaction,
+    `the cap must land on the compaction: turn 1 ${turn1}, compaction ${compaction}`,
+  );
+  assert.equal(result.outcome.status, "budget_exhausted");
+  assert.equal(result.outcome.terminal_signal, "budget");
+  assert.equal(compactionEntries(runtime).length, 1);
+  assert.ok(router.summaries() >= 1);
+  // The no-new-call bar at the compaction boundary: the lane's second request never reached the
+  // provider — every provider call is turn 1 or the compaction's own summarization.
+  assert.equal(router.laneRequests(), 1);
+  assert.equal(result.providerCalls, 1 + router.summaries());
+  assert.equal(router.unexpected(), 0);
+  assert.ok(
+    !result.events.some((e) => e.kind === "tool_outcome" && e.tool === "submit"),
+    "submit never ran",
+  );
+  // The agent loop still reaches its request step after the trip; the aborted signal makes pi-ai
+  // refuse the request before dispatch (the provider count above did not move), and the loop
+  // records the refusal as a zero-usage error turn — counted like every turn_end.
+  const turns = observed.ofType("turn_end").map((e) => {
+    const message = e.message as {
+      stopReason?: string;
+      usage?: { input?: number; output?: number };
+    };
+    return [message.stopReason, (message.usage?.input ?? 0) + (message.usage?.output ?? 0)];
+  });
+  assert.deepEqual(turns, [
+    ["toolUse", turn1],
+    ["error", 0],
+  ]);
+  assert.equal(result.outcome.budget.turns, 2);
+  assert.equal(result.outcome.budget.tokens, turn1 + compaction, "turn 1 plus the compaction");
+  assertAccounted(result, runtime);
+});
+
+test("e2e: RETRIES EXHAUSTED — the last unrecovered error is terminal → failed/model_error", async () => {
+  const observed = observeSessionEvents();
+  const overloaded = () =>
+    fauxAssistantMessage([fauxText("")], { stopReason: "error", errorMessage: "overloaded" });
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [overloaded(), overloaded(), idle()],
+    extraSettings: { retry: { maxRetries: 1, baseDelayMs: 1 } },
+    onRuntime: observed.onRuntime,
+  });
+  assert.equal(result.outcome.status, "failed");
+  assert.equal(result.outcome.terminal_signal, "model_error");
+  assert.equal(result.outcome.error?.message, "overloaded");
+  assert.equal(result.providerCalls, 2, "the first attempt and its one retry");
+  assert.ok(
+    observed.ofType("auto_retry_end").some((e) => e.success === false),
+    "Pi gave up",
+  );
+  assert.equal(result.outcome.budget.turns, 2);
   assertAccounted(result, observed.runtime());
 });
