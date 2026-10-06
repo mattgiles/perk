@@ -11,13 +11,15 @@
 // bare hermetic runtime, so registration really happens through the production order (services →
 // selection → admission → construction). The model-accounting scenarios register a recording faux
 // classifier on the injected runtime and plant model-using tools plus Pi's real codemode, pinning
-// `budget.tokens` against Pi's own session census.
+// `budget.tokens` against Pi's own session census. The builtin-factory scenarios read the live
+// session on a real request: the worker's own `tool_search`/`codemode` builtins (activation,
+// opt-out, disable, replacement) and the absence of any MCP handler.
 
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import {
   fauxAssistantMessage,
   fauxText,
@@ -30,12 +32,13 @@ import {
   bareModelRuntime,
   fakePerkRouter,
   fauxModelRuntime,
+  plantMcpRegistrar,
   plantWorkerModelTools,
   plantWorkerProviderExtension,
   recordingClassifier,
   scaffoldWorkerWorktree,
 } from "../testing/harness.ts";
-import { MODEL_CALL_REFUSAL_PREFIX, WORKER_CODEMODE_MODELS } from "./modelCallPolicy.ts";
+import { MODEL_CALL_REFUSAL_PREFIX } from "./modelCallPolicy.ts";
 // Test-side adapter import: the E2E tier mints the nominal request deliberately (an injected
 // runtime + pattern ride the SAME production `defaultCreateRuntime` path).
 import { type DriveRuntimeLike, defaultCreateRuntime, WorkerModelRequest } from "./sdkAdapter.ts";
@@ -58,6 +61,16 @@ const idle = () => fauxAssistantMessage([fauxText("done")], { stopReason: "stop"
 const BUDGET: DriveBudget = { maxTurns: 100, maxTokens: 1_000_000, wallClockMs: 60_000 };
 
 let runCounter = 0;
+
+/**
+ * The live-session slice the loaded-extension scenarios read (structural; Pi's `AgentSession`):
+ * every registered tool with its provenance, and the runner's loaded extension paths (a builtin
+ * loads as `builtin:<name>`). Test-side only — the worker's `DriveSessionLike` stays narrow.
+ */
+interface LiveSession {
+  getAllTools(): { name: string; sourceInfo: { path: string; source: string } }[];
+  extensionRunner: { getExtensionPaths(): string[] };
+}
 
 /** Drive a full stage through the real factory + a faux model; return outcome + captured events. */
 async function runDrive(opts: {
@@ -87,6 +100,12 @@ async function runDrive(opts: {
   /** Observe the PRODUCTION runtime (built by `defaultCreateRuntime`) once constructed. */
   onRuntime?: (runtime: DriveRuntimeLike) => void;
   /**
+   * Receive the production runtime's session as the structural slice the loaded-extension
+   * scenarios read (`LiveSession`). Read it only while the session lives — inside a scripted
+   * response: `runStage` disposes the runtime before `runDrive` returns.
+   */
+  liveSession?: (session: LiveSession) => void;
+  /**
    * The model request verbatim (runtime + optional `--model` pattern). Absent ⇒ the default faux
    * runtime selected by its explicit `provider/id` pattern.
    */
@@ -97,6 +116,8 @@ async function runDrive(opts: {
   plantProviders?: Parameters<typeof plantWorkerProviderExtension>[1];
   /** Plant the model-using tools / Pi's real codemode into the scaffold (`plantWorkerModelTools`). */
   plantModelTools?: Parameters<typeof plantWorkerModelTools>[1];
+  /** Plant arbitrary project files into the scaffolded worktree before the drive. */
+  plant?: (cwd: string) => void;
   /**
    * Called with the default faux runtime right after it is built (the `model`-absent path), so a
    * scenario can register its recording classifier on it before the drive.
@@ -114,6 +135,7 @@ async function runDrive(opts: {
   });
   if (opts.plantProviders !== undefined) plantWorkerProviderExtension(cwd, opts.plantProviders);
   if (opts.plantModelTools !== undefined) plantWorkerModelTools(cwd, opts.plantModelTools);
+  opts.plant?.(cwd);
 
   const savedEnv = new Map<string, string | undefined>();
   const setEnv = (key: string, value: string) => {
@@ -124,6 +146,10 @@ async function runDrive(opts: {
   setEnv("PERK_RUN_ID", runId);
   setEnv("PERK_BIN", fakePerkRouter(cwd, opts.routes ?? {}, opts.captureArgv ? { argvFile } : {}));
   setEnv("PI_OFFLINE", "1");
+  // A per-drive global agent dir: nothing a drive resolves through `getAgentDir()` (sessions, a
+  // factory's global-dir default) ever lands in the operator's real one.
+  const globalAgentDir = mkdtempSync(join(tmpdir(), "perk-e2e-global-"));
+  setEnv("PI_CODING_AGENT_DIR", globalAgentDir);
 
   let request: WorkerModelRequest;
   let providerCalls = (): number => 0;
@@ -166,13 +192,14 @@ async function runDrive(opts: {
                 opts.onEvent?.(e);
               },
             }),
-        ...(opts.onRuntime !== undefined
+        ...(opts.onRuntime !== undefined || opts.liveSession !== undefined
           ? {
               createRuntime: async (o: { worktree: string; model?: WorkerModelRequest }) => {
                 assert.ok(o.model !== undefined, "the E2E tier always passes its model request");
                 const built = await defaultCreateRuntime(o.worktree, o.model);
                 assert.ok(built.ok, "an observed runtime is never a selection refusal");
                 opts.onRuntime?.(built.runtime);
+                opts.liveSession?.(built.runtime.session as unknown as LiveSession);
                 return built.runtime;
               },
             }
@@ -187,7 +214,15 @@ async function runDrive(opts: {
     const argv = opts.captureArgv
       ? readFileSync(argvFile, "utf8").trim().split("\n").filter(Boolean)
       : [];
-    return { outcome, events, cwd, runId, argv, providerCalls: providerCalls() };
+    return {
+      outcome,
+      events,
+      cwd,
+      runId,
+      argv,
+      providerCalls: providerCalls(),
+      globalAgentDir,
+    };
   } finally {
     // No global registry teardown needed: the faux provider lives on the per-run ModelRuntime.
     for (const [key, value] of savedEnv) {
@@ -202,6 +237,62 @@ function assertMonotonicSeq(events: RunEvent[]): void {
   events.forEach((e, i) => {
     assert.equal(e.seq, i, `seq[${i}] should be ${i}`);
   });
+}
+
+/** One scripted request as the live session saw it. */
+interface LiveSnapshot {
+  /** The tool names the request declared to the model. */
+  declared: string[];
+  /** Every registered tool's provenance, by name. */
+  tools: Map<string, { path: string; source: string }>;
+  /** The runner's loaded extension paths. */
+  extensionPaths: string[];
+}
+
+/**
+ * Observe the live session from inside scripted replies: pass `liveSession` to `runDrive`, wrap a
+ * reply with `at(reply)` to snapshot that request (declared tools, registered provenance, loaded
+ * extension paths) before replying, and read the snapshots after the drive.
+ */
+function observeLive(): {
+  liveSession: (session: LiveSession) => void;
+  at: (reply: unknown) => (context: { messages: never }) => unknown;
+  snapshots: LiveSnapshot[];
+  /** The first snapshot (asserts one was taken). */
+  first: () => LiveSnapshot;
+} {
+  let live: LiveSession | undefined;
+  const snapshots: LiveSnapshot[] = [];
+  return {
+    liveSession: (session) => {
+      live = session;
+    },
+    at: (reply) => (context) => {
+      assert.ok(live, "the live session was observed before the first request");
+      snapshots.push({
+        declared: getCurrentTools(context.messages).map((t) => t.name),
+        tools: new Map(
+          live
+            .getAllTools()
+            .map((t) => [t.name, { path: t.sourceInfo.path, source: t.sourceInfo.source }]),
+        ),
+        extensionPaths: live.extensionRunner.getExtensionPaths(),
+      });
+      return reply;
+    },
+    snapshots,
+    first: () => {
+      const first = snapshots[0];
+      assert.ok(first, "the first request was observed");
+      return first;
+    },
+  };
+}
+
+/** Record every `console.error` line for the rest of the test (the original still prints). */
+function captureStderr(t: TestContext): () => string[] {
+  const spy = t.mock.method(console, "error");
+  return () => spy.mock.calls.map((call) => call.arguments.map(String).join(" "));
 }
 
 // --- Scenario 1: implement HAPPY (the load-bearing assumption) ----------------------------------
@@ -287,33 +378,6 @@ test("e2e: implement HAPPY (file sink) — the production NDJSON sink writes the
     "the file sink captured the submit tool_outcome",
   );
   assertMonotonicSeq(events);
-});
-
-test("e2e: implement HAPPY with the discovery opt-in — the worker is a nonparticipant: the family stays declared, tool_search is never registered", async () => {
-  let runtime: DriveRuntimeLike | undefined;
-  const seen: { declared: string[]; registered: string[] } = { declared: [], registered: [] };
-  const first = (context: { messages: never }) => {
-    seen.declared = getCurrentTools(context.messages).map((t) => t.name);
-    const session = runtime?.session as unknown as { getAllTools(): { name: string }[] };
-    seen.registered = session.getAllTools().map((t) => t.name);
-    return fauxAssistantMessage([fauxToolCall("submit", {})], { stopReason: "toolUse" as const });
-  };
-  const { outcome } = await runDrive({
-    stage: "implement",
-    routes: implementHappyRoutes,
-    responses: [first, idle()],
-    defaultTools: ["+tool_search"],
-    onRuntime: (r) => {
-      runtime = r;
-    },
-  });
-  assert.ok(seen.registered.length > 0, "the first request was observed");
-  for (const name of ["collect_review_wave", "push_annotations", "objective_stack_status"])
-    assert.ok(seen.declared.includes(name), `${name} is declared on the first request`);
-  assert.ok(!seen.declared.includes("tool_search"), "tool_search is not declared");
-  assert.ok(!seen.registered.includes("tool_search"), "the worker registers no tool_search");
-  assert.equal(outcome.status, "completed", "the drive still completes via submit");
-  assert.equal(outcome.terminal_signal, "submit_tool");
 });
 
 // --- Scenario 2: address HAPPY -----------------------------------------------------------------
@@ -1019,19 +1083,23 @@ test("e2e: MODEL-TOOL nested — a model-using tool called from a codemode scrip
   assertAccounted(result, runtime);
 });
 
-test("e2e: CODEMODE classify across the cap (test-only models:true) — counted once at turn_end, no further request, no usage on partials", async () => {
+test("e2e: CODEMODE classify across the cap (test-only models:true) — counted once at turn_end, no further request, no usage on partials", async (t) => {
   const classifier = await recordingClassifier({
     ...CLASSIFIER,
     usage: { input: 300_000, output: 100_000 },
     failCall: 3,
   });
+  const stderr = captureStderr(t);
   const observed = observeAccounting();
+  const live = observeLive();
   const result = await runDrive({
     stage: "implement",
     routes: implementHappyRoutes,
     responses: [
-      codemodeCall(
-        `const m = models;\nfor (let i = 0; i < 5; i++) await m.classify(${REF}, ${CTX});\nreturn "ran";`,
+      live.at(
+        codemodeCall(
+          `const m = models;\nfor (let i = 0; i < 5; i++) await m.classify(${REF}, ${CTX});\nreturn "ran";`,
+        ),
       ),
       submitCall(),
       idle(),
@@ -1041,8 +1109,26 @@ test("e2e: CODEMODE classify across the cap (test-only models:true) — counted 
     budget: BUDGET,
     onModelRuntime: (runtime) => runtime.registerNativeProvider(classifier.provider),
     onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
   });
   const runtime = observed.runtime();
+  // The planted (non-replaceable) project codemode REPLACES the worker's builtin, loudly.
+  const first = live.first();
+  assert.ok(
+    first.tools.get("codemode")?.path.endsWith("worker-model-tools.ts"),
+    "the active codemode is the project registration",
+  );
+  assert.ok(first.declared.includes("codemode"));
+  assert.ok(!first.extensionPaths.includes("builtin:codemode"), "the builtin was not loaded");
+  assert.ok(first.extensionPaths.includes("builtin:tool-search"), "only codemode was replaced");
+  assert.ok(
+    stderr().some(
+      (line) =>
+        line.startsWith("perk worker: extension warning — builtin:codemode: ") &&
+        line.includes("built-in extension `codemode` was not loaded"),
+    ),
+    "the replacement warning reached stderr",
+  );
   assert.equal(result.outcome.status, "budget_exhausted");
   assert.equal(result.outcome.terminal_signal, "budget");
   // No mid-script trip exists: all five ran although the cap was crossed during the third.
@@ -1226,25 +1312,41 @@ test("e2e: queued concurrency after an abort — the queued calls never reach th
   assertAccounted(result, runtime);
 });
 
-test("e2e: PRODUCTION SHAPE — models:WORKER_CODEMODE_MODELS + the typed refusal; refusals are non-terminal", async () => {
+test("e2e: PRODUCTION SHAPE — the worker's own builtin codemode (models:WORKER_CODEMODE_MODELS) + the typed refusal; refusals are non-terminal", async () => {
   const classifier = await recordingClassifier({ ...CLASSIFIER, usage: { input: 7, output: 3 } });
   const observed = observeAccounting();
+  const live = observeLive();
   const result = await runDrive({
     stage: "implement",
     routes: implementHappyRoutes,
     responses: [
-      codemodeCall('await models.generateImages({ provider: "x", id: "y" }, { input: [] });'),
+      live.at(
+        codemodeCall('await models.generateImages({ provider: "x", id: "y" }, { input: [] });'),
+      ),
       codemodeCall(`await models.classify(${REF}, ${CTX});`),
       codemodeCall(`const m = models;\nreturn await m.classify(${REF}, ${CTX});`),
       submitCall(),
       idle(),
     ],
-    plantModelTools: { codemode: { models: WORKER_CODEMODE_MODELS } },
+    // A project extension that registers no codemode leaves the worker's builtin in place.
+    plantModelTools: { tool: CLASSIFIER },
     defaultTools: ["+codemode"],
     onModelRuntime: (runtime) => runtime.registerNativeProvider(classifier.provider),
     onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
   });
   const runtime = observed.runtime();
+  const first = live.first();
+  assert.deepEqual(
+    first.tools.get("codemode"),
+    { path: "builtin:codemode", source: "builtin" },
+    "the active codemode is the worker's own builtin (WORKER_CODEMODE_MODELS)",
+  );
+  assert.ok(
+    first.declared.includes("codemode"),
+    "defaultTools activated it: declared on request 1",
+  );
+  assert.ok(first.declared.includes("faux_classify_tool"), "the project tool loaded beside it");
   assert.equal(result.outcome.status, "completed");
   assert.equal(result.outcome.terminal_signal, "submit_tool");
   const outcomes = codemodeOutcomes(result.events);
@@ -1260,4 +1362,161 @@ test("e2e: PRODUCTION SHAPE — models:WORKER_CODEMODE_MODELS + the typed refusa
   assert.equal(classifier.calls.length, 0, "no classifier request was ever made");
   assert.equal(toolResultUsageSum(runtime), 0);
   assertAccounted(result, runtime);
+});
+
+// --- Pi's builtin factories in the worker: discovery, codemode, and no MCP -----------------------
+//
+// The worker supplies Pi's `codemode` and `tool-search` builtins (CLI identity) beside its policy
+// extension; configuration alone decides activation. Every live-session fact is read inside a
+// scripted reply (`observeLive`), before `runStage` disposes the runtime.
+
+/** The discovery family members eligible in the drivable read-write stages. */
+const FAMILY = ["collect_review_wave", "push_annotations", "objective_stack_status"];
+
+const BUILTIN_TOOL_SEARCH = { path: "builtin:tool-search", source: "builtin" };
+const BUILTIN_CODEMODE = { path: "builtin:codemode", source: "builtin" };
+
+test("e2e: discovery opt-in — the worker joins the cohort through its builtin tool_search; a search re-declares a deferred member", async () => {
+  const observed = observeAccounting();
+  const live = observeLive();
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      live.at(
+        fauxAssistantMessage([fauxToolCall("tool_search", { query: "objective stack status" })], {
+          stopReason: "toolUse",
+        }),
+      ),
+      live.at(submitCall()),
+      idle(),
+    ],
+    defaultTools: ["+tool_search"],
+    onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
+  });
+  const [first, afterSearch] = live.snapshots;
+  assert.ok(first && afterSearch, "both requests were observed");
+  assert.deepEqual(first.tools.get("tool_search"), BUILTIN_TOOL_SEARCH);
+  assert.ok(first.declared.includes("tool_search"), "the resolved defaultTools activated it");
+  for (const name of FAMILY) {
+    assert.ok(first.tools.has(name), `${name} is registered`);
+    assert.ok(!first.declared.includes(name), `${name} is deferred: not declared on request 1`);
+  }
+  assert.deepEqual(first.tools.get("codemode"), BUILTIN_CODEMODE, "codemode is registered");
+  assert.ok(!first.declared.includes("codemode"), "but not activated by this selection");
+
+  const search = result.events.find((e) => e.kind === "tool_outcome" && e.tool === "tool_search");
+  assert.ok(search?.kind === "tool_outcome" && search.ok, "tool_search ran ok");
+  assert.ok(
+    afterSearch.declared.includes("objective_stack_status"),
+    "the search re-declared the deferred member on the next request",
+  );
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assertAccounted(result, observed.runtime());
+});
+
+test("e2e: discovery opt-out (-tool_search) — the builtin is registered but inactive; the family stays declared", async () => {
+  const observed = observeAccounting();
+  const live = observeLive();
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [live.at(submitCall()), idle()],
+    defaultTools: ["-tool_search"],
+    onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
+  });
+  const first = live.first();
+  assert.deepEqual(first.tools.get("tool_search"), BUILTIN_TOOL_SEARCH);
+  assert.ok(!first.declared.includes("tool_search"), "opted out: not declared");
+  for (const name of FAMILY) assert.ok(first.declared.includes(name), `${name} is declared`);
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assertAccounted(result, observed.runtime());
+});
+
+test("e2e: -builtin:<name> disables a worker builtin — neither loads, even when defaultTools names it", async () => {
+  const observed = observeAccounting();
+  const live = observeLive();
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [live.at(submitCall()), idle()],
+    defaultTools: ["+tool_search", "+codemode"],
+    extraSettings: { extensions: ["-builtin:tool-search", "-builtin:codemode"] },
+    onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
+  });
+  const first = live.first();
+  assert.ok(
+    first.extensionPaths.some((path) => path.includes("perk-worker-policy")),
+    "the census surface works: the worker's policy extension is listed",
+  );
+  for (const path of ["builtin:tool-search", "builtin:codemode"]) {
+    assert.ok(!first.extensionPaths.includes(path), `${path} is not loaded`);
+  }
+  assert.ok(!first.tools.has("tool_search") && !first.tools.has("codemode"), "neither registered");
+  for (const name of FAMILY) assert.ok(first.declared.includes(name), `${name} is declared`);
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assertAccounted(result, observed.runtime());
+});
+
+test("e2e: the worker loads no builtin:mcp — .pi/mcp.json is inert and a project registerMcpServer is reported, never connected", async (t) => {
+  const stderr = captureStderr(t);
+  const observed = observeAccounting();
+  const live = observeLive();
+  const server = { command: process.execPath, args: ["-e", "process.exit(0)"] };
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [live.at(submitCall()), idle()],
+    plant: (cwd) => {
+      writeFileSync(
+        join(cwd, ".pi", "mcp.json"),
+        `${JSON.stringify({ mcpServers: { inert_file: server } }, null, 2)}\n`,
+        "utf8",
+      );
+      plantMcpRegistrar(cwd);
+    },
+    onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
+  });
+  const first = live.first();
+  // The positive floor proves the census surface lists builtins at all.
+  assert.ok(first.extensionPaths.includes("builtin:tool-search"));
+  assert.ok(first.extensionPaths.includes("builtin:codemode"));
+  assert.ok(!first.extensionPaths.includes("builtin:mcp"), "the worker supplies no MCP factory");
+  assert.ok(
+    first.extensionPaths.some((path) => path.endsWith("worker-mcp-registrar.ts")),
+    "the registrar loaded",
+  );
+  assert.deepEqual(
+    [...first.tools.keys()].filter((name) => name.startsWith("mcp__")),
+    [],
+    "no MCP tool is registered",
+  );
+  assert.deepEqual(
+    first.declared.filter((name) => name.startsWith("mcp__")),
+    [],
+    "no MCP tool is declared",
+  );
+  const reports = stderr().filter((line) => line.startsWith("perk worker: extension error — "));
+  assert.ok(
+    reports.some((line) =>
+      /worker-mcp-registrar\.ts \(register_mcp_server\): MCP server "inert" is registered, but no loaded extension connects MCP servers/.test(
+        line,
+      ),
+    ),
+    `the registration is reported legibly, not connected: ${JSON.stringify(reports)}`,
+  );
+  assert.ok(!reports.some((line) => line.includes("[object Object]")), "never [object Object]");
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  for (const name of ["mcp.log", "mcp-auth.json"]) {
+    assert.equal(existsSync(join(result.globalAgentDir, name)), false, `no ${name} was written`);
+  }
+  assertAccounted(result, observed.runtime());
 });

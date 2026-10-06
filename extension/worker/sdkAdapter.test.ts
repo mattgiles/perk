@@ -1,10 +1,11 @@
 // Fully-offline coverage for the private SDK adapter's owned helpers: the SDK→perk event
-// translation (translateEvent), the drive-session handle's bind/rebind structural contract, and
-// the model selection ladder's pure steps (resolveWorkerModel and selectWorkerModel over stub
-// runtimes — deterministic, no ModelRuntime.create host reads), plus the native-provider
-// saved-credential case over a REAL hermetic ModelRuntime (in-memory credential store, no
-// models.json). The seam-side policy fold and the drive orchestration are covered in
-// stageExecution.test.ts.
+// translation (translateEvent), the drive-session handle's bind/rebind structural contract, the
+// worker's fixed extension inputs (the policy hook, the builtin identity) and bind-time error
+// formatting, and the model selection ladder's pure steps (resolveWorkerModel and
+// selectWorkerModel over stub runtimes — deterministic, no ModelRuntime.create host reads), plus
+// the native-provider saved-credential case over a REAL hermetic ModelRuntime (in-memory
+// credential store, no models.json). The seam-side policy fold and the drive orchestration are
+// covered in stageExecution.test.ts.
 
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -13,6 +14,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   createAgentSession,
+  createCodemodeExtension,
   DefaultResourceLoader,
   ModelRuntime,
   SessionManager,
@@ -25,10 +27,12 @@ import {
   type DriveEvent,
   type DriveSessionLike,
   type DriveTurn,
+  formatExtensionError,
   resolveWorkerModel,
   type StageEvent,
   selectWorkerModel,
   translateEvent,
+  workerBuiltinExtensions,
   workerPolicyExtension,
 } from "./sdkAdapter.ts";
 
@@ -497,6 +501,86 @@ test("workerPolicyExtension: plain scripts, other tools and non-string code pass
     "a non-string script is left to the tool's own validation",
   );
   assert.equal(onToolCall({ toolName: "codemode", input: {} }), undefined);
+});
+
+// --- the worker's builtin tool extensions --------------------------------------------------------
+
+/** A tool definition as a fake `pi` records it from `registerTool`. */
+type RegisteredDefinition = { name: string; description: string; defaultActive?: boolean };
+
+/** Run an extension factory against a recording fake `pi`; return the tools it registered. */
+function registeredBy(factory: (pi: never) => unknown): RegisteredDefinition[] {
+  const tools: RegisteredDefinition[] = [];
+  const fakePi = {
+    registerTool(definition: RegisteredDefinition) {
+      tools.push(definition);
+    },
+    appendEntry() {},
+    getAllTools: () => [],
+    getSettings: () => ({}),
+  };
+  void factory(fakePi as never);
+  return tools;
+}
+
+test("workerBuiltinExtensions: Pi's codemode then tool-search with the CLI's builtin identity, no MCP", () => {
+  const entries = workerBuiltinExtensions().map((entry) => {
+    assert.ok(typeof entry === "object", "a named inline extension");
+    return entry;
+  });
+  assert.deepEqual(
+    entries.map((e) => e.name),
+    ["codemode", "tool-search"],
+    "the CLI's order; Pi's mcp and llama.cpp builtins are not supplied",
+  );
+  for (const entry of entries) {
+    assert.equal(entry.builtin, true, `${entry.name} loads as builtin:${entry.name}`);
+    assert.equal(entry.replaceable, true, `a project registration of ${entry.name} replaces it`);
+    assert.equal(entry.hidden, undefined, "builtin identity alone (Pi hides builtins itself)");
+  }
+  const [codemode, toolSearch] = entries;
+  assert.ok(codemode && toolSearch);
+  const codemodeTools = registeredBy(codemode.factory);
+  assert.deepEqual(
+    codemodeTools.map((t) => [t.name, t.defaultActive]),
+    [["codemode", false]],
+    "registered inactive: only the resolved defaultTools activate it",
+  );
+  assert.deepEqual(
+    registeredBy(toolSearch.factory).map((t) => [t.name, t.defaultActive]),
+    [["tool_search", false]],
+  );
+  // The worker's codemode is built without the `models` namespace (WORKER_CODEMODE_MODELS): its
+  // description carries no Model API section, which a `models: true` codemode does (the control).
+  const control = registeredBy(createCodemodeExtension({ models: true }));
+  assert.ok(control[0]?.description.includes("Model API"), "control: models:true is observable");
+  assert.ok(
+    !codemodeTools[0]?.description.includes("Model API"),
+    "the worker's codemode: models off",
+  );
+});
+
+test("formatExtensionError: Pi's ExtensionError renders path, event and message; other values fall back", () => {
+  assert.equal(
+    formatExtensionError({
+      extensionPath: "/wt/.pi/extensions/registrar.ts",
+      event: "register_mcp_server",
+      error: 'MCP server "inert" is registered, but no loaded extension connects MCP servers',
+      stack: "Error: ...",
+    }),
+    "perk worker: extension error — /wt/.pi/extensions/registrar.ts (register_mcp_server): " +
+      'MCP server "inert" is registered, but no loaded extension connects MCP servers',
+  );
+  assert.equal(
+    formatExtensionError(new Error("boom")),
+    "perk worker: extension error — Error: boom",
+    "not the ExtensionError shape: String(err)",
+  );
+  assert.equal(
+    formatExtensionError({ extensionPath: "/x.ts", event: 1, error: "e" }),
+    "perk worker: extension error — [object Object]",
+  );
+  assert.equal(formatExtensionError(null), "perk worker: extension error — null");
 });
 
 // --- resolveWorkerModel — `--model` resolves with pi's CLI semantics -----------------------------

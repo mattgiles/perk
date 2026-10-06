@@ -26,6 +26,9 @@ import {
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
+  createCodemodeExtension,
+  createToolSearchExtension,
+  type ExtensionError,
   type InlineExtension,
   ModelRuntime,
   resolveCliModel,
@@ -34,7 +37,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { toolCallRefusalHook } from "../pi/v1/toolCallRefusal.ts";
 import { atomicWriteFileSync } from "../substrate/cache.ts";
-import { codemodeCallRefusal } from "./modelCallPolicy.ts";
+import { codemodeCallRefusal, WORKER_CODEMODE_MODELS } from "./modelCallPolicy.ts";
 
 // --- structural shapes (kept minimal so pure helpers stay offline-testable) ---------------------
 
@@ -232,16 +235,37 @@ export type EndRunAfterTurn = (turn: { freshTokens: number }) => boolean;
 
 // --- the drive-session handle --------------------------------------------------------------------
 
+/**
+ * One bind-time extension error as the worker's stderr line:
+ * `perk worker: extension error — <extensionPath> (<event>): <error>`. The listener receives Pi's
+ * `ExtensionError` payload (an object — `String()` alone renders it `[object Object]`); a value
+ * that is not that shape falls back to `String(err)` after the same prefix. Pure.
+ */
+export function formatExtensionError(err: unknown): string {
+  const prefix = "perk worker: extension error — ";
+  if (err !== null && typeof err === "object") {
+    const { extensionPath, event, error } = err as Partial<Record<keyof ExtensionError, unknown>>;
+    if (
+      typeof extensionPath === "string" &&
+      typeof event === "string" &&
+      typeof error === "string"
+    ) {
+      return `${prefix}${extensionPath} (${event}): ${error}`;
+    }
+  }
+  return `${prefix}${String(err)}`;
+}
+
 /** The binding the worker applies to every (re)bound session: headless (`hasUI === false`). */
 function headlessBinding(): {
   uiContext: undefined;
   mode: "json";
-  onError: (err: unknown) => void;
+  onError: (error: ExtensionError) => void;
 } {
   return {
     uiContext: undefined,
     mode: "json",
-    onError: (err: unknown) => console.error(`perk worker: extension error — ${String(err)}`),
+    onError: (error: ExtensionError) => console.error(formatExtensionError(error)),
   };
 }
 
@@ -597,6 +621,40 @@ export function workerPolicyExtension(): InlineExtension {
   };
 }
 
+/**
+ * Pi's builtin tool extensions the worker supplies, in the CLI's order and with the CLI's exact
+ * builtin identity (`replaceable: true, builtin: true`): each loads as `builtin:<name>` with
+ * `source: "builtin"` provenance (what perk's posture table and the discovery-cohort join key
+ * on), a project `extensions: ["-builtin:<name>"]` entry disables it, and a project extension
+ * registering the same tool name replaces it (Pi records a loader warning). Both register their
+ * tool inactive: configuration alone (the resolved `defaultTools`) activates them.
+ *
+ * - `codemode` is built with `models: WORKER_CODEMODE_MODELS` (the model-call policy's hard
+ *   layer); `mode`/`inlineBudget` are left to the merged `codemode.*` settings.
+ * - `tool-search` takes no options.
+ *
+ * Deliberately absent: Pi's `mcp` builtin (its config, credential store and log default to the
+ * GLOBAL agent dir), so within the worker-supplied set nothing reads `mcp.json`/`mcp-auth.json`
+ * or writes `mcp.log`, and a project `registerMcpServer` is reported at bind, never connected;
+ * and `llama.cpp` (the worker's providers come from its `ModelRuntime` and project extensions).
+ */
+export function workerBuiltinExtensions(): InlineExtension[] {
+  return [
+    {
+      name: "codemode",
+      factory: createCodemodeExtension({ models: WORKER_CODEMODE_MODELS }),
+      replaceable: true,
+      builtin: true,
+    },
+    {
+      name: "tool-search",
+      factory: createToolSearchExtension(),
+      replaceable: true,
+      builtin: true,
+    },
+  ];
+}
+
 // --- the production runtime factory ---------------------------------------------------------------
 
 /** The production factory's result: a live runtime, or a typed zero-turn selection refusal. */
@@ -675,7 +733,8 @@ export async function defaultCreateRuntime(
  * receive the worker-minted `modelRuntime`: left to itself, `createAgentSessionServices` would
  * derive a runtime from the throwaway `agentDir` — an empty auth store. The factory re-runs
  * identically on a session replacement (`/new`, `/resume`, fork). The worker's hidden policy
- * extension (`workerPolicyExtension`) is a fixed input to every services build — it rides
+ * extension (`workerPolicyExtension`, always first) and Pi's builtin discovery + codemode
+ * factories (`workerBuiltinExtensions`) are fixed inputs to every services build; they ride
  * `resourceLoaderOptions.extensionFactories`, beside (never instead of) the project extensions.
  */
 async function constructRuntime(
@@ -700,14 +759,21 @@ async function constructRuntime(
       agentDir: factoryOpts.agentDir,
       settingsManager,
       modelRuntime,
-      resourceLoaderOptions: { extensionFactories: [workerPolicyExtension()] },
+      resourceLoaderOptions: {
+        extensionFactories: [workerPolicyExtension(), ...workerBuiltinExtensions()],
+      },
     });
     // 2. Loud construction diagnostics, before selection: extension load errors and
     //    registration errors are recorded, not raised, by the SDK — they are the CAUSE behind a
     //    later `model_not_found`/`no_model` (an extension that never loaded registers nothing)
     //    or `no_extension_tools`. Fail-soft reporting only; never throws.
-    for (const entry of services.resourceLoader.getExtensions().errors) {
+    const loaded = services.resourceLoader.getExtensions();
+    for (const entry of loaded.errors) {
       console.error(`perk worker: extension load error — ${entry.path}: ${entry.error}`);
+    }
+    // Warnings include a builtin left out because a project extension registers the same name.
+    for (const entry of loaded.warnings ?? []) {
+      console.error(`perk worker: extension warning — ${entry.path}: ${entry.warning}`);
     }
     for (const entry of services.diagnostics) {
       if (entry.type !== "info") {
