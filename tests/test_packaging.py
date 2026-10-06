@@ -156,6 +156,7 @@ def test_wheel_bundles_shared(built_wheel):
         "perk/_shared/registry.yaml",
         "perk/_shared/bindings.yaml",
         "perk/_shared/providers.yaml",
+        "perk/_shared/host-floor.yaml",
         "perk/_shared/contracts.md",
         # The boundary-model JSON Schema snapshots bundle into the wheel under the
         # `perk/_shared/schemas/` subdir (representative file proves the subdir ships).
@@ -376,6 +377,7 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
     assert "shared/registry.yaml" in paths
     assert "shared/bindings.yaml" in paths
     assert "shared/providers.yaml" in paths
+    assert "shared/host-floor.yaml" in paths
     assert "shared/contracts.md" in paths
     assert "shared/README.md" in paths
     assert "shared/schemas/contracts/registry.schema.json" in paths

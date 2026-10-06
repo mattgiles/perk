@@ -53,6 +53,7 @@ NPM_TARBALL_EXPECTED: frozenset[str] = frozenset(
         "shared/registry.yaml",
         "shared/bindings.yaml",
         "shared/providers.yaml",
+        "shared/host-floor.yaml",
         "shared/contracts.md",
         "shared/README.md",
         "shared/schemas/contracts/registry.schema.json",

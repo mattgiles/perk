@@ -60,6 +60,7 @@ from perk.convergence.doctor import DoctorReportOut
 from perk.convergence.init.report import InitReportOut
 from perk.objective._models import StructuredRoadmapNode
 from perk.substrate.bindings import BindingsFile
+from perk.substrate.host_floor import HostFloorFile
 from perk.substrate.providers import ProvidersFile
 from perk.substrate.registry import RegistryFile
 
@@ -86,6 +87,7 @@ SCHEMAS: tuple[SchemaEntry, ...] = (
     SchemaEntry("contracts/registry.schema.json", RegistryFile, "validation"),
     SchemaEntry("contracts/bindings.schema.json", BindingsFile, "validation"),
     SchemaEntry("contracts/providers.schema.json", ProvidersFile, "validation"),
+    SchemaEntry("contracts/host-floor.schema.json", HostFloorFile, "validation"),
     # Machine batch inputs.
     SchemaEntry("inputs/review-post-batch.schema.json", ReviewBatchInput, "validation"),
     SchemaEntry("inputs/review-submit-batch.schema.json", ReviewSubmitBatchInput, "validation"),

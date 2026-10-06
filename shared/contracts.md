@@ -15020,3 +15020,7 @@ shared transport `extension/pi/v1/foregroundDelegation.ts`, the snapshot policy
   forbid it; the catalog-entry half still holds). Deferred: a cross-session librarian lock, a
   per-launch timeout knob, background execution of the writer child, a catalog-level publication
   revision marker.
+
+## §8.76 · Host admission (the shared floor, the Python launch preflight, the environment checks)
+
+(Section body authored below in this change.)

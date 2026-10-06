@@ -1,0 +1,16 @@
+# perk host floor — the FOURTH parsed cross-plane contract (sibling of registry.yaml,
+# bindings.yaml and providers.yaml). Authored once, bundled into both artifacts
+# (wheel -> perk/_shared/, npm tarball -> shared/), parsed directly by both planes:
+# perk/substrate/host_floor.py and extension/substrate/hostFloor.ts. No codegen.
+#
+# A FLOOR is a minimum (>=), compared with semver precedence: a prerelease of the floor
+# triple is below it; a later release is admitted. It is NOT a dev pin (package.json
+# devDependencies, exact), NOT the pi-subagents supplier pin, NOT the doctor guidance stamp,
+# and NOT the remote install pin — those stay in their own homes. Every host observation
+# (the PATH `pi` CLI, a loaded SDK) is admitted independently against the same minimum;
+# equality between observations is never required.
+schema_version: 1
+pi:
+  min_version: "1.0.0"
+node:
+  min_version: "22.19.0"
