@@ -313,7 +313,10 @@ The **repo-default model + thinking level** (`default` + `thinking`) is converge
 `defaultThinkingLevel` keys, which pi reads natively at session boot. Applies to **every** pi
 session in the repo: perk cold doors, plain `pi`, and the headless worker (local **and** remote —
 the worker resolves its model from the checkout's disk-layered settings, so this is how you
-configure the worker's model).
+configure the worker's model). The worker loads the checkout's project extensions **first**, so an
+extension-registered provider or virtual model is selectable (as the default or via its `--model`
+flag); a model whose provider has no configured credential is refused before any model turn, with
+guidance naming the provider and the credential sources (env API key / agent dir `auth.json`).
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
