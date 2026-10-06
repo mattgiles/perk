@@ -330,9 +330,11 @@ codemode has **no `models` namespace** this release (pi reports a script's model
 script end, so a running script cannot be held to the budget): classifier calls are unavailable
 and image generation is refused — a script naming `models.classify(` / `models.generateImages(`
 is refused before it runs with a typed reason (`perk worker: model call refused (classifier |
-image_generation) — …`). Not configurable. Tools a project's own extensions register (including a
-codemode they register themselves) are outside the rule: their model usage is counted at turn end
-and bounded by the turn, token and wall-clock limits.
+image_generation) — …`). Not configurable. The refusal screens **every** tool named `codemode`, including
+one a project extension registers; what a project's extensions control is their own factory
+options (their codemode's `models` setting, their tools' direct model calls). Model usage that gets
+past the refusal (an aliased `models` in a project-registered codemode, a project tool calling a
+classifier itself) is counted at turn end and bounded by the turn, token and wall-clock limits.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |

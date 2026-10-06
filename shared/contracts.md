@@ -3771,7 +3771,8 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
     a project-registered `codemode` left at Pi's `models: true` default, or any tool calling
     `ctx.modelRegistry.classify` — are the repo's own choice: Pi offers no mid-call hook for any
     tool, so their model usage is counted once at the turn boundary and bounded by the turn cap,
-    the token cap at turn end and the wall clock.
+    the token cap at turn end and the wall clock. The advisory screen still applies to every
+    `codemode` call whatever its registrar — only the factory options are the repo's.
   - **Retirement condition** — Pi surfaces a script's per-call `models.*` usage on a public
     mid-script surface (e.g. `usage` on `tool_execution_update` partials) or offers a public
     factory-level call bound. The e2e tier pins that no partial carries `usage`, so it fails

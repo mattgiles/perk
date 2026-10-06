@@ -446,9 +446,9 @@ _Avoid_: total tokens, context tokens, cost
 
 **Model-call policy**:
 The worker's fixed rule for model calls from its own codemode — no `models` namespace
-(`WORKER_CODEMODE_MODELS = false`), and a `codemode` call naming `models.classify(` or
-`models.generateImages(` refused before it runs with a typed reason; scoped to the worker's own
-surfaces.
+(`WORKER_CODEMODE_MODELS = false`, the worker's own codemode only), and any `codemode` call,
+whatever its registrar, naming `models.classify(` or `models.generateImages(` refused before it
+runs with a typed reason.
 _Avoid_: model gate, classifier opt-out
 
 **Constrained capability**:

@@ -42,9 +42,12 @@ release. Pi reports a script's model usage only when the script ends, so a runni
 be held to the budget: classifier calls are unavailable there, and image generation is refused. A
 script that still names `models.classify(` or `models.generateImages(` is refused before it runs,
 with a reason that names the call; the model can carry on with ordinary tools. This is not
-configurable. Tools your own project extensions register, including a codemode they register
-themselves, are outside this rule: their model usage is counted at the end of each turn and
-bounded by the worker's turn, token, and wall-clock limits.
+configurable. The refusal screens every tool named `codemode`, including one your own project
+extension registers. What your extensions control is their own factory options: a codemode they
+register keeps whatever `models` setting they give it, and their other tools may call models
+directly. Model usage that gets past the refusal — a script that reaches `models` under
+another name, or a project tool that calls a classifier itself — is counted at the end of each
+turn and bounded by the worker's turn, token, and wall-clock limits.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |

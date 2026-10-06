@@ -3,7 +3,7 @@
 // fast tier while every full entrypoint keeps the whole suite.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test } from "node:test";
 import {
@@ -28,6 +28,27 @@ function recipeBody(name: string): string {
   return body.join("\n");
 }
 
+/** The quoted glob arguments of a recipe's `node --test` line — read from the justfile itself. */
+function recipeGlobs(name: string): string[] {
+  const line = recipeBody(name)
+    .split("\n")
+    .find((l) => l.startsWith("node --test "));
+  assert.ok(line, `\`${name}\` runs node --test`);
+  return [...line.matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? "").sort();
+}
+
+/** The full suite as the `test-js` recipe defines it: its own globs, expanded independently. */
+function recipeSuite(): string[] {
+  const files = new Set<string>();
+  for (const pattern of recipeGlobs("test-js")) {
+    for (const file of globSync(pattern, { cwd: ROOT })) {
+      const normalized = file.split("\\").join("/");
+      if (!normalized.split("/").includes("node_modules")) files.add(normalized);
+    }
+  }
+  return [...files].sort();
+}
+
 test("the slow list is sorted, unique and names only real suite files", () => {
   assert.deepEqual([...SLOW_JS_TEST_FILES], [...new Set(SLOW_JS_TEST_FILES)].sort());
   const all = new Set(allJsTestFiles(ROOT));
@@ -36,7 +57,11 @@ test("the slow list is sorted, unique and names only real suite files", () => {
 });
 
 test("the tiers partition the full suite: disjoint, and their union is every file", () => {
-  const all = allJsTestFiles(ROOT);
+  // The oracle is the `test-js` recipe's own globs, not the selector's: a cohort dropped from
+  // `JS_TEST_GLOBS` (or added to the recipe only) fails here.
+  const all = recipeSuite();
+  assert.ok(all.length > 0, "the recipe's globs select files");
+  assert.deepEqual(allJsTestFiles(ROOT), all, "the selector's corpus is the recipe's suite");
   const fast = jsTestTierFiles("fast", ROOT);
   const slow = jsTestTierFiles("slow", ROOT);
   assert.ok(fast.length > 0 && slow.length > 0, "both tiers select files");
@@ -48,13 +73,13 @@ test("the tiers partition the full suite: disjoint, and their union is every fil
   assert.ok(fast.includes("extension/testing/jsTestTiers.test.ts"), "this guard runs in the gate");
 });
 
-test("the full recipes run every glob; the tier recipes run the tier runner", () => {
+test("the selector's globs are exactly the full recipes' globs, both ways", () => {
   for (const recipe of ["test-js", "test"]) {
-    const body = recipeBody(recipe);
-    for (const glob of JS_TEST_GLOBS) {
-      assert.ok(body.includes(`"${glob}"`), `\`${recipe}\` runs the full suite glob ${glob}`);
-    }
+    assert.deepEqual(recipeGlobs(recipe), [...JS_TEST_GLOBS].sort(), `\`${recipe}\`'s globs`);
   }
+});
+
+test("the tier recipes run the tier runner", () => {
   assert.equal(recipeBody("test-js-fast"), "node extension/testing/runJsTestTier.ts fast {{args}}");
   assert.equal(recipeBody("test-js-slow"), "node extension/testing/runJsTestTier.ts slow {{args}}");
 });

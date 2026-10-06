@@ -843,7 +843,10 @@ const assistantUsageSum = (runtime: DriveRuntimeLike): number => usageSum(runtim
 /** A raw `tool_execution_update` slice (the codemode progress partials). */
 interface ToolUpdate {
   toolName: string;
-  partialResult?: { details?: { calls?: { status: string }[] } } & Record<string, unknown>;
+  partialResult?: { details?: { calls?: { name: string; status: string }[] } } & Record<
+    string,
+    unknown
+  >;
 }
 
 /** An `onRuntime` that keeps the production runtime and records codemode progress partials. */
@@ -851,9 +854,19 @@ function observeAccounting(): {
   runtime: () => DriveRuntimeLike;
   updates: ToolUpdate[];
   onRuntime: (runtime: DriveRuntimeLike) => void;
+  /**
+   * Resolves once a codemode progress partial lists at least `n` `models.classify` rows. Codemode
+   * publishes a call's row BEFORE the call waits for a limiter slot, so `n` rows means `n` calls
+   * entered the limiter. Never rejects — race it against the drive.
+   */
+  classifyRows: (n: number) => Promise<void>;
 } {
   let observed: DriveRuntimeLike | undefined;
   const updates: ToolUpdate[] = [];
+  const waiters: { n: number; resolve: () => void }[] = [];
+  const rowsIn = (update: ToolUpdate): number =>
+    (update.partialResult?.details?.calls ?? []).filter((c) => c.name === "models.classify").length;
+  const maxRows = (): number => Math.max(0, ...updates.map(rowsIn));
   return {
     runtime: () => {
       assert.ok(observed, "the production runtime was observed");
@@ -864,10 +877,38 @@ function observeAccounting(): {
       observed = runtime;
       censusSession(runtime).subscribe((event) => {
         const e = event as { type?: string } & ToolUpdate;
-        if (e.type === "tool_execution_update" && e.toolName === "codemode") updates.push(e);
+        if (e.type !== "tool_execution_update" || e.toolName !== "codemode") return;
+        updates.push(e);
+        const rows = rowsIn(e);
+        for (const waiter of waiters.filter((w) => rows >= w.n)) {
+          waiters.splice(waiters.indexOf(waiter), 1);
+          waiter.resolve();
+        }
       });
     },
+    classifyRows: (n) =>
+      maxRows() >= n ? Promise.resolve() : new Promise((resolve) => waiters.push({ n, resolve })),
   };
+}
+
+/** The `details.calls` rows of the branch's last codemode tool result (the script's final record). */
+function codemodeResultCalls(runtime: DriveRuntimeLike): { name: string; status: string }[] {
+  const results = runtime.session.sessionManager.getBranch().flatMap((entry) => {
+    const e = entry as {
+      type?: string;
+      message?: {
+        role?: string;
+        toolName?: string;
+        details?: { calls?: { name: string; status: string }[] };
+      };
+    };
+    return e.type === "message" &&
+      e.message?.role === "toolResult" &&
+      e.message.toolName === "codemode"
+      ? [e.message.details?.calls ?? []]
+      : [];
+  });
+  return results.at(-1) ?? [];
 }
 
 /** The shared well-formedness + accounting identity every scenario here asserts. */
@@ -1154,21 +1195,32 @@ test("e2e: queued concurrency after an abort — the queued calls never reach th
     onModelRuntime: (runtime) => runtime.registerNativeProvider(classifier.provider),
     onRuntime: observed.onRuntime,
   });
-  // Four slots full, four calls queued in codemode's limiter.
-  const { reached, result } = await abortOnBarrier(drive, classifier.started(4), controller);
+  // Abort only once all eight calls entered codemode's limiter (eight progress rows) AND its four
+  // slots are full at the provider — so exactly four calls are queued when the abort lands.
+  const { reached, result } = await abortOnBarrier(
+    drive,
+    Promise.all([classifier.started(4), observed.classifyRows(8)]).then(() => undefined),
+    controller,
+  );
   const runtime = observed.runtime();
-  assert.equal(reached, true);
+  assert.equal(reached, true, "eight calls entered the limiter and four reached the provider");
   assert.equal(result.outcome.status, "aborted");
   assert.equal(result.outcome.terminal_signal, "external_abort");
   assert.deepEqual(
-    classifier.calls.map((c) => [c.stopReason, c.abortedAtStart]),
+    classifier.calls.map((c) => [c.seq, c.stopReason, c.abortedAtStart]),
     [
-      ["aborted", false],
-      ["aborted", false],
-      ["aborted", false],
-      ["aborted", false],
+      [1, "aborted", false],
+      [2, "aborted", false],
+      [3, "aborted", false],
+      [4, "aborted", false],
     ],
-    "the four queued calls were refused before reaching the provider",
+    "only the four in-flight calls ever reached the provider; the four queued calls were refused",
+  );
+  const rows = codemodeResultCalls(runtime).filter((c) => c.name === "models.classify");
+  assert.equal(rows.length, 8, "the script's record carries all eight calls");
+  assert.ok(
+    rows.every((c) => c.status !== "ok"),
+    "no call completed",
   );
   assert.equal(toolResultUsageSum(runtime), 0);
   assertAccounted(result, runtime);

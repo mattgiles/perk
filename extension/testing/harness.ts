@@ -25,6 +25,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { TestContext } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   fauxAssistantMessage,
@@ -645,23 +646,13 @@ export interface ClassifyCall {
   usage?: { input: number; output: number };
 }
 
-/** Resolve after `ms`, or as soon as `signal` aborts (timer and listener both released). */
-function waitOrAbort(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal?.aborted) {
-      resolve();
-      return;
-    }
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
+/** Resolve after `ms`, or as soon as `signal` aborts (an abort resolves; it never rejects). */
+async function waitOrAbort(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  try {
+    await delay(ms, undefined, { signal });
+  } catch (error) {
+    if ((error as { name?: unknown } | null)?.name !== "AbortError") throw error;
+  }
 }
 
 /**
