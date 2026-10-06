@@ -14,7 +14,7 @@
 // surface; the caller-side guarantee is the import-edge ban plus nominal minting, nothing
 // stronger.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // pi-ai's `ModelThinkingLevel` (`"off" | minimal | … | xhigh`) is the union `resolveCliModel`
@@ -33,6 +33,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { toolCallRefusalHook } from "../pi/v1/toolCallRefusal.ts";
+import { atomicWriteFileSync } from "../substrate/cache.ts";
 import { codemodeCallRefusal } from "./modelCallPolicy.ts";
 
 // --- structural shapes (kept minimal so pure helpers stay offline-testable) ---------------------
@@ -647,10 +648,9 @@ export async function defaultCreateRuntime(
   };
   try {
     // The worker's one global setting (see above): Pi's cache warmer never starts.
-    writeFileSync(
+    atomicWriteFileSync(
       join(agentDir, "settings.json"),
       `${JSON.stringify({ cacheWarming: "off" })}\n`,
-      "utf8",
     );
     const modelRuntime = request.modelRuntime ?? (await ModelRuntime.create());
     const runtime = await constructRuntime(
