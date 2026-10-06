@@ -7,6 +7,8 @@ import yaml
 from perk import __version__
 from perk.run import workflow_artifacts as wa
 from perk.run.runner import GITHUB_ACTIONS_WORKFLOW
+from perk.substrate.host_floor import load_host_floor, required_pi_version
+from perk.substrate.semver import parse_semver, satisfies_floor
 
 
 def test_workflow_path_matches_the_locked_dispatch_filename():
@@ -132,6 +134,28 @@ def test_composite_action_installs_the_skills_cli():
         assert "continue-on-error" not in body
 
 
+def test_composite_action_pins_pi_and_node_for_both_repo_kinds():
+    for self_repo in (True, False):
+        doc = yaml.safe_load(wa.remote_setup_action(self_repo=self_repo))
+        steps = {step["name"]: step for step in doc["runs"]["steps"]}
+        assert steps["Install pi"]["run"] == "npm install -g @earendil-works/pi-coding-agent@1.0.0"
+        node = steps["Set up Node 22.19.0"]
+        assert node["with"]["node-version"] == "22.19.0"  # exact: CI exercises the floor
+
+
+def test_composite_action_node_version_renders_from_the_shared_floor():
+    floor = load_host_floor().node_min_version
+    body = wa.remote_setup_action(self_repo=False)
+    assert f'node-version: "{floor}"' in body
+
+
+def test_remote_pi_version_is_a_release_at_or_above_the_floor():
+    pinned = parse_semver(wa.REMOTE_PI_VERSION)
+    assert pinned is not None and pinned.prerelease == ()
+    assert str(pinned) == wa.REMOTE_PI_VERSION  # exact release text, no `v`/build metadata
+    assert satisfies_floor(pinned, required_pi_version(load_host_floor()))
+
+
 def test_composite_action_installs_cloc_after_pi():
     # Submit counts the PR's change stats with cloc; both repo kinds install the npm package
     # (it wraps cloc's Perl script) right after pi.
@@ -157,15 +181,22 @@ def test_drive_step_configures_git_auth_before_run_worker():
 
 
 def test_composite_action_worker_deps_is_repo_kind_aware():
-    # self uses `npm ci`; consumer installs the pinned `@mgiles/perk` into `.pi/npm` (no deferral)
-    # PLUS the unpinned pi SDK — `@mgiles/perk` has zero runtime deps and `--legacy-peer-deps`
-    # skips peers, so the SDK spec is what lands the worker's imports (B-pre-c).
+    # self uses `npm ci` (the committed pins); consumer installs the pinned `@mgiles/perk` into
+    # `.pi/npm` PLUS the pi SDK — `@mgiles/perk` has zero runtime deps and `--legacy-peer-deps`
+    # skips peers, so the SDK spec is what lands the worker's imports (B-pre-c). The consumer
+    # worker SDK is the remote wave host, so it is pinned to the exact remote install pin.
     assert "npm ci" in wa.remote_setup_action(self_repo=True)
     consumer = wa.remote_setup_action(self_repo=False)
     assert "npm ci" not in consumer
-    assert f"npm install @mgiles/perk@{__version__} @earendil-works/pi-coding-agent" in consumer
-    # The SDK spec stays unpinned (evergreen, like the composite's global pi install).
-    assert "@earendil-works/pi-coding-agent@" not in consumer
+    deps = next(
+        s
+        for s in yaml.safe_load(consumer)["runs"]["steps"]
+        if s["name"] == "Install Node worker deps"
+    )
+    assert deps["run"] == (
+        f"npm install @mgiles/perk@{__version__} @earendil-works/pi-coding-agent@1.0.0"
+        " --prefix .pi/npm --legacy-peer-deps"
+    )
     assert "--prefix .pi/npm" in consumer
     assert "--legacy-peer-deps" in consumer
     assert "::error::" not in consumer

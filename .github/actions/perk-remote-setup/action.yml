@@ -14,10 +14,10 @@ runs:
       with:
         python-version: "3.13"
 
-    - name: Set up Node 22
+    - name: Set up Node 22.19.0
       uses: actions/setup-node@v4
       with:
-        node-version: "22"
+        node-version: "22.19.0"
 
     - name: Install perk
       shell: bash
@@ -25,7 +25,7 @@ runs:
 
     - name: Install pi
       shell: bash
-      run: npm install -g @earendil-works/pi-coding-agent
+      run: npm install -g @earendil-works/pi-coding-agent@1.0.0
 
     # The npm package wraps cloc's Perl script (the Ubuntu runner ships Perl). Non-fatal at
     # submit time — a missing cloc degrades the PR's change stats to a note — but installed so
