@@ -1,5 +1,5 @@
 // A deliberately minimal YAML-subset reader for perk's OWN bundled contract files only
-// (`shared/{registry,bindings,providers}.yaml`) — this is NOT a general-purpose YAML parser.
+// (`shared/{registry,bindings,providers,host-floor}.yaml`) — this is NOT a general-purpose YAML parser.
 //
 // Why this exists: pi loads the perk extension from a git-package clone whose imports resolve
 // through a FIXED host-alias set (`@earendil-works/pi-*`, `typebox`) plus native `node_modules`
@@ -10,7 +10,7 @@
 // reader replaces the lone non-host runtime import (`yaml`) with Node builtins only — NO bare npm
 // imports — so the extension loads from a bare git checkout regardless of whether any install ran.
 //
-// Scope (the bounded feature surface across the three shipped files):
+// Scope (the bounded feature surface across the four shipped files):
 //   - block mappings (indentation-nested) and block sequences (`- item`, incl. `- id: x`
 //     map-as-sequence-item),
 //   - flow mappings `{ k: v, ... }` and flow sequences `[a, b]` / `[]`,
@@ -23,9 +23,10 @@
 // floats, and multi-document `---`/`...` streams. An unsupported future edit fails CI loudly.
 //
 // Fidelity to the reference `yaml` library is pinned by `miniYaml.test.ts`, which deep-equals this
-// reader's output against `yaml.parse` for all three bundled files (the `yaml` lib is a dev-only
+// reader's output against `yaml.parse` for all four bundled files (the `yaml` lib is a dev-only
 // dependency that powers that test and never ships in the consumer git clone). This reader is the
-// twin of the Python plane's `pyyaml`-based readers in `perk/substrate/{registry,bindings,providers}.py`.
+// twin of the Python plane's `pyyaml`-based readers in
+// `perk/substrate/{registry,bindings,providers,host_floor}.py`.
 
 interface Line {
   indent: number;

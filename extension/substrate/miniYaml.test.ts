@@ -2,7 +2,7 @@
 //
 // The reader replaces the lone non-host runtime import (`yaml`) so the extension is self-contained
 // in a consumer git clone. `yaml` survives as a DEV-only dependency that powers the fidelity half
-// of this test: for each of the three bundled `shared/*.yaml` contracts, the vendored reader must
+// of this test: for each of the four bundled `shared/*.yaml` contracts, the vendored reader must
 // produce a value graph deep-equal to the reference parser's. The unit half pins the reader's
 // scalar typing, flow collections, comment handling, and loud failure on unsupported constructs.
 
@@ -14,8 +14,8 @@ import { parse as referenceParse } from "yaml";
 import { parse as miniParse } from "./miniYaml.ts";
 import { sharedDir } from "./resources.ts";
 
-test("fidelity: parses all three bundled shared/*.yaml files identically to the reference parser", () => {
-  for (const file of ["registry.yaml", "bindings.yaml", "providers.yaml"]) {
+test("fidelity: parses all four bundled shared/*.yaml files identically to the reference parser", () => {
+  for (const file of ["registry.yaml", "bindings.yaml", "providers.yaml", "host-floor.yaml"]) {
     const text = readFileSync(join(sharedDir(), file), "utf8");
     assert.deepStrictEqual(
       miniParse(text),
