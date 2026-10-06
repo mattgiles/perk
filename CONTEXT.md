@@ -423,6 +423,20 @@ to every delegation that omits the field and read by both engines once at activa
 observes and refuses, never converges it.
 _Avoid_: worktree allocation default, perk-managed worktree setting
 
+### Headless worker
+
+**Worker model request**:
+The worker's unresolved model input — the raw `--model` pattern (Pi CLI semantics, including a
+`:thinking` suffix) plus, for tests, the model runtime; resolved only after the worktree's
+extensions have registered their providers.
+_Avoid_: model selection (the resolved pick), model token
+
+**Worker selection ladder**:
+The fixed order inside the worker's runtime factory — extension registration → explicit
+resolution → admission (`no_model` / `model_not_found` / `model_auth`) → session construction
+with Pi's default chain → bind.
+_Avoid_: auth preflight, model preflight
+
 ### TUI surfaces
 
 **Display sink**:

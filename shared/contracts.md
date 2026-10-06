@@ -3706,18 +3706,23 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
 | `run_id` | ULID, present as `PERK_RUN_ID` in env | minted by positioning; the worker **inherits** it and never re-mints |
 | handoff / plan-ref / plan-body | files under `<worktree>/.perk/workflow/` | materialized by positioning; the worker does not re-write them |
 | `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch/prompts.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/stageExecution.test.ts` + `tests/test_worker_prompt_parity.py`); the prompt carries **no skill-binding suffix** — the worker's bindings arrive via §8.9 Mechanism A (the extension's `before_agent_start` injection, which fires because the handoff records the stage and neither the prompt nor Pi's live context projection carries `BINDING_HEADER`); the injected content is byte-identical to the cold door's prompt suffix (`tests/test_binding_render_parity.py`; the named mechanism difference is §8.38 row 2) |
-| `model` | optional `WorkerModelSelection` — an **opaque nominal token** (`#private` fields; structurally unforgeable) minted only by `resolveWorkerModel` in the **private SDK adapter** (`worker/sdkAdapter.ts`); it carries the `ModelRuntime` (default-created when the flag is absent) plus the optional explicit model and parsed thinking level | explicit worker input (`stageExecution.ts::StageRunOptions`); **no available model ⇒ a fail-soft `failed`/`no_model` outcome, never a throw** (same semantics as before). The workerMain shim resolves an explicit `--model` flag through pi's `resolveCliModel` (CLI parity: fuzzy matching, `provider/pattern`, a `:thinking` suffix — `resolveWorkerModel`, re-exported through the seam); a parsed thinking level rides the selection, applied at session creation (absent ⇒ the settings default) |
+| `model` | optional `WorkerModelRequest` — an **opaque nominal token** (a `#private` field; structurally unforgeable) whose class lives in the **private SDK adapter** (`worker/sdkAdapter.ts`) and is re-exported by the seam as a value; it carries the **raw, unresolved** `--model` pattern (absent or `""` ⇒ no explicit model) and, for tests only, an injected `ModelRuntime` (absent ⇒ the adapter mints `ModelRuntime.create()` inside the outcome boundary) | explicit worker input (`stageExecution.ts::StageRunOptions`; absent ⇒ an empty request). `workerMain` passes `--model` through verbatim — it no longer resolves it nor exits 2 on an unknown model. Resolution happens **after extension registration** (see *The model-selection ladder*) through pi's `resolveCliModel` (CLI parity: fuzzy matching, `provider/pattern`, a `:thinking` suffix — the parsed thinking level is applied at session creation, absent ⇒ the settings default); a refusal (`no_model` / `model_not_found` / `model_auth`) is a **fail-soft zero-turn `failed`/`model_error` outcome, never a throw** |
 | `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort |
-| `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog — sampled at drive entry and again immediately before the driving `prompt()` (an aborted signal at either point yields `aborted`/`external_abort` with zero turns, no `prompt()` and no `session.abort()`; nothing is constructed on the entry sample), and subscribed only for the drive itself (registered synchronously after the pre-prompt sample — `AbortSignal` does not replay an earlier abort to a late listener). A terminal reached inside the initialization window (`runtime_init`, `no_model`, `no_extension_tools`) is reported as itself |
+| `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog — sampled at drive entry and again immediately before the driving `prompt()` (an aborted signal at either point yields `aborted`/`external_abort` with zero turns, no `prompt()` and no `session.abort()`; nothing is constructed on the entry sample), and subscribed only for the drive itself (registered synchronously after the pre-prompt sample — `AbortSignal` does not replay an earlier abort to a late listener). A terminal reached inside the initialization window (`runtime_init`, `no_model`, `model_not_found`, `model_auth`, `no_extension_tools`) is reported as itself |
 
 ### Determinism invariants (fixed by the worker; not caller-tunable)
 
 - **`cwd = worktree`, `agentDir = throwaway temp dir`**: the project tier resolves the managed
   `.pi/settings.json` `packages` list — perk's `@mgiles/perk` **plus** the
   borrowed packages (`npm:pi-subagents` etc.), the same package set as a warm session — alongside
-  the managed `AGENTS.md`/`APPEND_SYSTEM.md`, while the user-global tier
-  (extensions/settings/skills/models/auth) stays locked out via the throwaway `agentDir` — the
-  isolation invariant; loader/install mechanics live in `extension/worker/sdkAdapter.ts`. Missing
+  the managed `AGENTS.md`/`APPEND_SYSTEM.md` and any project `.pi/extensions/` (the project tier
+  is trusted for the prepared worktree), while the user-global **resource** tier
+  (extensions/settings/skills) stays locked out via the throwaway `agentDir` — the isolation
+  invariant; loader/install mechanics live in `extension/worker/sdkAdapter.ts`. Auth and
+  `models.json` are **not** throwaway-scoped: they come from the worker-minted `ModelRuntime`
+  (`ModelRuntime.create()` — the global agent dir's `auth.json`/`models.json`,
+  `PI_CODING_AGENT_DIR`-aware, plus provider env keys; offline), handed explicitly to the
+  services factory. Missing
   `npm:` packages **auto-install** into the
   project-scope root `.pi/npm` at session construction (an install failure throws → a loud
   `failed`/`runtime_init` outcome; installs are skipped under `PI_OFFLINE`) — §8.14's composite
@@ -3742,6 +3747,32 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
   happy path (the prompt instructs `/submit`, never `/implement`; `lifecycleGates.newSession` is
   `hasUI`-guarded; objective compaction is inert) — so an observed replacement is a **loud
   structured-log error** before the listener is kept alive.
+
+**The model-selection ladder.** Model selection runs **inside** the SDK runtime factory, in pi's
+own CLI order, and re-runs identically on any session replacement:
+
+1. **Services** — `createAgentSessionServices({ cwd, agentDir, settingsManager, modelRuntime })`
+   loads the project extensions and applies their queued `registerProvider` (config and native)
+   and `registerVirtualModel` registrations onto the worker-minted runtime, then refreshes its
+   availability. Services **never** derive a runtime from the throwaway `agentDir` (that would be
+   an empty auth store). Extension load errors and every non-`info` registration diagnostic are
+   printed to stderr here — the cause behind a later refusal.
+2. **Explicit resolution** — a non-empty `--model` pattern resolves through `resolveCliModel`
+   over the post-registration runtime (so an extension-registered provider or virtual model is
+   selectable); a miss ⇒ `error.type "model_not_found"`.
+3. **Admission** — with no pattern, `no_model` iff the availability snapshot is empty (message
+   names the extension-registered provider ids); with an explicit model, `model_auth` unless its
+   provider passes pi's prompt-time predicate (`hasConfiguredAuth(provider) ||
+   checkAuth(provider) !== undefined`) — the worker refuses exactly what pi would refuse at the
+   first request, only earlier, typed and zero-turn, with guidance naming the provider, its env
+   key / `auth.json` credential sources and `--model`. A virtual model is admitted on its own
+   provider's configured status; its physical target's credentials stay pi's request-time
+   routing concern.
+4. **Construction** — `createAgentSessionFromServices` with the explicit model, or `model:
+   undefined` on the deferred path so pi's own `findInitialModel` chain picks (saved
+   `defaultProvider`/`defaultModel` when its provider has configured auth → curated per-provider
+   defaults → first available). Perk never pre-picks a catalog entry.
+5. **Bind** — the explicit `bindExtensions` (above).
 
 ### Terminal-signal definition
 
@@ -3783,12 +3814,14 @@ well-formed `run_started`→`run_finished` pair. The check is presence-gated on 
 `extensionRunner` and deliberately does **not** require the `subagent` tool for `address` (the live
 subagent-under-worker smoke stays the carried risk below).
 
-**The initialization boundary.** Auth/model resolution (`resolveAuth` → `ModelRuntime.create()`
-when no selection is supplied), runtime construction, and `bindExtensions` all run **inside** the
-outcome boundary: a rejection before the session is bound is a **zero-turn** `failed` outcome under
-the existing `model_error` terminal signal with `error.type "runtime_init"` (the
-`no_model`/`no_extension_tools` precedent — no new `TerminalSignal` vocabulary); a rejection after
-bind keeps `error.type "drive_error"`. `runStage` never rejects.
+**The initialization boundary.** `ModelRuntime.create()` (when no runtime is injected), services,
+model selection + admission, runtime construction, and `bindExtensions` all run **inside** the
+outcome boundary. The ladder's typed refusals — `no_model`, `model_not_found`, `model_auth` — are
+**zero-turn** `failed` outcomes under the existing `model_error` terminal signal (no new
+`TerminalSignal` vocabulary; the throwaway `agentDir` is removed); any other rejection before the
+session is bound is a zero-turn `failed`/`model_error` outcome with `error.type "runtime_init"`;
+a rejection after bind keeps `error.type "drive_error"`. `runStage` never rejects, and an unknown
+`--model` is a `RunOutcome` (worker exit 1), never a pre-`run_started` usage exit.
 
 ### Outcome shape (frozen; **additive-stable** — fields may be added, existing fields keep meaning)
 
@@ -3866,9 +3899,9 @@ A small, JSON-serializable, **additive-stable** discriminated union. Every event
   **capped** synthesis (`capForModel(message, EVENT_SUMMARY_CAP=2KiB).shown`) — never the raw result.
 - **`run_finished`** — emitted **exactly once** at every terminal exit (natural-idle/verdict,
   budget/abort, the entry and pre-prompt abort samples, the `runtime_init` initialization failure,
-  drive-error catch, AND the `no_model` early return), carrying the full frozen
-  `RunOutcome` (terminal status + `error.summary` = the terminal failure summary). The stream's
-  "terminal status" event. A zero-turn run still emits a `run_started` + `run_finished` pair.
+  drive-error catch, AND the model-selection refusals — `no_model` / `model_not_found` /
+  `model_auth`), carrying the full frozen `RunOutcome` (terminal status + `error.summary` = the
+  terminal failure summary). The stream's "terminal status" event. A zero-turn run still emits a `run_started` + `run_finished` pair.
 
 ### Dual delivery (the injectable sink seam)
 

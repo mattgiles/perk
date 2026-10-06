@@ -22,9 +22,17 @@
 // handle, whose listener receives the perk-owned `StageEvent` union (the adapter translates raw
 // SDK events at the boundary; ALL policy folding — budget counters, terminal capture, outcome —
 // happens here on perk shapes). The one opaque model input (`StageRunOptions.model`) is the
-// adapter-minted nominal `WorkerModelSelection` (see the adapter header for the exact — narrow —
-// opacity guarantee: an import-edge ban plus nominal minting, nothing stronger). `workerMain.ts`
-// imports ONLY this seam (guard Rule F) and carries zero SDK imports.
+// nominal `WorkerModelRequest` (see the adapter header for the exact — narrow — opacity
+// guarantee: an import-edge ban plus nominal minting, nothing stronger) — an UNRESOLVED request
+// (the raw `--model` pattern) that the adapter resolves only after the worktree's extensions
+// registered their providers. `workerMain.ts` imports ONLY this seam (guard Rule F) and carries
+// zero SDK imports.
+//
+// The initialization boundary: model-runtime creation → services (extension load + provider
+// registration) → selection → admission → session construction → bind all run inside the
+// outcome boundary. A selection refusal (`no_model` / `model_not_found` / `model_auth`) is a
+// typed zero-turn `failed`/`model_error` outcome; any other failure before bind is
+// `runtime_init`.
 
 import { appendFileSync } from "node:fs";
 import { env } from "node:process";
@@ -38,22 +46,16 @@ import {
   type DriveRuntimeLike,
   type DriveSessionHandle,
   defaultCreateRuntime,
-  resolveAuth,
   type StageEvent,
-  type WorkerModelSelection,
+  WorkerModelRequest,
 } from "./sdkAdapter.ts";
 
 // Re-exports so `workerMain.ts` imports ONLY the seam (guard Rule F), plus the transitive type
 // closure of `runStage`'s signature: the `StageRunDeps.createRuntime` fake-construction types and
-// the type-only `StageRunOptions.model` token (`WorkerModelSelection` minting stays
-// adapter-owned — tests that mint import the class from `sdkAdapter.ts`).
-export type {
-  DriveEvent,
-  DriveRuntimeLike,
-  DriveSessionLike,
-  WorkerModelSelection,
-} from "./sdkAdapter.ts";
-export { resolveWorkerModel } from "./sdkAdapter.ts";
+// the `StageRunOptions.model` request class (a VALUE re-export so `workerMain.ts` mints the
+// request from the raw `--model` text with zero SDK imports).
+export type { DriveEvent, DriveRuntimeLike, DriveSessionLike } from "./sdkAdapter.ts";
+export { WorkerModelRequest } from "./sdkAdapter.ts";
 
 // --- contract types (additive-stable; §B of docs/design/headless-worker.md) ---------------------
 
@@ -135,14 +137,15 @@ export interface StageRunOptions {
   /** The seeded first prompt (see `initialPromptFor`). */
   initialPrompt: string;
   /**
-   * The one opaque model input: an adapter-minted nominal `WorkerModelSelection` (from
-   * `resolveWorkerModel`). Absent ⇒ the adapter builds a default-runtime selection and the SDK's
-   * own default resolution picks the model at session creation (settings `defaultModel` → pi's
-   * per-provider defaults → first available — Gap 5). Never pre-pinned here: `getAvailable()`
-   * sorts alphabetically, so `[0]` is the *oldest* model of the first provider (a since-removed
-   * `claude-3-5-haiku` date-pin 404'd a whole remote drive).
+   * The one opaque model input: the raw `--model` request, resolved inside the runtime factory
+   * only AFTER the worktree's extensions registered their providers/virtual models. Absent (or
+   * no pattern) ⇒ the SDK's own default chain picks the model at session creation (settings
+   * `defaultProvider`/`defaultModel` with configured auth → pi's per-provider defaults → first
+   * available). Never pre-pinned here: `getAvailable()` sorts alphabetically, so `[0]` is the
+   * *oldest* model of the first provider (a since-removed `claude-3-5-haiku` date-pin 404'd a
+   * whole remote drive). The request's runtime field is the test-injection seam.
    */
-  model?: WorkerModelSelection;
+  model?: WorkerModelRequest;
   budget: DriveBudget;
   /** External cancellation; OR'd with the budget watchdog. */
   signal?: AbortSignal;
@@ -484,10 +487,12 @@ function initialPromptFor(stage: DriveStage, planRef: PlanRef | null): string | 
  * mechanics go through the adapter's drive-session handle; policy stays here.
  *
  * The `run_started` + `run_finished` pair is emitted at entry / at every exit, so each path —
- * pre-aborted, `runtime_init`, `no_model`, the preflight, a pre-prompt abort, the drive — is a
- * well-formed zero-or-more-turn stream. Auth/model resolution, runtime construction and the bind
- * all run inside the outcome boundary: the catch arm keys its `error.type` on the bind boundary
- * (`runtime_init` before the session is bound, `drive_error` after). The external `signal` is
+ * pre-aborted, `runtime_init`, a selection refusal (`no_model` / `model_not_found` /
+ * `model_auth`), the preflight, a pre-prompt abort, the drive — is a well-formed
+ * zero-or-more-turn stream. Model-runtime creation, extension registration, model selection +
+ * admission, runtime construction and the bind all run inside the outcome boundary: a selection
+ * refusal comes back from the adapter as a typed value, and the catch arm keys its `error.type`
+ * on the bind boundary (`runtime_init` before the session is bound, `drive_error` after). The external `signal` is
  * SAMPLED at entry and again immediately before `prompt()` (an idle session has nothing to abort,
  * so an aborted sample returns `aborted` directly) and SUBSCRIBED only for the drive — the
  * listener is registered synchronously after the pre-prompt sample because `AbortSignal` never
@@ -563,20 +568,24 @@ export async function runStage(
     let runtime: DriveRuntimeLike;
     if (deps.createRuntime) runtime = await deps.createRuntime(opts);
     else {
-      // Auth/model resolution is a production-path concern only: an injected runtime factory
-      // (tests) never touches the default `ModelRuntime.create` (no host file reads).
-      const resolved = await resolveAuth(opts.model);
-      if (resolved === null) {
+      // Model selection is a production-path concern only: an injected runtime factory (tests)
+      // never touches the default `ModelRuntime.create` (no host file reads). The adapter runs
+      // the whole ladder (services → selection → admission → construction) and returns a
+      // refusal as a typed value — never a session that cannot drive.
+      const built = await defaultCreateRuntime(
+        opts.worktree,
+        opts.model ?? new WorkerModelRequest({}),
+      );
+      if (!built.ok) {
         return finish({
           status: "failed",
           terminal_signal: "model_error",
           pr: null,
-          errorType: "no_model",
-          errorMessage:
-            "no model available — set an API key (e.g. ANTHROPIC_API_KEY) or pass a model.",
+          errorType: built.refusal.type,
+          errorMessage: built.refusal.message,
         });
       }
-      runtime = await defaultCreateRuntime(opts.worktree, resolved);
+      runtime = built.runtime;
     }
     handle = createDriveSession(runtime, listener, endRunAfterTurn);
     await handle.bind();

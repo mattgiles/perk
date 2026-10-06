@@ -406,7 +406,8 @@ export function fakePerk(
  * extension. `packages` overrides the list (e.g. `[]` scaffolds a worktree whose session registers
  * zero perk tools — the `no_extension_tools` preflight scenario). Plants the handoff + plan-ref +
  * PERK_RUN_ID claim path, and `git init`s so the resource loader's ancestor `.agents/skills` walk
- * stops here (never leaking the dev machine's ancestor dirs).
+ * stops here (never leaking the dev machine's ancestor dirs). `extraSettings` is shallow-merged
+ * into the written settings (e.g. `defaultProvider`/`defaultModel`).
  */
 export function scaffoldWorkerWorktree(opts: {
   runId: string;
@@ -416,6 +417,8 @@ export function scaffoldWorkerWorktree(opts: {
   packages?: string[];
   /** Settings `defaultTools` (Pi's startup active-set preference); omitted when unset. */
   defaultTools?: string[];
+  /** Extra project settings, shallow-merged over the defaults above. */
+  extraSettings?: Record<string, unknown>;
 }): string {
   const cwd = mkdtempSync(join(tmpdir(), "perk-worker-wt-"));
   // extension/testing/harness.ts -> repo root is two levels up.
@@ -424,6 +427,7 @@ export function scaffoldWorkerWorktree(opts: {
   const settings = {
     packages: opts.packages ?? [repoRoot],
     ...(opts.defaultTools !== undefined ? { defaultTools: opts.defaultTools } : {}),
+    ...opts.extraSettings,
   };
   writeFileSync(
     join(cwd, ".pi", "settings.json"),
@@ -544,6 +548,110 @@ export async function loadSdkPiAi(): Promise<typeof import("@earendil-works/pi-a
   return existsSync(nested)
     ? ((await import(pathToFileURL(nested).href)) as typeof import("@earendil-works/pi-ai"))
     : await import("@earendil-works/pi-ai");
+}
+
+/**
+ * Plant a project-tier provider extension at `<cwd>/.pi/extensions/worker-providers.ts` (returns
+ * the path) so a worker drive exercises REAL extension-backed registration through the production
+ * order: Pi's loader discovers the file from disk, the extension queues `registerProvider(provider)`
+ * (native) and optionally `registerVirtualModel`, and `createAgentSessionServices` applies them
+ * onto the worker's `ModelRuntime`. The loader's alias map resolves the extension's
+ * `@earendil-works/pi-ai` import to the pi-ai copy pi-coding-agent itself uses, so the provider
+ * object shares the runtime's module instance.
+ *
+ * The native provider wraps a faux core (every model `reasoning: true`, so a `:thinking` suffix
+ * survives clamping) scripted with the implement-HAPPY replies (`submit`, then an idle stop).
+ * Its auth is CREDENTIAL-GATED: configured only when the runtime's credential store holds an
+ * `api_key` credential for `provider` — that gate is what makes "saved credentials" vs
+ * "unavailable auth" observable (Pi's own faux provider is always configured). `virtual` adds a
+ * virtual model whose router always targets the first physical model, so a public identity
+ * that differs from the physical one is observable on the recorded assistant message.
+ */
+export function plantWorkerProviderExtension(
+  cwd: string,
+  opts: {
+    provider: string;
+    models: [string, ...string[]];
+    virtual?: { provider: string; id: string };
+  },
+): string {
+  const dir = join(cwd, ".pi", "extensions");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "worker-providers.ts");
+  const models = opts.models.map((id) => ({ id, reasoning: true }));
+  const virtual = opts.virtual
+    ? `
+  pi.registerVirtualModel({
+    provider: ${JSON.stringify(opts.virtual.provider)},
+    id: ${JSON.stringify(opts.virtual.id)},
+    name: ${JSON.stringify(opts.virtual.id)},
+    contextWindow: 200_000,
+    maxTokens: 8_192,
+    route: () => ({ model: core.models[0], thinkingLevel: "off" }),
+  });
+`
+    : "";
+  const source = `// Planted by the worker e2e tier (extension/testing/harness.ts).
+import {
+  createFauxCore,
+  createProvider,
+  fauxAssistantMessage,
+  fauxText,
+  fauxToolCall,
+} from "@earendil-works/pi-ai";
+
+export default function (pi) {
+  const core = createFauxCore({
+    provider: ${JSON.stringify(opts.provider)},
+    models: ${JSON.stringify(models)},
+  });
+  core.setResponses([
+    fauxAssistantMessage([fauxToolCall("submit", {})], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxText("done")], { stopReason: "stop" }),
+  ]);
+  pi.registerProvider(
+    createProvider({
+      id: ${JSON.stringify(opts.provider)},
+      auth: {
+        apiKey: {
+          name: "worker fixture key",
+          resolve: async ({ credential }) =>
+            credential?.type === "api_key" && credential.key
+              ? { auth: { apiKey: credential.key } }
+              : undefined,
+        },
+      },
+      models: core.models,
+      api: {
+        stream: core.stream,
+        streamSimple: core.streamSimple,
+        fetchDeferred: core.fetchDeferred,
+        cancelDeferred: core.cancelDeferred,
+      },
+    }),
+  );${virtual}}
+`;
+  writeFileSync(path, source, "utf8");
+  return path;
+}
+
+/**
+ * A hermetic `ModelRuntime` with NO provider seeded — any non-builtin provider must come from a
+ * planted extension's registration. Hermetic: an in-memory credential store pre-populated with one
+ * `{ type: "api_key", key }` credential per `credentials` entry (provider id → key), no
+ * models.json read (`modelsPath: null`), no create-time refresh. Builtin providers are still
+ * present and their availability stays ambient-sensitive (env keys), so assert only on the
+ * fixture provider.
+ */
+export async function bareModelRuntime(
+  opts: { credentials?: Record<string, string> } = {},
+): Promise<ModelRuntime> {
+  const piAi = await loadSdkPiAi();
+  const store = new piAi.InMemoryCredentialStore();
+  for (const [providerId, key] of Object.entries(opts.credentials ?? {})) {
+    await store.modify(providerId, async () => ({ type: "api_key", key }));
+  }
+  return ModelRuntime.create({ credentials: store, modelsPath: null, refreshOnCreate: false });
 }
 
 /** A widget component factory as the harness sees it (pi's `setWidget` factory form). */

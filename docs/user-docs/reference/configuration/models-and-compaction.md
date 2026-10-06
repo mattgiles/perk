@@ -23,7 +23,14 @@ The **repository-default model and thinking level** are converged by `perk init`
 `defaultThinkingLevel` keys, which Pi reads natively at session boot. Because they land in the
 committed settings file, they apply to **every** Pi session in the repo: perk cold doors, plain
 `pi`, and the headless worker, locally or remotely. The worker resolves its model from the
-checkout's disk-layered settings.
+checkout's disk-layered settings. It loads the checkout's project extensions first, so a provider
+or virtual model an extension registers is selectable by the worker — as the converged default or
+via its `--model` flag. A model named with `--model` whose provider has no configured credential
+makes the worker refuse before any model turn, naming the provider and the credential sources (an
+API-key environment variable or the agent directory's `auth.json`). The converged default gets no
+such refusal: Pi uses it only when its provider has a configured credential, and otherwise falls
+back to another available model (Pi's per-provider defaults, then the first available). The
+worker refuses only when no model is available at all.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |

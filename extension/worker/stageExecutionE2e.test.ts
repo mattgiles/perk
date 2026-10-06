@@ -7,7 +7,9 @@
 // the real bind/subscribe loop — driven by a FAUX pi-ai model that scripts the terminating tool
 // calls, with NO live GitHub (the terminating tools' Python delegation is stubbed via PERK_BIN).
 // Asserts both the structured run-event stream (§8.12) and the terminal `RunOutcome`
-// (§8.11). Test-only: no worker/Python/contract change.
+// (§8.11). The model-selection scenarios plant a project-tier provider extension and drive a
+// bare hermetic runtime, so registration really happens through the production order (services →
+// selection → admission → construction).
 
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -15,18 +17,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
-  type Api,
   fauxAssistantMessage,
   fauxText,
   fauxToolCall,
   getCurrentTools,
-  type Model,
 } from "@earendil-works/pi-ai";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { agentScratchDir, type PlanRef, runEventsPath } from "../substrate/cache.ts";
-import { fakePerkRouter, fauxModelRuntime, scaffoldWorkerWorktree } from "../testing/harness.ts";
-// Test-side adapter import: the E2E tier mints the nominal selection deliberately (the faux
-// runtime + faux model ride the SAME production `defaultCreateRuntime` path).
-import { type DriveRuntimeLike, defaultCreateRuntime, WorkerModelSelection } from "./sdkAdapter.ts";
+import {
+  bareModelRuntime,
+  fakePerkRouter,
+  fauxModelRuntime,
+  plantWorkerProviderExtension,
+  scaffoldWorkerWorktree,
+} from "../testing/harness.ts";
+// Test-side adapter import: the E2E tier mints the nominal request deliberately (an injected
+// runtime + pattern ride the SAME production `defaultCreateRuntime` path).
+import { type DriveRuntimeLike, defaultCreateRuntime, WorkerModelRequest } from "./sdkAdapter.ts";
 import { type DriveBudget, type DriveStage, type RunEvent, runStage } from "./stageExecution.ts";
 
 // Extension delivery is the PRODUCTION load path: `defaultCreateRuntime` layers disk settings
@@ -35,8 +42,10 @@ import { type DriveBudget, type DriveStage, type RunEvent, runStage } from "./st
 // offline pin of that resolution (local-path package ⇒ no npm ⇒ no network); `PI_OFFLINE=1` is set
 // belt-and-suspenders so an accidental `npm:` entry would skip, not hit the network.
 
-// Auth: the faux provider registers NATIVELY on a hermetic `ModelRuntime` (its apiKey auth
-// always resolves as configured — no key, no network); see `fauxModelRuntime`.
+// Auth: by default the faux provider registers NATIVELY on a hermetic `ModelRuntime` (its apiKey
+// auth always resolves as configured — no key, no network; see `fauxModelRuntime`) and the drive
+// selects it with an explicit pattern. The model-selection scenarios instead pass a bare runtime
+// (`bareModelRuntime`) and plant the provider as a project extension.
 
 /** A trailing idle message (D6): a continued loop never hits "no more faux responses queued". */
 const idle = () => fauxAssistantMessage([fauxText("done")], { stopReason: "stop" });
@@ -48,8 +57,11 @@ let runCounter = 0;
 /** Drive a full stage through the real factory + a faux model; return outcome + captured events. */
 async function runDrive(opts: {
   stage: DriveStage;
-  /** Scripted replies; a function reply receives the request context (it may record it). */
-  responses: unknown[];
+  /**
+   * Scripted replies for the default faux runtime; a function reply receives the request context
+   * (it may record it). Ignored when `model` is given (a planted provider scripts its own).
+   */
+  responses?: unknown[];
   routes?: Record<string, { json: unknown; code?: number }>;
   initialPrompt?: string;
   planRef?: PlanRef;
@@ -69,6 +81,15 @@ async function runDrive(opts: {
   defaultTools?: string[];
   /** Observe the PRODUCTION runtime (built by `defaultCreateRuntime`) once constructed. */
   onRuntime?: (runtime: DriveRuntimeLike) => void;
+  /**
+   * The model request verbatim (runtime + optional `--model` pattern). Absent ⇒ the default faux
+   * runtime selected by its explicit `provider/id` pattern.
+   */
+  model?: { runtime: ModelRuntime; pattern?: string };
+  /** Extra project settings merged into the scaffold (e.g. `defaultProvider`/`defaultModel`). */
+  extraSettings?: Record<string, unknown>;
+  /** Plant a project-tier provider extension into the scaffold (`plantWorkerProviderExtension`). */
+  plantProviders?: Parameters<typeof plantWorkerProviderExtension>[1];
 }) {
   const runId = `01JE2E${String(runCounter++).padStart(20, "0")}`;
   const cwd = scaffoldWorkerWorktree({
@@ -77,7 +98,9 @@ async function runDrive(opts: {
     planRef: opts.planRef,
     packages: opts.packages,
     defaultTools: opts.defaultTools,
+    extraSettings: opts.extraSettings,
   });
+  if (opts.plantProviders !== undefined) plantWorkerProviderExtension(cwd, opts.plantProviders);
 
   const savedEnv = new Map<string, string | undefined>();
   const setEnv = (key: string, value: string) => {
@@ -89,8 +112,23 @@ async function runDrive(opts: {
   setEnv("PERK_BIN", fakePerkRouter(cwd, opts.routes ?? {}, opts.captureArgv ? { argvFile } : {}));
   setEnv("PI_OFFLINE", "1");
 
-  const reg = await fauxModelRuntime();
-  reg.setResponses(opts.responses);
+  let request: WorkerModelRequest;
+  let providerCalls = (): number => 0;
+  if (opts.model !== undefined) {
+    request = new WorkerModelRequest({
+      modelRuntime: opts.model.runtime,
+      pattern: opts.model.pattern,
+    });
+  } else {
+    const reg = await fauxModelRuntime();
+    reg.setResponses(opts.responses ?? []);
+    const model = reg.getModel() as { provider: string; id: string };
+    request = new WorkerModelRequest({
+      modelRuntime: reg.modelRuntime,
+      pattern: `${model.provider}/${model.id}`,
+    });
+    providerCalls = () => reg.callCount();
+  }
 
   const events: RunEvent[] = [];
   try {
@@ -99,7 +137,7 @@ async function runDrive(opts: {
         worktree: cwd,
         stage: opts.stage,
         initialPrompt: opts.initialPrompt ?? `Drive the ${opts.stage} stage.`,
-        model: new WorkerModelSelection(reg.modelRuntime, reg.getModel() as unknown as Model<Api>),
+        model: request,
         budget: opts.budget ?? BUDGET,
         signal: opts.signal,
       },
@@ -116,11 +154,12 @@ async function runDrive(opts: {
             }),
         ...(opts.onRuntime !== undefined
           ? {
-              createRuntime: async (o: { worktree: string; model?: WorkerModelSelection }) => {
-                assert.ok(o.model !== undefined, "the E2E tier always passes its faux selection");
-                const runtime = await defaultCreateRuntime(o.worktree, o.model);
-                opts.onRuntime?.(runtime);
-                return runtime;
+              createRuntime: async (o: { worktree: string; model?: WorkerModelRequest }) => {
+                assert.ok(o.model !== undefined, "the E2E tier always passes its model request");
+                const built = await defaultCreateRuntime(o.worktree, o.model);
+                assert.ok(built.ok, "an observed runtime is never a selection refusal");
+                opts.onRuntime?.(built.runtime);
+                return built.runtime;
               },
             }
           : {}),
@@ -134,7 +173,7 @@ async function runDrive(opts: {
     const argv = opts.captureArgv
       ? readFileSync(argvFile, "utf8").trim().split("\n").filter(Boolean)
       : [];
-    return { outcome, events, cwd, runId, argv, providerCalls: reg.callCount() };
+    return { outcome, events, cwd, runId, argv, providerCalls: providerCalls() };
   } finally {
     // No global registry teardown needed: the faux provider lives on the per-run ModelRuntime.
     for (const [key, value] of savedEnv) {
@@ -476,4 +515,268 @@ test("e2e: BUDGET — the turn cap trips the watchdog on the real session → bu
   const tools = events.flatMap((e) => (e.kind === "tool_outcome" ? [e.tool] : []));
   assert.deepEqual(tools, ["read"], "no tool past the cap executed");
   assertMonotonicSeq(events);
+});
+
+// --- Model selection after extension registration -----------------------------------------------
+//
+// The worker resolves its model only after `createAgentSessionServices` loaded the worktree's
+// project extensions and applied their provider / virtual-model registrations. Each scenario
+// plants a project-tier provider extension (`plantWorkerProviderExtension`): a credential-gated
+// faux native provider `ext-faux` scripted with the implement-HAPPY replies, plus an optional
+// virtual model. Happy paths and `model_auth` drive a REAL bare runtime and assert only on the
+// fixture provider; the order pins use a recording stub runtime because a real runtime's
+// availability snapshot is ambient-sensitive (builtin providers resolve env keys).
+
+const EXT_PROVIDER = "ext-faux";
+const extProviders = (virtual?: {
+  provider: string;
+  id: string;
+}): Parameters<typeof plantWorkerProviderExtension>[1] => ({
+  provider: EXT_PROVIDER,
+  models: ["m-1", "m-2"],
+  ...(virtual !== undefined ? { virtual } : {}),
+});
+
+/**
+ * A recording stub runtime (typed `as never` at the use site): logs every registration and every
+ * availability-snapshot read into one ordered `calls` list, so the test can prove registration
+ * happens BEFORE selection. `snapshot` overrides the (empty) availability read.
+ */
+function recordingStubRuntime(opts: { snapshot?: () => unknown[] } = {}) {
+  const calls: string[] = [];
+  const registered: string[] = [];
+  const runtime = {
+    registerProvider(name: string) {
+      calls.push(`registerProvider:${name}`);
+      registered.push(name);
+    },
+    registerNativeProvider(provider: { id: string }) {
+      calls.push(`registerNativeProvider:${provider.id}`);
+      registered.push(provider.id);
+    },
+    registerVirtualModel(definition: { provider: string; id: string }) {
+      calls.push(`registerVirtualModel:${definition.provider}/${definition.id}`);
+    },
+    async refresh() {},
+    getModels: () => [],
+    getAvailableSnapshot: () => {
+      calls.push("getAvailableSnapshot");
+      return opts.snapshot ? opts.snapshot() : [];
+    },
+    getRegisteredProviderIds: () => [...registered],
+    hasConfiguredAuth: () => false,
+    checkAuth: async () => undefined,
+  };
+  return { runtime: runtime as never as ModelRuntime, calls };
+}
+
+/** The shared zero-turn refusal shape: the event pair, no turns, and no leaked agentDir. */
+function assertZeroTurnRefusal(
+  result: { outcome: Awaited<ReturnType<typeof runDrive>>["outcome"]; events: RunEvent[] },
+  dirsBefore: Set<string>,
+  errorType: string,
+): void {
+  const { outcome, events } = result;
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.terminal_signal, "model_error");
+  assert.equal(outcome.error?.type, errorType);
+  assert.ok((outcome.error?.summary.length ?? 0) > 0, "a non-empty capped summary");
+  assert.equal(outcome.budget.turns, 0, "zero turns — the model never ran");
+  assert.deepEqual(
+    events.map((e) => e.kind),
+    ["run_started", "run_finished"],
+  );
+  assertMonotonicSeq(events);
+  const leaked = [...throwawayAgentDirs()].filter((name) => !dirsBefore.has(name));
+  assert.deepEqual(leaked, [], "the throwaway agentDir is removed on a refusal");
+}
+
+/** The assistant message entries recorded on a session branch (provider/model as recorded). */
+function assistantEntries(runtime: DriveRuntimeLike): { provider: string; model: string }[] {
+  return runtime.session.sessionManager.getBranch().flatMap((entry) => {
+    const e = entry as {
+      type?: string;
+      message?: { role?: string; provider?: string; model?: string };
+    };
+    return e.type === "message" && e.message?.role === "assistant"
+      ? [{ provider: e.message.provider ?? "", model: e.message.model ?? "" }]
+      : [];
+  });
+}
+
+/** The live session's selection, read once the production runtime is constructed. */
+interface ObservedSession {
+  runtime: DriveRuntimeLike | undefined;
+  model: string | undefined;
+  thinkingLevel: string | undefined;
+}
+
+function observeSession(): { observed: ObservedSession; onRuntime: (r: DriveRuntimeLike) => void } {
+  const observed: ObservedSession = {
+    runtime: undefined,
+    model: undefined,
+    thinkingLevel: undefined,
+  };
+  return {
+    observed,
+    onRuntime: (runtime) => {
+      const session = runtime.session as unknown as {
+        model?: { provider: string; id: string };
+        thinkingLevel?: string;
+      };
+      observed.runtime = runtime;
+      observed.model = session.model ? `${session.model.provider}/${session.model.id}` : undefined;
+      observed.thinkingLevel = session.thinkingLevel;
+    },
+  };
+}
+
+test("e2e: no_model is decided AFTER extension registration (order pin) → zero-turn failed/no_model", async () => {
+  const dirsBefore = throwawayAgentDirs();
+  const stub = recordingStubRuntime();
+  const result = await runDrive({
+    stage: "implement",
+    packages: [],
+    plantProviders: extProviders({ provider: "router", id: "auto" }),
+    model: { runtime: stub.runtime },
+  });
+  assertZeroTurnRefusal(result, dirsBefore, "no_model");
+  const firstRead = stub.calls.indexOf("getAvailableSnapshot");
+  assert.ok(firstRead !== -1, "the availability snapshot was read");
+  for (const registration of [
+    `registerNativeProvider:${EXT_PROVIDER}`,
+    "registerVirtualModel:router/auto",
+  ]) {
+    const at = stub.calls.indexOf(registration);
+    assert.ok(at !== -1 && at < firstRead, `${registration} precedes the first snapshot read`);
+  }
+  assert.ok(
+    result.outcome.error?.message.includes(EXT_PROVIDER),
+    "the message names the extension-registered providers",
+  );
+});
+
+test("e2e: a throwing availability read after services → zero-turn runtime_init, agentDir removed", async () => {
+  const dirsBefore = throwawayAgentDirs();
+  const stub = recordingStubRuntime({
+    snapshot: () => {
+      throw new Error("auth store unreadable");
+    },
+  });
+  const result = await runDrive({
+    stage: "implement",
+    packages: [],
+    plantProviders: extProviders(),
+    model: { runtime: stub.runtime },
+  });
+  assertZeroTurnRefusal(result, dirsBefore, "runtime_init");
+  assert.ok(result.outcome.error?.message.includes("auth store unreadable"), "names the cause");
+});
+
+test("e2e: explicit --model selects an extension-registered provider with a saved credential → completed", async () => {
+  const { observed, onRuntime } = observeSession();
+  const { outcome } = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    plantProviders: extProviders(),
+    model: {
+      runtime: await bareModelRuntime({ credentials: { [EXT_PROVIDER]: "k" } }),
+      pattern: `${EXT_PROVIDER}/m-2`,
+    },
+    onRuntime,
+  });
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.terminal_signal, "submit_tool");
+  assert.equal(observed.model, `${EXT_PROVIDER}/m-2`);
+  assert.ok(observed.runtime);
+  const recorded = assistantEntries(observed.runtime);
+  assert.ok(recorded.length > 0, "the branch recorded assistant messages");
+  assert.deepEqual(recorded[0], { provider: EXT_PROVIDER, model: "m-2" });
+});
+
+test("e2e: default selection honours a saved non-first default from an extension provider → completed", async () => {
+  // The old order failed `no_model` here (the provider did not exist yet); a first-available
+  // fallback would have picked m-1.
+  const { observed, onRuntime } = observeSession();
+  const { outcome } = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    plantProviders: extProviders(),
+    extraSettings: { defaultProvider: EXT_PROVIDER, defaultModel: "m-2" },
+    model: { runtime: await bareModelRuntime({ credentials: { [EXT_PROVIDER]: "k" } }) },
+    onRuntime,
+  });
+  assert.equal(outcome.status, "completed");
+  assert.equal(observed.model, `${EXT_PROVIDER}/m-2`);
+});
+
+test("e2e: an explicit model whose provider has no configured auth → zero-turn failed/model_auth", async () => {
+  const dirsBefore = throwawayAgentDirs();
+  const result = await runDrive({
+    stage: "implement",
+    packages: [],
+    plantProviders: extProviders(),
+    model: { runtime: await bareModelRuntime(), pattern: `${EXT_PROVIDER}/m-1` },
+  });
+  assertZeroTurnRefusal(result, dirsBefore, "model_auth");
+  const message = result.outcome.error?.message ?? "";
+  for (const fragment of [EXT_PROVIDER, "auth.json", "--model"]) {
+    assert.ok(message.includes(fragment), `the guidance names ${fragment}`);
+  }
+});
+
+test("e2e: an unknown explicit model → zero-turn failed/model_not_found", async () => {
+  const dirsBefore = throwawayAgentDirs();
+  const result = await runDrive({
+    stage: "implement",
+    packages: [],
+    plantProviders: extProviders(),
+    model: {
+      runtime: await bareModelRuntime({ credentials: { [EXT_PROVIDER]: "k" } }),
+      pattern: "nope/zzz",
+    },
+  });
+  assertZeroTurnRefusal(result, dirsBefore, "model_not_found");
+  assert.ok(result.outcome.error?.message.includes("nope/zzz"), "names the requested pattern");
+});
+
+test("e2e: a virtual model routes to a physical target with a different identity → completed", async () => {
+  const { observed, onRuntime } = observeSession();
+  const { outcome } = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    plantProviders: extProviders({ provider: "router", id: "auto" }),
+    model: {
+      runtime: await bareModelRuntime({ credentials: { [EXT_PROVIDER]: "k" } }),
+      pattern: "router/auto",
+    },
+    onRuntime,
+  });
+  assert.equal(outcome.status, "completed");
+  assert.equal(observed.model, "router/auto", "the selection names the virtual model");
+  assert.ok(observed.runtime);
+  const recorded = assistantEntries(observed.runtime);
+  assert.ok(recorded.length > 0, "the branch recorded assistant messages");
+  assert.deepEqual(
+    recorded[0],
+    { provider: EXT_PROVIDER, model: "m-1" },
+    "the assistant message records the physical target",
+  );
+});
+
+test("e2e: a `:thinking` suffix on --model survives the reorder → session thinking level applied", async () => {
+  const { observed, onRuntime } = observeSession();
+  const { outcome } = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    plantProviders: extProviders(),
+    model: {
+      runtime: await bareModelRuntime({ credentials: { [EXT_PROVIDER]: "k" } }),
+      pattern: `${EXT_PROVIDER}/m-1:high`,
+    },
+    onRuntime,
+  });
+  assert.equal(outcome.status, "completed");
+  assert.equal(observed.model, `${EXT_PROVIDER}/m-1`);
+  assert.equal(observed.thinkingLevel, "high");
 });

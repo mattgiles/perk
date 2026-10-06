@@ -7,8 +7,10 @@
 // never-throws contract under adversarial fakes, the structured run-event stream, and the
 // cross-plane prompt-parity invariant (reciprocal of tests/test_worker_prompt_parity.py).
 // The adapter-owned helpers (translateEvent, the drive-session handle,
-// resolveAuth/resolveWorkerModel) are covered in sdkAdapter.test.ts; the real-factory tier lives
-// in stageExecutionE2e.test.ts. See stageExecution.ts.
+// selectWorkerModel/resolveWorkerModel) are covered in sdkAdapter.test.ts; the real-factory tier
+// (including the post-registration `no_model` / `model_auth` / `model_not_found` refusals and the
+// `runtime_init` arm of a failing post-services read) lives in stageExecutionE2e.test.ts. See
+// stageExecution.ts.
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -18,8 +20,6 @@ import { test } from "node:test";
 import type { PlanRef } from "../substrate/cache.ts";
 import { planRefPath, runEventsPath, workflowDir } from "../substrate/cache.ts";
 import { readSessionPointers } from "../substrate/sessionPointers.ts";
-// The nominal model token is adapter-owned; tests mint it deliberately.
-import { WorkerModelSelection } from "./sdkAdapter.ts";
 import {
   type DriveEvent,
   type DriveRuntimeLike,
@@ -673,29 +673,12 @@ test("runStage: a wall-clock timeout trips → budget_exhausted", async () => {
   assert.equal(outcome.terminal_signal, "budget");
 });
 
-test("runStage: no model available → failed/no_model, never throws", async () => {
-  // Build the nominal selection around an empty-snapshot stub runtime so the path is
-  // deterministic regardless of the dev machine's ambient provider keys (resolveAuth returns
-  // null when the availability snapshot is empty and no explicit model rides the selection).
-  const emptyRuntime = { getAvailableSnapshot: () => [] } as never;
-  const outcome = await runStage({
-    worktree: "/tmp/wt",
-    stage: "implement",
-    initialPrompt: "go",
-    budget: baseBudget,
-    model: new WorkerModelSelection(emptyRuntime),
-  });
-  assert.equal(outcome.status, "failed");
-  assert.equal(outcome.error?.type, "no_model");
-});
-
 // --- the initialization boundary ------------------------------------------------------------------
 
-/** Injected failures: `throwing` for sync reads, `rejecting` for async factories/binds. */
-const throwing = (message: string) => (): never => {
+/** An injected async failure for factories/binds. */
+const rejecting = (message: string) => async (): Promise<never> => {
   throw new Error(message);
 };
-const rejecting = (message: string) => async (): Promise<never> => throwing(message)();
 
 /** Drive with the fixed clock + an array sink (the boundary tests' shared shape). */
 async function driveInit(
@@ -710,7 +693,7 @@ async function driveInit(
   return { outcome, events };
 }
 
-test("runStage: a rejecting auth/runtime initialization → zero-turn failed/model_error/runtime_init pair, never throws", async () => {
+test("runStage: a rejecting runtime initialization → zero-turn failed/model_error/runtime_init pair, never throws", async () => {
   const expectRuntimeInit = async (drive: ReturnType<typeof driveInit>, fragment: string) => {
     const { outcome, events } = await drive;
     assert.equal(outcome.status, "failed");
@@ -724,15 +707,11 @@ test("runStage: a rejecting auth/runtime initialization → zero-turn failed/mod
     );
     assert.deepEqual((events[1] as Extract<RunEvent, { kind: "run_finished" }>).outcome, outcome);
   };
-  // Arm A — the production `resolveAuth` rejects: a throwing snapshot is the deterministic offline
-  // proxy for an unreadable auth store (the supplied selection means `ModelRuntime.create` never runs).
-  const snapshot = { getAvailableSnapshot: throwing("auth store unreadable") } as never;
-  const auth = driveInit({ model: new WorkerModelSelection(snapshot) });
-  await expectRuntimeInit(auth, "auth store unreadable");
-  // Arm B — the runtime factory rejects.
+  // Arm A — the runtime factory rejects. (A failing read inside the production factory's
+  // selection step is the real-runtime tier's arm: stageExecutionE2e.test.ts.)
   const factory = driveInit({}, { createRuntime: rejecting("construction exploded") });
   await expectRuntimeInit(factory, "construction exploded");
-  // Arm C — extension binding rejects; the never-bound handle is still disposed.
+  // Arm B — extension binding rejects; the never-bound handle is still disposed.
   const session = new FakeSession(() => {});
   session.bindExtensions = rejecting("bind exploded");
   const runtime = fakeRuntime(session);
@@ -1139,29 +1118,6 @@ test("runStage: an external abort emits a terminal run_finished(aborted)", async
   assert.equal(finished.outcome.status, "aborted");
   assert.equal(finished.outcome.terminal_signal, "external_abort");
   assert.ok(session.abortCalls >= 1, "the SDK abort was fired");
-});
-
-test("runStage: the no_model early return still emits run_started + run_finished(failed/no_model)", async () => {
-  const events: RunEvent[] = [];
-  await runStage(
-    {
-      worktree: "/tmp/wt",
-      stage: "implement",
-      initialPrompt: "go",
-      budget: eventBudget,
-      model: new WorkerModelSelection({ getAvailableSnapshot: () => [] } as never),
-    },
-    { eventSink: (e) => events.push(e) },
-  );
-  assert.deepEqual(
-    events.map((e) => e.kind),
-    ["run_started", "run_finished"],
-  );
-  const finished = events[1] as Extract<RunEvent, { kind: "run_finished" }>;
-  assert.equal(finished.outcome.status, "failed");
-  assert.equal(finished.outcome.error?.type, "no_model");
-  // The terminal failure summary is the capped error.summary.
-  assert.ok((finished.outcome.error?.summary?.length ?? 0) > 0);
 });
 
 test("runStage: a throwing injected eventSink never breaks the drive (fail-soft)", async () => {

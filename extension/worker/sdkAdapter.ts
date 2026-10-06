@@ -5,13 +5,14 @@
 // ownership are adapter-confined so the seam (`stageExecution.ts`) carries no SDK vocabulary on
 // its caller surface and folds policy (budget, terminal capture, outcome) over perk shapes only. The only production
 // importer is the seam itself (enforced by `extension/importDirectionGuard.test.ts` Rule F);
-// tests import this module deliberately (to mint `WorkerModelSelection` and drive the handle).
+// tests import this module deliberately (to inject a model runtime and drive the handle).
 //
-// The opacity contract (narrow, stated exactly): `WorkerModelSelection` is *nominal* —
-// `#private` fields make structural forgery impossible — and is minted only here (production
-// imports of this module are guard-banned outside the seam). SDK types still appear on this
-// adapter-owned class surface; the caller-side guarantee is the import-edge ban plus nominal
-// minting, nothing stronger.
+// The opacity contract (narrow, stated exactly): `WorkerModelRequest` is *nominal* — a
+// `#private` field makes structural forgery impossible — and its class lives only here (the seam
+// re-exports it so `workerMain.ts` can mint one with zero SDK imports; production imports of this
+// module are guard-banned outside the seam). SDK types still appear on this adapter-owned class
+// surface; the caller-side guarantee is the import-edge ban plus nominal minting, nothing
+// stronger.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -331,134 +332,237 @@ export function createDriveSession(
  */
 export type DriveSessionHandle = ReturnType<typeof createDriveSession>;
 
-// --- model/auth (Gap 5), unified around one nominal type ------------------------------------------
+// --- model request, selection and admission --------------------------------------------------------
 
 /**
- * The opaque model input the seam's `StageRunOptions.model` carries. NOMINAL: the `#private`
- * fields make structural forgery impossible — a selection is minted only by this adapter
- * (`resolveWorkerModel`/`resolveAuth`) and by tests that import the adapter deliberately. The
- * SDK-typed reads below are adapter-internal by the import-edge ban (Rule F); they appear on
- * this adapter-owned surface only.
+ * The seam's UNRESOLVED model input (`StageRunOptions.model`): the raw `--model` text plus, for
+ * tests, the model runtime to use. NOMINAL: the `#private` field makes structural forgery
+ * impossible. Nothing is resolved at mint time — the pattern is resolved inside the runtime
+ * factory only after the worktree's extensions have registered their providers and virtual
+ * models (`selectWorkerModel`), so an extension-registered model is visible to it.
  */
-export class WorkerModelSelection {
-  // The ONE `#private` field supplies the nominal guarantee; the payload rides ordinary readonly
-  // fields. (Constructor parameter properties would be smaller still, but node's type-stripping
-  // test runner rejects non-erasable TS syntax.)
-  readonly #modelRuntime: ModelRuntime;
-  /** The EXPLICIT model only; `undefined` defers the pick to the SDK at session creation. */
-  readonly model: Model<Api> | undefined;
+export class WorkerModelRequest {
+  // The ONE `#private` field supplies the nominal guarantee; the payload rides an ordinary
+  // readonly field. (Constructor parameter properties would be smaller still, but node's
+  // type-stripping test runner rejects non-erasable TS syntax.)
+  readonly #modelRuntime: ModelRuntime | undefined;
   /**
-   * Thinking level parsed from the `--model <pattern>:<level>` suffix (`resolveWorkerModel`).
-   * `undefined` ⇒ the SDK's settings-default resolution — unchanged behavior.
+   * The raw `--model <pattern>[:<thinking>]` text, resolved with pi's CLI semantics. Absent or
+   * `""` (a bare `--model`) defers the pick to the SDK's own default chain at session creation.
    */
-  readonly thinkingLevel: ThinkingLevel | undefined;
+  readonly pattern: string | undefined;
 
-  constructor(modelRuntime: ModelRuntime, model?: Model<Api>, thinkingLevel?: ThinkingLevel) {
-    this.#modelRuntime = modelRuntime;
-    this.model = model;
-    this.thinkingLevel = thinkingLevel;
+  constructor(options: { pattern?: string; modelRuntime?: ModelRuntime }) {
+    this.#modelRuntime = options.modelRuntime;
+    this.pattern = options.pattern;
   }
 
-  /** The canonical model/auth runtime (pi 0.84 `ModelRuntime`). */
-  get modelRuntime(): ModelRuntime {
+  /**
+   * The injected model/auth runtime (the test seam). Absent ⇒ `defaultCreateRuntime` mints
+   * `ModelRuntime.create()` inside the outcome boundary.
+   */
+  get modelRuntime(): ModelRuntime | undefined {
     return this.#modelRuntime;
   }
 }
 
-/** What a `--model` flag resolves to — discriminated so no contradictory state is expressible. */
+/** What a `--model` pattern resolves to — discriminated so no contradictory state is expressible. */
 export type ResolvedWorkerModel =
-  | { ok: true; selection: WorkerModelSelection; warning: string | undefined }
+  | {
+      ok: true;
+      /** The EXPLICIT model only; `undefined` defers the pick to the SDK at session creation. */
+      model: Model<Api> | undefined;
+      /** The parsed `:thinking` suffix; `undefined` ⇒ the settings default. */
+      thinkingLevel: ThinkingLevel | undefined;
+      warning: string | undefined;
+    }
   | { ok: false; error: string; warning: string | undefined };
 
+/** The worker's normalized not-found text for a resolution that yields neither model nor error. */
+function notFoundError(pattern: string): string {
+  return `model '${pattern}' not found in the registry.`;
+}
+
 /**
- * Resolve an explicit `--model` flag with pi's OWN CLI semantics (`resolveCliModel`): fuzzy
- * matching, bare-id resolution, `provider/pattern`, and a `:thinking` suffix — the same chain the
- * flag's string hits in an interactive pi launch, closing the warm/cold parity gap (cf.
- * docs/learned/workflow/execution-path-parity.md).
+ * Resolve an explicit `--model` pattern over `modelRuntime` with pi's OWN CLI semantics
+ * (`resolveCliModel`): fuzzy matching, bare-id resolution, `provider/pattern`, and a `:thinking`
+ * suffix — the same chain the flag's string hits in an interactive pi launch, closing the
+ * warm/cold parity gap (cf. docs/learned/workflow/execution-path-parity.md). Pure over the
+ * runtime; resolves over `getModels()` regardless of auth (admission is `selectWorkerModel`'s).
  *
- * `raw` absent **or `""`** ⇒ `ok: true` with a selection carrying only a default-created
- * `ModelRuntime` (model/thinking undefined — the SDK's own initial-model resolution at session
- * creation stays the default). The `""` ≡ omitted equivalence is deliberate: workerMain's flag
+ * `pattern` absent **or `""`** ⇒ `ok: true` with no model (the SDK's own initial-model
+ * resolution stays the default). The `""` ≡ omitted equivalence is deliberate: workerMain's flag
  * grammar produces `""` for a bare `--model`, and the tolerance is pinned by a test. A
  * resolution that yields neither a model nor an error is normalized to the worker's not-found
  * error (`ok: false` — fail fast, never guess). `warning` is a non-fatal resolution diagnostic
  * (e.g. an invalid `:thinking` suffix) — the caller surfaces it only when proceeding.
- *
- * The optional `modelRuntime` param is the test-injection seam (deterministic `stubRuntime`
- * tests); `ModelRuntime.create()` runs only when it is absent.
  */
-export async function resolveWorkerModel(
-  raw: string | undefined,
-  modelRuntime?: ModelRuntime,
-): Promise<ResolvedWorkerModel> {
-  const runtime = modelRuntime ?? (await ModelRuntime.create());
-  if (!raw) {
-    return { ok: true, selection: new WorkerModelSelection(runtime), warning: undefined };
+export function resolveWorkerModel(
+  pattern: string | undefined,
+  modelRuntime: ModelRuntime,
+): ResolvedWorkerModel {
+  if (!pattern) {
+    return { ok: true, model: undefined, thinkingLevel: undefined, warning: undefined };
   }
-  const result = resolveCliModel({ cliModel: raw, modelRuntime: runtime });
-  if (result.model === undefined && result.error === undefined) {
-    return {
-      ok: false,
-      error: `model '${raw}' not found in the registry.`,
-      warning: result.warning,
-    };
-  }
+  const result = resolveCliModel({ cliModel: pattern, modelRuntime });
   if (result.error !== undefined) {
     return { ok: false, error: result.error, warning: result.warning };
   }
+  if (result.model === undefined) {
+    return { ok: false, error: notFoundError(pattern), warning: result.warning };
+  }
   return {
     ok: true,
-    selection: new WorkerModelSelection(runtime, result.model, result.thinkingLevel),
+    model: result.model,
+    thinkingLevel: result.thinkingLevel,
     warning: result.warning,
   };
 }
 
+/** The typed zero-turn refusals of the selection ladder (`error.type` under `model_error`). */
+export type WorkerModelRefusalType = "model_not_found" | "no_model" | "model_auth";
+
+/** The selection ladder's verdict over a post-registration runtime. */
+export type WorkerModelPick =
+  | {
+      ok: true;
+      /** The explicit model; `undefined` defers to the SDK's `findInitialModel` chain. */
+      model: Model<Api> | undefined;
+      thinkingLevel: ThinkingLevel | undefined;
+      warning: string | undefined;
+    }
+  | {
+      ok: false;
+      type: WorkerModelRefusalType;
+      message: string;
+      warning: string | undefined;
+    };
+
+/** Drop one trailing period so an embedded sentence can be re-terminated exactly once. */
+function withoutTrailingPeriod(text: string): string {
+  return text.endsWith(".") ? text.slice(0, -1) : text;
+}
+
 /**
- * Normalize the seam's optional model input for the production drive path; returns null (never
- * throws a domain error) when no model is available at all. `selection` absent ⇒ a
- * default-runtime selection (async because pi 0.84's `ModelRuntime.create` is async; the default
- * creation stays offline — `allowModelNetwork` defaults false). `null` iff there is no explicit
- * model AND `getAvailableSnapshot()` is empty — the `no_model` fail-fast, unchanged. The model is
- * NOT pre-pinned from the runtime: an `undefined` model lets `createAgentSession` run its own
- * initial-model resolution (settings `defaultModel` → pi's curated per-provider defaults → first
- * available), which picks a current-generation model instead of the catalogue's
- * alphabetically-first (= oldest) entry.
+ * The selection + admission steps of the worker's ladder, run over the runtime AFTER
+ * `createAgentSessionServices` applied the extensions' provider/native-provider/virtual-model
+ * registrations (so those are visible here):
+ *
+ *  - an explicit `pattern` resolves through `resolveWorkerModel`; a miss ⇒ `model_not_found`;
+ *  - no pattern ⇒ `no_model` iff the availability snapshot is empty, else a deferred pick
+ *    (`model: undefined` — Pi's own default chain picks at session creation; perk never
+ *    pre-picks a catalog entry). The deferred path adds no auth check: Pi's chain only picks
+ *    configured providers;
+ *  - an explicit model ⇒ `model_auth` unless its provider passes Pi's prompt-time auth predicate
+ *    (`hasConfiguredAuth || (await checkAuth) !== undefined`) — the worker refuses exactly what
+ *    Pi would refuse at the first request, only earlier, typed and zero-turn. A virtual model is
+ *    admitted on its own provider's configured status; its physical target's auth stays Pi's
+ *    request-time routing concern.
  */
-export async function resolveAuth(
-  selection: WorkerModelSelection | undefined,
-): Promise<WorkerModelSelection | null> {
-  const effective = selection ?? new WorkerModelSelection(await ModelRuntime.create());
-  if (!effective.model && effective.modelRuntime.getAvailableSnapshot().length === 0) return null;
-  return effective;
+export async function selectWorkerModel(
+  pattern: string | undefined,
+  modelRuntime: ModelRuntime,
+): Promise<WorkerModelPick> {
+  const resolved = resolveWorkerModel(pattern, modelRuntime);
+  if (!resolved.ok) {
+    const detail =
+      pattern && resolved.error !== notFoundError(pattern)
+        ? withoutTrailingPeriod(resolved.error)
+        : "no match";
+    return {
+      ok: false,
+      type: "model_not_found",
+      message: `model '${pattern ?? ""}' not found in the registry (resolved after extension registration): ${detail}.`,
+      warning: resolved.warning,
+    };
+  }
+  const model = resolved.model;
+  if (model === undefined) {
+    if (modelRuntime.getAvailableSnapshot().length === 0) {
+      const registered = modelRuntime.getRegisteredProviderIds();
+      return {
+        ok: false,
+        type: "no_model",
+        message:
+          "no model available after extension registration — set a provider API key (e.g. " +
+          "ANTHROPIC_API_KEY), save a credential for a provider in the agent dir's auth.json, " +
+          `or pass --model; extension-registered providers: ${registered.length > 0 ? registered.join(", ") : "none"}.`,
+        warning: resolved.warning,
+      };
+    }
+    return { ok: true, model: undefined, thinkingLevel: undefined, warning: resolved.warning };
+  }
+  const provider = model.provider;
+  const admitted =
+    modelRuntime.hasConfiguredAuth(provider) ||
+    (await modelRuntime.checkAuth(provider)) !== undefined;
+  if (!admitted) {
+    return {
+      ok: false,
+      type: "model_auth",
+      message:
+        `model ${provider}/${model.id} has no configured auth — set the provider's API key env ` +
+        `var or save a credential for '${provider}' in the agent dir's auth.json, or pass a ` +
+        "different --model.",
+      warning: resolved.warning,
+    };
+  }
+  return { ok: true, model, thinkingLevel: resolved.thinkingLevel, warning: resolved.warning };
+}
+
+/**
+ * A typed selection refusal travelling out of the SDK runtime factory (a factory must resolve to
+ * a session or reject); `defaultCreateRuntime` converts it into `{ ok: false, refusal }`.
+ */
+class WorkerModelRefusal extends Error {
+  readonly refusal: { type: WorkerModelRefusalType; message: string };
+
+  constructor(pick: Extract<WorkerModelPick, { ok: false }>) {
+    super(pick.message);
+    this.name = "WorkerModelRefusal";
+    this.refusal = { type: pick.type, message: pick.message };
+  }
 }
 
 // --- the production runtime factory ---------------------------------------------------------------
 
+/** The production factory's result: a live runtime, or a typed zero-turn selection refusal. */
+export type RuntimeConstruction =
+  | { ok: true; runtime: DriveRuntimeLike }
+  | { ok: false; refusal: { type: WorkerModelRefusalType; message: string } };
+
 /**
  * Build the asymmetric runtime: `cwd = worktree` (project tier — perk's `@mgiles/perk` extension via the
- * managed `.pi/settings.json`, the managed `AGENTS.md`/`APPEND_SYSTEM.md`) and `agentDir = throwaway`
- * (user-global tier OUT — the throwaway dir has no `settings.json`, so the global tier is empty),
- * env-var/registry auth+model (Gap 5). Settings are DISK-LAYERED (`SettingsManager.create` +
- * `applyOverrides`, the SDK's sanctioned "with overrides" shape — docs/sdk.md "Settings
- * Management"): the project tier resolves the managed `packages` list, while the compaction-off/
- * retry-off determinism overrides ride the merged view only (package resolution reads the
- * per-scope raws — overrides cannot leak into it). Missing `npm:` packages auto-install into
- * `.pi/npm` during the loader's reload (skipped under `PI_OFFLINE`); an install failure throws →
- * the seam's catch arm → a loud `failed`/`runtime_init`. No `tools` allowlist — read-write
- * defaults + extension tools. The `createAgentSessionServices` factory builds the
- * `DefaultResourceLoader` internally from `cwd`/`agentDir` (recipe correction #1).
+ * managed `.pi/settings.json`, any project `.pi/extensions/`, the managed `AGENTS.md`/`APPEND_SYSTEM.md`)
+ * and `agentDir = throwaway` (user-global RESOURCES out — the throwaway dir has no `settings.json`,
+ * extensions or skills, so the global resource tier is empty). Auth + `models.json` come from the
+ * worker-minted `ModelRuntime` instead: `request.modelRuntime ?? ModelRuntime.create()` (the global
+ * agent dir's `auth.json`/`models.json`, `PI_CODING_AGENT_DIR`-aware, plus env keys; offline),
+ * minted INSIDE this function's failure-cleanup guard so a rejection is the seam's
+ * `runtime_init`. Settings are DISK-LAYERED (`SettingsManager.create` + `applyOverrides`, the
+ * SDK's sanctioned "with overrides" shape — docs/sdk.md "Settings Management"): the project tier
+ * resolves the managed `packages` list, while the compaction-off/retry-off determinism overrides
+ * ride the merged view only (package resolution reads the per-scope raws — overrides cannot leak
+ * into it). Missing `npm:` packages auto-install into `.pi/npm` during the loader's reload
+ * (skipped under `PI_OFFLINE`); an install failure throws → the seam's catch arm → a loud
+ * `failed`/`runtime_init`. No `tools` allowlist — read-write defaults + extension tools.
  *
- * Adapter-owned inputs only (`worktree` + the nominal selection): no seam type appears in the
+ * The selection ladder runs inside the SDK runtime factory, mirroring pi's own CLI order:
+ * services (extension load + registrations) → `selectWorkerModel` (explicit resolution,
+ * admission) → `createAgentSessionFromServices`. A ladder refusal returns
+ * `{ ok: false, refusal }`; every other construction error rethrows.
+ *
+ * Adapter-owned inputs only (`worktree` + the nominal request): no seam type appears in the
  * signature, so a reverse seam←adapter type edge is impossible by construction. The throwaway
  * `mkdtempSync` agentDir is best-effort removed (fail-soft `rm`; a removal failure logs and
- * never affects the outcome) at exactly two moments — dispose, and a construction failure that
- * would otherwise orphan it — the isolation invariant is untouched: no removal while the
- * session lives.
+ * never affects the outcome) at exactly two moments — dispose, and a construction failure or
+ * refusal that would otherwise orphan it — the isolation invariant is untouched: no removal
+ * while the session lives.
  */
 export async function defaultCreateRuntime(
   worktree: string,
-  selection: WorkerModelSelection,
-): Promise<DriveRuntimeLike> {
+  request: WorkerModelRequest,
+): Promise<RuntimeConstruction> {
   const agentDir = mkdtempSync(join(tmpdir(), "perk-worker-agent-"));
   const removeAgentDir = (): void => {
     try {
@@ -468,39 +572,81 @@ export async function defaultCreateRuntime(
     }
   };
   try {
-    return await constructRuntime(worktree, selection, agentDir, removeAgentDir);
+    const modelRuntime = request.modelRuntime ?? (await ModelRuntime.create());
+    const runtime = await constructRuntime(
+      worktree,
+      request.pattern,
+      modelRuntime,
+      agentDir,
+      removeAgentDir,
+    );
+    return { ok: true, runtime };
   } catch (err) {
     // Construction failed before the disposer-wrapping runtime existed — without this arm every
     // failed worker invocation would leak its `perk-worker-agent-*` directory.
     removeAgentDir();
+    if (err instanceof WorkerModelRefusal) return { ok: false, refusal: err.refusal };
     throw err;
   }
 }
 
-/** The construction body behind `defaultCreateRuntime`'s failure-cleanup guard. */
+/**
+ * The construction body behind `defaultCreateRuntime`'s failure-cleanup guard. Services MUST
+ * receive the worker-minted `modelRuntime`: left to itself, `createAgentSessionServices` would
+ * derive a runtime from the throwaway `agentDir` — an empty auth store. The factory re-runs
+ * identically on a session replacement (`/new`, `/resume`, fork).
+ */
 async function constructRuntime(
   worktree: string,
-  selection: WorkerModelSelection,
+  pattern: string | undefined,
+  modelRuntime: ModelRuntime,
   agentDir: string,
   removeAgentDir: () => void,
 ): Promise<DriveRuntimeLike> {
   const settingsManager = SettingsManager.create(worktree, agentDir);
   settingsManager.applyOverrides({ compaction: { enabled: false }, retry: { enabled: false } });
+  const reportSettingsErrors = (): void => {
+    for (const entry of settingsManager.drainErrors()) {
+      console.error(`perk worker: settings error (${entry.scope}) — ${String(entry.error)}`);
+    }
+  };
   const factory: CreateAgentSessionRuntimeFactory = async (factoryOpts) => {
+    // 1. Services: load the project extensions and apply their provider / native-provider /
+    //    virtual-model registrations onto the runtime, then refresh its availability.
     const services = await createAgentSessionServices({
       cwd: factoryOpts.cwd,
       agentDir: factoryOpts.agentDir,
       settingsManager,
-      modelRuntime: selection.modelRuntime,
+      modelRuntime,
     });
+    // 2. Loud construction diagnostics, before selection: extension load errors and
+    //    registration errors are recorded, not raised, by the SDK — they are the CAUSE behind a
+    //    later `model_not_found`/`no_model` (an extension that never loaded registers nothing)
+    //    or `no_extension_tools`. Fail-soft reporting only; never throws.
+    for (const entry of services.resourceLoader.getExtensions().errors) {
+      console.error(`perk worker: extension load error — ${entry.path}: ${entry.error}`);
+    }
+    for (const entry of services.diagnostics) {
+      if (entry.type !== "info") {
+        console.error(`perk worker: extension ${entry.type} — ${entry.message}`);
+      }
+    }
+    // 3. Selection + admission over the post-registration runtime.
+    const pick = await selectWorkerModel(pattern, services.modelRuntime);
+    if (!pick.ok) {
+      reportSettingsErrors();
+      throw new WorkerModelRefusal(pick);
+    }
+    if (pick.warning) console.error(`perk worker: ${pick.warning}`);
+    // 4. Construction: an `undefined` model ⇒ the SDK's `findInitialModel` chain (saved default
+    //    with configured auth → curated per-provider defaults → first available); an
+    //    `undefined` thinkingLevel likewise defers to the settings default.
     const result = await createAgentSessionFromServices({
       services,
       sessionManager: factoryOpts.sessionManager,
       sessionStartEvent: factoryOpts.sessionStartEvent,
-      // `undefined` ⇒ the SDK's initial-model resolution picks the model (see `resolveAuth`);
-      // an `undefined` thinkingLevel likewise defers to the settings default.
-      model: selection.model,
-      thinkingLevel: selection.thinkingLevel,
+      model: pick.model,
+      thinkingLevel: pick.thinkingLevel,
     });
     // Name the model that will actually drive (the SDK may have picked it) — the remote step
     // log is otherwise silent about it until a provider error.
@@ -508,15 +654,9 @@ async function constructRuntime(
     console.error(
       `perk worker: model ${chosen ? `${chosen.provider}/${chosen.id}` : "unresolved"}`,
     );
-    // Loud construction diagnostics (the CAUSE behind a later `no_extension_tools` symptom):
-    // settings I/O errors and extension load errors are recorded, not raised, by the SDK —
-    // surfacing them is the app layer's job. Fail-soft reporting only; never throws.
-    for (const entry of result.extensionsResult.errors) {
-      console.error(`perk worker: extension load error — ${entry.path}: ${entry.error}`);
-    }
-    for (const entry of settingsManager.drainErrors()) {
-      console.error(`perk worker: settings error (${entry.scope}) — ${String(entry.error)}`);
-    }
+    // Settings I/O errors are likewise recorded, not raised; drained after construction so the
+    // session's own settings reads are included.
+    reportSettingsErrors();
     return { ...result, services, diagnostics: services.diagnostics };
   };
   const runtime = await createAgentSessionRuntime(factory, {
