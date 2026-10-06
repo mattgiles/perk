@@ -336,6 +336,19 @@ options (their codemode's `models` setting, their tools' direct model calls). Mo
 past the refusal (an aliased `models` in a project-registered codemode, a project tool calling a
 classifier itself) is counted at turn end and bounded by the turn, token and wall-clock limits.
 
+The worker's own codemode is **pi's builtin `codemode`**, loaded beside pi's builtin
+`tool_search` with the CLI's builtin identity (`builtin:codemode` / `builtin:tool-search`). Both
+register inactive; the repo's `defaultTools` decides (`+codemode`; perk's seeded `+tool_search`
+joins the worker to the discovery cohort, a committed `-tool_search` opts out), and the
+`codemode.mode` / `codemode.inlineBudget` settings apply. A project `"extensions":
+["-builtin:<name>"]` entry keeps a builtin out of the worker; a project extension registering its
+own `codemode`/`tool_search` replaces the builtin (the worker prints pi's loader warning,
+`perk worker: extension warning — builtin:<name>: …`). **MCP is off in the worker:** it loads no
+MCP support, so `.pi/mcp.json` is inert there, nothing reads/writes pi's `mcp.json` /
+`mcp-auth.json` / `mcp.log`, and a project extension's `registerMcpServer` is reported on stderr
+(`perk worker: extension error — <path> (register_mcp_server): …`), never connected. A project
+extension that brings its own MCP support is the repo's choice and outside that guarantee.
+
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `default` | string (`provider/id`) | _(pi default)_ | Must be an **exact** `provider/id` pair (pi's settings default is an exact lookup). Split on the **first** `/`, so openrouter ids keep their inner slashes. A `:thinking` suffix is accepted. |
@@ -543,8 +556,8 @@ missing-dir warning. Seeded-door previews, skills create/refine, and `plan resum
 and omit these; their real launches still apply the same checks and injection. `perk resume
 --dry-run` reports the resolved agent dir + its source (`env`/`config`/`default`) in its own preview.
 
-**Non-goals:** `--remote`, the headless worker (throwaway agentDir), and a hand-run `pi` are
-unaffected — run bare `perk` for a plain session that carries the redirect. Use direnv or your
+**Non-goals:** `--remote`, the headless worker (throwaway agentDir; no MCP support loaded, so no
+MCP config or credentials are read there), and a hand-run `pi` are unaffected — run bare `perk` for a plain session that carries the redirect. Use direnv or your
 shell for a hand-run Pi redirect.
 
 ### `[compaction]`

@@ -813,6 +813,27 @@ export default function (pi) {${tool}${codemode}}
 }
 
 /**
+ * Plant `<cwd>/.pi/extensions/worker-mcp-registrar.ts` (returns the path): a project extension
+ * whose factory registers one MCP server (`inert`, a `node -e "process.exit(0)"` stdio command
+ * that would exit at once if anything ever spawned it). With no loaded extension connecting MCP
+ * servers, Pi reports the registration at bind as a `register_mcp_server` extension error and
+ * never connects it — the observable that distinguishes an absent MCP handler from a loaded one.
+ */
+export function plantMcpRegistrar(cwd: string): string {
+  const dir = join(cwd, ".pi", "extensions");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "worker-mcp-registrar.ts");
+  const server = { command: process.execPath, args: ["-e", "process.exit(0)"] };
+  const source = `// Planted by the worker e2e tier (extension/testing/harness.ts).
+export default function (pi) {
+  pi.registerMcpServer("inert", ${JSON.stringify(server)});
+}
+`;
+  writeFileSync(path, source, "utf8");
+  return path;
+}
+
+/**
  * A hermetic `ModelRuntime` with NO provider seeded — any non-builtin provider must come from a
  * planted extension's registration. Hermetic: an in-memory credential store pre-populated with one
  * `{ type: "api_key", key }` credential per `credentials` entry (provider id → key), no

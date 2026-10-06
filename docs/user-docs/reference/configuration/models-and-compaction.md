@@ -49,6 +49,18 @@ directly. Model usage that gets past the refusal — a script that reaches `mode
 another name, or a project tool that calls a classifier itself — is counted at the end of each
 turn and bounded by the worker's turn, token, and wall-clock limits.
 
+The worker's own codemode is **Pi's builtin `codemode`**, which the worker loads together with
+Pi's builtin `tool_search`. Both start switched off; the repo's `defaultTools` decides, exactly as
+in an interactive session (`+codemode` turns codemode on; perk's seeded `+tool_search` turns on
+discovery, and a committed `-tool_search` opts out). The codemode `mode` and `inlineBudget`
+settings apply. To keep either builtin out of the worker, add `"extensions":
+["-builtin:codemode"]` (or `-builtin:tool-search`) to the repo's `.pi/settings.json`. A project
+extension that registers its own `codemode` replaces the builtin, and the worker prints Pi's
+warning saying so. **MCP is off in the worker:** it loads no MCP support, so `.pi/mcp.json` has no
+effect there, nothing reads or writes Pi's MCP config, credentials or log, and a project
+extension's `registerMcpServer` is reported on stderr rather than connected. A project extension
+that brings its own MCP support is the repo's own choice and outside that guarantee.
+
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `default` | string (`provider/id`) | _(Pi default)_ | Must be an **exact** `provider/id` pair; Pi's settings default is an exact provider-and-id lookup, not a fuzzy match. It splits on the **first** `/`, so OpenRouter ids retain inner slashes (`openrouter/meta-llama/llama-3-70b` becomes provider `openrouter`, id `meta-llama/llama-3-70b`). A `:thinking` suffix is accepted. |
@@ -330,7 +342,8 @@ filesystem checks. `perk resume --dry-run` reports the resolved agent directory 
 (`env` / `config` / `default`) in its own preview.
 
 **Scope boundaries:** local launches only. `--remote` dispatch is unaffected, the headless worker
-keeps its throwaway agent directory, and a hand-run `pi` is outside perk's control. Use direnv or
+keeps its throwaway agent directory (and loads no MCP support, so no MCP config or credentials are
+read there), and a hand-run `pi` is outside perk's control. Use direnv or
 your shell to set `PI_CODING_AGENT_DIR` for hand-run Pi sessions.
 
 ## Related

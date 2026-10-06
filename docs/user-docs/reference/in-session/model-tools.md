@@ -147,8 +147,9 @@ A codemode script calling a perk tool receives:
   (`<tool> failed: <message>`) on a soft failure — catch it with `try`/`catch` and the script
   continues.
 
-In the headless worker, the worker's own codemode has no `models` namespace, and a script that
-names a classifier or image-generation call is refused before it runs; see the worker rules in
+In the headless worker, the worker's own codemode (Pi's builtin, activated by `defaultTools`) has
+no `models` namespace, and a script that names a classifier or image-generation call is refused
+before it runs; see the worker rules in
 [Models and compaction](../configuration/models-and-compaction.md#models).
 
 Terminal, interactive and orchestration tools are model-only: never callable from a script or
@@ -468,9 +469,21 @@ four again when your next prompt starts; navigating the session tree restores wh
 `/perk-selfcheck` reports `discovery: cohort (family: …)` or `discovery: nonparticipant`.
 
 Who never participates: a session of a repo that opted out with `-tool_search` (or whose resolved
-selection is empty), a session whose `tool_search` comes from some other extension, the headless worker, `/btw`'s side
+selection is empty), a session whose `tool_search` comes from some other extension, `/btw`'s side
 session and spawned subagent children — they keep every perk tool declared as before. The pilot's measurements and its adopt/retire decision are
 recorded in `docs/design/native-discovery-pilot.md`.
+
+**In the headless worker.** The worker loads Pi's builtin `tool_search` and `codemode` itself, so
+the repo's `defaultTools` decides exactly as in an interactive session: the seeded `+tool_search`
+makes the worker a cohort member, a committed `-tool_search` opts it out, and `+codemode`
+activates the worker's own codemode (which has no `models` namespace). There are no doors in the
+worker, so a deferred tool comes back only by search or by a successful `start_review_wave`. To
+keep a builtin out of the worker entirely, add `"extensions": ["-builtin:tool-search"]` (or
+`-builtin:codemode`) to the repo's `.pi/settings.json`; a project extension that registers its own
+`codemode` or `tool_search` replaces the builtin (the worker prints the loader's warning). **MCP is
+off in the worker:** it loads no MCP support, so `.pi/mcp.json` has no effect there and a project
+extension's `registerMcpServer` is reported on stderr, not connected. A project extension that
+brings its own MCP support is outside that — it connects servers on its own account.
 
 Pi owns its builtins (`read`, `edit`, `write`, `bash`, `grep`, `find`, and related host tools); this
 reference does not redefine them. Stage scoping is fail-open at compatibility boundaries: a bare
