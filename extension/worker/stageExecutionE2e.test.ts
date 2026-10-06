@@ -28,9 +28,12 @@ import {
   bareModelRuntime,
   fakePerkRouter,
   fauxModelRuntime,
+  plantWorkerModelTools,
   plantWorkerProviderExtension,
+  recordingClassifier,
   scaffoldWorkerWorktree,
 } from "../testing/harness.ts";
+import { MODEL_CALL_REFUSAL_PREFIX, WORKER_CODEMODE_MODELS } from "./modelCallPolicy.ts";
 // Test-side adapter import: the E2E tier mints the nominal request deliberately (an injected
 // runtime + pattern ride the SAME production `defaultCreateRuntime` path).
 import { type DriveRuntimeLike, defaultCreateRuntime, WorkerModelRequest } from "./sdkAdapter.ts";
@@ -90,6 +93,13 @@ async function runDrive(opts: {
   extraSettings?: Record<string, unknown>;
   /** Plant a project-tier provider extension into the scaffold (`plantWorkerProviderExtension`). */
   plantProviders?: Parameters<typeof plantWorkerProviderExtension>[1];
+  /** Plant the model-using tools / Pi's real codemode into the scaffold (`plantWorkerModelTools`). */
+  plantModelTools?: Parameters<typeof plantWorkerModelTools>[1];
+  /**
+   * Called with the default faux runtime right after it is built (the `model`-absent path), so a
+   * scenario can register its recording classifier on it before the drive.
+   */
+  onModelRuntime?: (modelRuntime: ModelRuntime) => void;
 }) {
   const runId = `01JE2E${String(runCounter++).padStart(20, "0")}`;
   const cwd = scaffoldWorkerWorktree({
@@ -101,6 +111,7 @@ async function runDrive(opts: {
     extraSettings: opts.extraSettings,
   });
   if (opts.plantProviders !== undefined) plantWorkerProviderExtension(cwd, opts.plantProviders);
+  if (opts.plantModelTools !== undefined) plantWorkerModelTools(cwd, opts.plantModelTools);
 
   const savedEnv = new Map<string, string | undefined>();
   const setEnv = (key: string, value: string) => {
@@ -121,6 +132,7 @@ async function runDrive(opts: {
     });
   } else {
     const reg = await fauxModelRuntime();
+    opts.onModelRuntime?.(reg.modelRuntime);
     reg.setResponses(opts.responses ?? []);
     const model = reg.getModel() as { provider: string; id: string };
     request = new WorkerModelRequest({
@@ -779,4 +791,419 @@ test("e2e: a `:thinking` suffix on --model survives the reorder → session thin
   assert.equal(outcome.status, "completed");
   assert.equal(observed.model, `${EXT_PROVIDER}/m-1`);
   assert.equal(observed.thinkingLevel, "high");
+});
+
+// --- Tool-driven model usage: counted once, bounded at the worker's own boundaries --------------
+//
+// A recording faux classifier is registered on the drive's injected runtime (`onModelRuntime`);
+// a planted extension supplies a model-using tool and/or Pi's REAL codemode
+// (`plantWorkerModelTools`). Every scenario asserts the accounting identity against Pi's own
+// census: `outcome.budget.tokens === getSessionStats().tokens.input + output`.
+
+const CLASSIFIER = { provider: "faux-classifier", id: "clf-1" };
+const REF = JSON.stringify(CLASSIFIER);
+const CTX =
+  '{ state: {}, questions: { q: { type: "bool", instructions: "x", criteria: { true: "t", false: "f" } } } }';
+
+/** The session surfaces the accounting scenarios read (structural; Pi's `AgentSession`). */
+interface CensusSession {
+  getSessionStats(): { tokens: { input: number; output: number } };
+  readonly cacheWarmingStatus: unknown;
+  subscribe(listener: (event: unknown) => void): () => void;
+}
+
+const censusSession = (runtime: DriveRuntimeLike): CensusSession =>
+  runtime.session as unknown as CensusSession;
+
+/** Pi's own census of the session's fresh work (input + output over every usage record). */
+function piCensus(runtime: DriveRuntimeLike): number {
+  const { tokens } = censusSession(runtime).getSessionStats();
+  return tokens.input + tokens.output;
+}
+
+/** Σ input + output over the branch's message entries of `role`. */
+function usageSum(runtime: DriveRuntimeLike, role: "assistant" | "toolResult"): number {
+  let sum = 0;
+  for (const entry of runtime.session.sessionManager.getBranch()) {
+    const e = entry as {
+      type?: string;
+      message?: { role?: string; usage?: { input?: number; output?: number } };
+    };
+    if (e.type !== "message" || e.message?.role !== role) continue;
+    sum += (e.message.usage?.input ?? 0) + (e.message.usage?.output ?? 0);
+  }
+  return sum;
+}
+
+const toolResultUsageSum = (runtime: DriveRuntimeLike): number => usageSum(runtime, "toolResult");
+const assistantUsageSum = (runtime: DriveRuntimeLike): number => usageSum(runtime, "assistant");
+
+/** A raw `tool_execution_update` slice (the codemode progress partials). */
+interface ToolUpdate {
+  toolName: string;
+  partialResult?: { details?: { calls?: { status: string }[] } } & Record<string, unknown>;
+}
+
+/** An `onRuntime` that keeps the production runtime and records codemode progress partials. */
+function observeAccounting(): {
+  runtime: () => DriveRuntimeLike;
+  updates: ToolUpdate[];
+  onRuntime: (runtime: DriveRuntimeLike) => void;
+} {
+  let observed: DriveRuntimeLike | undefined;
+  const updates: ToolUpdate[] = [];
+  return {
+    runtime: () => {
+      assert.ok(observed, "the production runtime was observed");
+      return observed;
+    },
+    updates,
+    onRuntime: (runtime) => {
+      observed = runtime;
+      censusSession(runtime).subscribe((event) => {
+        const e = event as { type?: string } & ToolUpdate;
+        if (e.type === "tool_execution_update" && e.toolName === "codemode") updates.push(e);
+      });
+    },
+  };
+}
+
+/** The shared well-formedness + accounting identity every scenario here asserts. */
+function assertAccounted(
+  result: { outcome: Awaited<ReturnType<typeof runDrive>>["outcome"]; events: RunEvent[] },
+  runtime: DriveRuntimeLike,
+): void {
+  assertMonotonicSeq(result.events);
+  const finished = result.events.at(-1);
+  assert.ok(finished?.kind === "run_finished", "a terminal run_finished");
+  assert.deepEqual(finished.outcome, result.outcome);
+  assert.equal(
+    result.outcome.budget.tokens,
+    piCensus(runtime),
+    "budget.tokens equals Pi's own census (getSessionStats input + output)",
+  );
+}
+
+/** A codemode tool call carrying `code`. */
+const codemodeCall = (code: string) =>
+  fauxAssistantMessage([fauxToolCall("codemode", { code })], { stopReason: "toolUse" as const });
+
+const submitCall = () =>
+  fauxAssistantMessage([fauxToolCall("submit", {})], { stopReason: "toolUse" as const });
+
+const codemodeOutcomes = (events: RunEvent[]) =>
+  events.flatMap((e) => (e.kind === "tool_outcome" && e.tool === "codemode" ? [e] : []));
+
+test("e2e: MODEL-TOOL direct — a model-using tool's reported usage is counted once; cache warming is off", async () => {
+  const classifier = await recordingClassifier({
+    ...CLASSIFIER,
+    usage: { input: 700, output: 300 },
+  });
+  const observed = observeAccounting();
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      fauxAssistantMessage([fauxToolCall("faux_classify_tool", {})], { stopReason: "toolUse" }),
+      submitCall(),
+      idle(),
+    ],
+    plantModelTools: { tool: CLASSIFIER },
+    onModelRuntime: (runtime) => runtime.registerNativeProvider(classifier.provider),
+    onRuntime: observed.onRuntime,
+  });
+  const runtime = observed.runtime();
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assert.deepEqual(
+    classifier.calls,
+    [{ seq: 1, abortedAtStart: false, stopReason: "stop", usage: { input: 700, output: 300 } }],
+    "exactly one classifier request",
+  );
+  assert.equal(toolResultUsageSum(runtime), 1_000, "the tool result carries the classifier usage");
+  assert.equal(
+    result.outcome.budget.tokens - assistantUsageSum(runtime),
+    1_000,
+    "the budget counted the tool usage exactly once",
+  );
+  assert.deepEqual(
+    censusSession(runtime).cacheWarmingStatus,
+    { state: "inactive", reason: "cache warming disabled" },
+    "Pi reports warming disabled for the worker session",
+  );
+  assertAccounted(result, runtime);
+});
+
+test("e2e: MODEL-TOOL nested — a model-using tool called from a codemode script is counted once", async () => {
+  const classifier = await recordingClassifier({
+    ...CLASSIFIER,
+    usage: { input: 700, output: 300 },
+  });
+  const observed = observeAccounting();
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      codemodeCall('await tools.faux_classify_tool({});\nreturn "ok";'),
+      submitCall(),
+      idle(),
+    ],
+    plantModelTools: { tool: CLASSIFIER, codemode: { models: false } },
+    defaultTools: ["+codemode"],
+    onModelRuntime: (runtime) => runtime.registerNativeProvider(classifier.provider),
+    onRuntime: observed.onRuntime,
+  });
+  const runtime = observed.runtime();
+  assert.equal(result.outcome.status, "completed");
+  const outcomes = result.events.flatMap((e) =>
+    e.kind === "tool_outcome" ? [{ tool: e.tool, ok: e.ok }] : [],
+  );
+  assert.ok(
+    outcomes.some((o) => o.tool === "faux_classify_tool" && o.ok),
+    "the nested tool_execution_end really fired (narrative only)",
+  );
+  assert.ok(
+    outcomes.some((o) => o.tool === "codemode" && o.ok),
+    "the script completed",
+  );
+  assert.equal(classifier.calls.length, 1);
+  assert.equal(toolResultUsageSum(runtime), 1_000, "Pi folded the nested usage onto the script");
+  assert.equal(
+    result.outcome.budget.tokens - assistantUsageSum(runtime),
+    1_000,
+    "counted once — the nested end is never summed",
+  );
+  assertAccounted(result, runtime);
+});
+
+test("e2e: CODEMODE classify across the cap (test-only models:true) — counted once at turn_end, no further request, no usage on partials", async () => {
+  const classifier = await recordingClassifier({
+    ...CLASSIFIER,
+    usage: { input: 300_000, output: 100_000 },
+    failCall: 3,
+  });
+  const observed = observeAccounting();
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      codemodeCall(
+        `const m = models;\nfor (let i = 0; i < 5; i++) await m.classify(${REF}, ${CTX});\nreturn "ran";`,
+      ),
+      submitCall(),
+      idle(),
+    ],
+    plantModelTools: { codemode: { models: true } },
+    defaultTools: ["+codemode"],
+    budget: BUDGET,
+    onModelRuntime: (runtime) => runtime.registerNativeProvider(classifier.provider),
+    onRuntime: observed.onRuntime,
+  });
+  const runtime = observed.runtime();
+  assert.equal(result.outcome.status, "budget_exhausted");
+  assert.equal(result.outcome.terminal_signal, "budget");
+  // No mid-script trip exists: all five ran although the cap was crossed during the third.
+  assert.deepEqual(
+    classifier.calls.map((c) => [c.stopReason, c.abortedAtStart]),
+    [
+      ["stop", false],
+      ["stop", false],
+      ["error", false],
+      ["stop", false],
+      ["stop", false],
+    ],
+  );
+  assert.equal(toolResultUsageSum(runtime), 5 * 400_000, "the failed call's usage counts too");
+  assert.equal(result.providerCalls, 1, "the gate ended the run: no provider request past the cap");
+  assert.equal(result.outcome.budget.turns, 1);
+  // The retirement-condition pin: progress partials carry call rows, never usage.
+  assert.ok(
+    observed.updates.some((u) => (u.partialResult?.details?.calls?.length ?? 0) > 0),
+    "codemode published progress partials with call rows",
+  );
+  assert.ok(
+    observed.updates.every((u) => u.partialResult === undefined || !("usage" in u.partialResult)),
+    "no partial carries usage — when Pi starts reporting it, revisit WORKER_CODEMODE_MODELS",
+  );
+  assertAccounted(result, runtime);
+});
+
+/** Abort the drive once `barrier` resolves (never dangles: raced against the drive itself). */
+async function abortOnBarrier(
+  drive: Promise<Awaited<ReturnType<typeof runDrive>>>,
+  barrier: Promise<void>,
+  controller: AbortController,
+): Promise<{ reached: boolean; result: Awaited<ReturnType<typeof runDrive>> }> {
+  const reached = await Promise.race([barrier.then(() => true), drive.then(() => false)]);
+  if (reached) controller.abort();
+  return { reached, result: await drive };
+}
+
+test("e2e: mid-script EXTERNAL abort with a call in flight — the held call is aborted, no call starts after the abort", async () => {
+  const classifier = await recordingClassifier({
+    ...CLASSIFIER,
+    usage: { input: 7, output: 3 },
+    hold: { from: 3, maxMs: 20_000 },
+  });
+  const observed = observeAccounting();
+  const controller = new AbortController();
+  const drive = runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      codemodeCall(
+        `const m = models;\nfor (let i = 0; i < 50; i++) await m.classify(${REF}, ${CTX});`,
+      ),
+      submitCall(),
+      idle(),
+    ],
+    plantModelTools: { codemode: { models: true } },
+    defaultTools: ["+codemode"],
+    signal: controller.signal,
+    onModelRuntime: (runtime) => runtime.registerNativeProvider(classifier.provider),
+    onRuntime: observed.onRuntime,
+  });
+  const { reached, result } = await abortOnBarrier(drive, classifier.started(3), controller);
+  const runtime = observed.runtime();
+  assert.equal(reached, true, "the third call reached the provider before the abort");
+  assert.equal(result.outcome.status, "aborted");
+  assert.equal(result.outcome.terminal_signal, "external_abort");
+  assert.deepEqual(
+    classifier.calls.map((c) => [c.stopReason, c.abortedAtStart]),
+    [
+      ["stop", false],
+      ["stop", false],
+      ["aborted", false],
+    ],
+    "zero provider starts after the abort",
+  );
+  assert.equal(toolResultUsageSum(runtime), 20, "the completed calls' usage Pi retained counts");
+  assert.deepEqual(
+    codemodeOutcomes(result.events).map((o) => o.ok),
+    [false],
+    "the script ended aborted",
+  );
+  assert.equal(result.providerCalls, 1);
+  assert.ok(result.outcome.budget.elapsed_ms < 10_000, "released by the abort, not the guard");
+  assertAccounted(result, runtime);
+});
+
+test("e2e: mid-script WALL-CLOCK exhaustion — the watchdog aborts a running script", async () => {
+  const classifier = await recordingClassifier({
+    ...CLASSIFIER,
+    usage: { input: 7, output: 3 },
+    delayMs: 50,
+  });
+  const observed = observeAccounting();
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      codemodeCall(
+        `const m = models;\nfor (let i = 0; i < 400; i++) await m.classify(${REF}, ${CTX});`,
+      ),
+      submitCall(),
+      idle(),
+    ],
+    plantModelTools: { codemode: { models: true } },
+    defaultTools: ["+codemode"],
+    budget: { ...BUDGET, wallClockMs: 1_500 },
+    onModelRuntime: (runtime) => runtime.registerNativeProvider(classifier.provider),
+    onRuntime: observed.onRuntime,
+  });
+  const runtime = observed.runtime();
+  assert.equal(result.outcome.status, "budget_exhausted");
+  assert.equal(result.outcome.terminal_signal, "budget");
+  // Timing-tolerant: how many calls ran depends on host load; the shape does not.
+  const calls = classifier.calls;
+  assert.ok(calls.length < 400, "the script was stopped");
+  assert.equal(calls.filter((c) => c.abortedAtStart).length, 0, "no call started after the abort");
+  assert.ok(calls.filter((c) => c.stopReason === "aborted").length <= 1, "at most one in flight");
+  assert.ok(
+    calls.every((c) => c.stopReason === "stop" || c.stopReason === "aborted"),
+    "every other call completed normally",
+  );
+  assert.equal(result.providerCalls, 1);
+  assert.ok(result.outcome.budget.elapsed_ms < 10_000, "far below the unaborted ~20 s");
+  assertAccounted(result, runtime);
+});
+
+test("e2e: queued concurrency after an abort — the queued calls never reach the provider", async () => {
+  const classifier = await recordingClassifier({
+    ...CLASSIFIER,
+    usage: { input: 7, output: 3 },
+    hold: { from: 1, maxMs: 20_000 },
+  });
+  const observed = observeAccounting();
+  const controller = new AbortController();
+  const drive = runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      codemodeCall(
+        `const m = models;\nawait Promise.all(Array.from({ length: 8 }, () => m.classify(${REF}, ${CTX})));`,
+      ),
+      submitCall(),
+      idle(),
+    ],
+    plantModelTools: { codemode: { models: true } },
+    defaultTools: ["+codemode"],
+    signal: controller.signal,
+    onModelRuntime: (runtime) => runtime.registerNativeProvider(classifier.provider),
+    onRuntime: observed.onRuntime,
+  });
+  // Four slots full, four calls queued in codemode's limiter.
+  const { reached, result } = await abortOnBarrier(drive, classifier.started(4), controller);
+  const runtime = observed.runtime();
+  assert.equal(reached, true);
+  assert.equal(result.outcome.status, "aborted");
+  assert.equal(result.outcome.terminal_signal, "external_abort");
+  assert.deepEqual(
+    classifier.calls.map((c) => [c.stopReason, c.abortedAtStart]),
+    [
+      ["aborted", false],
+      ["aborted", false],
+      ["aborted", false],
+      ["aborted", false],
+    ],
+    "the four queued calls were refused before reaching the provider",
+  );
+  assert.equal(toolResultUsageSum(runtime), 0);
+  assertAccounted(result, runtime);
+});
+
+test("e2e: PRODUCTION SHAPE — models:WORKER_CODEMODE_MODELS + the typed refusal; refusals are non-terminal", async () => {
+  const classifier = await recordingClassifier({ ...CLASSIFIER, usage: { input: 7, output: 3 } });
+  const observed = observeAccounting();
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      codemodeCall('await models.generateImages({ provider: "x", id: "y" }, { input: [] });'),
+      codemodeCall(`await models.classify(${REF}, ${CTX});`),
+      codemodeCall(`const m = models;\nreturn await m.classify(${REF}, ${CTX});`),
+      submitCall(),
+      idle(),
+    ],
+    plantModelTools: { codemode: { models: WORKER_CODEMODE_MODELS } },
+    defaultTools: ["+codemode"],
+    onModelRuntime: (runtime) => runtime.registerNativeProvider(classifier.provider),
+    onRuntime: observed.onRuntime,
+  });
+  const runtime = observed.runtime();
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  const outcomes = codemodeOutcomes(result.events);
+  assert.deepEqual(
+    outcomes.map((o) => o.ok),
+    [false, false, false],
+  );
+  const [images, classify, aliased] = outcomes.map((o) => o.summary ?? "");
+  assert.ok(images?.includes(`${MODEL_CALL_REFUSAL_PREFIX}image_generation)`), images);
+  assert.ok(classify?.includes(`${MODEL_CALL_REFUSAL_PREFIX}classifier)`), classify);
+  // The aliased call passes the advisory screen; the hard layer (no `models` global) holds.
+  assert.ok(aliased?.includes("models") && aliased.includes("is not defined"), aliased);
+  assert.equal(classifier.calls.length, 0, "no classifier request was ever made");
+  assert.equal(toolResultUsageSum(runtime), 0);
+  assertAccounted(result, runtime);
 });

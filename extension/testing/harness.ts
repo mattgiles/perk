@@ -635,6 +635,192 @@ export default function (pi) {
   return path;
 }
 
+/** One classifier request the recording fixture received (`stopReason` is set when it ends). */
+export interface ClassifyCall {
+  /** 1-based arrival order at the provider. */
+  seq: number;
+  /** The request's signal was already aborted when it reached the provider. */
+  abortedAtStart: boolean;
+  stopReason?: "stop" | "error" | "aborted";
+  usage?: { input: number; output: number };
+}
+
+/** Resolve after `ms`, or as soon as `signal` aborts (timer and listener both released). */
+function waitOrAbort(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * A RECORDING faux classifier provider: a real pi-ai `createProvider({ classifiers })` built from
+ * pi-ai as pi-coding-agent sees it, for `ModelRuntime.registerNativeProvider` on the drive's
+ * injected runtime (the same seam `fauxModelRuntime` uses for chat). In-process and in-memory:
+ * every request reaching the provider is appended to `calls`; `started(seq)` is a barrier that
+ * resolves once request `seq` has arrived (immediately if it already has) and never rejects —
+ * race it against the drive so it can never dangle.
+ *
+ * Auth resolves unconditionally (configured against any credential store). Each request reports
+ * the fixed `usage`, waits (`delayMs`, default 0; or — for `seq >= hold.from` — until its signal
+ * aborts, `hold.maxMs` being only a hang guard), then ends `aborted` without usage when its signal
+ * aborted during the wait, `error` WITH usage when `seq === failCall`, else `stop` with usage.
+ */
+export async function recordingClassifier(opts: {
+  provider: string;
+  id: string;
+  usage: { input: number; output: number };
+  delayMs?: number;
+  failCall?: number;
+  hold?: { from: number; maxMs: number };
+}): Promise<{
+  provider: Parameters<ModelRuntime["registerNativeProvider"]>[0];
+  model: { provider: string; id: string };
+  calls: ClassifyCall[];
+  started(seq: number): Promise<void>;
+}> {
+  const piAi = await loadSdkPiAi();
+  const api = "faux-classify";
+  const calls: ClassifyCall[] = [];
+  const waiters = new Map<number, (() => void)[]>();
+  const usage = {
+    input: opts.usage.input,
+    output: opts.usage.output,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: opts.usage.input + opts.usage.output,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  const classify = async (
+    model: { provider: string; id: string },
+    _context: unknown,
+    options?: { signal?: AbortSignal },
+  ) => {
+    const signal = options?.signal;
+    const call: ClassifyCall = { seq: calls.length + 1, abortedAtStart: signal?.aborted === true };
+    calls.push(call);
+    for (const release of waiters.get(call.seq) ?? []) release();
+    waiters.delete(call.seq);
+    const held = opts.hold !== undefined && call.seq >= opts.hold.from;
+    await waitOrAbort(held && opts.hold ? opts.hold.maxMs : (opts.delayMs ?? 0), signal);
+    const base = {
+      api,
+      provider: model.provider,
+      model: model.id,
+      answers: {},
+      timestamp: Date.now(),
+    };
+    if (signal?.aborted) {
+      call.stopReason = "aborted";
+      return { ...base, stopReason: "aborted" as const, errorMessage: "aborted" };
+    }
+    call.usage = { ...opts.usage };
+    if (call.seq === opts.failCall) {
+      call.stopReason = "error";
+      return { ...base, usage, stopReason: "error" as const, errorMessage: "faux failure" };
+    }
+    call.stopReason = "stop";
+    return { ...base, usage, stopReason: "stop" as const };
+  };
+  const provider = piAi.createProvider({
+    id: opts.provider,
+    auth: { apiKey: { name: "fixture", resolve: async () => ({ auth: { apiKey: "faux" } }) } },
+    models: [
+      {
+        type: "classifier",
+        id: opts.id,
+        name: opts.id,
+        api,
+        provider: opts.provider,
+        baseUrl: "",
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 8_192,
+      },
+    ],
+    classifiers: { [api]: { classify } },
+  });
+  return {
+    provider: provider as Parameters<ModelRuntime["registerNativeProvider"]>[0],
+    model: { provider: opts.provider, id: opts.id },
+    calls,
+    started: (seq) =>
+      calls.length >= seq
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            waiters.set(seq, [...(waiters.get(seq) ?? []), resolve]);
+          }),
+  };
+}
+
+/**
+ * Plant `<cwd>/.pi/extensions/worker-model-tools.ts` (returns the path): the model-using tools a
+ * worker drive exercises through Pi's own loader. `tool` registers `faux_classify_tool`, which
+ * calls `ctx.modelRegistry.classify` on the named classifier and reports the result's `usage` on
+ * its own tool result (failing unless the call stopped normally). `codemode` registers Pi's REAL
+ * `createCodemodeExtension({ mode: "on", models })` — the loader's alias map resolves the import to
+ * the host package, so the sandbox's worker/wasm paths resolve from it; activate it with the
+ * scaffold's `defaultTools: ["+codemode"]` (it registers inactive).
+ */
+export function plantWorkerModelTools(
+  cwd: string,
+  opts: { tool?: { provider: string; id: string }; codemode?: { models: boolean } },
+): string {
+  const dir = join(cwd, ".pi", "extensions");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "worker-model-tools.ts");
+  const tool = opts.tool
+    ? `
+  pi.registerTool({
+    name: "faux_classify_tool",
+    label: "faux_classify_tool",
+    description: "Classify with the fixture classifier model.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+    async execute(_id, _params, signal, _onUpdate, ctx) {
+      const model = ctx.modelRegistry.getModelOfType(
+        "classifier",
+        ${JSON.stringify(opts.tool.provider)},
+        ${JSON.stringify(opts.tool.id)},
+      );
+      const r = await ctx.modelRegistry.classify(
+        model,
+        { state: {}, questions: { q: { type: "bool", instructions: "x", criteria: { true: "t", false: "f" } } } },
+        { signal },
+      );
+      return {
+        content: [{ type: "text", text: r.stopReason }],
+        details: { stopReason: r.stopReason },
+        ...(r.usage ? { usage: r.usage } : {}),
+        ...(r.stopReason === "stop" ? {} : { isError: true }),
+      };
+    },
+  });
+`
+    : "";
+  const codemode = opts.codemode
+    ? `
+  createCodemodeExtension({ mode: "on", models: ${JSON.stringify(opts.codemode.models)} })(pi);
+`
+    : "";
+  const source = `// Planted by the worker e2e tier (extension/testing/harness.ts).
+${opts.codemode ? 'import { createCodemodeExtension } from "@earendil-works/pi-coding-agent";\n' : ""}
+export default function (pi) {${tool}${codemode}}
+`;
+  writeFileSync(path, source, "utf8");
+  return path;
+}
+
 /**
  * A hermetic `ModelRuntime` with NO provider seeded — any non-builtin provider must come from a
  * planted extension's registration. Hermetic: an in-memory credential store pre-populated with one
@@ -901,7 +1087,7 @@ export async function loadPerkSession(opts: {
     const { errors } = loader.getExtensions();
     if (errors.length > 0) {
       throw new Error(
-        `perk harness: extension load failed \u2014 ${errors.map((e) => `${e.path}: ${e.error}`).join("; ")}`,
+        `perk harness: extension load failed — ${errors.map((e) => `${e.path}: ${e.error}`).join("; ")}`,
       );
     }
   }
