@@ -32,6 +32,20 @@ such refusal: Pi uses it only when its provider has a configured credential, and
 back to another available model (Pi's per-provider defaults, then the first available). The
 worker refuses only when no model is available at all.
 
+The worker's **token budget** counts fresh work from Pi's own usage records: each turn's assistant
+input and output, plus any usage a tool reports on its result. Pi folds the model calls nested
+inside a codemode script into the script's result, so nothing counts twice, and failed calls that
+used tokens still count. Cache reads and writes and reasoning breakdowns are not counted. The
+worker turns Pi's prompt-cache warming off for its own session; your interactive sessions keep
+your setting. Codemode scripts in the worker's own codemode have **no `models` namespace** this
+release. Pi reports a script's model usage only when the script ends, so a running script cannot
+be held to the budget: classifier calls are unavailable there, and image generation is refused. A
+script that still names `models.classify(` or `models.generateImages(` is refused before it runs,
+with a reason that names the call; the model can carry on with ordinary tools. This is not
+configurable. Tools your own project extensions register, including a codemode they register
+themselves, are outside this rule: their model usage is counted at the end of each turn and
+bounded by the worker's turn, token, and wall-clock limits.
+
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `default` | string (`provider/id`) | _(Pi default)_ | Must be an **exact** `provider/id` pair; Pi's settings default is an exact provider-and-id lookup, not a fuzzy match. It splits on the **first** `/`, so OpenRouter ids retain inner slashes (`openrouter/meta-llama/llama-3-70b` becomes provider `openrouter`, id `meta-llama/llama-3-70b`). A `:thinking` suffix is accepted. |

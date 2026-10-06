@@ -147,6 +147,10 @@ A codemode script calling a perk tool receives:
   (`<tool> failed: <message>`) on a soft failure — catch it with `try`/`catch` and the script
   continues.
 
+In the headless worker, the worker's own codemode has no `models` namespace, and a script that
+names a classifier or image-generation call is refused before it runs; see the worker rules in
+[Models and compaction](../configuration/models-and-compaction.md#models).
+
 Terminal, interactive and orchestration tools are model-only: never callable from a script or
 another tool, and never given an output schema.
 

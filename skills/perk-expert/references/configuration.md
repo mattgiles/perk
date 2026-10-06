@@ -321,6 +321,19 @@ model turn, with guidance naming the provider and the credential sources (env AP
 a configured credential, else falls back to another available model (pi's per-provider defaults →
 first available); the worker refuses only when no model is available at all.
 
+The worker's **token budget** counts fresh work from pi's usage records, once each: per turn the
+assistant's input + output **plus** every tool result's reported usage (pi folds a codemode
+script's nested model calls into the script's result; failed calls' usage counts). Cache
+reads/writes and reasoning breakdowns are excluded, and the worker turns pi's prompt-cache warming
+**off** for its own session (interactive sessions keep the user's setting). The worker's own
+codemode has **no `models` namespace** this release (pi reports a script's model usage only at
+script end, so a running script cannot be held to the budget): classifier calls are unavailable
+and image generation is refused — a script naming `models.classify(` / `models.generateImages(`
+is refused before it runs with a typed reason (`perk worker: model call refused (classifier |
+image_generation) — …`). Not configurable. Tools a project's own extensions register (including a
+codemode they register themselves) are outside the rule: their model usage is counted at turn end
+and bounded by the turn, token and wall-clock limits.
+
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `default` | string (`provider/id`) | _(pi default)_ | Must be an **exact** `provider/id` pair (pi's settings default is an exact lookup). Split on the **first** `/`, so openrouter ids keep their inner slashes. A `:thinking` suffix is accepted. |
