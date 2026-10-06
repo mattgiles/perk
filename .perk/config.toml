@@ -110,7 +110,11 @@ trusted = true
 # target is carried as the two complementary tier rows (`test-py-fast` + `test-py-slow`, same glob)
 # so the concurrent run overlaps the slow build/integration cohort with the rest: their union is
 # exactly what `just test-py` collects (`tests/test_pytest_tiers.py` guards both the selection and
-# this wiring), so the gate's scope is unchanged — no case is skipped.
+# this wiring), so the gate's scope is unchanged — no case is skipped. The node:test target is
+# different, by design: the `test-js` row runs only the FAST tier (`just test-js-fast`). The slow
+# tier (the measured files listed in `extension/testing/jsTestTiers.ts`) would push the run-all
+# report far past its time budget, so it runs in `just test-js` / `just test` / GitHub CI, and ad
+# hoc via `just test-js-slow` — an in-session scope cut that `jsTestTiers.test.ts` pins.
 [[ci.checks]]
 name = "lint-py"
 command = "just lint-py"
@@ -148,7 +152,7 @@ glob = "*.py"
 
 [[ci.checks]]
 name = "test-js"
-command = "just test-js"
+command = "just test-js-fast"
 glob = "*.ts,*.tsx,*.js,*.jsx,*.mjs,docs/site/**,package.json,package-lock.json"
 
 [[ci.checks]]

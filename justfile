@@ -98,6 +98,17 @@ test-py-slow *args:
 test-js:
     node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs" "packages/perk-dev/**/*.test.mjs"
 
+# run the FAST node:test tier: every `test-js` file except the slow tier — the in-session
+# `run_ci` gate's JS row. Extra `node --test` flags pass through (e.g. --test-name-pattern=…).
+test-js-fast *args:
+    node extension/testing/runJsTestTier.ts fast {{args}}
+
+# run the SLOW node:test tier: the measured files whose own wall time dominates the suite (listed
+# in extension/testing/jsTestTiers.ts). Ad hoc locally; `test-js`, `test` and GitHub CI always
+# run it. Same flag passthrough.
+test-js-slow *args:
+    node extension/testing/runJsTestTier.ts slow {{args}}
+
 # run the test suite (python: pytest; extension TS + docs-site .mjs + perk-dev .mjs: node:test;
 # docs site: static build + post-build checks)
 test *args:

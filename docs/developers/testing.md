@@ -1,8 +1,8 @@
 # Testing perk
 
-This page is a **how-to guide**: how to run perk's Python test suite whole or by tier, how to
-pass pytest arguments through `just`, what the full gates actually run, and how to time a tier
-honestly.
+This page is a **how-to guide**: how to run perk's Python and node:test suites whole or by tier,
+how to pass pytest arguments through `just`, what the full gates actually run, and how to time a
+tier honestly.
 
 ## The suites and the gates
 
@@ -31,6 +31,15 @@ gate.
 The only submission gate in a perk session is one green **run-all** `run_ci` report (AGENTS.md's
 rule). A tier is a focused local selection while iterating — never a substitute for the run-all.
 
+The node:test suite is tiered differently. `just test-js`, `just test` and GitHub CI run every
+file. perk's in-session `run_ci` carries one `test-js` row that runs only the **fast tier**
+(`just test-js-fast`); the **slow tier** (`just test-js-slow`) is a measured list of files whose
+own wall time dominates the suite — real Pi sessions over real git repositories — and is
+left out of the in-session gate so the run-all report stays inside its time budget. That is a
+deliberate scope cut, unlike the Python tiers: run `just test-js-slow` yourself when you work
+near those files; the PR's GitHub CI runs it either way. See
+[The node:test tiers](#the-nodetest-tiers).
+
 ## Recipes
 
 | Command | Selection |
@@ -40,6 +49,9 @@ rule). A tier is a focused local selection while iterating — never a substitut
 | `just test-py-slow` | Default cases selected by `-m slow` |
 | `just test`, GitHub CI, perk's Python gate | Full default Python suite under existing gate scope rules |
 | `just prose-review-test` | Existing separately opt-in prose suite |
+| `just test-js` | Full node:test suite (all three globs) |
+| `just test-js-fast` | node:test files outside the slow list — the in-session `run_ci` JS row |
+| `just test-js-slow` | node:test files on the slow list — ad hoc, and inside every full gate |
 
 `test-py-fast` and `test-py-slow` are complementary selections of the same suite: together they
 collect exactly what `test-py` collects, and neither is a different regression standard.
@@ -75,6 +87,21 @@ silently ignored — pytest-dev/pytest#14442; the flag keeps the declared `pytes
 the shared build: it walks the post-deselection session items and fails on any unmarked consumer
 of `built_distributions`. It is itself unmarked, so it runs in the full gates and in the fast tier;
 the slow tier neither needs nor runs it.
+
+## The node:test tiers
+
+`extension/testing/jsTestTiers.ts` holds the suite's globs and the slow list;
+`extension/testing/runJsTestTier.ts` runs one tier with the full recipe's flags (dot reporter,
+2× core concurrency) over the tier's explicit file list. Extra `node --test` flags pass through
+the tier recipes before the files, e.g. `just test-js-slow --test-name-pattern=submit`.
+
+A file joins the slow list when its own wall time is ≥ 20 s in a full-suite run under the recipe's
+concurrency; the measurement behind the current list is recorded in
+`docs/design/archive/js-test-tiers.md`. Add a file in the change that makes it slow. Like the
+Python marker, the list is a **selection**: `extension/testing/jsTestTiers.test.ts` pins that
+every entry is a real suite file, that the tiers are disjoint and together are exactly the full
+suite, that `test-js` and `test` still pass every glob, and that the in-session gate runs the fast
+tier and nothing broader.
 
 ## Passing arguments
 
