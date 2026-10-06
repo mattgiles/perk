@@ -14,7 +14,7 @@
 // surface; the caller-side guarantee is the import-edge ban plus nominal minting, nothing
 // stronger.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // pi-ai's `ModelThinkingLevel` (`"off" | minimal | … | xhigh`) is the union `resolveCliModel`
@@ -26,13 +26,30 @@ import {
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
+  type InlineExtension,
   ModelRuntime,
   resolveCliModel,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { toolCallRefusalHook } from "../pi/v1/toolCallRefusal.ts";
+import { codemodeCallRefusal } from "./modelCallPolicy.ts";
 
 // --- structural shapes (kept minimal so pure helpers stay offline-testable) ---------------------
+
+/**
+ * The slice of a Pi usage record the budget reads (assistant messages and tool results alike).
+ * Only `input + output` is summed. `reasoning` is a provider-reported breakdown that is a
+ * **subset of `output`** on every pi-ai provider that populates it (anthropic `thinking_tokens`,
+ * google `thoughtsTokenCount` folded into `output`, openai `reasoning_tokens` inside completion/
+ * output tokens — verified @ pi-ai 0.80.5), so it is deliberately EXCLUDED from the budget sum:
+ * adding it would double-count. Cache reads/writes are not fresh work and are not read at all.
+ */
+export interface UsageSlice {
+  input?: number;
+  output?: number;
+  reasoning?: number;
+}
 
 /** The slice of an agent session event the worker reads (structural — see agent-session.d.ts). */
 export interface DriveEvent {
@@ -44,15 +61,16 @@ export interface DriveEvent {
     role?: string;
     stopReason?: string;
     errorMessage?: string;
-    /**
-     * Assistant token usage. `reasoning` is a provider-reported breakdown that is a **subset of
-     * `output`** on every pi-ai provider that populates it (anthropic `thinking_tokens`, google
-     * `thoughtsTokenCount` folded into `output`, openai `reasoning_tokens` inside completion/
-     * output tokens — verified @ pi-ai 0.80.5), so it is deliberately EXCLUDED from the budget
-     * sum: adding it would double-count.
-     */
-    usage?: { input?: number; output?: number; reasoning?: number };
+    /** Assistant token usage (see `UsageSlice`). */
+    usage?: UsageSlice;
   };
+  /**
+   * `turn_end` only: the turn's tool-result messages. Each `usage` is the tool's own reported
+   * usage with every nested call's usage already folded in by Pi (a codemode script's `models.*`
+   * aggregate, a nested `ctx.executeTool` roll-up) — the one place tool-driven model usage is
+   * read, so nested `tool_execution_end` events are never summed.
+   */
+  toolResults?: { usage?: UsageSlice }[];
 }
 
 /** The session surface the worker drives (structurally satisfied by pi's `AgentSession`). */
@@ -82,6 +100,7 @@ export interface DriveSessionLike {
 /** The slice of pi-agent-core's `AgentTurnContext` the turn gate reads. */
 export interface DriveTurn {
   message?: DriveEvent["message"];
+  toolResults?: DriveEvent["toolResults"];
 }
 
 /** The runtime surface (structurally satisfied by pi's `AgentSessionRuntime`). */
@@ -111,11 +130,9 @@ export type StageEvent =
   | {
       kind: "turn_ended";
       /**
-       * Fresh-work tokens for the turn: assistant `input + output` ONLY. `usage.reasoning` is a
-       * provider-reported breakdown that is a **subset of `output`** on every pi-ai provider that
-       * populates it (anthropic `thinking_tokens`, google `thoughtsTokenCount` folded into
-       * `output`, openai `reasoning_tokens` inside completion/output tokens — verified @ pi-ai
-       * 0.80.5), so it is deliberately EXCLUDED: adding it would double-count.
+       * Fresh-work tokens for the turn (`freshTokensOf`): the assistant's `input + output` plus
+       * every tool result's reported `input + output` — `reasoning` and cache reads/writes
+       * excluded (see `UsageSlice`).
        */
       freshTokens: number;
     }
@@ -131,12 +148,29 @@ export type StageEvent =
     }
   | { kind: "model_errored"; message: string };
 
-/** Best-effort error text for a failed tool (details.error | result string | a generic fallback). */
+/** Every `{ type: "text" }` block of a tool result's `content`, joined by newlines; null if none. */
+function textContentOf(result: unknown): string | null {
+  if (!result || typeof result !== "object" || !("content" in result)) return null;
+  const content = (result as { content: unknown }).content;
+  if (!Array.isArray(content)) return null;
+  const texts = content.flatMap((block: unknown) => {
+    const b = block as { type?: unknown; text?: unknown } | null;
+    return b && b.type === "text" && typeof b.text === "string" ? [b.text] : [];
+  });
+  const text = texts.join("\n");
+  return text ? text : null;
+}
+
+/**
+ * Best-effort error text for a failed tool, in order: `details.error` → a bare string result →
+ * the result's text content (a blocked call's reason, a codemode "Script error") → a generic
+ * fallback. Pre-cap: the seam caps it into `tool_outcome.summary`.
+ */
 function toolErrorMessage(event: DriveEvent): string {
   const details = detailsOf(event.result);
   if (details && typeof details.error === "string" && details.error) return details.error;
   if (typeof event.result === "string" && event.result) return event.result;
-  return `tool ${event.toolName ?? ""} failed`;
+  return textContentOf(event.result) ?? `tool ${event.toolName ?? ""} failed`;
 }
 
 /**
@@ -170,16 +204,28 @@ export function translateEvent(event: DriveEvent): StageEvent | null {
   return null;
 }
 
-/** A turn's fresh-work tokens (`input + output`; see `StageEvent.turn_ended.freshTokens`). */
-function freshTokensOf(turn: DriveTurn): number {
-  const usage = turn.message?.usage;
+/** One usage record's fresh-work tokens: clamped `input + output` (absent ⇒ 0). */
+function usageTokens(usage: UsageSlice | undefined): number {
   return usage ? Math.max(0, usage.input ?? 0) + Math.max(0, usage.output ?? 0) : 0;
 }
 
 /**
+ * A turn's fresh-work tokens — the ONE sum both the `turn_ended` translation and the turn gate
+ * use, so the gate's post-turn verdict and the seam's fold agree exactly: the assistant message's
+ * usage plus every tool result's usage (onto which Pi has already folded nested calls). The same
+ * `input + output` arithmetic as Pi's own session census, clamped.
+ */
+function freshTokensOf(turn: DriveTurn): number {
+  let tokens = usageTokens(turn.message?.usage);
+  for (const result of turn.toolResults ?? []) tokens += usageTokens(result.usage);
+  return tokens;
+}
+
+/**
  * The seam's turn-boundary verdict, asked once per finished turn BEFORE its `turn_end`: `true`
- * ends the run there (no next turn starts). Receives the turn's fresh-work tokens — the same sum
- * the following `turn_ended` event carries — so the seam can decide on the post-turn counters.
+ * ends the run there (no next turn starts). Receives the turn's fresh-work tokens (assistant +
+ * tool results, `freshTokensOf`) — the same sum the following `turn_ended` event carries — so the
+ * seam can decide on the post-turn counters.
  */
 export type EndRunAfterTurn = (turn: { freshTokens: number }) => boolean;
 
@@ -211,7 +257,9 @@ function headlessBinding(): {
  * `endRunAfterTurn` (optional) is installed as a wrapper over the bound agent's `finishTurn` —
  * after the session's own hook (which dispatches the extension `turn_end` boundary), so an
  * earlier `end` decision always stands — and removed on rebind and dispose. A session that
- * exposes no `agent` (the seam's fakes) skips the gate; the seam's abort still stops it.
+ * exposes no `agent` (the seam's fakes) skips the gate; the seam's abort still stops it. The gate
+ * decides on `freshTokensOf(turn)` — Pi's turn context carries the turn's tool results, so the
+ * verdict covers tool-reported usage exactly as the following `turn_ended` fold does.
  */
 export function createDriveSession(
   runtime: DriveRuntimeLike,
@@ -524,6 +572,30 @@ class WorkerModelRefusal extends Error {
   }
 }
 
+// --- the worker's fixed policy extension ------------------------------------------------------------
+
+/** The name of the worker's hidden policy extension (`<inline:perk-worker-policy>` in Pi errors). */
+const WORKER_POLICY_EXTENSION = "perk-worker-policy";
+
+/**
+ * The worker's hidden inline policy extension — a fixed worker input, not configurable. Its one
+ * `tool_call` hook is the ADVISORY layer of the model-call policy (`modelCallPolicy.ts`): a
+ * `codemode` call (any registrar) whose script literally names `models.classify(` /
+ * `models.generateImages(` is blocked BEFORE it executes with the typed refusal reason, which Pi
+ * returns to the model as the call's error result. Never `terminate` — a refusal is an ordinary
+ * failed tool call the model recovers from. The hard layer is the codemode factory option
+ * (`WORKER_CODEMODE_MODELS`); an aliased `models` slips past this screen by design. The decision
+ * is the pure `codemodeCallRefusal`; the Pi registration lives in the `pi/` adapter home
+ * (`toolCallRefusalHook`).
+ */
+export function workerPolicyExtension(): InlineExtension {
+  return {
+    name: WORKER_POLICY_EXTENSION,
+    hidden: true,
+    factory: toolCallRefusalHook(codemodeCallRefusal),
+  };
+}
+
 // --- the production runtime factory ---------------------------------------------------------------
 
 /** The production factory's result: a live runtime, or a typed zero-turn selection refusal. */
@@ -534,8 +606,10 @@ export type RuntimeConstruction =
 /**
  * Build the asymmetric runtime: `cwd = worktree` (project tier — perk's `@mgiles/perk` extension via the
  * managed `.pi/settings.json`, any project `.pi/extensions/`, the managed `AGENTS.md`/`APPEND_SYSTEM.md`)
- * and `agentDir = throwaway` (user-global RESOURCES out — the throwaway dir has no `settings.json`,
- * extensions or skills, so the global resource tier is empty). Auth + `models.json` come from the
+ * and `agentDir = throwaway` (user-global RESOURCES out — the throwaway dir carries exactly one
+ * global setting, `cacheWarming: "off"` (Pi reads warming from global settings only, so the
+ * merged-view overrides cannot reach it; warming is the only out-of-turn usage source left once
+ * compaction is off), and no extensions or skills, so the global resource tier is empty). Auth + `models.json` come from the
  * worker-minted `ModelRuntime` instead: `request.modelRuntime ?? ModelRuntime.create()` (the global
  * agent dir's `auth.json`/`models.json`, `PI_CODING_AGENT_DIR`-aware, plus env keys; offline),
  * minted INSIDE this function's failure-cleanup guard so a rejection is the seam's
@@ -572,6 +646,12 @@ export async function defaultCreateRuntime(
     }
   };
   try {
+    // The worker's one global setting (see above): Pi's cache warmer never starts.
+    writeFileSync(
+      join(agentDir, "settings.json"),
+      `${JSON.stringify({ cacheWarming: "off" })}\n`,
+      "utf8",
+    );
     const modelRuntime = request.modelRuntime ?? (await ModelRuntime.create());
     const runtime = await constructRuntime(
       worktree,
@@ -594,7 +674,9 @@ export async function defaultCreateRuntime(
  * The construction body behind `defaultCreateRuntime`'s failure-cleanup guard. Services MUST
  * receive the worker-minted `modelRuntime`: left to itself, `createAgentSessionServices` would
  * derive a runtime from the throwaway `agentDir` — an empty auth store. The factory re-runs
- * identically on a session replacement (`/new`, `/resume`, fork).
+ * identically on a session replacement (`/new`, `/resume`, fork). The worker's hidden policy
+ * extension (`workerPolicyExtension`) is a fixed input to every services build — it rides
+ * `resourceLoaderOptions.extensionFactories`, beside (never instead of) the project extensions.
  */
 async function constructRuntime(
   worktree: string,
@@ -618,6 +700,7 @@ async function constructRuntime(
       agentDir: factoryOpts.agentDir,
       settingsManager,
       modelRuntime,
+      resourceLoaderOptions: { extensionFactories: [workerPolicyExtension()] },
     });
     // 2. Loud construction diagnostics, before selection: extension load errors and
     //    registration errors are recorded, not raised, by the SDK — they are the CAUSE behind a

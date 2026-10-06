@@ -19,6 +19,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { loadSdkPiAi } from "../testing/harness.ts";
+import { MODEL_CALL_REFUSAL_PREFIX } from "./modelCallPolicy.ts";
 import {
   createDriveSession,
   type DriveEvent,
@@ -28,6 +29,7 @@ import {
   type StageEvent,
   selectWorkerModel,
   translateEvent,
+  workerPolicyExtension,
 } from "./sdkAdapter.ts";
 
 // --- pure: translateEvent -------------------------------------------------------------------------
@@ -64,6 +66,41 @@ test("translateEvent: usage.reasoning is NOT summed — it is a subset of output
       message: { role: "assistant", usage: { input: 10, output: 20, reasoning: 15 } },
     }),
     { kind: "turn_ended", freshTokens: 30 },
+  );
+});
+
+test("translateEvent: turn_end sums every tool result's reported usage onto the assistant's", () => {
+  // Pi folds a tool's nested calls onto its result's usage before turn_end, so the tool results
+  // are the one place tool-driven model usage is read.
+  assert.deepEqual(
+    translateEvent({
+      type: "turn_end",
+      message: { role: "assistant", usage: { input: 10, output: 5 } },
+      toolResults: [
+        { usage: { input: 700, output: 300 } },
+        {}, // a tool result without usage adds 0
+        { usage: { input: 20, output: -4, reasoning: 50 } }, // negatives clamp; reasoning excluded
+      ],
+    }),
+    { kind: "turn_ended", freshTokens: 15 + 1_000 + 20 },
+  );
+  // An error/aborted assistant turn carries no tool results: the assistant usage alone.
+  assert.deepEqual(
+    translateEvent({
+      type: "turn_end",
+      message: { role: "assistant", usage: { input: 4, output: 2 } },
+      toolResults: [],
+    }),
+    { kind: "turn_ended", freshTokens: 6 },
+  );
+  // Tool usage counts even when the assistant message carries none.
+  assert.deepEqual(
+    translateEvent({
+      type: "turn_end",
+      message: { role: "assistant" },
+      toolResults: [{ usage: { input: 3, output: 4 } }],
+    }),
+    { kind: "turn_ended", freshTokens: 7 },
   );
 });
 
@@ -118,6 +155,40 @@ test("translateEvent: tool_execution_end → tool_ended (details.ok wins, !isErr
       errorText: "tool bash failed",
     },
   );
+});
+
+test("translateEvent: failed-tool error text precedence — details.error → string → text content → generic", () => {
+  const errorTextOf = (result: unknown): string | null => {
+    const translated = translateEvent({
+      type: "tool_execution_end",
+      toolName: "codemode",
+      isError: true,
+      result,
+    });
+    assert.ok(translated?.kind === "tool_ended");
+    return translated.errorText;
+  };
+  const content = [
+    { type: "text", text: "Script failed" },
+    { type: "image", data: "x", mimeType: "image/png" },
+    { type: "text", text: "Script error:\nReferenceError" },
+  ];
+  // details.error wins over text content.
+  assert.equal(errorTextOf({ content, details: { error: "from details" } }), "from details");
+  // A bare string result wins over the generic fallback.
+  assert.equal(errorTextOf("bare failure"), "bare failure");
+  // Text content: every text block, joined by newlines (a blocked call's reason, a script error).
+  assert.equal(
+    errorTextOf({ content, details: {} }),
+    "Script failed\nScript error:\nReferenceError",
+  );
+  // An empty details.error / no text blocks fall through to the generic fallback.
+  assert.equal(
+    errorTextOf({ content: [{ type: "image" }], details: { error: "" } }),
+    "tool codemode failed",
+  );
+  assert.equal(errorTextOf({ content: [{ type: "text", text: "" }] }), "tool codemode failed");
+  assert.equal(errorTextOf({ content: "not an array" }), "tool codemode failed");
 });
 
 test("translateEvent: assistant message_end with stopReason error → model_errored; others → null", () => {
@@ -333,6 +404,99 @@ test("createDriveSession: no verdict or no agent leaves the session untouched", 
   await handle.bind();
   assert.equal("agent" in agentless, false, "an agentless (fake) session is never patched");
   await handle.dispose();
+});
+
+test("createDriveSession: the gate decides on assistant + tool-result usage — the same sum turn_ended carries", async () => {
+  const { session } = gatedSession(undefined);
+  const asked: number[] = [];
+  const handle = createDriveSession(
+    { session, dispose() {} },
+    () => {},
+    (turn) => {
+      asked.push(turn.freshTokens);
+      return turn.freshTokens >= 1_000;
+    },
+  );
+  await handle.bind();
+  const finishTurn = session.agent.finishTurn;
+  assert.ok(finishTurn);
+  // Below the cap on the assistant alone; the tool result's usage carries it over.
+  const turn: DriveTurn = {
+    message: { role: "assistant", usage: { input: 5, output: 5 } },
+    toolResults: [{ usage: { input: 600, output: 390 } }, {}],
+  };
+  assert.deepEqual(await finishTurn(turn), { action: "end" }, "the combined sum ends the run");
+  assert.equal(
+    await finishTurn({ message: turn.message, toolResults: [] }),
+    undefined,
+    "the assistant alone stays below the cap",
+  );
+  assert.deepEqual(asked, [1_000, 10]);
+  // The turn_ended translation of the same turn carries the identical sum.
+  assert.deepEqual(translateEvent({ type: "turn_end", ...turn }), {
+    kind: "turn_ended",
+    freshTokens: 1_000,
+  });
+  await handle.dispose();
+});
+
+// --- the worker's hidden policy extension ------------------------------------------------------
+
+/** Load `workerPolicyExtension` into a fake `pi` and return its one `tool_call` handler. */
+function policyToolCallHandler(): (event: {
+  toolName: string;
+  input: Record<string, unknown>;
+}) => unknown {
+  const extension = workerPolicyExtension();
+  assert.ok(typeof extension === "object", "a named inline extension");
+  assert.equal(extension.name, "perk-worker-policy");
+  assert.equal(extension.hidden, true, "hidden from the startup Extensions list");
+  const handlers = new Map<string, (event: never) => unknown>();
+  const fakePi = {
+    on(event: string, handler: (event: never) => unknown) {
+      assert.equal(handlers.has(event), false, `one ${event} handler`);
+      handlers.set(event, handler);
+    },
+  };
+  void extension.factory(fakePi as never);
+  assert.deepEqual([...handlers.keys()], ["tool_call"], "the extension registers one hook");
+  const handler = handlers.get("tool_call");
+  assert.ok(handler);
+  return (event) => handler({ type: "tool_call", toolCallId: "c1", ...event } as never);
+}
+
+test("workerPolicyExtension: a codemode script naming a metered model call is blocked with the typed reason", () => {
+  const onToolCall = policyToolCallHandler();
+  const images = onToolCall({
+    toolName: "codemode",
+    input: { code: "await models.generateImages(m, { input: [] });" },
+  }) as { block?: boolean; reason?: string; terminate?: boolean };
+  assert.equal(images.block, true);
+  assert.ok(images.reason?.startsWith(`${MODEL_CALL_REFUSAL_PREFIX}image_generation)`));
+  assert.equal(images.terminate, undefined, "a refusal never terminates the batch");
+
+  const classify = onToolCall({
+    toolName: "codemode",
+    input: { code: "return await models.classify(ref, ctx);" },
+  }) as { block?: boolean; reason?: string };
+  assert.equal(classify.block, true);
+  assert.ok(classify.reason?.startsWith(`${MODEL_CALL_REFUSAL_PREFIX}classifier)`));
+});
+
+test("workerPolicyExtension: plain scripts, other tools and non-string code pass untouched", () => {
+  const onToolCall = policyToolCallHandler();
+  assert.equal(onToolCall({ toolName: "codemode", input: { code: 'return "ok";' } }), undefined);
+  assert.equal(
+    onToolCall({ toolName: "bash", input: { command: "echo models.classify(x)" } }),
+    undefined,
+    "only codemode calls are screened",
+  );
+  assert.equal(
+    onToolCall({ toolName: "codemode", input: { code: 42 } }),
+    undefined,
+    "a non-string script is left to the tool's own validation",
+  );
+  assert.equal(onToolCall({ toolName: "codemode", input: {} }), undefined);
 });
 
 // --- resolveWorkerModel — `--model` resolves with pi's CLI semantics -----------------------------

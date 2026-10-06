@@ -12,9 +12,16 @@
 // /plan-body materialization, `run_id` mint) is the cold-door/runner's job and is a PREPARED-
 // WORKTREE input (audit Gap 7): the worker inherits `PERK_RUN_ID` from the env and never re-mints.
 //
-// Budget semantics: `budget.tokens` counts FRESH WORK only — assistant `input + output` per
-// `turn_end`. Cache reads/writes and the provider `reasoning` breakdown (a subset of `output` in
-// pi-ai's normalization) are excluded by design; see the adapter's `StageEvent.freshTokens`.
+// Budget semantics: `budget.tokens` counts FRESH WORK from Pi's own usage records, once each —
+// per `turn_end`, the assistant's `input + output` plus every tool result's reported
+// `input + output` (Pi folds a tool's nested calls — a codemode script's `models.*` aggregate, a
+// nested tool roll-up — onto the parent result, so nested ends are never summed). Usage reported
+// by failed or aborted calls counts. Excluded: cache reads/writes, the provider `reasoning`
+// breakdown (a subset of `output` in pi-ai's normalization), compaction/branch-summary usage and
+// perk's report-wave children (separate sessions). There is no out-of-turn usage source:
+// compaction and cache warming are both off in the worker, so the turn boundary is the single
+// enforcement point. Pi's `getSessionStats().tokens.input + output` is the reference census the
+// e2e tier asserts equality against; see the adapter's `freshTokensOf`.
 //
 // CONFINEMENT: this seam's caller surface carries no SDK shapes. Every `@earendil-works` import
 // AND the session-drive mechanics (construction, raw events, prompt/abort) live in the private
@@ -190,9 +197,9 @@ function freshCounters(): DriveCounters {
 /**
  * Fold one perk-owned drive event into the running counters (pure) — the seam's policy fold over
  * the adapter's translated `StageEvent` union. Counts turns and fresh-work tokens (the sum is
- * adapter-computed; see `StageEvent`'s `freshTokens` doc for the reasoning-subset exclusion),
+ * adapter-computed — assistant plus tool-result usage; see `StageEvent`'s `freshTokens` doc),
  * captures the `submit`/`finalize_address` terminal tool details, and records a post-acceptance
- * model error.
+ * model error. Exhaustive over the union: a new event kind fails type-checking here.
  */
 function applyStageEvent(counters: DriveCounters, event: StageEvent): void {
   if (event.kind === "turn_ended") {
@@ -217,7 +224,12 @@ function applyStageEvent(counters: DriveCounters, event: StageEvent): void {
     }
     return;
   }
-  counters.modelError = { message: event.message };
+  if (event.kind === "model_errored") {
+    counters.modelError = { message: event.message };
+    return;
+  }
+  const unhandled: never = event;
+  throw new Error(`unhandled stage event ${JSON.stringify(unhandled)}`);
 }
 
 /**
