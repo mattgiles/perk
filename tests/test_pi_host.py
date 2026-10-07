@@ -19,7 +19,7 @@ from perk.substrate.pi_host import (
     probe_pi_host,
 )
 from perk.substrate.proc import ProcFailure
-from perk.substrate.semver import Semver
+from perk.substrate.semver import Semver, parse_semver, satisfies_floor
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FLOOR = Semver(1, 0, 0)
@@ -70,7 +70,14 @@ def test_a_floor_satisfying_cli_is_admitted_beside_an_older_sdk_dev_pin() -> Non
     package = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
     sdk_pin = package["devDependencies"]["@earendil-works/pi-coding-agent"]
     floor = required_pi_version(load_host_floor())
-    assert sdk_pin != str(floor)
+    pinned = parse_semver(sdk_pin)
+    assert pinned is not None, sdk_pin
+    if satisfies_floor(pinned, floor):
+        # The dev pins sit at the 1.0.0 floor, so the live tree no longer shows the skew; the
+        # converse carries the independence: a below-floor CLI is refused beside them.
+        assert admit_pi_version(PI, "0.99.2\n", floor).outcome == "unsupported"
+    else:
+        assert sdk_pin != str(floor)
     assert admit_pi_version(PI, "1.0.0\n", floor).outcome == "admitted"
     assert admit_pi_version(PI, "1.0.0\n", floor).observed == "1.0.0"
 
