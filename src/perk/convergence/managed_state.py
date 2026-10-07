@@ -231,11 +231,11 @@ def _settings_portion(root: Path, *, self_repo: bool) -> bytes:
     moves exactly when perk's desired wiring moves (version bump, borrowed-set change,
     provider/linear/compaction/models selection change — the ``subagents`` key is a
     perk-version-deterministic constant, present in every desired portion) and never encodes
-    user-owned settings keys. The two seeds (``tuiMode`` and ``defaultTools``) are excluded:
-    each is user-ownable after it is written. The reused helpers each treat a malformed
-    committed TOML as empty (defer-to-config-check), so this inherits that posture. Package
-    order is canonicalized (identity-sorted) so the observed twin compares order-insensitively
-    — see :func:`_canonical_package_order`.
+    user-owned settings keys. The ``defaultTools`` seed is excluded: it is user-ownable after it
+    is written. The reused helpers each treat a malformed committed TOML as empty
+    (defer-to-config-check), so this inherits that posture. Package order is canonicalized
+    (identity-sorted) so the observed twin compares order-insensitively — see
+    :func:`_canonical_package_order`.
     """
     packages, _, _ = _merge_static_packages([], _desired_packages(self_repo))
     packages, _ = _reconcile_ponytail_entry(packages)
@@ -248,11 +248,8 @@ def _settings_portion(root: Path, *, self_repo: bool) -> bytes:
     # Always writes on an empty stub (the delta gate only skips an already-true key), so the
     # desired portion unconditionally carries perk's constant `subagents` key.
     _converge_subagents(stub)
-    # Neither seed is run here — each key is user-ownable after it is written, so it must stay
-    # invisible to the health lens (`_observed_settings` never reads either key):
-    # - `_converge_tui_mode` (seed-when-absent): rebuilding it against the empty stub would
-    #   always yield "fullscreen" and permanently classify a repo that opted back to "regular"
-    #   as locally-modified;
+    # The `defaultTools` seed is not run here — the key is user-ownable after it is written, so
+    # it must stay invisible to the health lens (`_observed_settings` never reads it):
     # - `_converge_discovery` (seed-when-unnamed; user-owned via `-tool_search` or `[]`):
     #   rebuilding it would always yield `["+tool_search"]` and permanently classify an
     #   opted-out repo as locally-modified.

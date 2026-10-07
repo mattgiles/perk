@@ -132,9 +132,10 @@ def test_init_converges_and_is_idempotent(tmp_path):
         "prompts": [],
         "themes": [],
     }
-    # The fresh-repo settings seeds: Pi's native tool discovery and the fullscreen TUI mode.
+    # The fresh-repo settings seed: Pi's native tool discovery. Pi 1.0 defaults to fullscreen, so
+    # perk writes no `tuiMode`.
     assert settings["defaultTools"] == ["+tool_search"]
-    assert settings["tuiMode"] == "fullscreen"
+    assert "tuiMode" not in settings
     assert settings["subagents"] == {"disableBuiltins": True}
 
     # The whole `.perk/workflow/` cache tree is gitignored — no committed `.gitkeep`; init creates
@@ -262,9 +263,10 @@ def test_init_default_tools_seed_matches_the_shared_fixture(tmp_path, case):
 
 
 def test_discovery_default_is_invisible_to_the_settings_portion(tmp_path):
-    """`defaultTools` stays out of the managed `settings-wiring` portion (the `tuiMode` reason):
-    a seeded, an opted-out and a key-deleted repo share one observed hash, equal to the desired
-    and recorded hashes. Drift comes from the convergence dry-run, never from the lens."""
+    """`defaultTools` stays out of the managed `settings-wiring` portion (a seeded entry is
+    user-ownable after it is written, so the lens must never see it): a seeded, an opted-out and
+    a key-deleted repo share one observed hash, equal to the desired and recorded hashes. Drift
+    comes from the convergence dry-run, never from the lens."""
     from perk.convergence.doctor import run_doctor
     from perk.convergence.managed_state import load_managed_state, managed_artifacts
 
@@ -896,21 +898,21 @@ def test_init_subagents_overwrites_perk_key_preserving_others(tmp_path):
     assert subagents["agentOverrides"] == {"oracle": {"disabled": False}}  # preserved intact
 
 
-def test_init_seeds_tui_mode_fullscreen(tmp_path):
-    # Seed-when-absent: a bare repo gains the fullscreen default once.
-    assert run_init(tmp_path, verify=False).ok
-    settings = json.loads((tmp_path / ".pi" / "settings.json").read_text())
-    assert settings["tuiMode"] == "fullscreen"
-
-
-def test_init_preserves_existing_tui_mode(tmp_path):
-    # Presence — not value — is the guard: a committed opt-out survives reconvergence.
+@pytest.mark.parametrize("value", ["regular", "fullscreen"])
+def test_init_preserves_existing_tui_mode(tmp_path, value):
+    # `tuiMode` is a user-owned key: perk never writes it (Pi 1.0 defaults to fullscreen) and
+    # never rewrites or removes an existing value — an old seed and an operator's choice are
+    # indistinguishable.
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
-    pi_dir.joinpath("settings.json").write_text(json.dumps({"tuiMode": "regular"}, indent=2) + "\n")
-    run_init(tmp_path, verify=False)
+    pi_dir.joinpath("settings.json").write_text(json.dumps({"tuiMode": value}, indent=2) + "\n")
+    report = run_init(tmp_path, verify=False)
+    assert report.ok
     settings = json.loads((pi_dir / "settings.json").read_text())
-    assert settings["tuiMode"] == "regular"
+    assert settings["tuiMode"] == value
+    # The init rewrite really happened: the preservation is through a rewrite, not a no-op.
+    assert f"npm:@mgiles/perk@{__version__}" in settings["packages"]
+    assert not any("tuiMode" in line for line in _settings_changes(report.changes))
 
 
 def test_init_preserves_user_settings(tmp_path):
