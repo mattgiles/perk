@@ -3615,22 +3615,10 @@ pi-subagents' `applyBuiltinOverrides` consults **before** the bulk flag and whic
 never touches; a **user-global** `~/.pi/agent/settings.json` re-enable does **not** work (the
 project bulk-disable is checked before user-scope overrides).
 
-**`tuiMode` seed (init-owned):** perk seeds `"tuiMode": "fullscreen"` into `.pi/settings.json`
-**write-when-absent** — the third convergence shape beside write-when-present
-(`[compaction]`/`[models]`) and constant-enforced (`subagents.disableBuiltins`): the key is
-written once, only when absent, and never overwrites a present key (any value — presence, not
-value, is the guard). Python-plane-only (pi consumes `settings.json` itself; the extension never
-reads it), composed inside `_converge_settings`
-(`perk/convergence/init/settings.py::_converge_tui_mode`) so it rides the `settings-wiring`
-`ManagedConvergence`. **Excluded** from the desired/observed managed-state settings portions: a
-seeded default is user-ownable after the seed — including it would misclassify an opt-out as
-`locally-modified`. The opt-out is committing any `tuiMode` value (e.g. `"regular"`), which
-survives init/doctor; a user-global `/settings` change does **not** durably override the project
-key (pi merges project settings over global).
-
 **`defaultTools` discovery convergence (init-owned):** perk seeds `"+tool_search"` into the
-project `.pi/settings.json` `defaultTools` list **seed-when-unnamed** — the fourth convergence
-shape, the list-valued variant of seed-when-absent: the guard is the presence of an entry naming
+project `.pi/settings.json` `defaultTools` list **seed-when-unnamed** — the third convergence
+shape beside write-when-present (`[compaction]`/`[models]`) and constant-enforced
+(`subagents.disableBuiltins`): the guard is the presence of an entry naming
 `tool_search` in any of Pi's three forms (`tool_search`, `+tool_search`, `-tool_search`), and the
 seed *appends* (the operator's entries keep their order and text; perk never rewrites, reorders
 or removes one). An absent key becomes `["+tool_search"]`. The invariant: the seed never changes
@@ -3647,8 +3635,9 @@ cohort is keyed on host capability at `session_start`), composed inside `_conver
 (`perk/convergence/init/settings.py::_converge_discovery`), so it rides the `settings-wiring`
 `ManagedConvergence`: an absent key or a nonempty list naming no `tool_search` is
 `settings-wiring` drift (`fail`, detail `defaultTools: +tool_search`, remediation
-`perk doctor --fix`). **Excluded** from the desired/observed managed-state settings portions for
-the `tuiMode` reason (an opted-out repo would otherwise classify `locally-modified` forever).
+`perk doctor --fix`). **Excluded** from the desired/observed managed-state settings portions: a
+seeded entry is user-ownable after it is written, so an opted-out repo would otherwise classify
+`locally-modified` forever.
 **The opt-out** is a committed `"-tool_search"` entry in the same project list (Pi applies project
 modifiers after user-scope ones, so a user-global `-tool_search` cannot override a project
 `+tool_search` — the durable opt-out is the project entry; Pi has no project-local settings

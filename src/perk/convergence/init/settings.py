@@ -441,8 +441,6 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     subagents_changes = _converge_subagents(settings)
     # Seed Pi's native tool discovery when no `defaultTools` entry names it (same composition).
     discovery_changes = _converge_discovery(settings)
-    # Seed pi's fullscreen TUI mode when absent (same composition).
-    tui_changes = _converge_tui_mode(settings)
     new_text = json.dumps(settings, indent=2) + "\n"
     if new_text == old_text:
         return []
@@ -461,7 +459,6 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     parts.extend(models_changes)
     parts.extend(subagents_changes)
     parts.extend(discovery_changes)
-    parts.extend(tui_changes)
     return [f".pi/settings.json: {'; '.join(parts)}" if parts else ".pi/settings.json: normalized"]
 
 
@@ -544,27 +541,6 @@ def _converge_subagents(settings: dict[str, object]) -> list[str]:
     return ["subagents: disableBuiltins=true"]
 
 
-def _converge_tui_mode(settings: dict[str, object]) -> list[str]:
-    """Seed `tuiMode: "fullscreen"` into `settings` when the key is absent (seed-when-absent).
-
-    The third convergence shape, beside `_converge_subagents`' constant-enforced and
-    `_converge_compaction`/`_converge_models`' write-when-present: the key is written **once**,
-    only when absent, and is user-ownable afterwards. **Presence — not value — is the guard**: a
-    repo carrying any `tuiMode` (even an ill-typed value pi coerces to regular) has expressed
-    intent perk must not override. Seeded rather than enforced because fullscreen is
-    experimental and pi's `/settings` toggle writes the **global** settings file, which project
-    settings override — an enforced project pin would strip the only durable opt-out (editing
-    the committed key). Python-plane-only (pi consumes `settings.json` itself; the extension
-    never reads it). The change fragment is naturally delta-gated: it only fires when the key
-    was actually written. Deliberately excluded from the managed-state desired/observed
-    portions — see `managed_state._settings_portion`.
-    """
-    if "tuiMode" in settings:
-        return []
-    settings["tuiMode"] = "fullscreen"
-    return ["tuiMode: fullscreen"]
-
-
 def _names_discovery_tool(entry: object) -> bool:
     """Whether a `defaultTools` entry names `tool_search` in any of Pi's three forms.
 
@@ -581,7 +557,8 @@ def _names_discovery_tool(entry: object) -> bool:
 def _converge_discovery(settings: dict[str, object]) -> list[str]:
     """Append `+tool_search` to `settings["defaultTools"]` when no entry names it.
 
-    Seed-when-unnamed — the list-valued variant of `_converge_tui_mode`'s seed-when-absent: the
+    Seed-when-unnamed — the third convergence shape, beside `_converge_subagents`'
+    constant-enforced and `_converge_compaction`/`_converge_models`' write-when-present: the
     guard is the presence of the tool's *name* in any of Pi's three entry forms
     (:func:`_names_discovery_tool`), and the seed appends rather than sets. The invariant: the
     seed never changes what the operator's list resolves to beyond adding `tool_search`, and perk
@@ -602,10 +579,12 @@ def _converge_discovery(settings: dict[str, object]) -> list[str]:
     - otherwise → append at the end, every existing entry kept in place (Pi applies plain names
       first, then modifiers in order, so the position never changes the resolved set).
 
-    Excluded from the managed-state desired/observed portions for the `tuiMode` reason — see
-    `managed_state._settings_portion`. Python-plane-only: Pi consumes `settings.json` at startup;
-    the extension never reads it (the cohort is keyed on host capability at `session_start`).
-    The change fragment is naturally delta-gated: it only fires when the entry was written.
+    Excluded from the managed-state desired/observed portions: the seeded entry is user-ownable
+    after it is written (`-tool_search`, or a project `[]`), so including it would classify an
+    opted-out repo as locally-modified forever — see `managed_state._settings_portion`.
+    Python-plane-only: Pi consumes `settings.json` at startup; the extension never reads it (the
+    cohort is keyed on host capability at `session_start`). The change fragment is naturally
+    delta-gated: it only fires when the entry was written.
     """
     if "defaultTools" not in settings:
         settings["defaultTools"] = [DISCOVERY_DEFAULT_TOOLS_ENTRY]

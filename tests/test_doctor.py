@@ -2354,19 +2354,30 @@ def test_subagents_builtins_drift_detected_and_fixed(scaffolded_perk_repo):
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
 
 
-def test_tui_mode_opt_out_is_not_drift(scaffolded_perk_repo):
-    # `tuiMode` is a seed-once default, not perk-owned: a repo that opts back to "regular"
-    # must stay healthy (contrast `disableBuiltins` above, where the flipped key IS repaired).
-    # The seed is excluded from the desired/observed settings portions, so the health lens
-    # never sees the opt-out.
+@pytest.mark.parametrize("value", ["regular", "fullscreen"])
+def test_explicit_tui_mode_survives_a_settings_repair(scaffolded_perk_repo, value):
+    # Contrast `disableBuiltins` (perk-owned: flipped → repaired) with `tuiMode` (user-owned:
+    # never written, never repaired, never drift). `_apply_fixes` only converges `fail` checks,
+    # so unrelated perk-owned drift is armed first — the `--fix` below really rewrites the
+    # file, and the explicit value must survive that rewrite.
     settings_path = scaffolded_perk_repo / ".pi" / "settings.json"
     settings = json.loads(settings_path.read_text())
-    assert settings["tuiMode"] == "fullscreen"  # init seeded it
-    settings["tuiMode"] = "regular"
+    assert "tuiMode" not in settings  # init writes none
+    settings["tuiMode"] = value
+    settings["subagents"] = {"disableBuiltins": False}
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
     report = run_doctor(scaffolded_perk_repo, verify=False)
-    assert next(c for c in report.checks if c.name == "settings-wiring").status == "ok"
-    assert json.loads(settings_path.read_text())["tuiMode"] == "regular"  # untouched
+    # Non-vacuity precondition: the repair below really runs.
+    assert next(c for c in report.checks if c.name == "settings-wiring").status == "fail"
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert fixed.healthy
+    repaired = json.loads(settings_path.read_text())
+    assert repaired["subagents"]["disableBuiltins"] is True  # the convergence rewrote the file
+    assert repaired["tuiMode"] == value  # the explicit value survived the rewrite
+    again = run_doctor(scaffolded_perk_repo, verify=False)
+    # An explicit value, old seed or not, is never drift.
+    assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
+    assert json.loads(settings_path.read_text())["tuiMode"] == value
 
 
 def test_discovery_default_removed_is_drift_and_fixed(scaffolded_perk_repo):
