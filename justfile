@@ -33,16 +33,20 @@ lock:
     uv lock
     npm install --package-lock-only
 
-# The six @earendil-works devDeps move in exact lockstep (host-peer and registry skew otherwise —
-# guarded by tests/test_packaging.py::test_pi_toolchain_pin_lockstep). Settings-delivered pi
-# extension packages (pi-web-access, …) and the remote runner's global pi are deliberately
-# unpinned — they track latest and never need a bump here. If the typecheck fails after a bump,
-# migrate the imports tsc flags (prefer @earendil-works/pi-ai/compat over API rewrites), then
-# finish with `just ci`.
+# The four @earendil-works devDeps move in exact lockstep (host-peer and registry skew otherwise —
+# guarded by tests/test_packaging.py::test_pi_toolchain_pin_lockstep). Pi's RPC pi-server/pi-client
+# are not pinned: perk and its native consumers (pi-subagents, pi-web-access) import neither. The
+# `npm ls` line fails the bump on an invalid or missing copy (it tolerates extraneous ones: after
+# a bump that drops a dependency, `npm prune` removes the orphaned lockfile entries).
+# Settings-delivered pi extension packages (pi-web-access, …) and the remote runner's global pi
+# are deliberately unpinned — they track latest and never need a bump here. If the typecheck fails
+# after a bump, migrate the imports tsc flags (prefer @earendil-works/pi-ai/compat over API
+# rewrites), then finish with `just ci`.
 
 # bump the pinned pi toolchain to VERSION (lockstep devDeps + lock refresh + compat verification)
 bump-pi version:
-    npm install --save-dev --save-exact "@earendil-works/pi-coding-agent@{{version}}" "@earendil-works/pi-ai@{{version}}" "@earendil-works/pi-tui@{{version}}" "@earendil-works/pi-server@{{version}}" "@earendil-works/pi-client@{{version}}" "@earendil-works/pi-agent-core@{{version}}"
+    npm install --save-dev --save-exact "@earendil-works/pi-coding-agent@{{version}}" "@earendil-works/pi-ai@{{version}}" "@earendil-works/pi-tui@{{version}}" "@earendil-works/pi-agent-core@{{version}}"
+    npm ls @earendil-works/pi-coding-agent @earendil-works/pi-ai @earendil-works/pi-tui @earendil-works/pi-agent-core typebox
     npm run typecheck
     node --test extension/piAiCompatGuard.test.ts
     uv run pytest tests/test_packaging.py::test_pi_toolchain_pin_lockstep -q
