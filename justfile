@@ -38,10 +38,11 @@ lock:
 # are not pinned: perk and its native consumers (pi-subagents, pi-web-access) import neither. The
 # `npm ls` line fails the bump on an invalid or missing copy (it tolerates extraneous ones: after
 # a bump that drops a dependency, `npm prune` removes the orphaned lockfile entries).
-# Settings-delivered pi extension packages (pi-web-access, …) and the remote runner's global pi
-# are deliberately unpinned — they track latest and never need a bump here. If the typecheck fails
-# after a bump, migrate the imports tsc flags (prefer @earendil-works/pi-ai/compat over API
-# rewrites), then finish with `just ci`.
+# Settings-delivered pi extension packages (pi-web-access, …) are deliberately unpinned — they
+# track latest and never need a bump here. The remote runner's global pi CLI and consumer worker
+# SDK are pinned separately by REMOTE_PI_VERSION (src/perk/run/workflow_artifacts.py); this
+# recipe never moves them. If the typecheck fails after a bump, migrate the imports tsc flags
+# (prefer @earendil-works/pi-ai/compat over API rewrites), then finish with `just ci`.
 
 # bump the pinned pi toolchain to VERSION (lockstep devDeps + lock refresh + compat verification)
 bump-pi version:
