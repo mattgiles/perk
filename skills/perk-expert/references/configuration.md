@@ -106,7 +106,11 @@ row is presence + version and the `node` row compares the full version, and an o
 unverifiable one is `ok=False` like a missing one (init exits 2 `missing_tool`; doctor `fail`). The
 managed remote runner installs exactly Pi 1.0.0 (`REMOTE_PI_VERSION`) for both the global CLI and
 the consumer worker SDK and sets up exactly Node 22.19.0. The floor is a minimum, separate from the
-development pins, the pi-subagents pin below, and that remote install pin.
+development pins, the pi-subagents pin below, and that remote install pin. The same floor is
+admitted at the SDK boundary, independently of the PATH `pi`: the loaded extension checks the Pi
+SDK it runs in and refuses to load (Pi reports a failed extension load carrying perk's refusal;
+nothing registers), and the headless worker checks the SDK it loaded and ends the run with a typed
+`pi_version_unsupported` / `pi_version_unverifiable` failure before any drive work.
 
 **The perk-managed `.pi/settings.json` slice pins pi-subagents.** The borrowed set is unpinned
 except `npm:pi-subagents@0.75.0`: perk's report waves send the inline script text under the RPC

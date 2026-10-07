@@ -145,7 +145,7 @@ export interface PerkStatusHandle {
 }
 
 /**
- * Create the composed `perk` status handle (one per extension instance — created in index.ts
+ * Create the composed `perk` status handle (one per extension instance — created in pi/activation.ts
  * and passed to the objective publisher and the activity owners; no hidden module state).
  * Headless calls are full no-ops (never record text, so headless-era text can't resurrect in a
  * later headful render). The activity is a SET of live wait tokens, not a set/clear: the browser

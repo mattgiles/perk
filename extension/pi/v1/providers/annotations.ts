@@ -9,7 +9,7 @@
 // (`replaceWaveStatus`) the doors show while a wave is running.
 //
 // The surface handle is PER-ACTIVATION STATE (`createAnnotationState()` — created once in
-// `extension/index.ts` and threaded to this installer plus every priming door: the PR/stack
+// `extension/pi/activation.ts` and threaded to this installer plus every priming door: the PR/stack
 // review doors in review mode, the plan/objective review doors in plan mode — the
 // `draftReviewWave` threading pattern), never a tool param: the door primes
 // `primeAnnotationSurface` the moment the browser open picks the port and clears it when the
@@ -36,7 +36,7 @@
 // is skipped, never refused. With nothing pushed before collection, the per-angle final arrays
 // are already disjoint by the parent's reconciliation, so no cross-source promotion exists.
 //
-// Installed from `extension/index.ts`; FLOW-SCOPED via the door-primed surface handle — the
+// Installed from `extension/pi/activation.ts`; FLOW-SCOPED via the door-primed surface handle — the
 // browser door primes it the moment the browser open picks the port and clears it on bridge
 // settle AND on the readiness-degrade arm, so `push_annotations` refuses loudly (`no_surface`)
 // outside a door-opened flow.
@@ -1087,7 +1087,7 @@ const TOOL_GUIDELINES = [
 
 /**
  * Install the flow-scoped `push_annotations` tool over the threaded per-activation state.
- * Wired in `extension/index.ts`; the browser doors own the prime/clear lifecycle of the surface
+ * Wired in `extension/pi/activation.ts`; the browser doors own the prime/clear lifecycle of the surface
  * handle above (the same state instance is threaded to them).
  */
 export function installAnnotationBindings(pi: ExtensionAPI, state: AnnotationState): void {

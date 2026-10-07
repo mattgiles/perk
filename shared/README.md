@@ -21,7 +21,8 @@ Contents:
 - **`host-floor.yaml`** — the fourth *parsed* contract: the host floor (the minimum supported
   Pi and Node versions, semver `>=`). Read by both planes (`src/perk/substrate/host_floor.py`,
   the authoritative validator; `extension/substrate/hostFloor.ts`, a structural reader); the
-  Python launch preflight and `perk init`/`perk doctor` enforce it. See `contracts.md` §8.76.
+  Python launch preflight and `perk init`/`perk doctor` enforce it, and the extension and worker
+  entries admit the SDK they loaded against it. See `contracts.md` §8.76.
 - **`contracts.md`** — the numbered *prose* contract sections (`§8.1`–`§8.76`,
   non-contiguous: `§8.8` is skipped and `§8.6a` exists), each pinning the exact
   names/paths/shapes both planes implement against. The founding four — the

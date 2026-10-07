@@ -2,7 +2,7 @@
 // seam (appendWorkflowState). The identity-lifecycle decisions (claim/fork-derive/stage
 // resolution) live in `session/lifecycle.ts` — the named session operation.
 //
-// Mostly pure, fs-light logic kept separate from the `pi`/`ctx` effects (in index.ts); the
+// Mostly pure, fs-light logic kept separate from the `pi`/`ctx` effects (in pi/activation.ts); the
 // strict-append seam touches effects only through structural slices (`EntrySink`, `BranchSource`,
 // `ReportTarget`), so the whole module stays unit-testable under `node --test` with fakes. The
 // reconstruction discipline (scan getBranch on session_start AND session_tree, per-field LWW)

@@ -8,7 +8,7 @@
 // `plan-mode-state.enabled` only) — the `stage:plan` skill-binding rule included (a stage-less
 // session resolves to `stage:plan` only from perk's persisted read-only `mode`).
 //
-// INERT BY DEFAULT. This shim is ALWAYS registered in index.ts but does nothing unless the resolved
+// INERT BY DEFAULT. This shim is ALWAYS registered in pi/activation.ts but does nothing unless the resolved
 // `[providers] plan` selection is `tombell-plan` (read fresh per-event, same shape as the plan
 // installer). On any non-tombell selection it injects nothing and only strips its own stale
 // marker — zero behavior change on the default path.

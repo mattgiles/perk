@@ -122,6 +122,20 @@ environment checks report the floor instead, so the repair path stays reachable.
 remote runner installs exactly Pi 1.0.0 for both the global `pi` CLI and the consumer worker's
 SDK, and sets up exactly Node 22.19.0.
 
+**The same floor at the SDK boundary.** The perk extension checks the Pi it is loaded into (the
+SDK's `VERSION`) before it registers anything, and refuses to load on an older Pi or a prerelease
+of the floor such as `1.0.0-rc.1`. Pi reports that as a failed extension load whose message
+carries perk's refusal (`perk requires Pi >= 1.0.0; the Pi running this session is <version> …`)
+and, on Pi 0.99 and 1.0, exits with its `pi -ne` hint — so a plain `pi` in a perk-wired repo
+never runs with a partial set of perk tools. The headless worker checks the SDK it loaded the same
+way, before any extension, resource, provider or model work, and ends the run with a typed
+failure (`pi_version_unsupported` or `pi_version_unverifiable` in its run outcome); a remote
+run's outcome note on the plan issue shows the failed status, the terminal signal and the
+refusal summary. The three observations — the `pi` on your PATH, the extension's Pi, the
+worker's SDK — are checked independently against the one minimum and need not be equal: a
+passing `pi --version` says nothing about the other two. `/perk-selfcheck` shows the admitted
+version as `host sdk: <version> (floor >= 1.0.0)`.
+
 The perk CLI and the `@mgiles/perk` Pi extension are expected to have matching versions. A
 mismatch produces a soft, non-fatal launch warning. `perk doctor --fix` reconverges the
 repo-managed package pin and reinstalls the matching extension.

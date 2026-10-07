@@ -1,6 +1,6 @@
 // The Pi adapter for the hunk watch feedback bridge (contracts.md §8.58): eligibility, message
 // rendering, the narrow persisted-user-message acceptance scan, and the factory-scoped
-// receiver controller index.ts wires into session_start/session_tree.
+// receiver controller pi/activation.ts wires into session_start/session_tree.
 //
 // Eligibility is deliberately strict — only the ONE interactive TUI implement session whose
 // reconciled plan-ref matches the worktree's cache.plan-ref ever inspects the stream

@@ -678,8 +678,8 @@ swallowed**: a failed advance shows a visible `⚠ … NOT advanced — re-run /
 an object envelope with no `perk.parent-restrictions/…` key is **no packet** (`false`); invalid JSON,
 a non-object envelope, any family key other than exactly `/1` (an unsupported version, even beside a
 valid `/1`), or `/1` with anything but exactly one own `readOnly: boolean` is **malformed** (`true`,
-fail closed); `/1 = {readOnly: b}` is **valid** (`b`). Unrelated namespaces are opaque. `index.ts`
-reads both at the top of every `session_start` and **latches** the floor for the activation (`||=`)
+fail closed); `/1 = {readOnly: b}` is **valid** (`b`). Unrelated namespaces are opaque. The
+composition root (`pi/activation.ts`) reads both at the top of every `session_start` and **latches** the floor for the activation (`||=`)
 before lifecycle or gate sync; no session-key binding, status vocabulary, size bound or warning.
 Packet delivery under trust forwarding: pi-subagents ≥ 0.74.0 forwards the parent's
 `ctx.isProjectTrusted()` into the child's `SettingsManager` (`projectTrusted`), so perk's extension
@@ -1056,7 +1056,7 @@ the session identity lifecycle — the §8.2 claim/fork/adopt/mint/keep arms as 
 (`extension/session/lifecycle.ts::establishSessionIdentity`) plus the two-phase startup facts
 (`sessionStartToolScope` before the gate; `resolveSessionStartFacts` after it — the stage-gated
 linkage, implementation-capture and receiver inputs; `sessionTreeFacts` for navigation);
-`extension/index.ts` keeps the adapter wiring: gathering inputs, rendering the per-arm reports,
+the composition root (`extension/pi/activation.ts`) keeps the adapter wiring: gathering inputs, rendering the per-arm reports,
 and the ORDERED Pi effects (gate sync → claimed-only refinement import → post-gate facts →
 pointer capture → receiver sync);
 session-lifecycle gates + the warm `/implement` handoff (`extension/session/lifecycleGates.ts`
@@ -2221,7 +2221,7 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   before anything is emitted — the readiness probe cannot tell which review answers on a port and
   the doors prime annotation delivery immediately, so reusing it would announce and prime the
   review already holding it (in this process or another). The selection is
-  resolved ONCE per activation in `extension/index.ts` — before any door presets the variable, so
+  resolved ONCE per activation in the composition root (`extension/pi/activation.ts`) — before any door presets the variable, so
   a sibling door's transient preset is never mistaken for the operator's setting — and threaded
   to every door as `StartBrowserDeps.ports` (a caller passing none gets the local ephemeral
   selection). The core then saves + presets the env var, emits the `code-review` bridge request
@@ -3695,8 +3695,11 @@ raw session events, and prompt/abort ownership live in the private SDK adapter
 drives the session solely through the adapter's drive-session handle, whose listener receives a
 small perk-owned drive-event union translated at the boundary — raw SDK events never cross it),
 all policy folding (budget counters, terminal capture, outcome classification) stays in the seam
-over that union, and `workerMain.ts` imports **no SDK** — it consumes only the seam
-(guard-enforced: `extension/importDirectionGuard.test.ts` Rule F).
+over that union, and `workerMain.ts` is a **thin entry** that carries no SDK specifier: it admits
+the loaded SDK first (§8.76(f) — the `VERSION` read lives in `extension/substrate/hostSdkVersion.ts`,
+a namespace import), reaches the typed envelope through the SDK-free `extension/worker/runEnvelope.ts`
+statically, and links the seam only by a dynamic import after admission (guard-enforced:
+`extension/importDirectionGuard.test.ts` Rule F).
 
 ### Inputs (the prepared-worktree contract)
 
@@ -3948,6 +3951,22 @@ session is bound is a zero-turn `failed`/`model_error` outcome with `error.type 
 a rejection after bind keeps `error.type "drive_error"`. `runStage` never rejects, and an unknown
 `--model` is a `RunOutcome` (worker exit 1), never a pre-`run_started` usage exit.
 
+**The entry admission.** Before any drive, resource, provider or `ModelRuntime.create()` work, the
+worker entry admits the SDK it loaded against the host floor (§8.76(f)). Only the usage arms
+precede it (a stage other than `implement`/`address`, or no `PERK_RUN_ID` — exit 2, no outcome),
+plus the precondition that the bundled floor is readable (`perk worker: host floor unreadable —
+…`, exit 2). A non-admitted SDK is a **zero-turn** `failed`/`model_error` outcome (no new
+`TerminalSignal` vocabulary) with `error.type` `pi_version_unsupported` or
+`pi_version_unverifiable` and the worker refusal text as its message (`perk worker: the loaded Pi
+SDK (@earendil-works/pi-coding-agent) is version <observed>; perk requires Pi >= <required>.
+Reinstall the worker's SDK at a supported version: npm ci in this checkout (self-repo), or re-run
+the remote setup's worker-deps install (consumer).` / `perk worker: could not verify the loaded Pi
+SDK's version (<reason>); …`), printed and written exactly like a drive's outcome (stdout JSON, the
+§8.12 pair, exit 1). An admitted SDK whose seam import then rejects (it reports a supported
+`VERSION` but lacks the exports the adapter links) is the zero-turn `runtime_init` outcome
+(`worker runtime initialization failed: <link error>`). The plan-ref read (`no plan-ref` → exit 2)
+follows the seam import.
+
 ### Outcome shape (frozen; **additive-stable** — fields may be added, existing fields keep meaning)
 
 ```jsonc
@@ -4042,8 +4061,11 @@ A small, JSON-serializable, **additive-stable** discriminated union. Every event
 - **`run_finished`** — emitted **exactly once** at every terminal exit (natural-idle/verdict,
   budget/abort, the entry and pre-prompt abort samples, the `runtime_init` initialization failure,
   drive-error catch, AND the model-selection refusals — `no_model` / `model_not_found` /
-  `model_auth`), carrying the full frozen `RunOutcome` (terminal status + `error.summary` = the
-  terminal failure summary). The stream's "terminal status" event. A zero-turn run still emits a `run_started` + `run_finished` pair.
+  `model_auth`), and the worker entry's pre-drive refusals (§8.11 *The entry admission*), which
+  emit the pair (seq 0/1) through the same default file sink before any drive exists — carrying
+  the full frozen `RunOutcome` (terminal status + `error.summary` = the terminal failure summary).
+  The stream's "terminal status" event. A zero-turn run still emits a `run_started` +
+  `run_finished` pair.
 
 ### Dual delivery (the injectable sink seam)
 
@@ -4057,7 +4079,8 @@ both consumers: the worker harness asserts events in-process via an injected arr
   `<cwd>/.perk/workflow/scratch/runs/<runId>/events.ndjson` — a **cache-tier** artifact (the
   `.perk/workflow/scratch/` tree is gitignored), co-located with the run's read-only-child scratch.
 - **No-op when `run_id` is empty** — keeps the offline drive tests (which set no `PERK_RUN_ID`)
-  write-free; `workerMain` always has `PERK_RUN_ID`, so a real run always writes the file.
+  write-free; `workerMain` always has `PERK_RUN_ID`, so a real run — a refused one included —
+  always writes the file.
 - **Fail-soft** — each append (and the emitter's `sink(...)` call) is try/caught and swallowed with a
   structured-log line; a broken/throwing sink never aborts or fails the drive.
 
@@ -4318,7 +4341,9 @@ by the workflow on the plain repository checkout (cwd = the checkout = the workt
    imports resolving by walking up to `.pi/npm/node_modules`. A miss ⇒ `worker_entry_missing`.
 6. **Spawn** `node <entry> <stage> --worktree <repo_root>` with `PERK_RUN_ID=<run_id>` in the env
    (inherited stdio — the worker owns stdout/the `RunOutcome` JSON), and **exit with the worker's
-   exit code** so the workflow step reflects the drive outcome.
+   exit code** so the workflow step reflects the drive outcome. The entry admits the SDK it
+   resolves from that walk-up (§8.76(f)) before any drive work; a refusal is a typed `RunOutcome`
+   exit 1 like any other failed drive, visible to §8.15 through the events file.
 
 `run-worker` is a deterministic exterior command (no agentic reasoning): it positions and drives;
 model/auth resolution is the Node worker's job (§8.11). `--base` is part of
@@ -5147,7 +5172,7 @@ reconciliation procedure. A browser decision does not survive a Pi restart — t
 the door.
 
 1. **The current-review slot** (`createDraftReviewSlot(pi)`, one per activation, composed in
-   `index.ts` and threaded to every installer and door). EVERY review arm calls `slot.open(ctx,
+   the composition root `pi/activation.ts` and threaded to every installer and door). EVERY review arm calls `slot.open(ctx,
    {subject, source, raw, markdown, contextDigest?})` at entry — a first-party review supersedes
    an open browser review and vice versa. `open` reads `WorkflowSession.draftReviewContext()` for
    the run id / stage-derived subject / warm plan node claim (refusals `no-identity`,
@@ -13461,7 +13486,7 @@ human/extension persistence gesture — metadata is not an approval credential).
 internal deterministic workers (Workers group), not browse surfaces or model tools.
 
 **Interior entry, isolation and the draft tool** (`extension/pi/v1/objectiveRefinement.ts`
-over the Pi-free `extension/authoring/refinement/`; registered from `index.ts` before tool
+over the Pi-free `extension/authoring/refinement/`; registered from `pi/activation.ts` before tool
 snapshots):
 
 - **Cold admission** (`session/lifecycle.ts`): an `objective-refine` handoff carrying a top-level
@@ -14197,8 +14222,10 @@ those two packages would resolve a **second SDK graph** from `node_modules`. The
 specifiers, imported from the verified consumer roots, onto generated ESM **facades** that re-export
 the namespaces perk itself captured from the host — values and class identity are the host's own.
 
-**Install point.** The FIRST statement of the extension factory (`extension/index.ts::perk`) is the
-install (`installNativeSdkBridge(hostSdkNamespaces(), ports)`), before any other registration: Pi
+**Install point.** The FIRST statement of the composition root (`extension/pi/activation.ts::activatePerk`,
+entered by the thin entry `extension/index.ts::perk` only after the SDK-boundary admission,
+§8.76(f)) is the install (`installNativeSdkBridge(hostSdkNamespaces(), ports)`), before any other
+registration — a refused host never installs it: Pi
 loads packages **sequentially in project `packages` array order**, so the hooks must exist before a
 borrowed native consumer loads — the reason for §8.10's ordering rule. The captured namespaces
 (`extension/substrate/hostSdk.ts::hostSdkNamespaces`) are the instances jiti hands perk for its own
@@ -15037,11 +15064,15 @@ shared transport `extension/pi/v1/foregroundDelegation.ts`, the snapshot policy
 ## §8.76 · Host admission (the shared floor, the Python launch preflight, the environment checks)
 
 perk declares the minimum supported host versions once and enforces them at the Python launch
-boundary; `perk init` / `perk doctor` report the same requirement. Owning modules:
-`perk/substrate/host_floor.py` (the reader), `perk/substrate/semver.py` (precedence),
-`perk/substrate/pi_host.py` (the probe + the pure decision), `perk/run/pi_exec.py` (the launch
-preflight), `perk/convergence/env.py` (the environment rows), `extension/substrate/hostFloor.ts`
-(the TS reader).
+boundary and at both SDK-boundary entries (the extension, the worker); `perk init` / `perk doctor`
+report the same requirement. Owning modules: `perk/substrate/host_floor.py` (the reader),
+`perk/substrate/semver.py` (precedence), `perk/substrate/pi_host.py` (the probe + the pure
+decision), `perk/run/pi_exec.py` (the launch preflight), `perk/convergence/env.py` (the
+environment rows), `extension/substrate/hostFloor.ts` (the TS reader),
+`extension/substrate/semver.ts` (the TS precedence twin), `extension/substrate/hostAdmission.ts`
+(the pure SDK-boundary decision), `extension/substrate/hostSdkVersion.ts` (the loaded SDK's
+`VERSION` read), `extension/index.ts` (the extension entry), `extension/workerMain.ts` (the
+worker entry).
 
 ### (a) The declaration — `shared/host-floor.yaml`
 
@@ -15063,8 +15094,9 @@ Python reader is authoritative: `load_host_floor` raises `HostFloorError` for st
 (missing file, YAML error, not a mapping, unsupported `schema_version`, a wrong-typed present
 field), and `validate()` returns findings for content (missing, not semver, not a plain release).
 The TS reader (`parseHostFloor` / `loadHostFloor`) is a structural parse only — it throws on a
-non-mapping or a missing/non-string `min_version` — and currently ships consumed by no production
-module (only its test imports it) until an SDK-boundary admission consumes it.
+non-mapping or a missing/non-string `min_version` — and is consumed by the two SDK-boundary
+bootstraps ((f) below) through `hostAdmission.ts`; the TS comparator is `semver.ts`, mirroring
+`semver.py`'s grammar (the 256-character cap, one leading `v`) and precedence.
 
 ### (b) Separate version facts
 
@@ -15077,7 +15109,8 @@ worker SDK), never below the floor (a test pins it). Every host observation — 
 a loaded SDK — is admitted **independently** against the same floor; equality between
 observations is never required (a floor-satisfying CLI beside an older dev SDK pin is admitted on
 the CLI's own reading). The launch admission below reads no `package.json`, `node_modules` or
-loaded SDK. Host libraries stay wildcard peers; only `engines.node` mirrors the Node floor.
+loaded SDK; the SDK-boundary admissions ((f)) read no PATH `pi`, no `PERK_CLI_VERSION` and no
+`package.json`. Host libraries stay wildcard peers; only `engines.node` mirrors the Node floor.
 
 ### (c) The launch admission (`exec_pi`)
 
@@ -15105,7 +15138,8 @@ as `pi_cli_missing` (a re-run reuses the materialized worktree and mints a fresh
 
 `perk init`, `perk doctor` (incl. `--fix`), `--help` and every repair path are never gated by the
 launch admission — it lives only in `exec_pi`. The remote worker (`perk run-worker` →
-`node extension/workerMain.ts`) never reaches `exec_pi` and is not admitted here.
+`node extension/workerMain.ts`) never reaches `exec_pi`; the worker is admitted at its own entry
+against the SDK it loaded ((f)).
 
 ### (e) The environment checks (§8.5 `env`, §8.6 `environment`)
 
@@ -15117,3 +15151,48 @@ absent → `ok=False`, `not found`. The `node` row compares the full `node --ver
 `ok=False` exactly like an absent one — `missing_tool` exit 2 for `perk init` (the guided `pi`
 install, `npm install -g @earendil-works/pi-coding-agent`, also upgrades), `fail` for
 `perk doctor`. The row names, positions and envelope shapes are unchanged.
+
+### (f) The SDK-boundary admission (the extension entry, the worker entry)
+
+**What is read.** The public `VERSION` export of `@earendil-works/pi-coding-agent` as the loading
+process resolves the package — under Pi's extension loader the host's own module (its alias map),
+in the worker the entry-adjacent `node_modules` walk-up (§8.14) — through a **namespace** import
+(`substrate/hostSdkVersion.ts`), never a named one: under Node's native ESM a missing named export
+is a link-time error, a namespace binding never is. The floor is `pi.min_version` through the TS
+reader.
+
+**The decision** (`admitHostSdk`, pure — it reads only its two arguments): the same three outcomes
+and the same `error_type` codes as (c). A string `VERSION` that parses (one leading `v`, build
+metadata dropped from the reported text) at or above the floor is `admitted`; below it — a
+prerelease of the floor triple included — `unsupported` (`pi_version_unsupported`); a missing or
+non-string export, or a string that is not a version (its first 80 characters quoted in the
+reason), is `unverifiable` (`pi_version_unverifiable`). A floor that does not parse is a corrupt
+bundle and throws — not a host verdict.
+
+**The extension arm.** `extension/index.ts` is a thin bootstrap whose only value imports are the
+three SDK-free substrate modules (`hostAdmission.ts`, `hostFloor.ts`, `hostSdkVersion.ts`); its
+async factory admits, then dynamically imports the composition root (`pi/activation.ts`) and runs
+it. A refusal throws exactly the extension refusal text (`perk requires Pi >= <required>; the Pi
+running this session is <observed> (@earendil-works/pi-coding-agent VERSION). Upgrade it: …` /
+`… could not verify this Pi's version (<reason>). Reinstall it: …`). Pi's loader commits an
+extension's registrations only after its factory returns, so a throwing factory registers nothing
+and the host-SDK bridge (§8.73) is never installed; Pi reports an error diagnostic wrapping perk's
+message — the visible line begins `Error: Failed to load extension "<path>": Failed to load
+extension: perk requires Pi >= …` — and on the 0.99/1.0 hosts exits 1 at startup with its `pi -ne`
+hint. A thrown floor read propagates the same way (a broken install). The construction-only
+`hostSdkVersion` option is the test seam for the observed version; production never passes it.
+`/perk-selfcheck` reports the admitted version as `host sdk: <observed> (floor >= <required>)`.
+
+**The worker arm.** `extension/workerMain.ts`: parse args (usage → exit 2) → admit → on refusal the
+typed `RunOutcome` plus the §8.12 pair, exit 1 (§8.11 *The entry admission*) → only then the
+dynamic import of the stage-execution seam. A seam import that rejects after admission (an SDK
+reporting a supported `VERSION` but lacking the exports) is the typed `runtime_init` outcome. A
+floor that cannot be read is a precondition failure (`perk worker: host floor unreadable — …`,
+exit 2).
+
+**Independence.** Three observations — the PATH CLI ((c)), the extension's host SDK, the worker's
+SDK — against one minimum, never equality: a `1.0.0` CLI beside a `1.0.1` SDK is admitted on each
+reading, and a passing `pi --version` certifies neither runtime.
+
+**Not checked.** Node (its floor is the environment rows' and `engines.node`'s); the remote
+`REMOTE_PI_VERSION` pin ((b)) is what the remote installs, not what is read.

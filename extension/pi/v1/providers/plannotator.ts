@@ -23,7 +23,7 @@
 // result listener is installed BEFORE the request is emitted (an early-decision buffer bridges
 // the handshake gap), so no status catch-up query exists.
 //
-// INERT BY DEFAULT. The shim is ALWAYS registered in index.ts but the injection fires only when
+// INERT BY DEFAULT. The shim is ALWAYS registered in pi/activation.ts but the injection fires only when
 // the resolved `[providers] plan` selection is `plannotator-plan` (read fresh per-event, same
 // shape as the plan installer / tombell adapter). On any other selection the context handler
 // only strips its own stale marker — zero behavior change on the default path.
