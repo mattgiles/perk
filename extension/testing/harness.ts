@@ -47,6 +47,7 @@ import {
   type SessionEntry,
   SessionManager,
   SettingsManager,
+  VERSION,
 } from "@earendil-works/pi-coding-agent";
 import perk from "../index.ts";
 import { type PlanRef, workflowDir, writePlanRef } from "../substrate/cache.ts";
@@ -533,6 +534,20 @@ export async function fauxModelRuntime(options: { contextWindow?: number } = {})
     setResponses: (responses) => faux.setResponses(responses as never),
     callCount: () => faux.state.callCount,
   };
+}
+
+/**
+ * Whether the installed host SDK (`@earendil-works/pi-coding-agent`'s `VERSION`) is at least
+ * `major.minor.patch` — a numeric compare that ignores any prerelease/build suffix. A test whose
+ * expectation genuinely differs by host branches on this and keeps both arms.
+ */
+export function hostSdkAtLeast(major: number, minor: number, patch: number): boolean {
+  const installed = VERSION.split(/[.+-]/).map((n) => Number.parseInt(n, 10));
+  for (const [i, min] of [major, minor, patch].entries()) {
+    const part = installed[i] ?? 0;
+    if (part !== min) return part > min;
+  }
+  return true;
 }
 
 /**

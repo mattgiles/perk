@@ -11,6 +11,7 @@ import { before, test } from "node:test";
 import { type ExtensionAPI, type InlineExtension, VERSION } from "@earendil-works/pi-coding-agent";
 import {
   COHORT_SETTINGS,
+  hostSdkAtLeast,
   type PerkInstall,
   type PerkSession,
   recordingRuntime,
@@ -27,15 +28,7 @@ const LATE = "late_probe";
 
 /** Whether the host keeps restored-but-unregistered tools pending: Pi ≥ 1.0.0 (numeric compare). */
 function hostRestoresPending(): boolean {
-  const [major = 0, minor = 0, patch = 0] = VERSION.split(/[.+-]/).map((n) =>
-    Number.parseInt(n, 10),
-  );
-  const floor = [1, 0, 0];
-  for (const [i, part] of [major, minor, patch].entries()) {
-    const min = floor[i] ?? 0;
-    if (part !== min) return part > min;
-  }
-  return true;
+  return hostSdkAtLeast(1, 0, 0);
 }
 
 /** A registrant whose deferred tool registers at load, and after a reload only once released. */
