@@ -420,12 +420,6 @@ thinking = "high"
 > project-settings per-agent `"subagents": {"agentOverrides": {"<name>": {"disabled": false}}}`
 > entry — perk owns only the `disableBuiltins` key, so sibling keys survive init/doctor.
 >
-> perk also **seeds** `"tuiMode": "fullscreen"` into the same slice — but only when the key is
-> absent (seeded once, never overwritten). To opt out, set `"tuiMode": "regular"` in
-> `.pi/settings.json`; the value survives init/doctor. Note pi's `/settings` toggle writes the
-> **global** settings file, which the committed project key overrides — the durable opt-out is
-> the project key itself.
->
 > perk also **seeds** `"defaultTools": ["+tool_search"]` (Pi's native tool discovery) into the
 > same slice — appending to an existing `defaultTools` list, never reordering or removing your
 > entries; a list with no string entries (such as `[]`) is left alone — that only stops the seed

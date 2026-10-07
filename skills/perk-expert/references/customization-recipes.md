@@ -344,18 +344,6 @@ baseline (which the first check only records — it is not proof the mirror matc
 checked; `pinned` = a source checkout at a fixed ref, never probed. `[models.subagents] librarian`
 overrides the `run_librarian` writer child's model.
 
-## Prefer pi's regular TUI mode (`tuiMode`)
-
-perk seeds `"tuiMode": "fullscreen"` into `.pi/settings.json` — but only when the key is absent
-(seeded once, never overwritten). To prefer pi's regular mode, set `"tuiMode": "regular"` in
-`.pi/settings.json`; the value survives init/doctor. pi's `/settings` toggle writes the
-**global** settings file, which the committed project key overrides — the durable opt-out is the
-project key itself.
-
-```json
-{ "tuiMode": "regular" }
-```
-
 ## Opt out of native tool discovery (`defaultTools`)
 
 perk seeds `"+tool_search"` into the `defaultTools` list of `.pi/settings.json` (appending to an
