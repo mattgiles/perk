@@ -31,6 +31,9 @@ _SEMVER_RE = re.compile(
     rf"(?:\+(?P<build>{_BUILD_ID}(?:\.{_BUILD_ID})*))?",
     re.ASCII,
 )
+# npm's semver caps a version string at 256 characters; the cap also keeps every numeric
+# identifier far below Python's int-conversion digit limit, so `int()` can never raise.
+_MAX_VERSION_LENGTH = 256
 
 
 @dataclass(frozen=True)
@@ -52,11 +55,14 @@ class Semver:
 def parse_semver(text: str) -> Semver | None:
     """Parse ``text`` as semver 2.0.0 (one optional leading ``v``); ``None`` when it is not one.
 
-    Surrounding whitespace is stripped (``pi --version`` ends in a newline). Never raises.
+    Surrounding whitespace is stripped (``pi --version`` ends in a newline). Longer than
+    ``_MAX_VERSION_LENGTH`` characters is not a version. Never raises.
     """
     candidate = text.strip()
     if candidate[:1] in ("v", "V"):
         candidate = candidate[1:]
+    if len(candidate) > _MAX_VERSION_LENGTH:
+        return None
     match = _SEMVER_RE.fullmatch(candidate)
     if match is None:
         return None

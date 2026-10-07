@@ -15091,7 +15091,7 @@ then a semver comparison against `pi.min_version`. Three outcomes:
 |---|---|---|
 | `admitted` | stdout parses (one optional leading `v`, surrounding whitespace ignored) at or above the floor | — (the pipeline continues) |
 | `unsupported` | stdout parses below the floor — a prerelease of the floor triple included | `pi_version_unsupported` |
-| `unverifiable` | stdout is not a semver version (empty included), a non-zero exit, a timeout, or a spawn failure | `pi_version_unverifiable` |
+| `unverifiable` | stdout is not a semver version (empty or over 256 characters included), output that is not UTF-8, a non-zero exit, a timeout, or a spawn failure | `pi_version_unverifiable` |
 
 The refusal message always carries the executable path, the observed version (or the
 unverifiable reason), the required version, and the repair command (`npm install -g

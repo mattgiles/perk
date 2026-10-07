@@ -343,6 +343,24 @@ def test_exec_pi_refuses_an_unverifiable_pi(tmp_path, monkeypatch, launch_contex
     assert stale_lock.exists()
 
 
+def test_exec_pi_refuses_a_pi_with_undecodable_output(
+    tmp_path, monkeypatch, launch_context_factory
+):
+    events: list[str] = []
+    script = _pi_script(tmp_path, monkeypatch, r'printf "\377\n"')
+    monkeypatch.setattr(pi_exec.os, "chdir", lambda path: events.append("chdir"))
+    monkeypatch.setattr(pi_exec.os, "execvpe", lambda program, argv, env: events.append("exec"))
+    ctx, stale_lock = _stale_lock_context(tmp_path, launch_context_factory)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        launch._exec_pi(ctx)
+    assert excinfo.value.error_type == "pi_version_unverifiable"
+    message = excinfo.value.format_message()
+    assert str(script) in message
+    assert "not UTF-8" in message
+    assert events == []
+    assert stale_lock.exists()
+
+
 def test_exec_pi_admits_a_pi_at_the_floor_and_execs_its_absolute_path(
     tmp_path, monkeypatch, launch_context_factory
 ):

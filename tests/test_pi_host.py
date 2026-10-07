@@ -165,6 +165,29 @@ def test_a_timeout_or_spawn_failure_is_unverifiable(
     assert (host.outcome, host.detail) == ("unverifiable", detail)
 
 
+def _script(tmp_path: Path, body: str) -> str:
+    script = tmp_path / "pi"
+    script.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+    script.chmod(0o755)
+    return str(script)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        r'printf "\377\n"',  # an undecodable byte on stdout, exit 0
+        r'printf "\377\n" >&2; exit 1',  # an undecodable byte on stderr, non-zero exit
+    ],
+)
+def test_real_probe_with_undecodable_output_is_unverifiable(tmp_path: Path, body: str) -> None:
+    executable = _script(tmp_path, body)
+    host = probe_pi_host(executable, FLOOR)
+    assert (host.outcome, host.observed) == ("unverifiable", None)
+    assert host.detail == "pi --version printed output that is not UTF-8"
+    assert pi_refusal_error_type(host) == "pi_version_unverifiable"
+    assert executable in format_pi_refusal(host)
+
+
 def test_probe_against_a_missing_executable_is_unverifiable(tmp_path: Path) -> None:
     host = probe_pi_host(str(tmp_path / "absent-pi"), FLOOR)
     assert host.outcome == "unverifiable"

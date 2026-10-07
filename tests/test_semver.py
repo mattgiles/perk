@@ -47,6 +47,23 @@ def test_parse_rejects_non_semver(text: str) -> None:
     assert parse_semver(text) is None
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "9" * 4301 + ".0.0",  # past Python's int-conversion digit limit
+        "1.0.0-" + "9" * 4301,  # a numeric prerelease identifier the comparator would convert
+        "1.0.0-" + "a" * 251,  # 257 chars: grammatical, but longer than any version
+    ],
+)
+def test_parse_rejects_oversized_input_without_raising(text: str) -> None:
+    assert parse_semver(text) is None
+
+
+def test_parse_accepts_a_version_at_the_length_cap() -> None:
+    text = "1.0.0-" + "a" * 250  # exactly 256 chars
+    assert parse_semver(text) == Semver(1, 0, 0, ("a" * 250,))
+
+
 def test_str_renders_the_canonical_text_without_build_metadata() -> None:
     assert str(parse_semver("v1.0.0-rc.1+abc")) == "1.0.0-rc.1"
     assert str(parse_semver("22.19.0")) == "22.19.0"

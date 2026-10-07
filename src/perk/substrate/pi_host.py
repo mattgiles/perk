@@ -10,7 +10,8 @@ The decision is split from the I/O so it is testable without a process:
   ``admitted`` / ``unsupported`` (parses, below the floor — a prerelease of the floor triple
   included) / ``unverifiable`` (not a version).
 - ``probe_pi_host`` is the **only** I/O — one bounded ``pi --version`` spawn through
-  ``run_captured``; a timeout, a spawn failure or a non-zero exit are ``unverifiable``. It never
+  ``run_captured``; a timeout, a spawn failure, a non-zero exit or undecodable output are
+  ``unverifiable``. It never
   raises, never touches the network, never installs, never mutates the environment.
 
 The admission reads only the PATH CLI's own answer: it never consults ``package.json``,
@@ -101,6 +102,10 @@ def probe_pi_host(executable: str, floor: Semver | None = None) -> PiHost:
         else:
             detail = f"pi --version could not run: {exc.cause_text}"
         return _unverifiable(executable, floor, detail)
+    except UnicodeDecodeError:
+        # The capture wrapper decodes both streams strictly; a broken binary's undecodable output
+        # is a host verdict, not a crash of the launch / init / doctor paths.
+        return _unverifiable(executable, floor, "pi --version printed output that is not UTF-8")
     if result.returncode != 0:
         stderr_lines = [line for line in result.stderr.splitlines() if line.strip()]
         last = stderr_lines[-1].strip() if stderr_lines else "(no output)"
