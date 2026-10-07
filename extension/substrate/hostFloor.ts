@@ -6,9 +6,9 @@
 // floors (>=) — a minimum, never a pin.
 //
 // The Python plane is the authoritative validator (non-empty, parseable, a release); this side
-// does a thin structural parse only (string checks). The reader ships unconsumed: no production
-// module imports it until the SDK-boundary admission lands — a TS semver comparator arrives with
-// that consumer, not here.
+// does a thin structural parse only (string checks). It is consumed by the two SDK-boundary entry
+// bootstraps (`extension/index.ts`, `extension/workerMain.ts`) through `hostAdmission.ts`; the TS
+// semver comparator is `semver.ts`.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

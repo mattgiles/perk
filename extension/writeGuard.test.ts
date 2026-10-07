@@ -30,12 +30,12 @@ const RULES: { api: string; pattern: RegExp; allowed: string[] }[] = [
   {
     api: "appendFileSync(",
     pattern: /\bappendFileSync\(/,
-    // worker/stageExecution.ts: the append-only `events.ndjson` stream. hunkFeedback/store.ts
+    // worker/runEnvelope.ts: the append-only `events.ndjson` stream. hunkFeedback/store.ts
     // (the receiver's `delivered.ndjson`) and hunkFeedback/perkFeedback.ts (the standalone
     // bundled publisher's `outbox.ndjson`) are the §8.58 append-only NDJSON streams — same
     // O_APPEND rationale: appends cannot truncate-tear, and whole-file replace would introduce
     // a read-modify-write race between the two independent processes.
-    allowed: ["worker/stageExecution.ts", "hunkFeedback/store.ts", "hunkFeedback/perkFeedback.ts"],
+    allowed: ["worker/runEnvelope.ts", "hunkFeedback/store.ts", "hunkFeedback/perkFeedback.ts"],
   },
   { api: "writeFile(", pattern: /\bwriteFile\(/, allowed: [] },
   { api: "appendFile(", pattern: /\bappendFile\(/, allowed: [] },
@@ -106,11 +106,11 @@ test("file writes go through the atomic seam (atomicWriteFileSync in substrate/c
     "substrate/cache.ts no longer matches writeFileSync( — guard is vacuous",
   );
   const workerSource = stripComments(
-    readFileSync(path.join(import.meta.dirname, "worker", "stageExecution.ts"), "utf8"),
+    readFileSync(path.join(import.meta.dirname, "worker", "runEnvelope.ts"), "utf8"),
   );
   assert.ok(
     /\bappendFileSync\(/.test(workerSource),
-    "worker/stageExecution.ts no longer matches appendFileSync( — guard is vacuous",
+    "worker/runEnvelope.ts no longer matches appendFileSync( — guard is vacuous",
   );
 
   const lockSource = stripComments(
