@@ -1,18 +1,22 @@
-"""Environment verification for ``perk init`` (and, later, ``perk doctor``).
+"""Environment verification for ``perk init`` and ``perk doctor``.
 
 Presence checks for the tools perk's workflow needs (``cloc`` counts every submitted PR's change
-stats), plus the one real version gate:
-**node >= 22** (the extension relies on Node's native ``.ts`` type-stripping). Checks are
-pure + side-effect-free; the caller decides fatality (init: missing required tool -> exit 2).
+stats), plus the two version gates — **node** and **pi** — read from the shared host floor
+(``shared/host-floor.yaml``, contracts.md §8.76) and compared with semver precedence. An
+installed-but-outdated or unverifiable Node/Pi is ``ok=False`` exactly like an absent one. Checks
+are side-effect-free probes; the caller decides fatality (init: missing/outdated required tool
+-> exit 2; doctor: ``fail``). The launch admission in ``perk.run.pi_exec`` shares the Pi probe
+(``perk.substrate.pi_host``) but never gates these checks.
 """
 
 import shutil
 from dataclasses import dataclass
 
 from perk.substrate import cloc
-from perk.substrate.proc import ProcFailure, run_captured
-
-_MIN_NODE_MAJOR = 22
+from perk.substrate.host_floor import load_host_floor, required_node_version
+from perk.substrate.pi_host import PI_INSTALL_COMMAND, probe_pi_host
+from perk.substrate.proc import ProcFailure, run_captured, which_absolute
+from perk.substrate.semver import parse_semver, satisfies_floor
 
 
 @dataclass(frozen=True)
@@ -36,33 +40,60 @@ def _node_version() -> str | None:
     return proc.stdout.strip() or None
 
 
-def _node_major(version: str) -> int | None:
-    """Parse the major from ``vMAJOR.MINOR.PATCH`` (defensive)."""
-    try:
-        return int(version.lstrip("v").split(".", 1)[0])
-    except ValueError:
-        return None
-
-
 def _check_node() -> EnvCheck:
+    """The full Node floor (not just the major): an unparsable version counts as outdated."""
+    floor = required_node_version(load_host_floor())
     version = _node_version()
     if version is None:
         return EnvCheck(
             "node",
             False,
             "not found",
-            "Install Node.js >= 22: brew install node / mise use -g node@22 (https://nodejs.org).",
+            f"Install Node.js >= {floor}: brew install node / mise use -g node@{floor.major} "
+            "(https://nodejs.org).",
         )
-    major = _node_major(version)
-    if major is None or major < _MIN_NODE_MAJOR:
+    observed = parse_semver(version)
+    if observed is None or not satisfies_floor(observed, floor):
         return EnvCheck(
             "node",
             False,
             version,
-            f"Upgrade Node.js to >= {_MIN_NODE_MAJOR} (found {version}): "
-            "brew upgrade node / mise use -g node@22 (https://nodejs.org).",
+            f"Upgrade Node.js to >= {floor} (found {version}): "
+            f"brew upgrade node / mise use -g node@{floor.major} (https://nodejs.org).",
         )
     return EnvCheck("node", True, version, "")
+
+
+def _check_pi() -> EnvCheck:
+    """Presence + the Pi floor, through the same probe the launch admission uses.
+
+    Reads ``which_absolute`` / ``probe_pi_host`` as this module's globals (the test seams).
+    """
+    floor = load_host_floor()
+    path = which_absolute("pi")
+    if path is None:
+        return EnvCheck(
+            "pi",
+            False,
+            "not found",
+            f"Install Pi: {PI_INSTALL_COMMAND} (requires Node >= {floor.node_min_version}).",
+        )
+    host = probe_pi_host(path)
+    if host.outcome == "admitted":
+        return EnvCheck("pi", True, f"{host.observed} (floor >= {host.required})", "")
+    if host.outcome == "unsupported":
+        return EnvCheck(
+            "pi",
+            False,
+            f"{host.observed} (floor >= {host.required})",
+            f"Upgrade Pi to >= {host.required} (found {host.observed}): {PI_INSTALL_COMMAND}.",
+        )
+    return EnvCheck(
+        "pi",
+        False,
+        f"version unverifiable ({host.detail})",
+        f"Reinstall Pi (>= {host.required} required): {PI_INSTALL_COMMAND}.",
+    )
 
 
 def _check_tool(name: str, remediation: str) -> EnvCheck:
@@ -85,7 +116,7 @@ def _check_optional_tool(name: str, remediation: str) -> EnvCheck:
 
 
 def check_environment() -> list[EnvCheck]:
-    """All required-tooling checks (presence + node version).
+    """All required-tooling checks (presence + the node and pi version floors).
 
     The required-tool remediations carry the exact install command — rendered by init's
     failure path, doctor, AND the interactive guided-install pass (which offers to run the
@@ -101,10 +132,7 @@ def check_environment() -> list[EnvCheck]:
             "gh", "Install the GitHub CLI: brew install gh (or see https://cli.github.com)."
         ),
         _check_node(),
-        _check_tool(
-            "pi",
-            "Install Pi: npm install -g @earendil-works/pi-coding-agent (requires Node >= 22).",
-        ),
+        _check_pi(),
         _check_tool(
             "skills",
             "Install the skills CLI: curl -fsSL "
@@ -121,7 +149,7 @@ def check_environment() -> list[EnvCheck]:
 
 
 def required_tools_ok(checks: list[EnvCheck]) -> bool:
-    """True iff every *required* tool is present (and node meets the version gate).
+    """True iff every *required* tool is present (and node/pi meet the host floor).
 
     Optional checks (e.g. ast-grep) are ignored — a missing optional tool is non-fatal.
     """

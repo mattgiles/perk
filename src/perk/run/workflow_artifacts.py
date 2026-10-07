@@ -31,6 +31,8 @@ from pathlib import Path
 from perk import __version__
 from perk.convergence.init.settings import NPM_PACKAGE
 from perk.run.runner import GITHUB_ACTIONS_WORKFLOW
+from perk.substrate.host_floor import load_host_floor
+from perk.substrate.pi_host import PI_NPM_SPEC
 
 # The wired npm package name (without the `npm:` protocol prefix), single-sourced from the install
 # SSOT so the consumer worker-deps install stays in lockstep with the package perk actually wires.
@@ -167,20 +169,30 @@ jobs:
 _PERK_INSTALL_SELF = "uv tool install --from . perk"
 _PERK_INSTALL_CONSUMER = f"uv tool install perk=={__version__}"
 
+# The exact Pi both remote installs use (the global CLI and the consumer worker SDK) — the
+# certified published subject (contracts.md §8.14, §8.76). Distinct from the host floor (a
+# minimum, `shared/host-floor.yaml`), the development pins (`package.json` devDependencies) and
+# the pi-subagents supplier pin. Moved only after a live re-verify, and never below the floor
+# (a test pins that).
+REMOTE_PI_VERSION = "1.0.0"
+_PI_GLOBAL_INSTALL = f"npm install -g {PI_NPM_SPEC}@{REMOTE_PI_VERSION}"
+
 # The Node worker deps step differs by repo kind. The self-repo has the `package.json` + lockfile +
-# the `@earendil-works/*` devDeps the worker resolves, so `npm ci` works. A consumer checkout
-# installs the pinned `@mgiles/perk` into the project-scope `.pi/npm` root (mirroring the
-# PyPI install pin in `_PERK_INSTALL_CONSUMER` and the perk-owned `.pi/npm` install in
-# `convergence.init.extension_install`) **plus the pi SDK**: `@mgiles/perk` ships zero runtime
+# the `@earendil-works/*` devDeps the worker resolves, so `npm ci` works (the committed pins). A
+# consumer checkout installs the pinned `@mgiles/perk` into the project-scope `.pi/npm` root
+# (mirroring the PyPI install pin in `_PERK_INSTALL_CONSUMER` and the perk-owned `.pi/npm` install
+# in `convergence.init.extension_install`) **plus the pi SDK**: `@mgiles/perk` ships zero runtime
 # `dependencies` (the pi packages are peers) and `--legacy-peer-deps` makes npm skip peer
 # installation entirely, so the perk spec alone lands nothing the worker graph can import. The
-# unpinned `@earendil-works/pi-coding-agent` spec (tracking the same evergreen pi as the global
-# install above) brings its real deps — pi-ai, pi-tui, typebox — closing the worker's bare-import
-# set via node_modules walking from the staged entry (`run_worker._stage_consumer_entry`). Proven
-# live in `docs/design/archive/remote-runner-consumer-dogfood.md` (defects B-pre-c/B8).
+# `@earendil-works/pi-coding-agent` spec brings its real deps — pi-ai, pi-tui, typebox — closing
+# the worker's bare-import set via node_modules walking from the staged entry
+# (`run_worker._stage_consumer_entry`). The consumer worker SDK IS the remote wave host, so it is
+# pinned to `REMOTE_PI_VERSION` like the global CLI — pinning only the CLI would leave consumer
+# waves floating on whatever pi was latest. Proven live in
+# `docs/design/archive/remote-runner-consumer-dogfood.md` (defects B-pre-c/B8).
 _WORKER_DEPS_SELF = "npm ci"
 _WORKER_DEPS_CONSUMER = (
-    f"npm install {_NPM_NAME}@{__version__} @earendil-works/pi-coding-agent"
+    f"npm install {_NPM_NAME}@{__version__} {PI_NPM_SPEC}@{REMOTE_PI_VERSION}"
     " --prefix .pi/npm --legacy-peer-deps"
 )
 
@@ -201,10 +213,10 @@ runs:
       with:
         python-version: "3.13"
 
-    - name: Set up Node 22
+    - name: Set up Node {node_version}
       uses: actions/setup-node@v4
       with:
-        node-version: "22"
+        node-version: "{node_version}"
 
     - name: Install perk
       shell: bash
@@ -212,7 +224,7 @@ runs:
 
     - name: Install pi
       shell: bash
-      run: npm install -g @earendil-works/pi-coding-agent
+      run: {pi_install}
 
     # The npm package wraps cloc's Perl script (the Ubuntu runner ships Perl). Non-fatal at
     # submit time — a missing cloc degrades the PR's change stats to a note — but installed so
@@ -243,10 +255,19 @@ runs:
 
 
 def remote_setup_action(self_repo: bool) -> str:
-    """The composite setup action body for this repo kind (self-repo dogfoods the local code)."""
+    """The composite setup action body for this repo kind (self-repo dogfoods the local code).
+
+    Node is set up at exactly the shared host floor's version, so every remote run exercises the
+    declared minimum; pi is installed at the exact ``REMOTE_PI_VERSION``.
+    """
     install = _PERK_INSTALL_SELF if self_repo else _PERK_INSTALL_CONSUMER
     worker_deps = _WORKER_DEPS_SELF if self_repo else _WORKER_DEPS_CONSUMER
-    return _REMOTE_SETUP_ACTION_TEMPLATE.format(perk_install=install, worker_deps=worker_deps)
+    return _REMOTE_SETUP_ACTION_TEMPLATE.format(
+        perk_install=install,
+        worker_deps=worker_deps,
+        node_version=load_host_floor().node_min_version,
+        pi_install=_PI_GLOBAL_INSTALL,
+    )
 
 
 def _converge_file(path: Path, content: str, *, label: str, apply: bool) -> list[str]:

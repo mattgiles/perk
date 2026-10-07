@@ -37,6 +37,7 @@ category directory.
 | `registry.schema.json` | `RegistryFile` | `validation` | Accepted shape of the stage registry in `shared/registry.yaml`. |
 | `bindings.schema.json` | `BindingsFile` | `validation` | Accepted shape of the skill-binding set in `shared/bindings.yaml`. |
 | `providers.schema.json` | `ProvidersFile` | `validation` | Accepted shape of the provider catalog in `shared/providers.yaml`. |
+| `host-floor.schema.json` | `HostFloorFile` | `validation` | Accepted shape of the host floor in `shared/host-floor.yaml`. |
 <!-- perk:reference-facts:schemas-contracts:end -->
 
 ### `inputs/` — machine inputs

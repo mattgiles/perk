@@ -7,10 +7,11 @@ fields pinned in each section. `perk doctor` verifies conformance. The numbering
 section numbers are stable anchors, never renumbered; grep the existing headings before
 assigning a new one (a gap like `§8.8` stays a gap).
 
-Three **parsed** contracts are siblings of this file: `registry.yaml` — the stage
+Four **parsed** contracts are siblings of this file: `registry.yaml` — the stage
 graph, whose `state_keys` block is the canonical vocabulary referenced throughout this
 document — `bindings.yaml` — the skill-binding set (trigger→skill delivery), specified
-in §8.9 — and `providers.yaml` — the provider-selection supported set, specified in §8.10.
+in §8.9 — `providers.yaml` — the provider-selection supported set, specified in §8.10 — and
+`host-floor.yaml` — the minimum supported Pi and Node versions, specified in §8.76.
 One more sibling: `schemas/` (committed golden snapshots of the boundary models, §8.34).
 
 ---
@@ -2710,8 +2711,8 @@ Missing `git` inside a real repo classifies **`missing_tool`, never `not_a_repo`
 env gate runs before the repo probe — in both modes).
 
 **Interactive onboarding gestures.** Interactive `perk init` is a guided onboarding flow: a
-confirm-then-install pass over the missing *supported* required tools (`gh` via brew, `pi` via
-`npm -g`, `skills` via its official installer script on macOS / `go install` elsewhere, `cloc`
+confirm-then-install pass over the failing *supported* required tools (`gh` via brew, `pi` via
+`npm -g` — which also upgrades a `pi` the §8.76 floor reports outdated or unverifiable, `skills` via its official installer script on macOS / `go install` elsewhere, `cloc`
 via brew else `npm -g` when node works — `git`/`node` stay guide-only), an offered interactive `gh auth login` (re-probed afterward; the
 re-probe is the authority), a git `user.name`/`user.email` check with a prompted setup (scope
 confirm, global default), and — when the committed backend is `linear` with a `team` and no key
@@ -4261,19 +4262,22 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   `GITHUB_TOKEN`-pushed commits do not. The
   `runner-workflow-permissions` check is advisory `info` because of this PAT-push model (§8.16).
 - **`.github/actions/perk-remote-setup/action.yml`** — the composite setup action: the two pinned
-  toolchains (uv + Node 22), then perk (the exterior CLI — `--from . perk` for the self-repo,
+  toolchains (uv + Node at exactly `22.19.0` — the shared host floor's `node.min_version`, rendered
+  from `shared/host-floor.yaml`, §8.76), then perk (the exterior CLI — `--from . perk` for the self-repo,
   an exact-version-pinned PyPI install `uv tool install perk=={__version__}` for a consumer,
   baked in at `perk init` time so the runner reproduces the wiring perk version), pi (the interior the
-  worker drives), the **skills CLI** (`go install github.com/mattgiles/skills/cmd/skills@latest`
+  worker drives — `npm install -g @earendil-works/pi-coding-agent@<REMOTE_PI_VERSION>`, exactly
+  `1.0.0`), the **skills CLI** (`go install github.com/mattgiles/skills/cmd/skills@latest`
   — built from source because its release binaries are darwin-only; the runner's preinstalled Go +
   `GOTOOLCHAIN=auto` suffice, and the step is **fatal**: a failed install fails the job — no
   skills, no drive), the Node worker's peer deps, and a final **git-identity** step (`perk[bot]`,
   `--global`) so the worker's commits succeed on a fresh runner. The worker-deps step is repo-kind
   aware: **self** uses `npm ci` (the self-repo has the `package.json`/lockfile/devDeps the worker
-  resolves); **consumer** installs the pinned `@mgiles/perk` **plus the unpinned pi SDK**
-  (`npm install @mgiles/perk@{__version__} @earendil-works/pi-coding-agent --prefix .pi/npm
-  --legacy-peer-deps`, the perk pin baked in at `perk init` time so the runner reproduces the wiring
-  perk version). `@mgiles/perk` ships **zero** runtime `dependencies` (the pi packages are peers) and
+  resolves; the committed pins); **consumer** installs the pinned `@mgiles/perk` **plus the pi SDK
+  pinned to `REMOTE_PI_VERSION`** (`npm install @mgiles/perk@{__version__}
+  @earendil-works/pi-coding-agent@1.0.0 --prefix .pi/npm --legacy-peer-deps`, the perk pin baked in
+  at `perk init` time so the runner reproduces the wiring perk version; the consumer worker SDK is
+  the remote wave host, so it carries the same exact pin as the global CLI). `@mgiles/perk` ships **zero** runtime `dependencies` (the pi packages are peers) and
   `--legacy-peer-deps` makes npm skip peer installation entirely — the SDK spec is what lands the
   worker's imports: its real deps (pi-ai, pi-tui, typebox) close the worker graph's bare-import set
   under `.pi/npm/node_modules/`, resolvable from the staged `consumer-npm` entry (step 5 below).
@@ -13820,7 +13824,8 @@ launch environment with a stage launch, through the same seams: `resolve_launch_
 (the `launch_pi_agent_dir` precedence — env → main-checkout `[pi] agent_dir` → default — with
 the same missing-dir warning and `pi_agent_dir_invalid` refusal), `_build_exec_env(run_id=None)`,
 the `LINEAR_API_KEY` seed from the main checkout's `local.toml` (env wins), the pre-chdir
-absolute `pi` resolution (`pi_cli_missing`), the stale agent-lock sweep, and the one shared Pi
+absolute `pi` resolution (`pi_cli_missing`), then the host admission (`pi_version_unsupported` /
+`pi_version_unverifiable`, §8.76), the stale agent-lock sweep, and the one shared Pi
 executor `exec_pi` (`perk.run.pi_exec`; `perk.run.launch` re-exports `exec_pi`, `LaunchAgentDir`
 and `resolve_launch_agent_dir` for its `_exec_pi` adapter — `_exec_pi(ctx)` is the stage launch's
 `_LaunchContext` adapter over it, so the two paths cannot drift). `run_id=None` **removes an inherited `PERK_RUN_ID`** (never forwards
@@ -13897,7 +13902,8 @@ branch whose binding names another plan.
 reopened session keeps its own settings); a non-empty list yields one stderr note before the
 "opening the plan worktree's session picker" line. The gate picker validates the checkout and
 composes the launch BEFORE announcing anything, so an agent-dir refusal surfaces before any
-"opening" line; the exec step's `pi_cli_missing` / `launch_failed` land after it.
+"opening" line; the exec step's `pi_cli_missing` / `pi_version_unsupported` /
+`pi_version_unverifiable` / `launch_failed` land after it.
 
 ### (h) Perk-owned session names
 
@@ -14058,7 +14064,8 @@ env → main-checkout `[pi] agent_dir` → default — with the same missing-dir
 ordinary warm-session mint on load, §8.2 — exactly as a hand-run `pi`), the npm-quiet
 defaults and the `PERK_CLI_VERSION` stamp, the `LINEAR_API_KEY` seed from the main
 checkout's `local.toml` (env wins), the pre-chdir absolute `pi` resolution (`pi_cli_missing`),
-and the stale agent-lock sweep. The door imports `perk.run.pi_exec` only after the `not_a_tty`
+then the host admission (`pi_version_unsupported` / `pi_version_unverifiable`, §8.76), and the
+stale agent-lock sweep. The door imports `perk.run.pi_exec` only after the `not_a_tty`
 check and reads `pi_exec.resolve_launch_agent_dir` / `pi_exec.exec_pi` at call time, so the two
 paths cannot drift and the exec recorder's `pi_exec` monkeypatches reach it. The
 committed-redirect trust residual this shares with every cold-local launch is recorded in (h).
@@ -14098,7 +14105,8 @@ In order — `not_a_repo` (exit 2; the message is the ordinary "Not a git reposi
 appended line naming `pi` directly and `perk --help`) · `not_a_tty` · `pi_agent_dir_invalid` —
 all BEFORE the one announce line `opening a plain Pi session in <invocation root>: pi` (an
 agent-dir refusal never follows an "opening" line — the §8.71(g) shape); then the exec-phase
-`pi_cli_missing` · `launch_failed` after it (exit 1, `EXIT_FOR_TYPE`). A successful exec never
+`pi_cli_missing` · `pi_version_unsupported` · `pi_version_unverifiable` · `launch_failed` after it
+(exit 1, `EXIT_FOR_TYPE`). A successful exec never
 returns (the terminal receives pi's own exit status). Only `UserFacingCliError` is caught: an
 `OSError` / `UnicodeDecodeError` from the shared config read (`_read_toml`'s `Path.read_text`) or
 the fail-soft `local.toml` key read inside `exec_pi` is untyped and surfaces through Click's
@@ -14138,7 +14146,8 @@ the gitignored `local.toml` — is a cross-door decision outside this section.
 The one shared executor `exec_pi` (`perk.run.pi_exec`) carries a **profiling instrument, not an
 operator surface**:
 when `PERK_PROFILE_HANDOFF=<file>` is set to a non-blank value, `exec_pi` runs every pre-exec phase
-as usual — the pre-chdir absolute `pi` resolution, the child-env build (`_build_exec_env`), the
+as usual — the pre-chdir absolute `pi` resolution, the host admission (§8.76; a refused host
+raises its typed error and records nothing), the child-env build (`_build_exec_env`), the
 stale agent-lock sweep — and then, immediately before the `chdir` + `exec` that would otherwise
 follow, **records the handoff and exits `0` without exec'ing pi**: it writes `<file>` (parents
 created) as a JSON object with exactly the keys `schema` (`1`), `handoff_monotonic_ns` (a
@@ -14166,7 +14175,9 @@ registry**: the root registration (every command import + `add_command`, `perk/c
 _register_root_commands`) is deferred as one unit to Click's first subcommand lookup or listing
 (`SectionedGroup.get_command` / `list_commands`), which those three invocations never reach;
 `--version` exits during option parsing, and the bare arm imports `perk.run.pi_exec` only after
-the terminal check. A subcommand still loads the whole surface on its first lookup (unchanged);
+the terminal check. The bare arm also spawns one `pi --version` (the §8.76 host admission) — an
+exec-phase cost, not an import. A subcommand still loads the whole surface on its first lookup
+(unchanged);
 Click's own "Did you mean" suggestions are complete because `resolve_command` calls `get_command`
 before it reads the map. Guarded by the fresh-process importtime matrix
 `tests/test_cli_import_tiers.py` (`--version`, bare, `--`, and `--help` as the positive control);
@@ -15020,3 +15031,89 @@ shared transport `extension/pi/v1/foregroundDelegation.ts`, the snapshot policy
   forbid it; the catalog-entry half still holds). Deferred: a cross-session librarian lock, a
   per-launch timeout knob, background execution of the writer child, a catalog-level publication
   revision marker.
+
+---
+
+## §8.76 · Host admission (the shared floor, the Python launch preflight, the environment checks)
+
+perk declares the minimum supported host versions once and enforces them at the Python launch
+boundary; `perk init` / `perk doctor` report the same requirement. Owning modules:
+`perk/substrate/host_floor.py` (the reader), `perk/substrate/semver.py` (precedence),
+`perk/substrate/pi_host.py` (the probe + the pure decision), `perk/run/pi_exec.py` (the launch
+preflight), `perk/convergence/env.py` (the environment rows), `extension/substrate/hostFloor.ts`
+(the TS reader).
+
+### (a) The declaration — `shared/host-floor.yaml`
+
+The fourth parsed cross-plane contract (beside `registry.yaml`, `bindings.yaml`,
+`providers.yaml`), bundled into both artifacts and read directly by both planes (no codegen):
+
+```yaml
+schema_version: 1
+pi:
+  min_version: "1.0.0"
+node:
+  min_version: "22.19.0"
+```
+
+A **floor** is a minimum (`>=`) compared with semver 2.0.0 precedence: a prerelease of the floor
+triple (`1.0.0-rc.1`) is below it, build metadata carries no precedence, and a later release
+(`1.0.3`, `1.10.0`) is admitted. Each entry is a plain release `MAJOR.MINOR.PATCH` string. The
+Python reader is authoritative: `load_host_floor` raises `HostFloorError` for structural failures
+(missing file, YAML error, not a mapping, unsupported `schema_version`, a wrong-typed present
+field), and `validate()` returns findings for content (missing, not semver, not a plain release).
+The TS reader (`parseHostFloor` / `loadHostFloor`) is a structural parse only — it throws on a
+non-mapping or a missing/non-string `min_version` — and currently ships consumed by no production
+module (only its test imports it) until an SDK-boundary admission consumes it.
+
+### (b) Separate version facts
+
+Five facts, each in its own home, never conflated: the **host floor** (this file — a minimum);
+the **development pins** (`package.json` `devDependencies` — exact); the **pi-subagents supplier
+pin** (§8.10 settings wiring); the **doctor guidance stamp** (`subagent-compat`); and the **remote
+install pin** `REMOTE_PI_VERSION` (`perk/run/workflow_artifacts.py`, §8.14) — exact, the
+certified published subject, used by both remote installs (the global `pi` CLI and the consumer
+worker SDK), never below the floor (a test pins it). Every host observation — the PATH `pi` CLI,
+a loaded SDK — is admitted **independently** against the same floor; equality between
+observations is never required (a floor-satisfying CLI beside an older dev SDK pin is admitted on
+the CLI's own reading). The launch admission below reads no `package.json`, `node_modules` or
+loaded SDK. Host libraries stay wildcard peers; only `engines.node` mirrors the Node floor.
+
+### (c) The launch admission (`exec_pi`)
+
+The one Pi exec pipeline (§8.71(b), §8.72(b)) runs, immediately after the pre-chdir absolute `pi`
+resolution (`pi_cli_missing` on a PATH miss) and **before every other exec-phase step** (the
+`LINEAR_API_KEY` read, the env build, the stale agent-lock sweep, the `PERK_PROFILE_HANDOFF` arm,
+`chdir`, exec): one `<resolved pi> --version` spawn through `run_captured` with a 20 s timeout,
+then a semver comparison against `pi.min_version`. Three outcomes:
+
+| Outcome | When | `error_type` (exit 1) |
+|---|---|---|
+| `admitted` | stdout parses (one optional leading `v`, surrounding whitespace ignored) at or above the floor | — (the pipeline continues) |
+| `unsupported` | stdout parses below the floor — a prerelease of the floor triple included | `pi_version_unsupported` |
+| `unverifiable` | stdout is not a semver version (empty or over 256 characters included), output that is not UTF-8, a non-zero exit, a timeout, or a spawn failure | `pi_version_unverifiable` |
+
+The refusal message always carries the executable path, the observed version (or the
+unverifiable reason), the required version, and the repair command (`npm install -g
+@earendil-works/pi-coding-agent`). No operator override exists. One implementation applies to the
+plain session, every staged launch (through `_exec_pi`) and `perk resume`; a refused host leaves
+no handoff record (§8.72(i)). `--dry-run` previews return before the exec phase and never probe.
+On a staged launch the worktree, handoff and setup hook may already have run — the same posture
+as `pi_cli_missing` (a re-run reuses the materialized worktree and mints a fresh run id).
+
+### (d) What is not gated
+
+`perk init`, `perk doctor` (incl. `--fix`), `--help` and every repair path are never gated by the
+launch admission — it lives only in `exec_pi`. The remote worker (`perk run-worker` →
+`node extension/workerMain.ts`) never reaches `exec_pi` and is not admitted here.
+
+### (e) The environment checks (§8.5 `env`, §8.6 `environment`)
+
+The `pi` row is presence + version through the same probe (`probe_pi_host`): admitted →
+`ok=True` with detail `<observed> (floor >= <required>)`; unsupported → `ok=False`, the same detail
+and an upgrade remediation; unverifiable → `ok=False`, detail `version unverifiable (<reason>)`;
+absent → `ok=False`, `not found`. The `node` row compares the full `node --version` against
+`node.min_version` (an unparsable version is outdated). An outdated or unverifiable Node/Pi is
+`ok=False` exactly like an absent one — `missing_tool` exit 2 for `perk init` (the guided `pi`
+install, `npm install -g @earendil-works/pi-coding-agent`, also upgrades), `fail` for
+`perk doctor`. The row names, positions and envelope shapes are unchanged.

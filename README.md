@@ -56,7 +56,7 @@ perk plan
 `perk init` is idempotent and safe to re-run. `perk doctor` reports health;
 `perk doctor --fix` repairs managed drift.
 
-You need a git repo plus `git`, `gh`, `node >= 22`, `pi`, and `uv`. `ast-grep` is preferred
+You need a git repo plus `git`, `gh`, `node >= 22.19.0`, `pi`, and `uv`. `ast-grep` is preferred
 for structural search and reported when absent, but it is advisory. GitHub auth is verified
 and reported by init; it becomes required when you drive real plans, PRs, and merges.
 
@@ -91,7 +91,7 @@ Two pinned toolchains:
 
 - **Python** — [uv](https://docs.astral.sh/uv/) (3.13, pinned in `.python-version`),
   [ruff](https://docs.astral.sh/ruff/) (lint/format), [ty](https://docs.astral.sh/ty/) (types).
-- **TypeScript** — npm (Node ≥ 22, `.npmrc`), [Biome](https://biomejs.dev/) (lint/format),
+- **TypeScript** — npm (Node ≥ 22.19.0, `.npmrc`), [Biome](https://biomejs.dev/) (lint/format),
   `tsc` (types).
 
 With [`just`](https://github.com/casey/just):

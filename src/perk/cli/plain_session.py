@@ -42,9 +42,10 @@ def run_plain_session(ctx: click.Context) -> None:
     invocation root, so a linked worktree resolves to itself), the shared agent-dir precedence
     (its missing-dir warning and ``pi_agent_dir_invalid`` refusal ride along), ONE announce line
     (emitted only after the agent dir resolved, so a refusal never follows an "opening" line —
-    the exec-phase ``pi_cli_missing`` / ``launch_failed`` arms land after it), and the one shared
-    Pi exec pipeline with ``run_id=None`` (an inherited ``PERK_RUN_ID`` is dropped; the extension
-    mints its ordinary warm-session id on load, as for a hand-run ``pi``).
+    the exec-phase ``pi_cli_missing`` / ``pi_version_unsupported`` / ``pi_version_unverifiable``
+    / ``launch_failed`` arms land after it), and the one shared Pi exec pipeline with
+    ``run_id=None`` (an inherited ``PERK_RUN_ID`` is dropped; the extension mints its ordinary
+    warm-session id on load, as for a hand-run ``pi``).
 
     ``perk.run.pi_exec`` is imported only after the terminal check (the tiered-import rule,
     python-cli-guidelines §8.3: the exec seam carries the pydantic config boundary, which the

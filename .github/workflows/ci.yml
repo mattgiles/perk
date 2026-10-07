@@ -25,10 +25,10 @@ jobs:
           enable-cache: true
           python-version: "3.13"
 
-      - name: Set up Node 22
+      - name: Set up Node 22.19.0
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.19.0"
           cache: npm
 
       - name: Install just

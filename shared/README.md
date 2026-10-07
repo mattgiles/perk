@@ -18,16 +18,21 @@ Contents:
   set (the catalog of plan/footer/web providers perk can wire, with each entry's `package` /
   `adapter` / `default` / optional `package_filter`). Read by both planes
   (`src/perk/substrate/providers.py`, `extension/substrate/providers.ts`); see `contracts.md` §8.10.
-- **`contracts.md`** — the numbered *prose* contract sections (`§8.1`–`§8.57`,
+- **`host-floor.yaml`** — the fourth *parsed* contract: the host floor (the minimum supported
+  Pi and Node versions, semver `>=`). Read by both planes (`src/perk/substrate/host_floor.py`,
+  the authoritative validator; `extension/substrate/hostFloor.ts`, a structural reader); the
+  Python launch preflight and `perk init`/`perk doctor` enforce it. See `contracts.md` §8.76.
+- **`contracts.md`** — the numbered *prose* contract sections (`§8.1`–`§8.76`,
   non-contiguous: `§8.8` is skipped and `§8.6a` exists), each pinning the exact
   names/paths/shapes both planes implement against. The founding four — the
   `.perk/workflow/` layout, the `PERK_RUN_ID` protocol, the `perk:workflow-state`
   schema, and the GitHub gateway contract — were the original seed, not the current
   inventory.
 - **`schemas/`** — committed **golden snapshots** of perk's boundary models (the
-  shared-YAML parse contracts, the machine batch inputs, and the `--json` output
-  envelopes), generated from the Pydantic models in `perk/boundary.py` and grouped by
-  role under `contracts/` / `inputs/` / `outputs/`. Their function is making
+  shared-YAML parse contracts — registry, bindings, providers and host floor — the machine
+  batch inputs, and the `--json` output envelopes), generated from the Pydantic models in
+  `perk/boundary.py` and grouped by role under `contracts/` / `inputs/` / `outputs/`. Their
+  function is making
   machine-surface shape changes reviewable in PRs: bundled into both artifacts, read at
   runtime by neither, drift-guarded by `tests/test_contract_schemas.py`. See
   `contracts.md` §8.34.

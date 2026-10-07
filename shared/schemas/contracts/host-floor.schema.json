@@ -1,0 +1,34 @@
+{
+  "$defs": {
+    "_FloorEntry": {
+      "description": "One host's floor entry. ``str | None`` so an explicit YAML ``null`` reads as missing.",
+      "properties": {
+        "min_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Version"
+        }
+      },
+      "title": "_FloorEntry",
+      "type": "object"
+    }
+  },
+  "description": "The lenient whole-file parse model.\n\n``schema_version`` is deliberately NOT a field: it stays a structural pre-check in\n``load_host_floor`` (it must run before generic validation and raise its own message).",
+  "properties": {
+    "pi": {
+      "$ref": "#/$defs/_FloorEntry"
+    },
+    "node": {
+      "$ref": "#/$defs/_FloorEntry"
+    }
+  },
+  "title": "HostFloorFile",
+  "type": "object"
+}

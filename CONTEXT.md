@@ -466,6 +466,25 @@ worker-supplied set nothing reads Pi's MCP config or credentials; a project exte
 brings its own MCP support is outside that guarantee.
 _Avoid_: native factories (when MCP is implied), worker extensions
 
+### Host admission
+
+**Host floor**:
+The enforced minimum supported host version — Pi and Node — declared once in
+`shared/host-floor.yaml` and compared with semver precedence (`>=`; a prerelease of the floor
+triple is below it). Each host observation is admitted against it independently.
+_Avoid_: pin, requirement, gate (when the minimum is meant)
+
+**Admission**:
+The launch-boundary decision about the PATH `pi` against the host floor — `admitted`,
+`unsupported` (`pi_version_unsupported`) or `unverifiable` (`pi_version_unverifiable`) — taken
+once per local launch, before any exec-phase side effect.
+_Avoid_: version check, gate
+
+**Remote install pin**:
+The exact Pi the managed remote artifacts install (`REMOTE_PI_VERSION`) for both the global CLI
+and the consumer worker SDK; never below the host floor, and never the floor itself.
+_Avoid_: floor
+
 ### TUI surfaces
 
 **Display sink**:

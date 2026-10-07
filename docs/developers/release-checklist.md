@@ -50,7 +50,7 @@ just --list
 Expected:
 
 - `gh` is authenticated as an account with admin access to `mattgiles/perk`.
-- Node is new enough for this repo. CI uses Node 22.
+- Node meets the repo floor (`>=22.19.0`, `shared/host-floor.yaml`). CI uses exactly Node 22.19.0.
 - `uv`, `npm`, and `just` are available.
 
 ### 1.2. Check the package names before claiming anything

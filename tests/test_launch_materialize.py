@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -24,10 +25,12 @@ from perk.run.pi_exec import _build_exec_env
 from perk.state import cache
 from perk.substrate import git as git_mod
 from perk.substrate.config import Config
+from perk.substrate.host_floor import load_host_floor
 
 pytestmark = pytest.mark.usefixtures("stub_launch_extension_warm")
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch):
     """Real-git integration (D4/D5): implement creates plan-<pr_id> + branch, materializes
     handoff + plan-ref into it, and reuses the worktree on a second run."""
@@ -74,6 +77,7 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     assert wt.is_dir()
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_launch_warms_extension_install_before_exec(git_repo, monkeypatch):
     # ensure_extension_install_present is invoked before os.execvpe on the local consumer path.
     cache.write_plan_ref(git_repo, _PLAN_REF)
@@ -121,6 +125,7 @@ def test_launch_does_not_warm_on_dry_run(git_repo, monkeypatch, capsys):
     assert warmed == []  # --dry-run early-returns before the warm
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_install_step_resolves_done_when_install_happens(git_repo, monkeypatch, capsys):
     """When the extension is absent and the warm actually installs (returns a change line), the
     installing step resolves to a done milestone."""
@@ -149,6 +154,7 @@ def test_install_step_resolves_done_when_install_happens(git_repo, monkeypatch, 
     assert "installed perk extension" in err  # the step resolved to ✓
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_install_step_resolves_warn_when_install_did_not_take(git_repo, monkeypatch, capsys):
     """When the extension is absent and the warm returns None with the dir still absent (a swallowed
     failure), the installing step resolves to a warn rather than dangling."""
@@ -225,6 +231,7 @@ def test_launch_exported_linear_key_wins_over_local_config():
     assert env["LINEAR_API_KEY"] == "lin_api_env"
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_exec_pi_resolves_before_chdir_and_execs_the_absolute_path(
     tmp_path, monkeypatch, launch_context_factory
 ):
@@ -277,7 +284,101 @@ def test_exec_pi_which_miss_aborts_before_any_exec_phase_side_effect(
     assert stale_lock.exists()  # the lock sweep never ran either
 
 
+def _pi_script(tmp_path: Path, monkeypatch, body: str) -> Path:
+    """Put an executable ``pi`` script first on ``PATH`` (the REAL resolver + probe find it)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    script = bin_dir / "pi"
+    script.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    return script
+
+
+def _stale_lock_context(tmp_path: Path, launch_context_factory):
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    stale_lock = agent_dir / "settings.json.lock"
+    stale_lock.write_text("", encoding="utf-8")
+    ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF, agent_dir=agent_dir)
+    return ctx, stale_lock
+
+
+def test_exec_pi_refuses_an_outdated_pi_before_any_exec_phase_side_effect(
+    tmp_path, monkeypatch, launch_context_factory
+):
+    """The REAL probe (`pi --version` through run_captured) reads a below-floor Pi and refuses
+    `pi_version_unsupported` BEFORE the lock sweep, the chdir and the exec."""
+    events: list[str] = []
+    script = _pi_script(tmp_path, monkeypatch, "echo 0.99.2")
+    monkeypatch.setattr(pi_exec.os, "chdir", lambda path: events.append("chdir"))
+    monkeypatch.setattr(pi_exec.os, "execvpe", lambda program, argv, env: events.append("exec"))
+    ctx, stale_lock = _stale_lock_context(tmp_path, launch_context_factory)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        launch._exec_pi(ctx)
+    assert excinfo.value.error_type == "pi_version_unsupported"
+    message = excinfo.value.format_message()
+    assert str(script) in message
+    assert "version 0.99.2" in message
+    assert "Pi >= 1.0.0" in message
+    assert "npm install -g @earendil-works/pi-coding-agent" in message
+    assert events == []  # neither chdir nor exec happened
+    assert stale_lock.exists()  # the lock sweep never ran either
+
+
+def test_exec_pi_refuses_an_unverifiable_pi(tmp_path, monkeypatch, launch_context_factory):
+    events: list[str] = []
+    script = _pi_script(tmp_path, monkeypatch, "echo nope >&2\nexit 3")
+    monkeypatch.setattr(pi_exec.os, "chdir", lambda path: events.append("chdir"))
+    monkeypatch.setattr(pi_exec.os, "execvpe", lambda program, argv, env: events.append("exec"))
+    ctx, stale_lock = _stale_lock_context(tmp_path, launch_context_factory)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        launch._exec_pi(ctx)
+    assert excinfo.value.error_type == "pi_version_unverifiable"
+    message = excinfo.value.format_message()
+    assert str(script) in message
+    assert "pi --version exited 3: nope" in message
+    assert "Pi >= 1.0.0" in message
+    assert events == []
+    assert stale_lock.exists()
+
+
+def test_exec_pi_refuses_a_pi_with_undecodable_output(
+    tmp_path, monkeypatch, launch_context_factory
+):
+    events: list[str] = []
+    script = _pi_script(tmp_path, monkeypatch, r'printf "\377\n"')
+    monkeypatch.setattr(pi_exec.os, "chdir", lambda path: events.append("chdir"))
+    monkeypatch.setattr(pi_exec.os, "execvpe", lambda program, argv, env: events.append("exec"))
+    ctx, stale_lock = _stale_lock_context(tmp_path, launch_context_factory)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        launch._exec_pi(ctx)
+    assert excinfo.value.error_type == "pi_version_unverifiable"
+    message = excinfo.value.format_message()
+    assert str(script) in message
+    assert "not UTF-8" in message
+    assert events == []
+    assert stale_lock.exists()
+
+
+def test_exec_pi_admits_a_pi_at_the_floor_and_execs_its_absolute_path(
+    tmp_path, monkeypatch, launch_context_factory
+):
+    events: list[object] = []
+    floor = load_host_floor().pi_min_version
+    script = _pi_script(tmp_path, monkeypatch, f"echo {floor}")
+    monkeypatch.setattr(pi_exec.os, "chdir", lambda path: events.append("chdir"))
+    monkeypatch.setattr(
+        pi_exec.os, "execvpe", lambda program, argv, env: events.append(("exec", program))
+    )
+    ctx, stale_lock = _stale_lock_context(tmp_path, launch_context_factory)
+    launch._exec_pi(ctx)
+    assert events == ["chdir", ("exec", str(script))]
+    assert not stale_lock.exists()  # admitted: the ordinary pre-exec phases ran
+
+
 @pytest.mark.parametrize("failure_point", ["chdir", "execvpe"])
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_exec_pi_chdir_or_exec_oserror_becomes_launch_failed(
     tmp_path, monkeypatch, launch_context_factory, failure_point
 ):
@@ -773,7 +874,10 @@ def test_naming_hints_matrix(plan_state, snapshot_title, expected):
 
 
 def _capture_handoff(monkeypatch) -> dict[str, dict[str, object]]:
-    """Capture the handoff blob `launch_stage` writes; stub exec so the CLI never becomes pi."""
+    """Capture the handoff blob `launch_stage` writes; stub exec so the CLI never becomes pi.
+
+    Callers request ``admitted_pi_host`` (the stubbed ``/stub/bin/pi`` never answers a probe).
+    """
     captured: dict[str, dict[str, object]] = {}
 
     def _capture(root, run_id, data):
@@ -803,6 +907,7 @@ def _launch_implement(git_repo: Path, **kwargs) -> Path:
     return config.worktree_root / "plan-42"
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_handoff_naming_from_plan_state(git_repo, monkeypatch):
     """A state-bearing launch names from the selected plan state: its title + objective node."""
     captured = _capture_handoff(monkeypatch)
@@ -813,6 +918,7 @@ def test_handoff_naming_from_plan_state(git_repo, monkeypatch):
     assert "objective_id" not in data and "node_id" not in data  # never the planning-link keys
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_handoff_naming_from_snapshot_body(git_repo, monkeypatch):
     """Without a plan state the title comes from the fetched body — which is still snapshotted."""
     captured = _capture_handoff(monkeypatch)
@@ -824,6 +930,7 @@ def test_handoff_naming_from_snapshot_body(git_repo, monkeypatch):
     assert cache.plan_body_path(wt).exists()  # the one fetch still feeds the snapshot
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_handoff_naming_door_supplied_wins_wholesale(git_repo, monkeypatch):
     """A door's `handoff_extra["naming"]` replaces the launch-derived hints (no field merge)."""
     captured = _capture_handoff(monkeypatch)
@@ -836,6 +943,7 @@ def test_handoff_naming_door_supplied_wins_wholesale(git_repo, monkeypatch):
     assert captured["data"]["naming"] == {"title": "Door"}  # no `node` merged in
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_handoff_has_no_naming_for_worktree_none_stage(git_repo, monkeypatch):
     captured = _capture_handoff(monkeypatch)
     monkeypatch.setattr("perk.run.launch.cache.write_plan_ref", lambda *a, **k: None)
@@ -852,6 +960,7 @@ def test_handoff_has_no_naming_for_worktree_none_stage(git_repo, monkeypatch):
     assert "naming" not in captured["data"]
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_handoff_has_no_naming_when_fetch_fails_and_no_state(git_repo, monkeypatch, capsys):
     captured = _capture_handoff(monkeypatch)
 
@@ -1086,6 +1195,7 @@ def test_implement_linear_emission_failure_never_blocks_exec(
     assert "run-started emission skipped (non-fatal)" in capsys.readouterr().err
 
 
+@pytest.mark.usefixtures("admitted_pi_host")
 def test_handoff_extra_is_merged_into_handoff(git_repo, monkeypatch):
     """launch_stage merges handoff_extra into the handoff blob (objective-plan ferries the
     objective_id/node_id link this way so a later plan-save recovers it)."""

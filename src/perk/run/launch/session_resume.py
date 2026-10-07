@@ -258,9 +258,10 @@ def resolve_run_session(main_root: Path, run_id: str) -> RunSessionTarget:
 
 def exec_session_resume(launch_spec: SessionResumeLaunch) -> None:
     """Hand the spec to the one shared Pi exec pipeline with ``run_id=None`` (nothing minted;
-    an inherited ``PERK_RUN_ID`` dropped): absolute ``pi`` pre-chdir, the ``LINEAR_API_KEY``
-    seed from the main checkout, the stale-lock sweep, chdir + execvpe, ``OSError`` →
-    ``launch_failed``. A named entry point so both doors (and later arms) share one call shape.
+    an inherited ``PERK_RUN_ID`` dropped): absolute ``pi`` pre-chdir, the host admission
+    against the shared floor, the ``LINEAR_API_KEY`` seed from the main checkout, the
+    stale-lock sweep, chdir + execvpe, ``OSError`` → ``launch_failed``. A named entry point so
+    both doors (and later arms) share one call shape.
 
     Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execvpe`` and control returns.
     """

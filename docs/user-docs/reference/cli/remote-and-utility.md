@@ -281,7 +281,9 @@ same fail-closed validation the stage launchers apply — `worktree_unregistered
 registered git worktree), and for the plan forms `worktree_unbound` / `worktree_branch_mismatch`
 / `worktree_plan_mismatch`. A bare `--worktree NAME` needs no plan binding. Other refusals:
 `invalid_input` (a bad name, `TARGET --worktree root`, or `RUN_ID --worktree NAME`),
-`pi_cli_missing`, `launch_failed`, and the plan selection's own errors (`plan_not_found`,
+`pi_cli_missing`, `pi_version_unsupported` / `pi_version_unverifiable` (the
+[host floor](../requirements-and-compatibility.md#version-compatibility) admission),
+`launch_failed`, and the plan selection's own errors (`plan_not_found`,
 `issue_kind_mismatch`). The run-id form adds three: `run_not_found` (the run predates session
 recording, its run state was pruned by `perk state prune`, or its record is unreadable — browse
 the picker instead), `session_missing` (the recorded session file is gone — or Pi has not written

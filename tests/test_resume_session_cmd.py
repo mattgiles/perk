@@ -20,6 +20,7 @@ from perk.cli.cli import cli
 from perk.cli.commands import resume_session_cmd
 from perk.cli.context import PerkContext
 from perk.cli.ensure import UserFacingCliError
+from perk.run import pi_exec
 from perk.run.launch import session_resume
 from perk.state import cache, session_pointers
 from perk.state.run_id import mint
@@ -224,6 +225,24 @@ def test_bare_opens_the_picker_in_the_invocation_root(git_repo, monkeypatch, lau
     assert result.stdout == ""
     assert "skills \u00b7" not in result.stderr  # no launch banner: a picker is not a stage launch
     _assert_nothing_written(git_repo)
+
+
+def test_outdated_pi_refuses_after_the_picker_announce(git_repo, monkeypatch, launch_exec_recorder):
+    _tty(monkeypatch)
+
+    def _outdated(pi_path: str):
+        raise UserFacingCliError(
+            f"pi at {pi_path} is version 0.99.2; perk requires Pi >= 1.0.0.",
+            error_type="pi_version_unsupported",
+        )
+
+    monkeypatch.setattr(pi_exec, "_admit_pi_host", _outdated)
+    result = _invoke(git_repo, [])
+    assert result.exit_code == 1
+    announce = result.stderr.index(f"opening Pi's session picker in {git_repo}: pi --resume")
+    assert announce < result.stderr.index("is version 0.99.2; perk requires Pi >= 1.0.0")
+    assert "pi_version_unsupported" not in result.stderr
+    assert launch_exec_recorder.calls == [] and launch_exec_recorder.chdirs == []
 
 
 def test_worktree_name_opens_the_named_checkout(git_repo, monkeypatch, launch_exec_recorder):

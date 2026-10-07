@@ -1,7 +1,8 @@
 """Bare `perk` — the plain-session door (contracts.md §8.72).
 
 Driven through the registered `cli` object (CliRunner) with an injected `PerkContext.for_test`
-and the shared `launch_exec_recorder` (stubs `_resolve_pi_executable`, `os.chdir`, `os.execvpe`);
+and the shared `launch_exec_recorder` (stubs `_resolve_pi_executable`, the host admission,
+`os.chdir`, `os.execvpe`);
 the TTY seam swaps the door module's `sys` (CliRunner replaces `sys.stdin`, so patching
 `sys.stdin.isatty` alone would not reach it). These tests prove what the ROOT DISPATCH
 contributes — checkout, argv, `run_id=None`, ordering — not the shared executor's environment
@@ -232,6 +233,25 @@ def test_missing_pi_refuses_after_the_announce(git_repo, monkeypatch, launch_exe
     assert "pi_cli_missing" not in result.stderr  # the human surface never renders the code
     _assert_announce_precedes_error(result.stderr, git_repo)
     _assert_untouched(launch_exec_recorder)  # resolved pre-chdir: no chdir, no exec
+
+
+def test_outdated_pi_refuses_after_the_announce(git_repo, monkeypatch, launch_exec_recorder):
+    _tty(monkeypatch)
+
+    def _outdated(pi_path: str):
+        raise UserFacingCliError(
+            f"pi at {pi_path} is version 0.99.2; perk requires Pi >= 1.0.0.",
+            error_type="pi_version_unsupported",
+        )
+
+    monkeypatch.setattr(pi_exec, "_admit_pi_host", _outdated)
+    result = _invoke(git_repo)
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "is version 0.99.2; perk requires Pi >= 1.0.0" in result.stderr
+    assert "pi_version_unsupported" not in result.stderr  # the human surface never renders it
+    _assert_announce_precedes_error(result.stderr, git_repo)
+    _assert_untouched(launch_exec_recorder)  # admitted pre-chdir: no chdir, no exec
 
 
 def test_exec_oserror_is_launch_failed_after_the_announce(

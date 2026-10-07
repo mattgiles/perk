@@ -1,5 +1,8 @@
+import pytest
+
 from perk.convergence import env
 from perk.convergence.env import EnvCheck, check_environment, required_tools_ok
+from perk.substrate.pi_host import PiHost
 
 
 def test_check_environment_covers_required_tools():
@@ -26,10 +29,10 @@ def test_required_remediations_carry_the_exact_install_command(monkeypatch):
         "Install the GitHub CLI: brew install gh (or see https://cli.github.com)."
     )
     assert remediations["node"] == (
-        "Install Node.js >= 22: brew install node / mise use -g node@22 (https://nodejs.org)."
+        "Install Node.js >= 22.19.0: brew install node / mise use -g node@22 (https://nodejs.org)."
     )
     assert remediations["pi"] == (
-        "Install Pi: npm install -g @earendil-works/pi-coding-agent (requires Node >= 22)."
+        "Install Pi: npm install -g @earendil-works/pi-coding-agent (requires Node >= 22.19.0)."
     )
     assert remediations["skills"] == (
         "Install the skills CLI: curl -fsSL "
@@ -48,7 +51,7 @@ def test_outdated_node_remediation_also_carries_commands(monkeypatch):
     node = next(c for c in env.check_environment() if c.name == "node")
     assert not node.ok
     assert node.remediation == (
-        "Upgrade Node.js to >= 22 (found v20.11.0): "
+        "Upgrade Node.js to >= 22.19.0 (found v20.11.0): "
         "brew upgrade node / mise use -g node@22 (https://nodejs.org)."
     )
 
@@ -86,3 +89,104 @@ def test_node_absent(monkeypatch):
     monkeypatch.setattr(env, "_node_version", lambda: None)
     node = next(c for c in env.check_environment() if c.name == "node")
     assert not node.ok and node.detail == "not found"
+
+
+@pytest.mark.parametrize(
+    "version",
+    ["v22.18.0", "v22.19.0-nightly20250101", "v22", "garbage", "v21.99.99"],
+)
+def test_node_below_the_full_floor_or_unparsable_is_outdated(monkeypatch, version):
+    monkeypatch.setattr(env, "_node_version", lambda: version)
+    node = env._check_node()
+    assert not node.ok
+    assert node.detail == version
+    assert node.remediation.startswith(f"Upgrade Node.js to >= 22.19.0 (found {version}): ")
+
+
+# A prerelease of a LATER triple is above the floor (semver precedence compares the triple first).
+@pytest.mark.parametrize(
+    "version", ["v22.19.0", "v22.20.1", "v23.0.0-nightly20250101abc", "v24.0.0", "v26.3.0"]
+)
+def test_node_at_or_above_the_full_floor_is_ok(monkeypatch, version):
+    monkeypatch.setattr(env, "_node_version", lambda: version)
+    node = env._check_node()
+    assert node.ok and node.detail == version and node.remediation == ""
+
+
+# --- the pi row: presence + the Pi floor -----------------------------------------------------
+
+
+def _pi_host(outcome, observed, detail=""):
+    return PiHost("/opt/bin/pi", outcome, observed, "1.0.0", detail)
+
+
+def test_pi_absent(monkeypatch):
+    monkeypatch.setattr(env, "which_absolute", lambda name: None)
+    monkeypatch.setattr(env, "probe_pi_host", _unreachable_probe)
+    pi = env._check_pi()
+    assert (pi.ok, pi.detail) == (False, "not found")
+    assert pi.remediation == (
+        "Install Pi: npm install -g @earendil-works/pi-coding-agent (requires Node >= 22.19.0)."
+    )
+
+
+def test_pi_admitted(monkeypatch):
+    probed: list[str] = []
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
+    monkeypatch.setattr(
+        env, "probe_pi_host", lambda path: probed.append(path) or _pi_host("admitted", "1.0.3")
+    )
+    pi = env._check_pi()
+    assert probed == ["/opt/bin/pi"]
+    assert (pi.ok, pi.detail, pi.remediation) == (True, "1.0.3 (floor >= 1.0.0)", "")
+
+
+def test_pi_outdated_is_not_ok(monkeypatch):
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
+    monkeypatch.setattr(env, "probe_pi_host", lambda path: _pi_host("unsupported", "0.99.2"))
+    pi = env._check_pi()
+    assert not pi.ok
+    assert pi.detail == "0.99.2 (floor >= 1.0.0)"
+    assert pi.remediation == (
+        "Upgrade Pi to >= 1.0.0 (found 0.99.2): npm install -g @earendil-works/pi-coding-agent."
+    )
+    assert not required_tools_ok([pi])
+
+
+def test_pi_unverifiable_is_not_ok(monkeypatch):
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
+    monkeypatch.setattr(
+        env,
+        "probe_pi_host",
+        lambda path: _pi_host("unverifiable", None, "pi --version timed out after 20 s"),
+    )
+    pi = env._check_pi()
+    assert not pi.ok
+    assert pi.detail == "version unverifiable (pi --version timed out after 20 s)"
+    assert pi.remediation == (
+        "Reinstall Pi (>= 1.0.0 required): npm install -g @earendil-works/pi-coding-agent."
+    )
+
+
+def test_pi_with_undecodable_output_is_an_unverifiable_row_not_a_crash(monkeypatch, tmp_path):
+    script = tmp_path / "pi"
+    script.write_text('#!/bin/sh\nprintf "\\377\\n"\n', encoding="utf-8")
+    script.chmod(0o755)
+    monkeypatch.setattr(env, "which_absolute", lambda name: str(script))
+    pi = env._check_pi()  # the REAL probe
+    assert not pi.ok
+    assert pi.detail == "version unverifiable (pi --version printed output that is not UTF-8)"
+    assert pi.remediation.startswith("Reinstall Pi (>= 1.0.0 required): ")
+
+
+def test_check_environment_carries_the_pi_row_in_place(monkeypatch):
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
+    monkeypatch.setattr(env, "probe_pi_host", lambda path: _pi_host("unsupported", "0.99.2"))
+    names = [c.name for c in check_environment()]
+    assert names.index("node") + 1 == names.index("pi")
+    pi = next(c for c in check_environment() if c.name == "pi")
+    assert not pi.ok and pi.detail == "0.99.2 (floor >= 1.0.0)"
+
+
+def _unreachable_probe(path):
+    raise AssertionError(f"probe ran for an absent pi: {path}")

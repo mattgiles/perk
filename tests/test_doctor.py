@@ -89,6 +89,28 @@ def test_optional_env_tool_maps_to_warn(monkeypatch):
     assert report.healthy and report.exit_code == 0
 
 
+def test_outdated_pi_env_check_maps_to_fail_with_the_floor(monkeypatch):
+    # An installed-but-outdated Pi is a required-tool failure: doctor reports `fail` and carries
+    # the floor through the row's detail + remediation (no new check, no group change).
+    from perk.convergence import env
+    from perk.substrate.pi_host import PiHost
+
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
+    monkeypatch.setattr(
+        env, "probe_pi_host", lambda path: PiHost(path, "unsupported", "0.99.2", "1.0.0", "")
+    )
+    monkeypatch.setattr(doctor_mod.env, "check_environment", lambda: [env._check_pi()])
+    (pi,) = doctor_mod._env_checks()
+    assert (pi.name, pi.group, pi.status) == ("pi", "environment", "fail")
+    assert pi.message == "pi missing/outdated"
+    assert pi.detail == "0.99.2 (floor >= 1.0.0)"
+    assert pi.remediation == (
+        "Upgrade Pi to >= 1.0.0 (found 0.99.2): npm install -g @earendil-works/pi-coding-agent."
+    )
+    report = DoctorReport(checks=[pi], fixed=[], self_repo=False)
+    assert not report.healthy
+
+
 def test_report_to_dict_shape():
     report = DoctorReport(
         checks=[_check(status="ok"), _check(status="warn"), _check(status="fail")],
