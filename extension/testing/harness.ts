@@ -1035,6 +1035,8 @@ export async function loadPerkSession(opts: {
   feedbackReceiverFactory?: NonNullable<Parameters<typeof perk>[1]>["feedbackReceiverFactory"];
   /** Construction-only injected host-SDK bridge status (drives the reporting arms). */
   nativeSdkBridge?: NonNullable<Parameters<typeof perk>[1]>["nativeSdkBridge"];
+  /** Construction-only observed host SDK version (drives the entry's admission arms). */
+  hostSdkVersion?: NonNullable<Parameters<typeof perk>[1]>["hostSdkVersion"];
   /**
    * In-memory settings shallow-merged over the deterministic defaults (compaction and retry
    * off) — e.g. `{ compaction: { enabled: true, reserveTokens, keepRecentTokens } }` to exercise
@@ -1097,6 +1099,7 @@ export async function loadPerkSession(opts: {
               stackResolutionDelivery: opts.stackResolutionDelivery,
               feedbackReceiverFactory: opts.feedbackReceiverFactory,
               nativeSdkBridge: opts.nativeSdkBridge,
+              hostSdkVersion: opts.hostSdkVersion,
             }),
         },
       ];
