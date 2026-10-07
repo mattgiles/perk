@@ -127,8 +127,25 @@ missing. `git diff --stat e108044d -- package-lock.json package.json`:
 | `extension/piAiCompatGuard.test.ts` | 1 / 1 |
 | `test_pi_toolchain_pin_lockstep` | passes with the closed four-name set |
 
-The final gate is one run-all `run_ci` plus a `just test-js-slow` run in the same state; the PR
-body quotes both.
+**Final gate** at `ff736cc2` (the complete change; this paragraph is the only later edit, and it
+is docs-only):
+
+```text
+perk CI: all checks passed.
+✓ lint-py (2s)
+✓ lint-js (5s)
+✓ typecheck-py (9s)
+✓ typecheck-js (84s)
+✓ typecheck-prose-review (23s)
+✓ test-py-fast (278s)
+✓ test-py-slow (236s)
+✓ test-js (132s)
+✓ docs-check (365s)
+⊘ changelog-check (skipped — no changed files match CHANGELOG.md)
+```
+
+In the same state, `just test-js-slow` (TAP summary): `# tests 999`, `# pass 999`, `# fail 0`,
+`# cancelled 0`, `# skipped 0`.
 
 ## Fixes taken (with triage-ladder rung)
 
