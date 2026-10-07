@@ -20,7 +20,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { loadSdkPiAi } from "../testing/harness.ts";
+import { hostSdkAtLeast, loadSdkPiAi } from "../testing/harness.ts";
 import { MODEL_CALL_REFUSAL_PREFIX } from "./modelCallPolicy.ts";
 import {
   createDriveSession,
@@ -658,13 +658,24 @@ test("workerBuiltinExtensions: Pi's codemode then tool-search with the CLI's bui
     [["tool_search", false]],
   );
   // The worker's codemode is built without the `models` namespace (WORKER_CODEMODE_MODELS): its
-  // description carries no Model API section, which a `models: true` codemode does (the control).
+  // description carries no `models` reference, which a `models: true` codemode does (the control).
   const control = registeredBy(createCodemodeExtension({ models: true }));
-  assert.ok(control[0]?.description.includes("Model API"), "control: models:true is observable");
-  assert.ok(
-    !codemodeTools[0]?.description.includes("Model API"),
-    "the worker's codemode: models off",
-  );
+  if (hostSdkAtLeast(1, 0, 0)) {
+    // Pi 1.0.0 names `models` in one Globals line and moved the inline "Model API" type section
+    // into its codemode docs (docs/codemode.md, Models), so the Globals line is the marker.
+    const modelsGlobal = "- `models`:";
+    assert.ok(control[0]?.description.includes(modelsGlobal), "control: models:true is observable");
+    assert.ok(
+      !codemodeTools[0]?.description.includes(modelsGlobal),
+      "the worker's codemode: models off",
+    );
+  } else {
+    assert.ok(control[0]?.description.includes("Model API"), "control: models:true is observable");
+    assert.ok(
+      !codemodeTools[0]?.description.includes("Model API"),
+      "the worker's codemode: models off",
+    );
+  }
 });
 
 test("formatExtensionError: Pi's ExtensionError renders path, event and message; other values fall back", () => {

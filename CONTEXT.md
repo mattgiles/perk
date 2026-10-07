@@ -485,6 +485,14 @@ The exact Pi the managed remote artifacts install (`REMOTE_PI_VERSION`) for both
 and the consumer worker SDK; never below the host floor, and never the floor itself.
 _Avoid_: floor
 
+**Dev pins**:
+The exact `@earendil-works/*` `devDependencies` of perk's own checkout — four packages moved in
+lockstep by `just bump-pi` — that the repo's tsc, node:test and pytest resolve and that the
+self-repo remote worker runs on (its `npm ci` install). They certify nothing and gate nothing:
+the host floor is the admission minimum, and the remote install pin is what consumer repos
+install.
+_Avoid_: floor, supported version, host version, remote pin
+
 ### TUI surfaces
 
 **Display sink**:
