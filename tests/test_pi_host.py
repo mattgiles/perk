@@ -64,22 +64,20 @@ def test_a_long_malformed_output_is_truncated_in_the_detail() -> None:
     assert host.detail == f"pi --version printed {'x' * 80!r} instead of a version"
 
 
-def test_a_floor_satisfying_cli_is_admitted_beside_an_older_sdk_dev_pin() -> None:
-    # Independent observations: the committed SDK devDependency may sit below the floor while
-    # the PATH CLI satisfies it — the admission reads only the CLI's own answer.
+def test_the_dev_pin_satisfies_the_floor_and_the_cli_is_admitted_independently() -> None:
+    # Independent observations: the committed SDK devDependency satisfies the floor, yet the
+    # launch admission reads only the PATH CLI's own answer — a below-floor CLI is refused beside
+    # the pin, and an at-floor CLI is admitted on its own reading.
     package = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
     sdk_pin = package["devDependencies"]["@earendil-works/pi-coding-agent"]
     floor = required_pi_version(load_host_floor())
     pinned = parse_semver(sdk_pin)
     assert pinned is not None, sdk_pin
-    if satisfies_floor(pinned, floor):
-        # The dev pins sit at the 1.0.0 floor, so the live tree no longer shows the skew; the
-        # converse carries the independence: a below-floor CLI is refused beside them.
-        assert admit_pi_version(PI, "0.99.2\n", floor).outcome == "unsupported"
-    else:
-        assert sdk_pin != str(floor)
-    assert admit_pi_version(PI, "1.0.0\n", floor).outcome == "admitted"
-    assert admit_pi_version(PI, "1.0.0\n", floor).observed == "1.0.0"
+    assert satisfies_floor(pinned, floor), sdk_pin
+    assert admit_pi_version(PI, "0.99.2\n", floor).outcome == "unsupported"
+    admitted = admit_pi_version(PI, "1.0.0\n", floor)
+    assert admitted.outcome == "admitted"
+    assert admitted.observed == "1.0.0"
 
 
 def _code_strings(path: Path) -> list[str]:

@@ -477,3 +477,28 @@ The worker's landed shape moved behind a confined seam (Objective #2083, contrac
 - The read-only child runner this audit contrasted against (`readOnlySession.ts` —
   `createReadOnlySession`/`runReadOnlyChild`) was **deleted as dead code**; its model-visible
   capping helpers live on in `extension/substrate/modelVisible.ts`.
+
+---
+
+## Outcomes (SDK-boundary admission — landed)
+
+*Additive reconciliation note; the sections above are not rewritten.*
+
+The worker entry now admits the Pi SDK it loaded against the shared host floor before any drive
+work (contracts §8.11 *The entry admission*, §8.76(f)):
+
+- **Thin entry.** `workerMain.ts` parses its arguments, admits the SDK's public `VERSION` (read
+  through a namespace import in `extension/substrate/hostSdkVersion.ts`, so a missing named export
+  can never fail the process at link time), and only then `import()`s `worker/stageExecution.ts`.
+  It carries no `@earendil-works/*` specifier.
+- **The envelope module.** The `RunOutcome` / `RunEvent` shapes and the SDK-free helpers
+  (`assembleOutcome`, the event emitter, the default NDJSON file sink) moved to
+  `extension/worker/runEnvelope.ts`; the seam re-exports the types, so its importers keep their
+  paths.
+- **The pre-drive pair.** A refused SDK ends the run as a zero-turn `failed`/`model_error`
+  outcome (`error.type` `pi_version_unsupported` | `pi_version_unverifiable`) and writes the
+  `run_started` / `run_finished` pair to `events.ndjson`, so the remote reporter's outcome note
+  shows it like any failed drive; exit 1.
+- **The lying-SDK arm.** An SDK that reports a supported `VERSION` but lacks the exports the
+  adapter links rejects the dynamic seam import; that is caught into the existing typed
+  `runtime_init` outcome (`worker runtime initialization failed: <link error>`).

@@ -13,7 +13,7 @@
 // injection points — `SessionStateStore` (the workflow-state slice: rebuild + plain append +
 // the strict verified append), `SessionIdentityPorts` (handoff read/consume, run-scratch
 // isolation, the run-id mint, the §8.3 version stamp), and `SessionStartFactReads` (the handoff
-// + checkout plan-ref reads the post-gate facts may touch). `index.ts` binds the production
+// + checkout plan-ref reads the post-gate facts may touch). `pi/activation.ts` binds the production
 // values, orders the Pi effects, and renders the outcome's per-arm problems/warnings with today's
 // exact report scopes; the strict appends keep reporting through
 // `appendWorkflowStateClassified`'s own loudness channel (the report slice rides
@@ -44,7 +44,7 @@ import {
 
 /**
  * The exterior reads the lifecycle's decision tier needs — the read slice of
- * `SessionIdentityPorts` (production bound to `substrate/cache.ts` by `index.ts`; the test
+ * `SessionIdentityPorts` (production bound to `substrate/cache.ts` by `pi/activation.ts`; the test
  * suites bind fakes).
  */
 export interface SessionIdentityReads {
@@ -198,7 +198,7 @@ export function branchSessionStateStore(
   };
 }
 
-/** The exterior effects the lifecycle needs — production bound in `index.ts`, fakes in tests. */
+/** The exterior effects the lifecycle needs — production bound in `pi/activation.ts`, fakes in tests. */
 export interface SessionIdentityPorts extends SessionIdentityReads {
   /** Mark the handoff consumed (establish-before-consume: called only after a verified claim). */
   markHandoffConsumed(runId: string, opts: { piSessionId?: string }): void;
@@ -494,7 +494,7 @@ export function sessionStartToolScope(
 /**
  * The exterior reads the post-gate facts may touch — the handoff (the launched-stage authority
  * for claim/keep) and the checkout `cache.plan-ref` (read ONLY on the consuming arm). Production
- * binds both cwd-bound in `index.ts`; the suites bind recording fakes.
+ * binds both cwd-bound in `pi/activation.ts`; the suites bind recording fakes.
  */
 export interface SessionStartFactReads extends Pick<SessionIdentityReads, "readHandoff"> {
   /** The worktree's `cache.plan-ref` selector, or null (missing/unreadable). */
@@ -504,7 +504,7 @@ export interface SessionStartFactReads extends Pick<SessionIdentityReads, "readH
 /**
  * The receiver-shaped feedback inputs both startup and navigation derive. Deliberately a local,
  * inferred structural shape (no shared vocabulary with `hunkFeedback/receiver.ts`): the
- * `index.ts` call site adds Pi's run `mode` and the receiver's own `ReceiverSyncArgs` accepts
+ * `pi/activation.ts` call site adds Pi's run `mode` and the receiver's own `ReceiverSyncArgs` accepts
  * the result structurally. Eligibility stays receiver-owned (its fresh checkout read included).
  */
 interface SessionFeedbackFacts {

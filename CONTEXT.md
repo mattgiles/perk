@@ -475,9 +475,10 @@ triple is below it). Each host observation is admitted against it independently.
 _Avoid_: pin, requirement, gate (when the minimum is meant)
 
 **Admission**:
-The launch-boundary decision about the PATH `pi` against the host floor — `admitted`,
-`unsupported` (`pi_version_unsupported`) or `unverifiable` (`pi_version_unverifiable`) — taken
-once per local launch, before any exec-phase side effect.
+The decision about one host observation against the host floor — the PATH `pi` at the launch
+boundary, the loaded Pi SDK at the extension entry and at the worker entry — `admitted`,
+`unsupported` (`pi_version_unsupported`) or `unverifiable` (`pi_version_unverifiable`), taken
+before any workflow, resource or provider work on that path.
 _Avoid_: version check, gate
 
 **Remote install pin**:

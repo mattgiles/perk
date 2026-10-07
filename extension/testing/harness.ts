@@ -47,7 +47,6 @@ import {
   type SessionEntry,
   SessionManager,
   SettingsManager,
-  VERSION,
 } from "@earendil-works/pi-coding-agent";
 import perk from "../index.ts";
 import { type PlanRef, workflowDir, writePlanRef } from "../substrate/cache.ts";
@@ -537,20 +536,6 @@ export async function fauxModelRuntime(options: { contextWindow?: number } = {})
 }
 
 /**
- * Whether the installed host SDK (`@earendil-works/pi-coding-agent`'s `VERSION`) is at least
- * `major.minor.patch` — a numeric compare that ignores any prerelease/build suffix. A test whose
- * expectation genuinely differs by host branches on this and keeps both arms.
- */
-export function hostSdkAtLeast(major: number, minor: number, patch: number): boolean {
-  const installed = VERSION.split(/[.+-]/).map((n) => Number.parseInt(n, 10));
-  for (const [i, min] of [major, minor, patch].entries()) {
-    const part = installed[i] ?? 0;
-    if (part !== min) return part > min;
-  }
-  return true;
-}
-
-/**
  * pi-ai as pi-coding-agent sees it: the nested `pi-coding-agent/node_modules/@earendil-works/pi-ai`
  * copy when present, else the deduped top-level. pi-ai module state (the faux provider, the
  * credential store) is per instance, so anything handed to a real `ModelRuntime` must come from
@@ -1035,6 +1020,8 @@ export async function loadPerkSession(opts: {
   feedbackReceiverFactory?: NonNullable<Parameters<typeof perk>[1]>["feedbackReceiverFactory"];
   /** Construction-only injected host-SDK bridge status (drives the reporting arms). */
   nativeSdkBridge?: NonNullable<Parameters<typeof perk>[1]>["nativeSdkBridge"];
+  /** Construction-only observed host SDK version (drives the entry's admission arms). */
+  hostSdkVersion?: NonNullable<Parameters<typeof perk>[1]>["hostSdkVersion"];
   /**
    * In-memory settings shallow-merged over the deterministic defaults (compaction and retry
    * off) — e.g. `{ compaction: { enabled: true, reserveTokens, keepRecentTokens } }` to exercise
@@ -1097,6 +1084,7 @@ export async function loadPerkSession(opts: {
               stackResolutionDelivery: opts.stackResolutionDelivery,
               feedbackReceiverFactory: opts.feedbackReceiverFactory,
               nativeSdkBridge: opts.nativeSdkBridge,
+              hostSdkVersion: opts.hostSdkVersion,
             }),
         },
       ];

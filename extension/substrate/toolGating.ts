@@ -14,7 +14,7 @@
 //    whose live set needs no change and whose presented mode does not flip gets NO
 //    `setActiveTools` call (a bare session — no stage, read-write, no floor, default registration
 //    — gets none at all).
-//  - PRESENTATION is the loadout host's (`perk_stage`, registered by index.ts through
+//  - PRESENTATION is the loadout host's (`perk_stage`, registered by pi/activation.ts through
 //    `registerLoadoutHost`): its `prepareLoadout` hides, by name, every registered tool
 //    ineligible in the landing (by provenance — `hiddenDeclarationsFor`) and every
 //    cohort-deferred member outside the loadout being applied, so the gate and the diet reach
@@ -25,7 +25,7 @@
 //  - ENFORCEMENT is the read-only `tool_call` backstop: under the gate, edit/write, an
 //    unregistered name, an ineligible tool and an unsafe bash command are blocked. Fail-closed.
 //  - THE DISCOVERY COHORT: a session whose host has Pi's builtin `tool_search` registered and
-//    active at `session_start` joins it (index.ts: `deferDiscoveryFamily` re-registers the pilot
+//    active at `session_start` joins it (pi/activation.ts: `deferDiscoveryFamily` re-registers the pilot
 //    family deferred, then `joinDiscoveryCohort`). The next install deactivates the family once
 //    (still ONE perk install at startup); thereafter a member deferred in this session is kept
 //    exactly while it is active and eligible (`reconcileTarget`'s third term). A member whose
@@ -157,7 +157,7 @@ function textCarries(content: unknown, needles: readonly string[]): boolean {
 
 // --- the controller -----------------------------------------------------------------------------
 
-/** The API the plan-mode and read-only-stage consumers use + the lifecycle hooks index.ts wires. */
+/** The API the plan-mode and read-only-stage consumers use + the lifecycle hooks pi/activation.ts wires. */
 export interface ToolGating {
   /**
    * Reapply the gate + stage scoping from a rebuilt `mode` + `stage` (called on session_start
@@ -301,7 +301,7 @@ export function registerToolGating(
   });
 
   // The restoration window opens where Pi restores a loadout (`/reload`, a `/tree` restore). These
-  // handlers are registered before index.ts subscribes its own, so the flag is set before that
+  // handlers are registered before pi/activation.ts subscribes its own, so the flag is set before that
   // event's `syncFromState` reconciles.
   pi.on("session_start", async (event) => {
     if (event.reason === "reload") restorationWindow = true;

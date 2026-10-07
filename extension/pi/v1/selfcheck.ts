@@ -15,7 +15,8 @@
 //
 // The same report additionally carries a per-surface payload CENSUS — derived counts/chars for
 // `appendSystemPrompt`, `contextFiles`, the skills catalog section, the active tool definitions,
-// and perk-injected `custom_message` branch context, plus the host-SDK bridge state (§8.73).
+// and perk-injected `custom_message` branch context, plus the admitted host SDK (§8.76(f)) and the
+// host-SDK bridge state (§8.73).
 // Report-only: the census never affects the ok/level verdict (contracts.md §8.7).
 //
 // Sensitivity: `getSystemPromptOptions()` exposes the full system-prompt construction inputs. This
@@ -32,6 +33,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { BINDING_HEADER } from "../../substrate/bindingDelivery.ts";
 import { registerPerkCommand } from "../../substrate/command.ts";
+import type { HostSdkAdmission } from "../../substrate/hostAdmission.ts";
 import { type BridgeStatus, describeBridge } from "../../substrate/nativeSdkBridge.ts";
 import { branchOf } from "../../substrate/workflowState.ts";
 import { report as reportTo } from "../../surfaces/report.ts";
@@ -366,9 +368,11 @@ export function branchContextCensus(
 /**
  * Render the census as a fixed multi-line block. The line grammar (the `census:` /
  * `append-system-prompt:` / `context-files:` / `skills:` / `tools:` / `per source:` /
- * `discovery:` / `branch:` / `perk contexts:` / `native sdk bridge:` keys) is stable — the closing audit diffs against these
+ * `discovery:` / `branch:` / `perk contexts:` / `host sdk:` / `native sdk bridge:` keys) is stable — the closing audit diffs against these
  * exact keys; each `perk contexts:` row appends a `live=<n>` token — the pre-filter projection
- * count (`?` when the projection read failed) — after its historical `×copies (chars)`. The bridge block carries `describeBridge`, the
+ * count (`?` when the projection read failed) — after its historical `×copies (chars)`. `host sdk:`
+ * is the loaded SDK version the entry admitted against the floor (`?` when unobserved — an
+ * activation is only ever reached admitted). The bridge block carries `describeBridge`, the
  * host entry (or `-`) and the root paths — identifiers only. `discovery:` reports the session's
  * discovery-cohort membership and, in the cohort, the whole pilot family in catalog order.
  */
@@ -378,6 +382,7 @@ export function renderCensus(
   branch: BranchContextCensus,
   bridge: BridgeStatus,
   discovery: { cohort: boolean; family: readonly string[] },
+  hostSdk: HostSdkAdmission,
 ): string {
   const lines: string[] = ["census:"];
   lines.push(
@@ -421,6 +426,7 @@ export function renderCensus(
     `    perk contexts: ${perkSegment}; other custom_message ` +
       `×${branch.otherCustomMessages.copies} (${branch.otherCustomMessages.totalChars}c)`,
   );
+  lines.push(`  host sdk: ${hostSdk.observed ?? "?"} (floor >= ${hostSdk.required})`);
   lines.push(`  native sdk bridge: ${describeBridge(bridge)}`);
   lines.push(`    host: ${bridge.hostEntry ?? "-"}`);
   lines.push(
@@ -440,6 +446,8 @@ export function registerSelfcheck(
     version: string;
     sharedOk: boolean;
     bridge: BridgeStatus;
+    /** The entry's admission of the loaded host SDK (report-only). */
+    hostSdk: HostSdkAdmission;
     /** The gating controller's discovery-cohort read (`ToolGating.discovery`). */
     discovery: () => { cohort: boolean; family: readonly string[] };
   },
@@ -464,6 +472,7 @@ export function registerSelfcheck(
         branchContextCensus(branchOf(ctx), readLiveProjection(ctx)),
         opts.bridge,
         opts.discovery(),
+        opts.hostSdk,
       );
       // Headless-safe: report() surfaces the derived counts/identifiers (never raw prompt content).
       reportTo(ctx, "selfcheck", report.level, `${report.summary}\n${census}`);

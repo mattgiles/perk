@@ -343,9 +343,9 @@ const COLLECT_TOOL_GUIDELINES = [
 
 /**
  * Register the draft-review-wave tool pair over the activation-owned state (created fresh in
- * `index.ts` and shared with the two browser doors — a fresh activation IS the reset: no wave
+ * `pi/activation.ts` and shared with the two browser doors — a fresh activation IS the reset: no wave
  * pending, no context primed, and two bound sessions in one process never share a slot). Wired
- * in `extension/index.ts` beside `installReviewWaveBindings`; flow-scoped via the door-primed
+ * in `extension/pi/activation.ts` beside `installReviewWaveBindings`; flow-scoped via the door-primed
  * context + the pending-wave guard in the execute cores.
  */
 export function registerDraftReviewWaveTools(

@@ -318,7 +318,7 @@ export function approvedSubjectSaveResult(
 // ------------------------------------------------------ the launch chooser (the wave arm)
 
 /**
- * The injected wave-launch deps (composed in index.ts from the door exports — structural on
+ * The injected wave-launch deps (composed in pi/activation.ts from the door exports — structural on
  * purpose: this module imports NOTHING from door modules, avoiding the value-import cycle;
  * `planReviewBrowser.ts` value-imports the review arms). `present` is the plannotator
  * presence probe (`plannotatorPresent(pi)` at the call site); `plan`/`objective` are the

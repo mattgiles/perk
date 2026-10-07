@@ -404,11 +404,11 @@ export async function approvalSave(
 
 /**
  * Install every plan Pi binding. Hook order is the frozen composition sequence — the plan-mode
- * hook pair registers FIRST inside this installer (index.ts calls this at the slot the mode
+ * hook pair registers FIRST inside this installer (pi/activation.ts calls this at the slot the mode
  * surface always held; the tombell/plannotator adapters follow); every tool/command
  * registration is name-keyed and order-insensitive. `status` is the perk status handle's
  * activity slice the plannotator arm's browser-wait activity rides. `wave` is the injected
- * wave-launch deps (index.ts composes them from the door open cores); absent ⇒ the chooser never
+ * wave-launch deps (pi/activation.ts composes them from the door open cores); absent ⇒ the chooser never
  * appears and every review path is byte-stable.
  */
 export function installPlanBindings(
@@ -818,7 +818,7 @@ function installPlanMode(pi: ExtensionAPI, gating: ToolGating, runnerChild: () =
     });
 
     // `--plan` cold start: enter read-only on session_start when the flag is set and the gate is
-    // off. (index.ts's session_start already syncs the gate from the rebuilt `mode`; this layers
+    // off. (pi/activation.ts's session_start already syncs the gate from the rebuilt `mode`; this layers
     // the flag on top for ad-hoc `pi --plan` interactive starts — the cold plan door drives
     // read-only via the handoff `mode`, not this flag.) Skipped under the plannotator selection
     // along with the flag itself (the flag no longer exists on perk's side).

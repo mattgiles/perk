@@ -248,7 +248,7 @@ function isGistAuthoring(gating: ToolGating, branch: readonly BranchEntry[]): bo
 
 /**
  * Install every gist Pi binding: the gist-authoring context hook pair (the frozen hooks-ordering
- * slot index.ts calls this at), the `gist_draft` and `gist_save` tools, and the `/gist-save`
+ * slot pi/activation.ts calls this at), the `gist_draft` and `gist_save` tools, and the `/gist-save`
  * command — registration metadata pinned by the registration-parity tests. Inert outside gist
  * sessions; never throws.
  */

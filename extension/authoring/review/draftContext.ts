@@ -3,7 +3,7 @@
 // the PR pair): the wave's inputs — the draft under review, its type, and the optional
 // human-supplied custom-angle definition — are REGISTRATION-OWNED STATE primed by the door
 // (the `primeAnnotationSurface` discipline), never tool params: one `DraftReviewWaveState`
-// instance per activation, created in `index.ts` and threaded to the two browser doors and the
+// instance per activation, created in `pi/activation.ts` and threaded to the two browser doors and the
 // `pi/v1/draftReviewWaveTools.ts` tool pair. `start_draft_review_wave` takes ONLY `{angles}`
 // and refuses unprimed, so the model can never substitute a transcript/arbitrary draft or
 // invent a custom lane: reviewed bytes == browsed bytes == wave bytes by construction. A prime

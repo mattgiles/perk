@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { formatSkillsForPrompt, type Skill, type ToolInfo } from "@earendil-works/pi-coding-agent";
 import { BINDING_HEADER } from "../../substrate/bindingDelivery.ts";
+import { admitHostSdk, type HostSdkAdmission } from "../../substrate/hostAdmission.ts";
+import { loadedHostSdkVersion } from "../../substrate/hostSdkVersion.ts";
 import { type BridgeStatus, NATIVE_SDK_CENSUS } from "../../substrate/nativeSdkBridge.ts";
 import { REPORT_DETAIL_TYPE } from "../../surfaces/surfaces.ts";
 import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
@@ -391,6 +393,13 @@ test("branchContextCensus: empty branch → zeros", () => {
 // renderCensus — the stable line grammar (the closing audit diffs these exact keys)
 // ---------------------------------------------------------------------------
 
+const ADMITTED_SDK: HostSdkAdmission = {
+  outcome: "admitted",
+  observed: "1.0.0",
+  required: "1.0.0",
+  detail: "",
+};
+
 test("renderCensus: full block pins the line grammar", () => {
   const block = renderCensus(
     {
@@ -428,6 +437,7 @@ test("renderCensus: full block pins the line grammar", () => {
       detail: "",
     },
     { cohort: true, family: ["collect_review_wave", "push_annotations"] },
+    ADMITTED_SDK,
   );
   assert.equal(
     block,
@@ -442,6 +452,7 @@ test("renderCensus: full block pins the line grammar", () => {
       "  discovery: cohort (family: collect_review_wave, push_annotations)",
       "  branch: 142 entries; binding-header-copies=2",
       "    perk contexts: perk:binding-context ×1 (900c) live=1; perk:mode-context ×3 (14400c) live=?; other custom_message ×0 (0c)",
+      "  host sdk: 1.0.0 (floor >= 1.0.0)",
       `  native sdk bridge: installed (roots=2, specifiers=${NATIVE_SDK_CENSUS.length}, reused)`,
       "    host: /pi/dist/index.js",
       "    roots: 2 — /repo/consumers/pi-subagents, /repo/consumers/pi-web-access",
@@ -468,6 +479,8 @@ test("renderCensus: custom base prompt, empty surfaces → none/omitted segments
     },
     { ...NO_BRIDGE, state: "failed:host-entry", detail: "no entry" },
     { cohort: false, family: [] },
+    // Never reached in production (an activation is admitted); the render stays type-honest.
+    { outcome: "unverifiable", observed: null, required: "1.0.0", detail: "x" },
   );
   assert.equal(
     block,
@@ -481,6 +494,7 @@ test("renderCensus: custom base prompt, empty surfaces → none/omitted segments
       "  discovery: nonparticipant",
       "  branch: 3 entries; binding-header-copies=0",
       "    perk contexts: none; other custom_message ×1 (12c)",
+      "  host sdk: ? (floor >= 1.0.0)",
       "  native sdk bridge: failed:host-entry — no entry",
       "    host: -",
       "    roots: 0",
@@ -554,6 +568,12 @@ test("selfcheck (live): the report-detail entry carries the census block", async
     // The harness binds the factory in the test process (argv[1] is the test runner, not a Pi
     // CLI), so the bridge is the inert embedded-host state — and registers no hook.
     assert.match(msg, /; bridge=unsupported:embedded-host/);
+    // The entry admitted the installed SDK; the census reports it beside the floor.
+    const installed = admitHostSdk(loadedHostSdkVersion(), "1.0.0").observed ?? "";
+    assert.ok(
+      text.includes(`\n  host sdk: ${installed} (floor >= 1.0.0)\n  native sdk bridge:`),
+      text,
+    );
     assert.match(
       text,
       /\n {2}native sdk bridge: unsupported:embedded-host\n {4}host: -\n {4}roots: 0/,

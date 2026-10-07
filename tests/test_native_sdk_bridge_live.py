@@ -19,6 +19,10 @@ no ``trust.json`` write), and a placeholder provider key satisfies print mode's 
 when the developer has none exported — the command never prompts a model (``PI_OFFLINE=1`` guards
 the rest). Slow (a full Pi startup) and skip-guarded: no ``pi`` on PATH, or no installed consumers,
 skips.
+
+The PATH ``pi`` is also the host the extension admits (contracts §8.76(f)): the bridge proof needs
+an admitted one, and a below-floor ``pi`` instead proves the refusal — Pi reports perk's thrown
+refusal as a failed extension load and exits 1, so nothing of perk runs.
 """
 
 import json
@@ -28,11 +32,12 @@ import shutil
 from pathlib import Path
 
 import pytest
-from perk_dev.profile_startup.pty_session import PtySize, spawn_pty
+from perk_dev.profile_startup.pty_session import PtyRun, PtySize, spawn_pty
 
 from perk.convergence.init import SUBAGENTS_PACKAGE
 from perk.substrate import git
 from perk.substrate.config import launch_pi_agent_dir
+from perk.substrate.pi_host import PiHost, probe_pi_host
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONSUMER_INSTALL_ROOT = REPO_ROOT / ".pi" / "npm" / "node_modules"
@@ -75,6 +80,27 @@ def _launch_env() -> dict[str, str]:
     return env
 
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _path_pi() -> tuple[str, PiHost]:
+    pi = shutil.which("pi")
+    assert pi is not None
+    return pi, probe_pi_host(pi)
+
+
+def _selfcheck_run(pi: str) -> PtyRun:
+    return spawn_pty(
+        [pi, "--approve", "--mode", "json", "-p", "/perk-selfcheck"],
+        cwd=REPO_ROOT,
+        env=_launch_env(),
+        size=PtySize(cols=120, rows=40),
+        timeout_s=120.0,
+        exit_grace_s=120.0,
+        startup_marker=lambda _line: False,
+    )
+
+
 def test_the_installed_pi_subagents_is_the_managed_pin():
     pinned = SUBAGENTS_PACKAGE.rpartition("@")[2]
     manifest = CONSUMER_INSTALL_ROOT / "pi-subagents" / "package.json"
@@ -86,17 +112,14 @@ def test_the_installed_pi_subagents_is_the_managed_pin():
 
 
 def test_real_pi_selfcheck_reports_the_bridge_installed_and_both_consumers_loaded():
-    pi = shutil.which("pi")
-    assert pi is not None
-    run = spawn_pty(
-        [pi, "--approve", "--mode", "json", "-p", "/perk-selfcheck"],
-        cwd=REPO_ROOT,
-        env=_launch_env(),
-        size=PtySize(cols=120, rows=40),
-        timeout_s=120.0,
-        exit_grace_s=120.0,
-        startup_marker=lambda _line: False,
-    )
+    pi, host = _path_pi()
+    if host.outcome != "admitted":
+        pytest.skip(
+            f"the PATH pi ({host.observed or host.detail}) is not admitted by the host floor "
+            f"(>= {host.required}) — perk's extension refuses to load on it; upgrade it to run "
+            "the bridge proof"
+        )
+    run = _selfcheck_run(pi)
     stderr = run.stderr
     assert not run.timed_out, f"pi did not exit within the timeout:\n{stderr}"
     assert run.exit_code == 0, f"pi exited {run.exit_code}:\n{stderr}"
@@ -121,3 +144,21 @@ def test_real_pi_selfcheck_reports_the_bridge_installed_and_both_consumers_loade
     assert f"{SUBAGENTS_PACKAGE}=" in per_source, per_source
 
     assert "Failed to load extension" not in stderr, stderr
+
+
+def test_a_below_floor_real_pi_refuses_to_load_perk():
+    pi, host = _path_pi()
+    if host.outcome != "unsupported":
+        pytest.skip(f"needs a below-floor PATH pi (this one is {host.outcome})")
+    run = _selfcheck_run(pi)
+    stderr = _ANSI.sub("", run.stderr)
+    assert not run.timed_out, f"pi did not exit within the timeout:\n{stderr}"
+    assert run.exit_code == 1, f"pi exited {run.exit_code}:\n{stderr}"
+    # Pi wraps perk's refusal twice: its loader's message, then the startup diagnostic.
+    assert (
+        "Failed to load extension: perk requires Pi >= "
+        f"{host.required}; the Pi running this session is {host.observed} "
+        "(@earendil-works/pi-coding-agent VERSION)."
+    ) in stderr, stderr
+    assert 'Hint: Start without extensions using "pi -ne".' in stderr, stderr
+    assert "perk: selfcheck —" not in stderr, stderr

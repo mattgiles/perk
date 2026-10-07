@@ -62,9 +62,11 @@
 //      activation-day census, shrink-only via the stale arm (the census only burns down as
 //      registrations migrate into `pi/`). A LOCATION ratchet, not a runtime
 //      single-registration proof — the dogfood gate carries the runtime observation.
-//   F. Worker-plane confinement: the only production edge into `worker/` from outside is
-//      `workerMain.ts → worker/stageExecution.ts` (exact-set — doubling as the live-edge
-//      non-vacuity floor); the only production edge into the private `worker/sdkAdapter.ts` is
+//   F. Worker-plane confinement: the only production edges into `worker/` from outside are
+//      `workerMain.ts → worker/runEnvelope.ts` (the SDK-free envelope, static) and
+//      `workerMain.ts → worker/stageExecution.ts` (the seam, a dynamic import after the SDK
+//      admission) — exact-set, doubling as the live-edge non-vacuity floor; the only
+//      production edge into the private `worker/sdkAdapter.ts` is
 //      `worker/stageExecution.ts → worker/sdkAdapter.ts`; and across `workerMain.ts` + every
 //      file under `worker/`, ONLY the adapter may carry an `@earendil-works/*` specifier
 //      (type edges count) — and it must carry ≥ 1 (the positive floor: the SDK vocabulary
@@ -582,15 +584,18 @@ test("Rule F: worker-plane confinement (exact edges; SDK specifiers only in the 
     edges,
     readProductionFile,
   );
-  // (1) Exact-set: the ONLY production edge into worker/ from outside is the composition
-  // root → seam edge — which doubles as the live-edge non-vacuity floor (an empty scan or a
-  // dropped edge map could never produce exactly this edge).
+  // (1) Exact-set: the ONLY production edges into worker/ from outside are the thin entry's —
+  // the envelope (static) and the seam (dynamic, after admission) — which double as the
+  // live-edge non-vacuity floor (an empty scan or a dropped edge map could never produce
+  // exactly these edges).
   assert.deepEqual(
     inbound,
-    ["workerMain.ts → worker/stageExecution.ts"],
+    ["workerMain.ts → worker/runEnvelope.ts", "workerMain.ts → worker/stageExecution.ts"],
     "the production edges into worker/ from outside must be exactly " +
-      "workerMain.ts → worker/stageExecution.ts — no other production file may import into the " +
-      "worker plane; call the seam through workerMain or move the mechanism into substrate/.",
+      "workerMain.ts → worker/runEnvelope.ts and workerMain.ts → worker/stageExecution.ts (the " +
+      "entry reaches the envelope statically and the seam dynamically after admission) — no " +
+      "other production file may import into the worker plane; call the seam through " +
+      "workerMain or move the mechanism into substrate/.",
   );
   // (2) Exact-set: the private adapter has exactly one importer — the seam.
   assert.deepEqual(
@@ -913,7 +918,7 @@ test("control 12: Rule F mutation fixtures (foreign edge into the seam; a seam S
   );
   assert.notDeepEqual(
     inbound,
-    ["workerMain.ts → worker/stageExecution.ts"],
+    ["workerMain.ts → worker/runEnvelope.ts", "workerMain.ts → worker/stageExecution.ts"],
     "the exact-set comparison must fail once a foreign edge exists",
   );
 

@@ -431,7 +431,7 @@ const SAVE_TOOL_GUIDELINES = [
 
 /**
  * Install every objective-authoring Pi binding: the objective-authoring context hook pair (the
- * frozen hooks-ordering slot index.ts calls this at — planMode.ts defers when the stage is
+ * frozen hooks-ordering slot pi/activation.ts calls this at — planMode.ts defers when the stage is
  * objective-author, so exactly one authoring context is injected), the `objective_draft` and
  * `objective_save` tools, and the `/objective-save` command — registration metadata pinned by
  * the registration-parity tests. Inert outside objective sessions; never throws.

@@ -1,11 +1,15 @@
 // Extension-factory wiring tests. The live harness binds extension/index.ts through Pi's real
 // loader and runner, so these assertions cover registration rather than only renderer helpers —
-// and the activation wiring: footer install/vacate, version parity, the host-SDK bridge arms.
+// and the activation wiring: the host-SDK admission, footer install/vacate, version parity, the
+// host-SDK bridge arms.
 
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import perk from "./index.ts";
+import { admitHostSdk, formatHostSdkRefusal } from "./substrate/hostAdmission.ts";
 import { type BridgeStatus, NATIVE_SDK_CENSUS } from "./substrate/nativeSdkBridge.ts";
 import { REPORT_DETAIL_TYPE } from "./surfaces/surfaces.ts";
 import { loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
@@ -250,6 +254,89 @@ test("sdk bridge: an installed bridge emits no warning and reports through selfc
         `\\n {2}native sdk bridge: installed \\(roots=1, specifiers=${NATIVE_SDK_CENSUS.length}, reused\\)\\n {4}host: /pi/dist/index\\.js\\n {4}roots: 1 — /repo/pi-subagents`,
       ),
     );
+  } finally {
+    h.dispose();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The SDK-boundary admission at the extension entry (contracts.md §8.76(f)). In-process, these
+// arms prove the decision, the refusal text and that nothing registers. They CANNOT see the link
+// boundary — this process has already linked the real SDK and the composition root through the
+// harness — so the "the entry links nothing SDK-bearing before admission" proof is the
+// cold-process suite (entryAdmission.test.ts).
+// ---------------------------------------------------------------------------
+
+/** A recording ExtensionAPI: every property read is logged (the refusal must read none). */
+function recordingPi(): { pi: ExtensionAPI; touched: string[] } {
+  const touched: string[] = [];
+  const pi = new Proxy(
+    {},
+    {
+      get(_target, key) {
+        touched.push(String(key));
+        return () => {};
+      },
+    },
+  ) as ExtensionAPI;
+  return { pi, touched };
+}
+
+test("host admission: a below-floor host SDK rejects the factory before any registration", async () => {
+  const { pi, touched } = recordingPi();
+  let bridgeCalls = 0;
+  await assert.rejects(
+    perk(pi, {
+      hostSdkVersion: () => "0.99.2",
+      nativeSdkBridge: () => {
+        bridgeCalls += 1;
+        return { ...BRIDGE_BASE };
+      },
+    }),
+    (err: Error) => {
+      assert.equal(err.message, formatHostSdkRefusal(admitHostSdk("0.99.2", "1.0.0"), "extension"));
+      assert.match(
+        err.message,
+        /^perk requires Pi >= 1\.0\.0; the Pi running this session is 0\.99\.2 /,
+      );
+      return true;
+    },
+  );
+  assert.deepEqual(touched, [], "the refused factory must not touch the ExtensionAPI");
+  assert.equal(bridgeCalls, 0, "the refused factory must not install the host-SDK bridge");
+});
+
+test("host admission: an unverifiable VERSION rejects with the reason", async () => {
+  const { pi, touched } = recordingPi();
+  await assert.rejects(perk(pi, { hostSdkVersion: () => undefined }), (err: Error) => {
+    assert.equal(err.message, formatHostSdkRefusal(admitHostSdk(undefined, "1.0.0"), "extension"));
+    assert.match(err.message, /could not verify this Pi's version \(.*exports no VERSION string/);
+    return true;
+  });
+  assert.deepEqual(touched, []);
+});
+
+test("host admission: a floor-satisfying, unequal host SDK activates independently of the CLI stamp", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const h = await loadPerkSession({
+    cwd,
+    hostSdkVersion: () => "1.0.1",
+    env: { PERK_RUN_ID: "01RID", PERK_CLI_VERSION: "9.9.9-not-real" },
+  });
+  try {
+    const tools = h.session.extensionRunner.getAllRegisteredTools().map((t) => t.definition.name);
+    assert.ok(tools.includes("plan_draft"), JSON.stringify(tools));
+    // The only warning is the soft CLI/extension version-parity drift — never an admission one.
+    const warnings = h.notifyEvents.filter((e) => e.severity === "warning");
+    assert.equal(warnings.length, 1, JSON.stringify(h.notifies));
+    assert.match(warnings[0]?.message ?? "", /version parity/);
+    await h.invokeCommand("perk-selfcheck");
+    const entries = h.session.sessionManager.getEntries() as unknown as {
+      customType?: string;
+      data?: { text?: string };
+    }[];
+    const detail = entries.find((entry) => entry.customType === REPORT_DETAIL_TYPE);
+    assert.match(detail?.data?.text ?? "", /\n {2}host sdk: 1\.0\.1 \(floor >= 1\.0\.0\)\n/);
   } finally {
     h.dispose();
   }

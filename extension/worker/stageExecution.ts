@@ -34,8 +34,9 @@
 // nominal `WorkerModelRequest` (see the adapter header for the exact — narrow — opacity
 // guarantee: an import-edge ban plus nominal minting, nothing stronger) — an UNRESOLVED request
 // (the raw `--model` pattern) that the adapter resolves only after the worktree's extensions
-// registered their providers. `workerMain.ts` imports ONLY this seam (guard Rule F) and carries
-// zero SDK imports.
+// registered their providers. The thin entry `workerMain.ts` carries zero SDK imports: it reaches
+// the SDK-free envelope (`runEnvelope.ts`) statically and imports this seam DYNAMICALLY, only
+// after admitting the loaded SDK against the host floor (guard Rule F; contracts §8.11).
 //
 // The initialization boundary: model-runtime creation → services (extension load + provider
 // registration) → selection → admission → session construction → bind all run inside the
@@ -43,13 +44,23 @@
 // typed zero-turn `failed`/`model_error` outcome; any other failure before bind is
 // `runtime_init`.
 
-import { appendFileSync } from "node:fs";
 import { env } from "node:process";
-import { ensureRunScratch, type PlanRef, readPlanRef, runEventsPath } from "../substrate/cache.ts";
+import { type PlanRef, readPlanRef } from "../substrate/cache.ts";
 import { capForModel } from "../substrate/modelVisible.ts";
 import { planReadInstruction, render } from "../substrate/prompts.ts";
 import { captureSessionPointer } from "../substrate/sessionPointers.ts";
 import { rebuildWorkflowState } from "../substrate/workflowState.ts";
+import {
+  assembleOutcome,
+  createEventEmitter,
+  type DriveBudget,
+  type DriveStage,
+  defaultEventSink,
+  EVENT_SUMMARY_CAP,
+  type RunEventSink,
+  type RunOutcome,
+  type TerminalVerdict,
+} from "./runEnvelope.ts";
 import {
   createDriveSession,
   type DriveRuntimeLike,
@@ -59,85 +70,23 @@ import {
   WorkerModelRequest,
 } from "./sdkAdapter.ts";
 
-// Re-exports so `workerMain.ts` imports ONLY the seam (guard Rule F), plus the transitive type
+// The envelope types live in the SDK-free `runEnvelope.ts` (the thin entry reaches them before any
+// SDK links); re-exported so every importer of the seam keeps its import path.
+export type {
+  DriveBudget,
+  DriveStage,
+  RunEvent,
+  RunEventSink,
+  RunOutcome,
+  RunStatus,
+  TerminalSignal,
+} from "./runEnvelope.ts";
+// Re-exports so `workerMain.ts` never imports the adapter (guard Rule F), plus the transitive type
 // closure of `runStage`'s signature: the `StageRunDeps.createRuntime` fake-construction types and
 // the `StageRunOptions.model` request class (a VALUE re-export so `workerMain.ts` mints the
 // request from the raw `--model` text with zero SDK imports).
 export type { DriveEvent, DriveRuntimeLike, DriveSessionLike } from "./sdkAdapter.ts";
 export { WorkerModelRequest } from "./sdkAdapter.ts";
-
-// --- contract types (additive-stable; §B of docs/design/headless-worker.md) ---------------------
-
-/** The two read-write stages with `doors.cold_remote: true` (shared/registry.yaml). */
-export type DriveStage = "implement" | "address";
-
-/** Terminal run status (audit §B outcome shape). */
-export type RunStatus = "completed" | "failed" | "aborted" | "budget_exhausted";
-
-/** The first-of terminal signal that ended the drive (audit §B). */
-export type TerminalSignal =
-  | "submit_tool"
-  | "address_resolved"
-  | "agent_idle_incomplete"
-  | "budget"
-  | "external_abort"
-  | "model_error";
-
-/** The budget/timeout watchdog inputs (Gap 2). */
-export interface DriveBudget {
-  maxTurns: number;
-  maxTokens: number;
-  wallClockMs: number;
-}
-
-/**
- * The structured run outcome (audit §B). **Additive-stable**: later fields may be added; existing
- * fields keep their meaning. Never thrown — `runStage` always resolves with one of these.
- */
-export interface RunOutcome {
-  run_id: string;
-  stage: DriveStage;
-  status: RunStatus;
-  terminal_signal: TerminalSignal;
-  pr: { number: number; url: string } | null;
-  budget: { turns: number; tokens: number; elapsed_ms: number };
-  error: { type: string; message: string; summary: string } | null;
-}
-
-// --- structured run-event stream (§8.12) ----------------------------------------------
-
-/**
- * The structured run-event stream (contracts §8.12). A small, JSON-serializable,
- * **additive-stable** discriminated union keyed on `kind` (distinct from `DriveEvent.type`). Every
- * event carries a monotonic `seq` (0-based) and `t` (elapsed ms, same basis as
- * `RunOutcome.budget.elapsed_ms`). Future nodes may add variants/fields; existing ones keep
- * meaning — including deprecated variants that are no longer emitted (see `step_marker`).
- */
-export type RunEvent =
-  | { kind: "run_started"; seq: number; t: number; run_id: string; stage: DriveStage }
-  // DEPRECATED — never emitted: the `[WIP:n]`/`[DONE:n]` marker protocol died with the
-  // checkpoints removal. Kept for additive-stable grammar — historical `events.ndjson` files
-  // may carry the variant (contracts §8.12).
-  | { kind: "step_marker"; seq: number; t: number; marker: "wip" | "done"; step: number }
-  | {
-      kind: "tool_outcome";
-      seq: number;
-      t: number;
-      tool: string;
-      ok: boolean;
-      summary: string | null;
-    }
-  | { kind: "run_finished"; seq: number; t: number; outcome: RunOutcome };
-
-/** The injectable delivery seam: default = a run-scoped NDJSON file sink; tests inject an array. */
-export type RunEventSink = (event: RunEvent) => void;
-
-/** Distributive `Omit` so each `RunEvent` variant keeps its own fields when `seq`/`t` are stamped. */
-type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
-type RunEventInput = DistributiveOmit<RunEvent, "seq" | "t">;
-
-/** Per-event free-text cap (route-don't-relay): events carry the narrative, not raw tool payloads. */
-const EVENT_SUMMARY_CAP = 2 * 1024;
 
 export interface StageRunOptions {
   /** Absolute path to the already-positioned worktree (Gap 7). */
@@ -169,15 +118,6 @@ export interface StageRunDeps {
   now?: () => number;
   /** The structured run-event sink. Absent ⇒ the default run-scoped NDJSON file sink. */
   eventSink?: RunEventSink;
-}
-
-/** The natural-idle terminal classification (before watchdog/abort overrides). */
-interface TerminalVerdict {
-  status: RunStatus;
-  terminal_signal: TerminalSignal;
-  pr: { number: number; url: string } | null;
-  errorType: string | null;
-  errorMessage: string | null;
 }
 
 // --- pure helpers (module-local policy fold) -----------------------------------------------------
@@ -373,37 +313,6 @@ function extractPr(
   return null;
 }
 
-/**
- * Compose the final `RunOutcome` (pure). `run_id` is read from `PERK_RUN_ID` (inherited from
- * positioning, Gap 7), overridable for tests. On a non-completed status the `error` block carries a
- * capped `error.summary` (route-don't-relay discipline); a completed status has `error: null`.
- */
-function assembleOutcome(args: {
-  stage: DriveStage;
-  verdict: TerminalVerdict;
-  budget: { turns: number; tokens: number; elapsed_ms: number };
-  runId?: string;
-}): RunOutcome {
-  const { verdict } = args;
-  const error =
-    verdict.status === "completed" || verdict.errorMessage === null
-      ? null
-      : {
-          type: verdict.errorType ?? "error",
-          message: verdict.errorMessage,
-          summary: capForModel(verdict.errorMessage).shown,
-        };
-  return {
-    run_id: args.runId ?? env.PERK_RUN_ID ?? "",
-    stage: args.stage,
-    status: verdict.status,
-    terminal_signal: verdict.terminal_signal,
-    pr: verdict.pr,
-    budget: args.budget,
-    error,
-  };
-}
-
 // --- run-event helpers (offline-testable) ---------------------------------------------
 
 /**
@@ -422,47 +331,6 @@ function toolOutcomeOf(event: Extract<StageEvent, { kind: "tool_ended" }>): {
     ? null
     : capForModel(event.errorText ?? `tool ${event.tool} failed`, EVENT_SUMMARY_CAP).shown;
   return { tool: event.tool, ok: event.ok, summary };
-}
-
-/**
- * The run-event emitter: owns the monotonic `seq` counter and stamps `t = max(0, now() - startMs)`
- * (same basis as `RunOutcome.budget.elapsed_ms`). Fail-soft: a throwing injected sink is caught and
- * swallowed so a broken sink never aborts the drive.
- */
-function createEventEmitter(sink: RunEventSink, now: () => number, startMs: number) {
-  let seq = 0;
-  return {
-    emit(event: RunEventInput): void {
-      const full = { ...event, seq: seq++, t: Math.max(0, now() - startMs) } as RunEvent;
-      try {
-        sink(full);
-      } catch (err) {
-        console.error(`perk worker: run-event sink threw — ${String(err)}`);
-      }
-    },
-  };
-}
-
-/**
- * The default run-event sink: a fail-soft NDJSON appender to `runEventsPath(worktree, runId)`. A
- * **no-op when `runId` is empty** (keeps the offline drive tests, which set no `PERK_RUN_ID`,
- * write-free). Each append is wrapped so a write error logs and is swallowed.
- */
-function defaultEventSink(worktree: string, runId: string): RunEventSink {
-  if (!runId) return () => {};
-  let ensured = false;
-  const path = runEventsPath(worktree, runId);
-  return (event: RunEvent): void => {
-    try {
-      if (!ensured) {
-        ensureRunScratch(worktree, runId);
-        ensured = true;
-      }
-      appendFileSync(path, `${JSON.stringify(event)}\n`, "utf8");
-    } catch (err) {
-      console.error(`perk worker: run-event sink write failed — ${String(err)}`);
-    }
-  };
 }
 
 /**

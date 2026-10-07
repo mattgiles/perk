@@ -12,7 +12,7 @@
 // collector (`REVIEW_LAUNCH_PRIMES`): the launcher is reachable without a door, and its own
 // description and guidelines name `collect_review_wave`, which a discovery-cohort session defers.
 //
-// Registered in `extension/index.ts` beside the door registrations and FLOW-SCOPED via the
+// Registered in `extension/pi/activation.ts` beside the door registrations and FLOW-SCOPED via the
 // session's pending-wave guard: `start_review_wave` refuses while a wave is pending
 // (`wave_active`) and `collect_review_wave` drains it. The wave's `outputSchema` injects a
 // `structured_output` tool into every lane — the `agents/adversarial-reviewer.md` def completes
@@ -92,7 +92,7 @@ export interface ReviewWaveState {
  * supersedes" posture) EXCEPT while a stack wave is in flight against a different pin: the lanes
  * are reviewing those commits and the shared annotation surface would be re-primed for another
  * stack, so the door refuses until `collect_review_wave` settles the wave (re-opening the SAME
- * pin — a stale-session reopen — stays allowed). Created in `extension/index.ts` and shared by
+ * pin — a stale-session reopen — stays allowed). Created in `extension/pi/activation.ts` and shared by
  * BOTH installers so the model can never aim a stack wave at coordinates it relayed itself.
  */
 export interface StackPinState {
@@ -437,7 +437,7 @@ const COLLECT_TOOL_GUIDELINES = [
  * Install the review-wave tool pair over a registration-owned pending-ref state (the fresh
  * closure IS the reset — no wave can be pending in a new session, and two bound sessions in one
  * process never share a slot) and the composition root's per-activation `ReportWave` instance.
- * Wired in `extension/index.ts` beside the review-door registrations; flow-scoped via the
+ * Wired in `extension/pi/activation.ts` beside the review-door registrations; flow-scoped via the
  * pending-ref guard in the execute cores.
  */
 export function installReviewWaveBindings(

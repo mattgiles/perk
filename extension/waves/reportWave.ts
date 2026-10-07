@@ -712,7 +712,7 @@ export interface ReportWaveDeps {
 /**
  * The PRODUCTION factory — the wave owns adapter selection: constructs a FRESH rpc adapter per
  * launch over the supplied bus (per-execute adapter freshness; no shared mutable ping state).
- * One per-activation instance is constructed at the composition root (`extension/index.ts`) and
+ * One per-activation instance is constructed at the composition root (`extension/pi/activation.ts`) and
  * threaded to the installers; `deps.onNotice` receives the adapter's duplicate-responder events
  * as `WaveNotice`s.
  */
