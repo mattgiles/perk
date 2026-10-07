@@ -1,17 +1,15 @@
 // The restoration-window rule (contracts.md §8.40) through REAL bound AgentSessions (Mode A,
 // fully offline). An inline late registrant stands in for a reconnecting MCP server: its deferred
 // tool is active and recorded in the transcript, and after `/reload` it registers only when the
-// test releases it. The invariant half is version-agnostic — inside the window every perk install
-// only adds, and the first request after it declares none of the names the window's close
-// removed. The restoration half engages on Pi ≥ 1.0.0, whose pending set re-activates the late
-// tool when it registers (0.99.2 has no pending set, so there it stays inactive).
+// test releases it. Inside the window every perk install only adds, and the first request after
+// it declares none of the names the window's close removed; the host's pending set re-activates
+// the late tool when it registers, and perk never deactivates it.
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
-import { type ExtensionAPI, type InlineExtension, VERSION } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
 import {
   COHORT_SETTINGS,
-  hostSdkAtLeast,
   type PerkInstall,
   type PerkSession,
   recordingRuntime,
@@ -25,11 +23,6 @@ import { discoveryFamily, isPerkTool, LOADOUT_HOST_NAME, perkToolsFor } from "./
 before(ensureToolCatalog);
 
 const LATE = "late_probe";
-
-/** Whether the host keeps restored-but-unregistered tools pending: Pi ≥ 1.0.0 (numeric compare). */
-function hostRestoresPending(): boolean {
-  return hostSdkAtLeast(1, 0, 0);
-}
 
 /** A registrant whose deferred tool registers at load, and after a reload only once released. */
 function lateRegistrant(): { extension: InlineExtension; release(): void } {
@@ -107,7 +100,7 @@ function assertOnlyAdds(installs: readonly PerkInstall[], label: string): void {
   }
 }
 
-test("the window after /reload (A): every perk install only adds until the run starts; the first request declares none of the names the close removed; on Pi ≥ 1.0 the late tool comes back", async (t) => {
+test("the window after /reload (A): every perk install only adds until the run starts; the first request declares none of the names the close removed; the late tool comes back", async (t) => {
   const installs = recordPerkInstalls(t);
   const family = discoveryFamily();
   for (const [stage, mode] of [
@@ -141,8 +134,7 @@ test("the window after /reload (A): every perk install only adds until the run s
       late.release();
       await registration(h, LATE);
       assertOnlyAdds(installs.slice(from), `${label} (after the registration)`);
-      if (hostRestoresPending())
-        assert.ok(isActive(h, LATE), `${label}: Pi restored the late tool (VERSION ${VERSION})`);
+      assert.ok(isActive(h, LATE), `${label}: Pi restored the late tool`);
 
       const before = rt.requests.length;
       rt.census();
@@ -153,8 +145,7 @@ test("the window after /reload (A): every perk install only adds until the run s
         assert.ok(!first.tools.includes(name), `${label}: ${name} undeclared in the first request`);
         assert.ok(!isActive(h, name), `${label}: ${name} deactivated when the run started`);
       }
-      if (hostRestoresPending())
-        assert.ok(isActive(h, LATE), `${label}: perk never deactivates the restored foreign tool`);
+      assert.ok(isActive(h, LATE), `${label}: perk never deactivates the restored foreign tool`);
     } finally {
       h.dispose();
     }
