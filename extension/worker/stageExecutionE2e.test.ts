@@ -19,9 +19,17 @@
 // provider request, and retried, exhausted and non-retryable provider errors.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { type TestContext, test } from "node:test";
 import {
   fauxAssistantMessage,
@@ -46,7 +54,13 @@ import { MODEL_CALL_REFUSAL_PREFIX } from "./modelCallPolicy.ts";
 // Test-side adapter import: the E2E tier mints the nominal request deliberately (an injected
 // runtime + pattern ride the SAME production `defaultCreateRuntime` path).
 import { type DriveRuntimeLike, defaultCreateRuntime, WorkerModelRequest } from "./sdkAdapter.ts";
-import { type DriveBudget, type DriveStage, type RunEvent, runStage } from "./stageExecution.ts";
+import {
+  type DriveBudget,
+  type DriveStage,
+  type RunEvent,
+  type RunOutcome,
+  runStage,
+} from "./stageExecution.ts";
 
 // Extension delivery is the PRODUCTION load path: `defaultCreateRuntime` layers disk settings
 // (`SettingsManager.create(worktree, throwawayAgentDir)`), so the scaffold's `.pi/settings.json`
@@ -842,6 +856,69 @@ test("e2e: an unknown explicit model → zero-turn failed/model_not_found", asyn
   });
   assertZeroTurnRefusal(result, dirsBefore, "model_not_found");
   assert.ok(result.outcome.error?.message.includes("nope/zzz"), "names the requested pattern");
+});
+
+test("e2e: the real worker entry admits the installed SDK and drives to completion, independent of PATH and the CLI stamp", () => {
+  // A cold process through `extension/workerMain.ts` itself (no resolve hook — the real installed
+  // SDK): the entry admits it, links the seam, and the explicit `--model` drive completes. A PATH
+  // `pi` printing a below-floor version and a bogus CLI stamp change nothing — the worker reads
+  // only the SDK it loaded. Minimal env: no operator credentials; the provider key lives in the
+  // scratch agent dir's auth.json, read by the production `ModelRuntime.create()`.
+  const runId = `01JE2E${String(runCounter++).padStart(20, "0")}`;
+  const cwd = scaffoldWorkerWorktree({ runId, stage: "implement" });
+  plantWorkerProviderExtension(cwd, extProviders());
+  const agentDir = mkdtempSync(join(tmpdir(), "perk-e2e-global-"));
+  writeFileSync(
+    join(agentDir, "auth.json"),
+    `${JSON.stringify({ [EXT_PROVIDER]: { type: "api_key", key: "k" } })}\n`,
+    "utf8",
+  );
+  const bin = mkdtempSync(join(tmpdir(), "perk-e2e-bin-"));
+  writeFileSync(join(bin, "pi"), "#!/bin/sh\necho 0.0.1\n", "utf8");
+  chmodSync(join(bin, "pi"), 0o755);
+  const childTmp = mkdtempSync(join(tmpdir(), "perk-e2e-tmp-"));
+  const entry = resolve(import.meta.dirname, "..", "workerMain.ts");
+
+  const result = spawnSync(
+    process.execPath,
+    [entry, "implement", "--worktree", cwd, "--model", `${EXT_PROVIDER}/m-2`],
+    {
+      env: {
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+        HOME: mkdtempSync(join(tmpdir(), "perk-e2e-home-")),
+        TMPDIR: childTmp,
+        PERK_RUN_ID: runId,
+        PERK_BIN: fakePerkRouter(cwd, implementHappyRoutes),
+        PERK_CLI_VERSION: "9.9.9-not-real",
+        PI_OFFLINE: "1",
+        PI_CODING_AGENT_DIR: agentDir,
+      },
+      encoding: "utf8",
+      timeout: 120_000,
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const outcome = JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "") as RunOutcome;
+  assert.equal(outcome.run_id, runId);
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.terminal_signal, "submit_tool");
+  assert.deepEqual(outcome.pr, { number: 42, url: "https://github.com/x/pull/42" });
+  assert.match(result.stderr, new RegExp(`perk worker: model ${EXT_PROVIDER}/m-2`));
+  const events = readFileSync(runEventsPath(cwd, runId), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as RunEvent);
+  assert.equal(events[0]?.kind, "run_started");
+  const last = events.at(-1);
+  assert.ok(last?.kind === "run_finished");
+  assert.deepEqual(last.outcome, outcome);
+  assertMonotonicSeq(events);
+  // The child's throwaway agent dir lived under ITS OWN TMPDIR and was removed at dispose.
+  assert.deepEqual(
+    readdirSync(childTmp).filter((name) => name.startsWith("perk-worker-agent-")),
+    [],
+  );
 });
 
 test("e2e: a virtual model routes to a physical target with a different identity → completed", async () => {
