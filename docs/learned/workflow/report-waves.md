@@ -44,10 +44,9 @@ duplicate them here.
   by refusal, never escaped; outcome loops walk the plan, not the aggregate — "Validate
   downstream identifier contracts"; `blocked` reports reclassify to `lane-failed` before coverage
   (`blockedReports.ts`) — "Lane semantics".
-- A `no_active_session` RPC reply is held for a later success (a duplicate responder), never
-  first-reply — "The context-less RPC hold".
-- "Watch items / residuals" is the flagged-edges register — check it before extending the
-  module.
+- A `no_active_session` RPC reply is held for a later success, never first-reply — "The
+  context-less RPC hold"; a lane's compaction survival lives in `pi/subagents.md`.
+- "Watch items / residuals" is the flagged-edges register — check it before extending.
 
 ## Orientation
 
@@ -63,7 +62,8 @@ lifecycle — `start`/`collect`/`run` over opaque `ReportWaveRef`s: they supply 
 consume typed outcomes, never adapters, run handles, or result promises (the blocking `run` is
 start + await inside the instance; pending execution is instance-owned with drain-once,
 delete-as-claim collection). Adapter selection is wave-owned: `createReportWave(bus)` constructs
-the ONE per-activation production instance at the composition root (`extension/index.ts`) — it
+the ONE per-activation production instance at the composition root
+(`extension/pi/activation.ts::activatePerk`) — it
 takes **no supplier** (the child restriction packet is a constant, below); `reportWaveOver(adapter)`
 is the test injection seam. `renderWaveScript` + assignment validation
 are module-private — script text is invisible outside `waves/`, so renderer assertions observe
@@ -101,7 +101,8 @@ censuses raw `WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
   constant — the migration that killed the hand-transcribed `outputSchema` blocks.
 - `extension/learning/audit.ts` (`judgeAuditBundle`) — the perk-dev session-audit wave behind
   `run_audit_wave` (the `extension/pi/v1/learning/audit.ts` adapter): the analyst-wave-shaped
-  sibling with a **structural write binding**. The tool is a `READ_ONLY_TOOLS` member whose write target comes only from the cold
+  sibling with a **structural write binding**. The tool registers with a `gated: { carveOut }` policy (its `registerPerkTool` call in the
+  adapter; the carve-out prose renders into the read-only context) whose write target comes only from the cold
   door's workflow-state (`audit_bundle_dir`), with **no parameters** — no model-relayed path ⇒ no
   aimable writer. This is the precedent for read-only-gated tools that must write. Side effect
   worth sweeping for: adding an isolated registry stage (empty `successors`) implicitly grows
@@ -215,8 +216,9 @@ a flow-scoped tool predictably touches:
   judgment-prose pins stay on the guidance; and an interface-level harness e2e replaces the
   deleted rendered-mechanics pins — plus *negative* pins that `workflowScript`/`runs.all`/
   `outputSchema` no longer appear in the guidance.
-- **Name the `extension/substrate/toolGating.ts` lockstep explicitly** (`PERK_TOOLS` + the
-  worktree-stage family). Two consecutive flow plans missed it; the `stageTools.test.ts`
+- **Name the tool-policy lockstep explicitly** — the tool's `registerPerkTool` policy (its
+  `stages`, e.g. the worktree-stage family `WORKTREE_STAGES`) plus the regenerated
+  `shared/fixtures/tool-matrix.json` (`docs/learned/pi/tool-loadout.md`). Two consecutive flow plans missed it; the `stageTools.test.ts`
   drive-coverage guard forces it the moment the guidance names the tool, but catching it at plan
   time avoids the late scramble commit (see also `warm-door-commands.md`).
 
@@ -436,6 +438,10 @@ is therefore effective evidence a retry can never supersede — only a `blocked`
 REACHABILITY (a stale `extension/codeReview/automated.test.ts` composition kept asserting a path
 the new policy could no longer reach).
 
+**A compacted lane is not a failed lane.** A floored report child can be compacted mid-run; its
+task restore and the `structured_output` hold live entirely in the child's extension runtime (the
+wave module is unchanged) — `docs/learned/pi/subagents.md` § "Report children survive compaction".
+
 Extra defensive arms worth keeping when extending the module: a pre-aborted `AbortSignal` cancels
 before launch (no spawn issued); malformed async-complete payloads are dropped, never surfaced as
 phantom completions; a `status.json` without a `state` field throws (`aggregate-unreadable`)
@@ -568,15 +574,15 @@ intentional ripple detectors, not unrelated test churn.
 
 The registered-tool census has a fourth leg: the docs-site table
 `docs/user-docs/reference/in-session/model-tools.md`, guarded by
-`docs/site/src/in-session-reference.test.mjs` (set-equal to `PERK_TOOLS` and a live harness
-registration) — keep that guard in mind when registering tools (#1997).
+`docs/site/src/in-session-reference.test.mjs` (set-equal to the tool catalog via
+`shared/fixtures/tool-matrix.json`, and a live harness registration) — keep that guard in mind when registering tools (#1997).
 
 For start/collect wave pairs, `executionMode: "sequential"` remains the concurrency guard — and
 pending execution is INSTANCE-OWNED: the `ReportWave` instance holds every launched,
 uncollected run behind opaque `ReportWaveRef`s with drain-once (delete-as-claim) collection.
 Flow state holds only the opaque ref — which wave is *current* is flow policy: the draft pair's
 `DraftReviewWaveState.pending` slot (with the door-primed `context` beside it) lives in
-`extension/authoring/review/draftContext.ts`, created per-activation in `index.ts` and threaded
+`extension/authoring/review/draftContext.ts`, created per-activation in `activatePerk` (`extension/pi/activation.ts`) and threaded
 to the tool pair AND both browser doors, never module-global. Collect races the pending result
 against a bounded, environment-overridable grace (`PERK_WAVE_COLLECT_GRACE_MS` — wave-owned) to
 absorb ordering skew between native workflow-completion delivery and aggregate resolution.
@@ -772,6 +778,7 @@ Instances:
 - `docs/learned/pi/subagents.md` — the upstream pi-subagents mechanics (RPC envelope,
   `outputSchema`, supervisor channel) and the pre-digest recipe
 - `docs/learned/workflow/warm-door-commands.md` — the toolGating census + drive-coverage guard
+- `docs/learned/pi/tool-loadout.md` — the `registerPerkTool` catalog, postures and the matrix fixture
 - `docs/learned/workflow/learn-evidence-pipeline.md` — the `/learn` orchestrator that rides
   `extension/learning/analystWave.ts`
 - `docs/learned/workflow/plan-review-flow.md` — the annotation-push module (the sibling

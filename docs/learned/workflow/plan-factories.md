@@ -104,7 +104,8 @@ not a code path. The TS plane now mirrors the shape for the warm doors:
 `extension/learning/routing.ts` holds the `LearnFactoryKind` config interface and the
 `DOCS_FACTORY` / `CODE_FACTORY` constants; `extension/pi/v1/learning/factory.ts` holds the shared
 `registerLearnFactoryDoor` behind `installLearnFactoryBindings` (no per-door delegator files —
-`extension/index.ts` is the single registration site).
+`extension/pi/activation.ts::activatePerk` is the single registration site — the published
+`index.ts` entry is only the SDK-admission bootstrap that dynamically imports it).
 
 ## The shared seeded-cold-door pipeline (run_seeded_door / SeededLaunch / seeded_door_options)
 
@@ -220,7 +221,7 @@ never reaches a session):
 - **`init/skills.py`'s skill set** (+ the matching `.agents/manifest.d/perk.yaml` fragment) — so the
   factory's skill is installed by `perk init`.
 - **The `learn` verb group** — register the new command under its noun group.
-- **The warm door + `extension/index.ts` registration** — the in-session door and its wiring.
+- **The warm door + its registration in `extension/pi/activation.ts::activatePerk`** — the in-session door and its wiring.
 - **`prompts/_fixtures/live.yaml`** — the render fixture the prompt-parity tests read.
 - **The default-bindings assertions in BOTH planes** — `tests/test_bindings.py` (Python) **and**
   `extension/substrate/bindings.test.ts` (TS). Both must assert the new default binding, or one

@@ -16,15 +16,11 @@ can't derive from the package's root type exports.
 
 ## Distillation
 
-- `getSystemPromptOptions()` exists only on COMMAND contexts — lifecycle-event handlers don't
-  get it — "`getSystemPromptOptions()` is command-context-only".
-- `ctx.mode` (interactive/print) and `ctx.hasUI` answer different questions — pick per use —
-  "`ctx.mode` vs `ctx.hasUI`".
-- `before_agent_start` fires BEFORE the submitting prompt is persisted, so a first-turn
-  transcript read misses it — "`before_agent_start` fires BEFORE the submitting prompt is
-  persisted (the first-turn hole)".
-- The `context` event runs on EVERY provider call (keep handlers cheap + idempotent) — "The
-  `context` event runs on EVERY provider call".
+- `getSystemPromptOptions()` exists only on COMMAND contexts — "`getSystemPromptOptions()` is
+  command-context-only"; `ctx.mode` and `ctx.hasUI` answer different questions — "`ctx.mode` vs
+  `ctx.hasUI`".
+- `before_agent_start` fires BEFORE the submitting prompt is persisted — "… (the first-turn
+  hole)"; the `context` event runs on EVERY provider call — its own section.
 - `pi.sendUserMessage` is void fire-and-forget — the PERSISTED session entry is the only
   delivery evidence (spy on the session instance to assert it offline) — its own section +
   "Asserting `pi.sendUserMessage` injection offline".
@@ -35,10 +31,14 @@ can't derive from the package's root type exports.
 - A detached task from a slash command must latch `session_shutdown` and never touch a dead `ctx`
   (test via `invokeCommand` + `reload`, never `runCommandHandler`) — "Background work launched from
   a slash command outlives its activation".
-- Pi sanitizes session names only for newlines; strip terminal controls yourself —
-  "`setSessionName` / `getSessionName` facts".
-- Seam-forwarding + sink tests never prove registration — "A new Pi registration needs a live
-  factory/harness assertion".
+- Pi sanitizes session names only for newlines — "`setSessionName` / `getSessionName` facts";
+  seam-forwarding + sink tests never prove registration — "A new Pi registration needs …".
+- Read the SDK before admission only through a namespace import (a missing named export is
+  `undefined` under jiti but a link-time `SyntaxError` under native ESM); a throwing factory
+  registers nothing — "Host admission at the SDK boundary".
+- Every perk tool result passes through `structureResult` (`structuredContent` = `details`, own
+  `ok: false` ⇒ `isError`); only `kind: query` gets an `outputSchema` — "`registerTool` execute
+  results — the structured contract".
 - How pi resolves/loads a `git:`-package extension (clone root, package-manager internals) —
   "How pi loads a `git:`-package extension".
 - Body version numbers are event stamps, never currency claims — "Sources" names the pin SSOT,
@@ -248,18 +248,45 @@ newline, Esc resolves `undefined`, Ctrl+G (`app.editor.external`) opens the exte
 The editor-dialog UX (long-plan scrolling, the Ctrl+G round-trip) is automation-untested — pinned
 only by the type contract; first real interactive use should confirm.
 
-## `registerTool` execute results details requirement
+## `registerTool` execute results — the structured contract
 
 `AgentToolResult<TDetails>` (pi-agent-core) requires `details` but leaves its type
 unconstrained — `ToolDefinition` defaults `TDetails` to `unknown`; nothing in the SDK asks for
-`ok`. The `details: { ok: boolean, … }` shape is **perk's own convention**: the warm-door
-`Result<D, X>` union in `extension/substrate/result.ts` discriminates on `details.ok` (`ok()` /
-`failFor()` build it) and door consumers branch on it. Keep it for every perk tool so those
-consumers stay uniform.
+`ok`. perk's `details: { ok: boolean, … }` shape (the `Result<D, X>` union in
+`extension/substrate/result.ts`, built by `ok()` / `failFor()`) is now a **structured contract**
+(contracts §8.40, verified 0.99.2 and 1.0.0):
+
+- `registerPerkTool` wraps every `execute` with `extension/substrate/result.ts::structureResult`:
+  `structuredContent` is the same object as `details` (no clone); an own `ok: false` forces
+  `isError: true`, otherwise the tool's own flag is kept and `false` is never written;
+  `content`/`details`/`terminate`/`usage` and `onUpdate` partials pass through untouched. The
+  loadout host (`perk_stage`) stays unwrapped (its `execute` never runs).
+- `structuredContent` is never persisted nor sent to the model — only nested `ctx.executeTool` and
+  codemode see it. A soft failure is now model-visible as an error result (no batch termination,
+  no retry).
+- Codemode's `toScriptValue`: action tools (no `outputSchema`) *reject* on a soft failure; query
+  tools *resolve* to `{ ok: false, error, error_type }`. Do not give action tools an
+  `outputSchema` to avoid the rejection (declined). Only `kind: query` gets an `outputSchema`,
+  built from the policy `result` (closed success arm, open failure arm); Pi never validates it —
+  perk's `Value.Check` conformance pin does.
+- A source-scan census forbids hand-setting `outputSchema`/`structuredContent`/`isError`/
+  `renderResult`/`renderCall` on a perk tool definition.
+- **Testing gotchas:** every test-only `kind: "query"` registration needs
+  `result: { properties: {} }`; validation order (the deferred-kind check before `result`; "result
+  on non-query" before divergence) means a negative case wanting one refusal builds a separate
+  action policy; fake `registerPerkTool` registrations belong in `extension/pi/perkToolSeam.test.ts`,
+  never in census suites (`recordPerkTool` writes a process-global catalog — one process per file is
+  the only isolation). A real codemode sandbox runs offline under node:test
+  (`createCodemodeExtension({ mode: "on" })`, ≈0.1 s): activate `stages: []` probe tools explicitly
+  and read the script output from the last `codemode` toolResult on `sessionManager.getBranch()`.
+
+The policy side (kinds, `result` declaration) is `docs/learned/pi/tool-loadout.md` § "How to add or
+change a perk tool".
 
 ## A new Pi registration needs a live factory/harness assertion (#1761)
 
-A seam-forwarding test plus sink tests do not prove `extension/index.ts` registered the
+A seam-forwarding test plus sink tests do not prove the composition root
+(`extension/pi/activation.ts::activatePerk`) registered the
 implementation (the entry renderer was the caught instance) — every new Pi registration needs a
 live factory/harness assertion resolving through `ExtensionRunner` and exercising the registered
 implementation against a real appended entry.
@@ -277,12 +304,10 @@ Two contours of `registerTool` partial updates:
 
 ## Read-only gating trap
 
-A custom tool that must stay callable inside a read-only gate has to be named in that stage's
-gate-ON allowlist in `extension/substrate/toolGating.ts` — `READ_ONLY_TOOLS`, or
-`REFINEMENT_READ_ONLY_TOOLS` for the refinement stage (`gatedToolsFor` picks) — or the
-`setActiveTools` filter drops it the moment the gate engages. (The second list this section once
-named, the in-process read-only SDK child's `SDK_READ_ONLY_TOOLS`, retired with that child in
-#2100.)
+A custom tool is absent under the read-only gate unless its `registerPerkTool` policy carves it in
+(`gated: allowed` or `gated: { carveOut }`; the gated view is `gatedToolsFor(stage)`), and the
+`tool_call` backstop blocks it there even if something else activates it. The policy descriptor,
+the derived views and the foreign-tool postures live in `docs/learned/pi/tool-loadout.md`.
 
 ## Registration-time `process.cwd()` config reads make harness tests host-repo-sensitive
 
@@ -294,6 +319,35 @@ flags/commands inside test runs — the host repo's committed config leaks into 
 **Rule:** any harness test exercising registration-time branching must `process.chdir()` into its
 scaffold and restore in `finally`. Hit twice independently. Diagnosis shortcut: a harness test
 failing only locally/on main → check committed `.perk/config.toml` before suspecting the code.
+
+## Host admission at the SDK boundary — extension-loader facts (verified 0.99.2 and 1.0.0)
+
+- **`ExtensionFactory` may be async.** Pi awaits it and commits registrations only after it
+  returns; a factory that throws registers nothing and is discarded.
+- **The visible failure is double-wrapped** — `Error: Failed to load extension "<path>": Failed to
+  load extension: <message>`, then `Hint: Start without extensions using "pi -ne".`, exit 1 at
+  startup.
+- **Missing named exports differ by loader.** Under Pi's jiti loader a missing named export reads
+  `undefined` (jiti rewrites static and dynamic imports); under Node's native ESM (the worker,
+  `node --test`, compiled consumers) it is a link-time `SyntaxError: … does not provide an export
+  named …`. A **namespace** import never fails for a missing name, so it is the only safe
+  pre-admission read — `extension/substrate/hostSdkVersion.ts` reads `VERSION` that way.
+- In bundled or compiled hosts, `VIRTUAL_MODULES["@earendil-works/pi-coding-agent"]` is the
+  package's `index.js` namespace, so `VERSION` is visible there too (checked in the 1.0.0 dist).
+- **The entry split.** Both published entries are thin bootstraps: `extension/index.ts` admits the
+  loaded SDK (`extension/substrate/hostAdmission.ts::admitHostSdk` against
+  `shared/host-floor.yaml`) and only then dynamically imports the SDK-bearing composition root
+  `extension/pi/activation.ts::activatePerk`; `extension/workerMain.ts` does the same for the
+  worker. Why: the composition root statically imports named SDK symbols, so on an unsupported
+  host it would fail to link before any refusal could run. Normative: contracts §8.76(f).
+- **Stale installed SDKs fail loudly.** The precondition test in
+  `extension/substrate/hostAdmission.test.ts` fails when the SDK resolved from `node_modules` is
+  below the floor — repair with `npm ci`, never weaken the test
+  (`toolchain/worktree-node-modules.md`).
+- **Residual:** a "lying" SDK (`VERSION` ≥ floor, exports missing) is a typed `runtime_init` in the
+  worker but call-time `undefined`s under jiti — untested, low likelihood. The cold-process proof
+  that an entry links nothing SDK-bearing before admission is `workflow/vacuity-proof-tests.md`
+  § "Cold-process link-order proofs".
 
 ## Dogfooding just-changed extension code — cwd repo-root loading + `/reload`
 
@@ -326,6 +380,14 @@ extension as the path package `..`. Three consequences:
   (e.g. a lease-holding inbox consumer) re-claims **in place** under the new code — the
   sanctioned live-smoke path for such receivers (see
   `workflow/lease-outbox-delivery.md`).
+- **A floor-raising change locks out the operator host.** The self-repo loads package `..`, so a
+  checkout or worktree carrying a host-floor raise refuses every `pi` — every perk door launched
+  there included — on a below-floor PATH `pi`. The implement session does not notice: it still
+  runs the pre-change extension loaded at session start. Rule: upgrade the operator's PATH `pi`
+  (`npm install -g @earendil-works/pi-coding-agent@<floor>`) before merging; the escape hatch is
+  `pi -ne`. `run_ci` verdicts depend on that PATH `pi` too: `test-py-slow` is a `[[ci.checks]]` row
+  and its live smokes (`tests/test_native_sdk_bridge_live.py`) probe the host, while GitHub CI
+  installs no global `pi` and skips them.
 
 ## pi print mode executes slash commands fully offline
 
@@ -428,6 +490,12 @@ that *records* `{title, message}` and returns a canned answer. In-repo core inst
 `submit_pr_review` formal-event gate in `extension/pi/v1/codeReview/submit.test.ts`
 (`formalEventGateFor` scripts a recording confirm; a `comment` event never confirms; a headless
 formal event refuses before any exec).
+
+**Harness facts (verified 0.99.2).** `invokeTool` calls `definition.execute` directly — no
+`tool_call`/`tool_result` hooks fire — so state driven by `tool_result` needs a real
+`session.prompt` faux turn. Pi's `afterToolCall` builds a `tool_result` only for tools that
+executed. `emitToolCall` returns the first `{ block: true }`, so handler registration order
+matters.
 
 ## `pi.exec` never throws on spawn failure
 
@@ -533,7 +601,10 @@ tools or *months-old* code:
   provenance, not a currency promise; the pin is. 2026-10-01: the pins moved to `0.99.2` with the
   suites green and minimal in-place corrections only (the `ToolInfo.exposure` field, CLI built-in
   extensions); the full re-audit of this doc is owed — facts here are verified at 0.87.0 unless
-  corrected in place.
+  corrected in place. 2026-10: the pins are at `1.0.0` and the host floor is `1.0.0`
+  (`shared/host-floor.yaml`); the host-admission, structured-result and harness facts were added
+  at the versions each section states (0.99.2 and/or 1.0.0). The full 1.0.0 re-audit of this doc
+  is still owed.
 
 ## Cross-references
 
@@ -541,6 +612,8 @@ tools or *months-old* code:
 - `docs/learned/pi/context-injection.md` — conditional strip on the every-call `context` event
 - `docs/learned/workflow/skill-bindings.md` — branch persistence powering the cold↔warm dedup
 - `docs/learned/toolchain/worktree-node-modules.md` — getting the right installed SDK in a worktree
+- `docs/learned/pi/tool-loadout.md` — activation vs presentation vs enforcement, the
+  `registerPerkTool` catalog and the provenance postures
 - `docs/learned/pi/tool-param-decode.md` — the pure-decode export (the preferred decode-coverage
   shape beside `invokeTool`'s `opts.ui` overlay)
 - `extension/pi/v1/simplify.ts` — the `session_shutdown` liveness latch for detached command work

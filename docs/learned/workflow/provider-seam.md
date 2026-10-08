@@ -229,8 +229,8 @@ now three distinct vacating mechanisms plus two limit-case postures:
   deleted).
 - **Install-site / runtime vacating, keyed off `ctx.cwd`** (footer — **the new third mechanism**) —
   perk installs its footer with `installPerkFooter` **inside the `session_start` event handler**
-  (`extension/index.ts`), not at factory-bind. So the natural guard is a **runtime check at that
-  single install site**: `index.ts` calls `installPerkFooter` only when
+  (`extension/pi/activation.ts::activatePerk`), not at factory-bind. So the natural guard is a
+  **runtime check at that single install site**: `activatePerk` calls `installPerkFooter` only when
   `isPerkFooterReferenceSelected(ctx.cwd)`. There is **no name collision** (`setFooter` is a single
   last-wins slot, not a named registration), so the guard isn't about suffixing — it's about not
   clobbering the foreign footer's slot. **Easier test tier:** because `ctx.cwd` flows through the
@@ -608,17 +608,19 @@ Sites that need **no** change because they already iterate `SEAMS` / the whole s
 change needed" conclusions explicitly so a future reader doesn't re-derive them. (Watch ruff E501: a
 widened tuple inside a docstring can push the summary line past 100 cols.)
 
-## Read-only gating: a shared tool name is free allowlisting
+## Read-only gating: provenance, not a shared name
 
-`ask_user_question` is in `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`), so a
-foreign tool sharing the **exact** name is allowlisted automatically (same "foreign tool names
-inert/allowlisted by shared name" precedent as `plan_review` / `linear_*`). The read-only notice
-interpolates `READ_ONLY_TOOLS`, so it self-updates. The SDK in-process child's
+`ask_user_question` is governed by the `universal` posture row for
+`npm:@juicesharp/rpiv-ask-user-question` in `PACKAGE_TOOL_POLICY`
+(`extension/substrate/toolPolicy.ts`), not by an allowlist entry: perk classifies a foreign tool by
+WHO registered it (Pi's `sourceInfo`), never by its name, so a same-named tool from a package with
+no row is `unknown` (passes read-write diets, blocked under the gate). The read-only context
+(`renderReadOnlyContext(stage)` in `toolGating.ts`) names only carve-out writers, so a foreign
+posture change needs no prose edit (detail: `docs/learned/pi/tool-loadout.md`). The SDK in-process child's
 `SDK_READ_ONLY_TOOLS` deliberately **omitted** it — headless children never prompt a human
 (dated history: the child and its list were deleted with the stage-execution confinement,
-PR #2100). No code change — state the conclusion explicitly. *(Since Objective #1416 the name is
-governed via the borrowed census — `BORROWED_TOOLS`, the foreign questionnaire being the sole
-registrant — but the shared-name allowlisting mechanics above hold unchanged.)*
+PR #2100). *(Superseded twice: the name-keyed borrowed census that replaced the shared-name
+allowlist was itself retired for the provenance posture above.)*
 
 ## Testing a vacate-only seam without a `registeredTools()` accessor
 
@@ -653,7 +655,7 @@ guarantee in every mode — with the one novelty that the **web default's `packa
 - `extension/pi/v1/providers/tombell.ts` — the injection-only plan adapter shim (always registered, inert by default)
 - `extension/authoring/plan/save.ts` + `extension/pi/v1/plan.ts` — the seam-shared save substrate that never defers
 - `extension/surfaces/footerProvider.ts` — `isPerkFooterReferenceSelected` (the install-site/runtime footer vacating, keyed off `ctx.cwd`)
-- `extension/index.ts` — the `session_start` install site that gates `installPerkFooter` on `isPerkFooterReferenceSelected(ctx.cwd)`
+- `extension/pi/activation.ts::activatePerk` — the `session_start` install site that gates `installPerkFooter` on `isPerkFooterReferenceSelected(ctx.cwd)`
 - `docs/learned/workflow/borrowed-packages.md` — the borrow-ban footer-clobber rule reconciled vs a selected footer provider; the live home of the two required borrows the askuser/todo seams retired to
 - `docs/design/archive/provider-smoke-juicesharp-ask-user.md` — the askuser per-file mechanics + recorded select/deselect smoke
 - `extension/substrate/providers.ts` — `resolveProviders`, `PERK_PLAN_PROVIDER_ID`
@@ -666,3 +668,4 @@ guarantee in every mode — with the one novelty that the **web default's `packa
 - `docs/learned/workflow/init-doctor.md` — managed-convergence SSOT
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the `cache.plan-ref` lifecycle
 - `docs/learned/toolchain/worktree-node-modules.md` — the stale-global-`perk` / self-converge smoke gotcha
+- `docs/learned/pi/tool-loadout.md` — foreign-tool provenance postures (`PACKAGE_TOOL_POLICY`) and the gate's derived views

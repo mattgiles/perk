@@ -240,7 +240,8 @@ The `__version__` SSOT is enforced into the *running session* by three deliberat
 - **The runtime skew the static checks can't see → a soft `session_start` signal.** The one version perk
   cannot statically check is the **live-loaded** extension: pi can lazy-install/load a stale
   `npm:@mgiles/perk`, so the running `@mgiles/perk` may differ from the launching CLI. The extension's
-  `session_start` handler (`extension/index.ts`) compares `process.env.PERK_CLI_VERSION` against its own
+  `session_start` handler (in `extension/pi/activation.ts::activatePerk`, the composition root)
+  compares `process.env.PERK_CLI_VERSION` against its own
   `perkVersion()` and, when both are present and differ, emits a **soft non-fatal `warning`** via the
   surfaces seam (`report()`, headless-safe) pointing at `perk doctor --fix`. Deliberately **no
   once-guard** — the simplest code (one plain `if` in the existing handler); re-emitting on reload is
@@ -367,7 +368,7 @@ already-installed unranged npm source, so the boundary that matters (a consumer 
   adds a runtime dep)
 - `docs/learned/pi/extension-api.md` — the `session_start` handler the version-drift signal rides;
   also the pi `git:`-package loading substrate (the internals the retired git-clone lifecycle sat on)
-- `perk/run/pi_exec.py::_build_exec_env`, `extension/index.ts` — the `PERK_CLI_VERSION` inject + the
+- `perk/run/pi_exec.py::_build_exec_env`, `extension/pi/activation.ts::activatePerk` — the `PERK_CLI_VERSION` inject + the
   `session_start` drift comparison
 - `docs/learned/toolchain/worktree-node-modules.md` — the `package-lock.json` `pi-ai` bin-path churn
 - `docs/learned/toolchain/uv-workspace-src-layout.md` — the uv-workspace root-package `src`-layout

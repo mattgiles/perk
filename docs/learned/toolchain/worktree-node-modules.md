@@ -1,6 +1,6 @@
 ---
 title: Worktree node_modules resolution trap — stale SDK shadowing
-read_when: CI or the native-SDK census drift guard fails in files your diff never touched, a fresh worktree fails tsc before its install, a pinned bump seems inert, or a .pi/npm package is stale on disk.
+read_when: CI or the SDK census guard fails in files you never touched, a fresh worktree fails tsc before install, a pinned bump seems inert, a .pi/npm package is stale, or a Pi pin-bump lockfile trim
 cluster: toolchain-gotchas
 ---
 
@@ -19,6 +19,27 @@ drift/repair mechanics in `workflow/distribution.md`). The resolution trap below
 One `.pi/npm`-world rule in passing: an `npm ci --prefix .pi/npm` EUSAGE failure before a live run
 is an environment preflight blocker (the gitignored root drifts) — repair with
 `npm install --prefix .pi/npm`; detail + posture in `workflow/distribution.md`.
+
+## Distillation
+
+- Two npm worlds: the root `node_modules` (perk's dev tools; a fresh worktree resolves the
+  parent's) and `.pi/npm` (Pi's extension installs) — the intro above.
+- Red in files you never touched → `git stash` to prove it pre-existing, then compare installed vs
+  pinned SDK — "Symptom 1"; a worktree pin bump is inert until `npm install` runs there —
+  "Symptom 2"; peer-only `pi-tui`/`typebox` resolutions go stale independently — "Symptom 3".
+- Prove provenance before assuming you broke it; exit 143 with no `FAILED` line is a transient
+  kill — "Diagnosing pre-existing breakage".
+- A `.pi/npm` package can be stale on disk while `npm ls` says it is correct — read its on-disk
+  `package.json` — "The `.pi/npm` world in perk's own checkout".
+- `git checkout package-lock.json` drops incidental `"peer": true` churn — "Commit hygiene after
+  installing in a worktree".
+- A Pi pin bump: `just bump-pi`, trim the lockfile to the changed ranges (never hand-trim
+  pi-coding-agent's shrinkwrapped tree), `npm prune` dropped dependencies, never run the suites from
+  a lagging root checkout — "Pi pin-bump mechanics".
+- Host floor, remote install pin, dev pins, the pi-subagents pin and the guidance stamp are five
+  distinct facts; tests stay version-honest — "Five version facts, kept distinct".
+- Smoke the worktree's `.venv/bin/perk` and run `perk init` smokes in a scratch dir — "Stale
+  globally-installed `perk`".
 
 ## Symptom 1: pre-existing failures in files you never touched
 
@@ -125,6 +146,52 @@ A second churn shape — `pi-ai` bin-path npm-normalization rewrites with no dep
 has its rule and detail in `workflow/distribution.md` (§the git→npm install mirror):
 `git checkout package-lock.json` before staging when that is the only diff.
 
+## Pi pin-bump mechanics (used at 0.99.2 and 1.0.0)
+
+`just bump-pi <version>` moves the four `@earendil-works/*` exact pins (pi-coding-agent, pi-ai,
+pi-tui, pi-agent-core) and runs an `npm ls` gate, the typecheck, `piAiCompatGuard.test.ts` and
+`tests/test_packaging.py::test_pi_toolchain_pin_lockstep` (which pins a closed key set). The
+lockfile it leaves needs a deliberate trim:
+
+- **Keep** the bumped top-level pins, pi-coding-agent's whole nested tree — it ships
+  `hasShrinkwrap: true`, so never hand-trim it — and any entry whose declared range changed.
+- **Revert** incidental patch re-resolutions whose ranges did not change (`@aws-sdk/*`,
+  `@smithy/*`, `ws`, `@babel/runtime`) to the base text.
+- **The third churn shape**: pi-ai pins `openai` exactly, and its optional peer edges move ≈21
+  unrelated AWS/Smithy/`ws` entries — real version moves; restore them where the ranges allow.
+- **Validate**: `npm install --package-lock-only` leaves the file byte-identical, `npm ci`
+  succeeds, and the `npm ls` gate exits 0.
+- **Prune orphans.** Dropping a devDependency leaves extraneous packages (`chord`, `ignore`) — run
+  `npm prune` after any bump that drops a dependency. `npm ls <names>` exits 0 when every problem is
+  `extraneous` (npm 11.16), so the gate misses orphans.
+- `typebox` shows as not deduped — the shrinkwrapped tree carries its own copy; expected.
+- **A stale installed SDK now fails loudly**: the installed-SDK precondition test in
+  `extension/substrate/hostAdmission.test.ts` refuses a below-floor `node_modules` — repair with
+  `npm ci`, never weaken the test.
+- **The root checkout's `node_modules` can lag the manifest** (it did: 0.87.0 installed vs 1.0.0
+  pinned) — never run the suites from it.
+
+Record: `docs/design/archive/pi-1.0.0-dev-pins.md`.
+
+## Five version facts, kept distinct
+
+1. **The host floor** — `shared/host-floor.yaml`, read by both planes' admission.
+2. **The remote install pin** — `src/perk/run/workflow_artifacts.py::REMOTE_PI_VERSION`; it pins
+   both the consumer remote CLI and the worker SDK.
+3. **The dev pins** — `package.json` devDependencies; also the self-repo remote worker's SDK via
+   `npm ci`.
+4. **The pi-subagents supplier pin** — `src/perk/convergence/init/settings.py::SUBAGENTS_PACKAGE`,
+   reconciled by `settings-wiring`.
+5. **The guidance stamp** — `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` (`pi/subagents.md` § Sources).
+
+A comment or doc merging any two is drift. **Version-honest tests** (dated): an expectation that
+holds on both hosts stays unconditional; host-differing expectations were a branched pair until
+SDK-boundary admission retired the old arms — do not reintroduce a `hostSdkAtLeast`-style helper.
+Assertions on Pi-rendered tool description text are fragile (1.0.0 dropped codemode's inline
+"Model API" section). Branch a repo-state precondition on
+`satisfies_floor(parse_semver(pin), floor)` (`src/perk/substrate/semver.py`) rather than asserting
+`pin != floor`.
+
 ## Stale globally-installed `perk` + accidental self-converge
 
 The same staleness trap has a Python-plane analogue. A smoke that exercises a `shared/` source change
@@ -147,7 +214,9 @@ in a **scratch dir, never the worktree.**
 
 ## Cross-references
 
-- `docs/learned/pi/extension-api.md` — the extension API surface a stale SDK fails to provide
+- `docs/learned/pi/extension-api.md` — the extension API surface a stale SDK fails to provide;
+  § "Host admission at the SDK boundary" for the floor the precondition test enforces
+- `docs/learned/workflow/init-doctor.md` — the host-floor rows in `perk init` / `perk doctor`
 - `docs/learned/toolchain/biome.md` — the other half of the TS CI gate
 - `docs/learned/workflow/provider-seam.md` — the `shared/providers.yaml` seam these smokes exercise
 - `docs/learned/workflow/cold-door-client.md` — the merge-race fixture sweep after a cross-plane

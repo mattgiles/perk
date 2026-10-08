@@ -56,6 +56,11 @@ nested save/restore interleaves and restores the wrong value. Use per-session se
 plus ONE restore point (#2170). And abort paths must settle pending handshakes on every exit — a
 rejected/aborted arm that leaves a handshake pending deadlocks the suite (#2170).
 
+Spawned child processes under concurrent test files need their own fresh `TMPDIR` (`os.tmpdir()`
+honours it), and temp-dir assertions run only against that root — `just test-js` runs files
+concurrently, and the worker e2e file creates `perk-worker-agent-*` directories in the shared
+default.
+
 ## Async currency fences need a fence-between-awaits case
 
 An observer that re-checks `current()` after each of two awaits (before announcing readiness, and

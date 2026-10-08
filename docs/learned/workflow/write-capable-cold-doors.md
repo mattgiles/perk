@@ -50,7 +50,8 @@ The borrow is otherwise **inert** — borrowing `save` injects no save-stage beh
   bindings fire; with it `perk-skill-author` is delivered instead (the mechanism:
   `skill-bindings.md` § "The `binding_trigger` "borrows-a-stage" hazard").
 - The extension's authoring-context injection is gated on the **read-only** mode (plan mode plus
-  the objective-/gist-author mirrors, `extension/index.ts`), so a `mode: read-write` borrow of
+  the objective-/gist-author mirrors, installed from `extension/pi/activation.ts::activatePerk`; the
+  hooks live in `extension/pi/v1/contextInjection.ts`), so a `mode: read-write` borrow of
   `save` injects no authoring context.
 
 There is **no structural write-sandbox.** "Scoped to `.perk/skills/NAME/**`" is a **soft scope** carried

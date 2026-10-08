@@ -78,9 +78,14 @@ reference) see less than their names suggest (#2508, #2514):
 4. **`prompts/` is outside `_SOURCE_ROOTS`**, so prompt-file references are unguarded.
 5. **An illustrative `.md` path in prose registers as a doc reference** — placeholder it
    (`<section>/<page>.md`; the token charset exempts `<`).
-6. **A pointer to a module later split into a package still resolves.** `_resolve_source_pointer`
-   probes literal → `src/` form → `src/perk/…/X/__init__.py` (deliberate, so split history stays
-   valid), so a bare cite of the old `mod.py` keeps resolving to the facade even when the described
+6. **A pointer whose path still resolves but whose body moved is invisible** — a module later
+   split into a package, OR a file hollowed into a thin entry (the published `index.ts` entry
+   became a 43-line SDK-admission bootstrap while its composition-root role moved to
+   `extension/pi/activation.ts::activatePerk`, leaving 26 learned-doc mentions describing the old
+   role). Budget the pointer sweep in the plan that moves the body (`doc-reconciliation.md` § "A
+   retired-convention sweep needs a symbol grep, not a named-file census"). For the split case:
+   `_resolve_source_pointer` probes literal → `src/` form → `src/perk/…/X/__init__.py`
+   (deliberate, so split history stays valid), so a bare cite of the old `mod.py` keeps resolving to the facade even when the described
    content moved to a submodule — the realized case was `toolchain/ty.md`'s
    `perk/convergence/init.py` cite, whose content lives in `init/settings.py` (repointed by #2539;
    `workflow/provider-seam.md` still narrates the old path). The symbol arm is a plain substring

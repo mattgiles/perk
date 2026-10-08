@@ -17,7 +17,8 @@ This doc captures the repeatable recipe for both, because the ripple is wide and
   lenient parse (missing→findings, wrong-typed→domain error) + one findings vocabulary, TS reader
   on the vendored bounded YAML reader with
   Python as the authoritative validator, …) — "The six-seam recipe for a new parsed data
-  file".
+  file"; the fourth instance (`host-floor.yaml`) also needed a schema snapshot, the user-docs
+  schema row, the tarball list and the miniYaml fidelity loop — "Seams beyond six".
 - A cross-plane behavior change amends `contracts.md` the SAME TURN; envelope population changes
   also audit every consumer firing gate — "Prose-contract maintenance & objective hygiene — do it
   the same turn" and "Cross-plane envelope widenings must audit consumer gates".
@@ -41,7 +42,7 @@ This doc captures the repeatable recipe for both, because the ripple is wide and
 ## The six-seam recipe for a new parsed data file
 
 `registry.yaml` established the pattern; `bindings.yaml` and `providers.yaml` are its second and
-third instances. To add a **new** parsed data file, mirror exactly these six seams (no codegen,
+third instances, `host-floor.yaml` (contracts §8.76) its fourth. To add a **new** parsed data file, mirror exactly these six seams (no codegen,
 no manifest edits):
 
 1. **Data file** `shared/<name>.yaml` with `schema_version: 1` + a documenting header comment.
@@ -76,6 +77,22 @@ no manifest edits):
 6. **Tests in both planes** mirror `test_registry.py` / `registry.test.ts`: a `GOOD` constant + a
    per-test single-line `.replace()` mutation for each negative case; a "real bundled file
    validates" test; and a "matches shipped set" exact-tuple assertion.
+
+### Seams beyond six (what the fourth instance needed)
+
+`shared/host-floor.yaml` needed more than the six seams — budget these too:
+
+- a `tests/_schemas.py::SCHEMAS` entry plus the regenerated snapshot (`PERK_UPDATE_SCHEMAS=1`);
+- the matching row in the `schemas-contracts` region of
+  `docs/user-docs/reference/json-schemas.md`, guarded by
+  `tests/test_docs_gates.py::test_user_docs_reference_facts`;
+- the `packages/perk-dev/src/perk_dev/build.py` tarball expectation list;
+- the `extension/substrate/miniYaml.test.ts` fidelity loop and the file-count prose in the
+  `miniYaml.ts` header.
+
+A version-floor fact needs the same literal pinned in both suites, or the drift alarm is silent.
+Grep for the old literal (`Node 22`, `>= 22`) rather than trusting a planning-time ledger of
+carriers.
 
 ### The "unconsumed seam" node convention
 
@@ -280,6 +297,11 @@ validator strict.
   case), and `**Status` — a bold concept label like **Status** trips it; rephrase (`**The bridge
   status**`, #2525). Cite an archive gate record by **stem glob** under `docs/design/archive/`
   (`scout-launcher-*`), never by a literal filename that carries the banned token.
+- **The provenance guard also matches `node \d+\.\d+` case-insensitively**, so contract prose like
+  "Node 22.19.0" trips it — backtick the version.
+- **Retitling a bold paragraph breaks quoting comments.** Renaming §8.40's "The discovery pilot"
+  paragraph to "Native discovery" left comments quoting `§N.N "<old title>"` stale, and the anchor
+  test checks headings only — grep for the quoted old title.
 
 ## A `shared/fixtures/*.json` cross-plane fixture with per-plane expectations
 

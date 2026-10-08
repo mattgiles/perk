@@ -21,14 +21,15 @@ never an `> **Update**` blockquote, a `(historical)` `##` section, or WAS-tensed
 
 ## Distillation
 
-- A perk child's authorization is TWO booleans — the runner bit `PI_SUBAGENT_CHILD=1` + the
-  constant packet `perk.parent-restrictions/1 = {readOnly: true}` in
-  `PI_SUBAGENT_EXTENSION_BINDINGS` — decoded fail-closed, latched per activation, composed into
-  every gate observation; plan guidance rides the gate behind `isPlanGuidanceStage` + the runner
-  fence — "Native child execution — the two-boolean policy".
-- Agent defs ship in the npm package (`agents/*.md`, `pi-subagents.agents`), discovered as
-  `source: "package"`; the census is `agents/*.md` ↔ `SUBAGENT_KEYS` ↔ `SubagentsTable`; no
-  reconverge — "Agent-def delivery".
+- A perk child's authorization is TWO booleans — `PI_SUBAGENT_CHILD=1` + the constant packet
+  `perk.parent-restrictions/1 = {readOnly: true}` — decoded fail-closed, latched per activation;
+  in-child engine tools are classified by the child-engine provenance row — "Native child
+  execution — the two-boolean policy".
+- A floored report child survives compaction: its first prompt is re-injected as a
+  `perk:task-restore` steer and `structured_output` held until it is live — "Report children
+  survive compaction".
+- Agent defs ship in the npm package (`agents/*.md`), discovered as `source: "package"`; census
+  `agents/*.md` ↔ `SUBAGENT_KEYS` ↔ `SubagentsTable` — "Agent-def delivery".
 - Model knob: `[models.subagents] <agent>` applied as the workflow-level `model` at spawn time (wins
   over the def's frontmatter however set); builtins are OFF in every perk repo, re-enable only at
   PROJECT scope; `agentOverrides` is never perk's mechanism — "Models, overrides and builtins".
@@ -39,15 +40,14 @@ never an `> **Update**` blockquote, a `(historical)` `##` section, or WAS-tensed
   AND a schema-valid report (a valid report alone is evidence — since 0.71.0 it survives a later
   provider error/abort); every wave spawn disables acceptance auto-inference explicitly; `runs.all`
   is all-settled for config-object items only — "Execution surfaces and structured output".
-- Waves are completion-only: every spawn carries `intercomBridge: {mode: "off"}` (0.68.0 discards
-  parent-side `progress_update`); a successful child completion no longer wakes the parent; the
-  completion notice is a preview — collect via the typed wave tools; engine deadline + 60 s
-  settlement grace; reports ride only the completion `results[]` — "Supervisor channel".
-- perk reaches the engine only through public surfaces (v1 RPC envelope pinned as module constants,
-  delegation events, def frontmatter, package `exports`); doctor `subagent-compat` is a version
-  tripwire, never a source probe; the accepted coverage gap is named — "Engine-coupling posture".
-- `## Sources` records the guidance baseline (doctor constant) and the last engine source re-read;
-  superseded claims live only under "History (dated)".
+- Waves are completion-only (`intercomBridge: {mode: "off"}`); a successful child completion no
+  longer wakes the parent; the notice is a preview — collect via the typed wave tools; engine
+  deadline + 60 s grace; reports ride only the completion `results[]` — "Supervisor channel".
+- perk reaches the engine only through public surfaces; doctor `subagent-compat` is a version
+  tripwire, never a source probe; the coverage gap and the 0.75.0 watch items are named —
+  "Engine-coupling posture".
+- `## Sources` records the guidance baseline, the last source re-read and the browser-door
+  re-verify criteria; superseded claims live only under "History (dated)".
 
 ## Native child execution — the two-boolean policy
 
@@ -68,7 +68,8 @@ floor; no env var ⇒ no floor (the delegation-dispatched writer's case); an obj
 `perk.parent-restrictions/…` key ⇒ **no floor** (unrelated namespaces are opaque); invalid JSON, a
 non-object envelope, any `perk.parent-restrictions/` key other than exactly `/1`, or `/1` holding
 anything but exactly `{readOnly: boolean}` ⇒ **floor (fail closed)**; valid ⇒ the boolean.
-`extension/index.ts` reads both at every `session_start` and **latches** the floor
+`extension/pi/activation.ts::activatePerk` (the composition root) reads both at every
+`session_start` and **latches** the floor
 (`readOnlyFloor ||= …` — a re-emitted `session_start`, a gate `exit()` or `session_tree` navigation
 cannot clear it); `toolGating.ts` composes it as `isActive = active || hasFloor()` plus the all-names
 `tool_call` backstop; a throwing floor supplier is restrictive.
@@ -78,19 +79,19 @@ named key with `Object.hasOwn` *before* honoring the value — a polluted `Objec
 would otherwise satisfy `keys.length === 1 && value.readOnly === false` and un-floor the child. Every
 decoder reading a named property off parsed JSON should do the same.
 
-**The inherited gate vs the engine's child tools.** The engine injects `structured_output` and
-`contact_supervisor` at extension **load time** — before perk's `session_start` gate sync — so a
-gate sync that omits them deactivates them and an `outputSchema` child fails
-`structuredOutputFailed`. Hence `SUBAGENT_CHILD_TOOLS` (both names — perk's own waves spawn
-bridge-off so `contact_supervisor` is absent in their children, but the allowlist governs EVERY
-gated adopted child, and an ad-hoc gated child with an active bridge must keep its supervisor
-door; a review of the first cut caught the over-narrowing) sits in `READ_ONLY_TOOLS`
-(`extension/substrate/toolGating.ts`) and in **neither** `PERK_TOOLS` nor `BORROWED_TOOLS` —
-children are stage-unscoped, so gate membership is their only governance surface. A "missing
-`structured_output`" is a **composition** defect: trace (a) the launch tool plan
-(`resolvePiLaunchToolPlan` unions it when `outputSchema` is set), (b) ambient-extension loading
-(`disableAmbientExtensions` = `capabilityCeiling.denyExtensions` OR an `extensions` key present on
-the def — an empty array ≠ omitted), (c) perk's gate timing; never the def's `tools:`. Read-only
+**The inherited gate vs the engine's child tools.** The engine registers its in-child tools
+(`structured_output`, `contact_supervisor`, `wait`) through one named inline factory, so they are
+classified by provenance — the exact-path child-engine row
+`SYNTHETIC_PATH_TOOL_POLICY["<inline:pi-subagents:prompt-runtime>"]` in
+`extension/substrate/toolPolicy.ts`: stage-blind (adopted children are stage-unscoped) and
+gate-allowed (the gate IS inherited by adopted children). perk never deactivates a foreign tool, so
+gate timing cannot strip them; an allowlisted report child (a def `tools:` filter) registers no perk
+tool at all. Detail: `docs/learned/pi/tool-loadout.md`. A "missing `structured_output`" is a
+**composition** defect: trace (a) the launch tool plan (`resolvePiLaunchToolPlan` unions it when
+`outputSchema` is set), (b) ambient-extension loading (`disableAmbientExtensions` =
+`capabilityCeiling.denyExtensions` OR an `extensions` key present on the def — an empty array ≠
+omitted), (c) its provenance (a namesake from any other path is `unknown` and blocked under the
+gate); never the def's `tools:`. Read-only
 prose is not a sandbox: mutation prohibitions must be categorical ("never edit, never push"), never
 softened by an explicit-task exception a poisoned task could satisfy.
 
@@ -128,6 +129,28 @@ Bounded posture: not an OS sandbox nor authentication against malicious host ext
 adjacent trap: a feature with its **own** isolated `createAgentSession` (`/btw`) runs outside the
 main session's `tool_call` hook — thread the gate state into its toolset (read-only ⇒ `["read"]`)
 and into the side-session cache key.
+
+## Report children survive compaction
+
+A floored report child can be compacted mid-run, and pi-subagents has no per-child compaction knob
+(`compaction.enabled` is a global setting). The normative policy is contracts §8.3 "Runner task
+restore" and `docs/design/pi-subagents-child-execution-policy.md`; in summary
+(`extension/substrate/childTaskRestore.ts`):
+
+- After a compaction the child's first user prompt is re-injected byte-for-byte as a
+  `perk:task-restore` steer, and `structured_output` is blocked while that prompt is not live in
+  Pi's projection (the liveness rule — Pi's projection plus typed evidence — is
+  `docs/learned/pi/context-injection.md` § "Dedup against Pi's own live projection"). An accepted
+  report ends the policy.
+- The one-call-only rule for `structured_output` counts accepted calls only — a blocked call
+  captured nothing and its block reason tells the model so. pi-subagents' `structured_output`
+  throws on schema rejection (an error result) and returns `terminate: true` on success.
+- The wave module did not change; the restore lives entirely in the child's extension runtime.
+- **Residuals:** `TASK_RESTORE_MAX_ATTEMPTS = 3` is a total per activation, not per compaction (a
+  fourth restore is refused — fail-closed, uncovered). Only draft reviewers carry their whole
+  subject inline: PR-reviewer lanes fetch the diff themselves and analyst lanes receive manifest
+  paths, so evidence fetched later survives only as a compaction summary (narrowing §8.3's wording
+  is routed follow-up #2705 F9).
 
 ## Agent-def delivery to consumer repos
 
@@ -453,6 +476,14 @@ absent, `warn` when the `package.json` version is unreadable OR differs from
 `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`, `ok` at that version; it never reads engine source. A
 wrong-typed `{"version": 123}` is *unreadable*, never a *mismatch*.
 
+**Watch items (0.75.0).** A second inline child extension exists: `child-session.js` loads
+`pi-subagents:commands` only when a child's tools include BOTH `bash` and `subagent_command`, and
+registers a *wrapped* `bash`. Unreachable today — no perk def declares `subagent_command` — but a
+def that did would strip `bash`'s builtin provenance and classify it `unknown` (a census guard is
+routed follow-up #2705 F6). The engine's `disabledFeatures` refuses more than `workflow-scripts`:
+`missions` and `extension-bindings` each refuse every perk wave (fail closed — perk spawns with
+`mission: false` and every lane carries the restriction packet).
+
 ## Lane craft — evidence pitfalls, routing tokens, prompts
 
 ### Lane evidence pitfalls
@@ -614,10 +645,23 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   (`docs/design/archive/pi-subagents-0.75.0-reverify.md` — stamped on the source re-read, the
   offline/doctor/scout halves and the Pi 1.0.0 trust rows; the change merged without its PR-door
   browser outcome, so a follow-up PR carried both browser legs, and the plan-door and PR-door
-  halves both **passed** on the Pi 0.99.2 host). Earlier baselines: 0.73.1
+  halves both **passed** on the Pi 0.99.2 host; on Pi 1.0.0 the plan-door browser half passed —
+certification record X5a, `docs/design/archive/pi-1.0.0-certification.md` — and the PR-door half is
+unmeasured: deferred at reconcile, so the record's verdict is PENDING). Earlier baselines: 0.73.1
   (every live half passed), 0.70.1. Last source re-read of the mechanics
   in this doc: the installed 0.75.0 (compiled `src/**/*.js`; body paths name the upstream `.ts`
-  modules, whose anchors survive compilation) — provenance, not a currency promise.
+  modules, whose anchors survive compilation) — provenance, not a currency promise. (The offline
+  library source mirror is still at `v0.71.0`; an owner-run `perk librarian refresh pi-subagents`
+  is owed.)
+- **Browser-door re-verify criteria** — the push receipts are the instrument; a leg passes on all
+  five: (1) launch — every requested lane runnable, `preflightFailures: []`; (2) collect —
+  `complete: true`, N/N covered, `failures: []` (collect results carry no delivery outcome); (3)
+  delivery — exactly one `replace: true` `push_annotations` per covered angle, every receipt the ok
+  arm with `held == 0` AND `held_batches == 0` (either can be non-zero alone; `pushed: 0` on an
+  empty replacement is healthy); (4) decision order — the browser decision entry comes after the
+  last push receipt in file order; (5) owner observation of the `perk:wave` marker and the
+  annotations, asked once. Cite JSONL line numbers from the planning session, readable as the
+  `planning-session/main` byte copy in `perk learn evidence --json`.
 
 ## Cross-references
 
@@ -628,9 +672,8 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
 - `extension/pi/v1/foregroundDelegation.ts` (the shared writer transport),
   `extension/pi/v1/delivery/conflictResolverEngine.ts`, `extension/pi/v1/librarianEngine.ts`;
   `extension/waves/scoutWave.ts` / `extension/pi/v1/scoutWave.ts`
-- The lazy-owned borrowed-tool policy (how `subagent` follows its owner's live loader
-  registration) lives in `workflow/borrowed-packages.md` § "Borrowed-tool stage scoping" — do not
-  restate it here.
+- Foreign-tool governance (pi-subagents' `delegation` package row, the child-engine synthetic-path
+  row) lives in `pi/tool-loadout.md` — do not restate it here.
 - `perk/convergence/init/extension_install.py::shipped_agent_defs_dir`,
   `perk/convergence/doctor/legacy_agent_defs.py`, `perk/convergence/doctor/checks.py`, `agents/*.md`
 - `docs/design/pi-subagents-child-execution-policy.md`; `docs/developers/pi-subagents-reverify.md`;

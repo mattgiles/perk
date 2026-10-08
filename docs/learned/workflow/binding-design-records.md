@@ -57,6 +57,23 @@ that misses root-level files undercounts silently). Embedding verbatim tool outp
 record to the renderer's WORDING — a text-only renderer change forces a re-measure-and-re-author —
 so commit the docs-only record last, after review settles (#2519).
 
+## Pilot shape and contamination
+
+- **Live discoverability legs run in the authoring session are contaminated.** The model already
+  knows the tool name and the pinned queries, so such a leg proves search → activate → call, not
+  naive discoverability. Scored discoverability belongs to pinned offline queries or a fresh
+  session.
+- **The pilot shape that worked** (`docs/design/archive/native-discovery-pilot-dogfood.md`):
+  criteria and a decision rule pinned before measuring, with a written amendment protocol; a
+  dedicated baseline commit measured by the same repo-owned test; a preservation cross-check — the
+  nonparticipant arm reproduces the baseline byte-for-byte at every later commit, every delta
+  explained; and both ADOPT and RETIRE end states fully specified with commit boundaries, so RETIRE
+  is a revert.
+- **Characterize with matched controls before alleging a regression**: a CONTROL session without
+  perk, Pi-deactivating and Pi-additive controls for gesture rows, a classification table fixed
+  before measuring, and a throwaway worktree pinned to the subject version — the delayed-MCP matrix
+  (`docs/design/archive/pi-1.0.0-mcp-restoration.md`).
+
 ## Verification tooling disposed with a scaffold must be rebuilt from prose later
 
 Preserve verbatim outputs + the methodology in the record, because the checks themselves are torn

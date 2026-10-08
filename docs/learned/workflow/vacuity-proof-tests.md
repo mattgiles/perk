@@ -34,13 +34,13 @@ condition that would make an incorrect implementation fail, then assert the full
 - Negative-space checks prove a live selector and fail under an injected offender; a
   regression pin names the mutation it catches; widen the TEST seed to `unknown`, never the
   production type — "Negative-space checks" / "Structural source pins".
-- Folds and extractions mint branches: pin each arm — "Fold and extraction test craft"; never-execute
-  seams need a live control that first FIRES unhardened (two-stage: git's external diff skips
-  textconv) plus an argv pin — "Live controls for never-execute seams".
-- Keep one real default path through the deepest seam; pin composition via the CAPTURED
-  registration, never a hand rebuild — "Keep one real default path and verify delegates".
-- Assert where values leave the subsystem, reading back through the production reconstruction
-  seam — "Assert where values leave the subsystem".
+- Folds mint branches: pin each arm — "Fold and extraction test craft"; never-execute seams need a
+  live control that first FIRES unhardened plus an argv pin — "Live controls for never-execute
+  seams"; keep one real default path, pin composition via the CAPTURED registration — "Keep one
+  real default path and verify delegates".
+- Assert where values leave the subsystem — read back through the production seam and pin the
+  EFFECTIVE value on the live object — "Assert where values leave the subsystem"; link-order
+  claims need a cold child process plus two controls — "Cold-process link-order proofs".
 
 ## Default-miss fakes hide targeting errors
 
@@ -78,8 +78,8 @@ test. `workflow/issue-backend.md` records the backend form; delivery routing exa
   add a no-loader (eager owner) case and a hidden-then-enabled case, then mutation-check: removing
   the branch failed 3 tests; name-only classification failed 8. A fake owner must mirror each
   real owner's replay rules — a single shared fake was corrected at plan review
-  (`extension/substrate/stageTools.test.ts`; the owner rules are `workflow/borrowed-packages.md`
-  § "Borrowed-tool stage scoping").
+  (`extension/substrate/stageTools.test.ts`; the lazy-owner rules it modeled are since retired for
+  provenance postures — `pi/tool-loadout.md`).
 
 ## Seam conversions must re-home every observer
 
@@ -335,7 +335,8 @@ reset wipes it); snapshot/stash first and revert only the temporary mutation (#1
   delimiter** (#2521) — a `[^<>]*` class swallowed the inserted backslash; prove the oracle against
   the unsafe implementation.
 - **Pin the absence invariant itself, not one instance** (#2475) — an exhaustive
-  `Object.entries(STAGE_TOOLS)` sweep over the census-only family, mutation-checked — and pick the
+  sweep over `stageToolsFor(stage)` for every registry stage (`REGISTRY_STAGE_IDS`, both in
+  `extension/substrate/toolPolicy.ts`) over the census-only family, mutation-checked — and pick the
   fake that reproduces the load-order MECHANISM, not the foreign owner's toggle.
 
 ## Fold and extraction test craft
@@ -400,6 +401,23 @@ The binding-delivery example is in `workflow/skill-bindings.md` and
   proves nothing about it (#2021).
 - Message-pin-preserving extraction: interpolate the `what` parameter exactly where the old
   literal sat, so byte-identical message pins survive refactors (#2021).
+- **Configured-but-never-observed is the same hole one level up.** The headless worker's
+  compaction-off / retry-off invariant was configured in code and restated in four documents while
+  nothing read the effective state: `applyOverrides` was discarded by the services reload, and the
+  e2e scenario asserted only status and terminal (`pi/headless-session-drive.md` § "The
+  runtime-factory path builds the loader internally"). Pin the effective value on the live object
+  in the real-construction tier (`session.autoCompactionEnabled`, …) and count side effects
+  (provider calls, turns).
+
+## Cold-process link-order proofs
+
+Proving "entry X links nothing SDK-bearing before Y" needs a child process: `node --import
+<hook>.mjs` whose `module.registerHooks({ resolve })` maps the SDK specifier to a fake exporting
+only `VERSION`, the proof being that `import(entry)` succeeds
+(`extension/testing/fixtures/hostSdk/resolve-fake-sdk.mjs`, driven by
+`extension/entryAdmission.test.ts`). Pair it with two controls: the eager graph IS link-fatal under
+the same fake (else the fake proves nothing), and the hook is live. Give each child its own fresh
+`TMPDIR` (`toolchain/node-test-async-determinism.md`).
 
 ## Review checklist
 
@@ -427,6 +445,13 @@ Before accepting a test claim, ask:
     the captured registration?
 13. Was every mutation proof restored by reverting only the temporary mutation (never
     `git checkout <file>` over uncommitted work)?
+14. Is an in-flight abort triggered from the fixture's `started(seq)` barrier, not from a status
+    update? (An abort fired from codemode's "running" row fails at the auth step, before the
+    provider.) Does each barrier prove the claimed precondition? (`started(4)` proved four in
+    flight, not that 5–8 were queued — wait for the partial listing every row.)
+15. Is a recording fake claimed only as wiring proof, never outcome proof?
+16. When a plan-specified real-runtime assertion failed, was the code fixed or the divergence
+    escalated — never the pin loosened?
 
 ## Cross-references
 
@@ -436,3 +461,4 @@ Before accepting a test claim, ask:
 - `docs/learned/workflow/prose-review-workbench.md` — closed adapter matrices and wire boundaries
 - `docs/learned/toolchain/jsdom-react-component-harness.md` — component identity and stale-state
   fixtures
+- `docs/learned/pi/tool-loadout.md` — the derived tool views (`stageToolsFor`) negative-space sweeps run over

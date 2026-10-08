@@ -51,9 +51,10 @@ contract.
 ## The seed/gate contradiction trap (a prompt naming a tool the gate hides)
 
 **The gate is structural; prompts are advisory.** A factory prompt that names a tool the
-read-only gate hides (e.g. "persist with `plan_save`" in a session where `plan_save` is excluded
-from `READ_ONLY_TOOLS`) sends the model off-track every time — the injected read-only context
-enumerates the allowlist, so the model sees the contradiction plainly.
+read-only gate hides (e.g. "persist with `plan_save`" in a session where `plan_save` is
+ineligible under the gate — a `gated: blocked` posture in its `registerPerkTool` policy) sends the
+model off-track every time — the tool is simply absent from the gated loadout
+(`gatedToolsFor(stage)`), so the model sees the contradiction plainly.
 
 Root cause pattern: prompt-vs-reality drift when a flow converts to review-first (or a tool
 becomes stage/gate-scoped). Sweep **every** consumer surface in lockstep: the seed template, the
@@ -252,3 +253,4 @@ on-land step is fail-open and only prints on success, a stale header broke the w
 - `docs/learned/workflow/linear-backend.md` — the Linear transcoder + scripted-GraphQL fixture-sweep rules
 - `docs/learned/workflow/issue-backend.md` — the IssueBackend protocol-method ripple (the callout gateway adds one method)
 - `docs/learned/toolchain/ruff.md` — the `RUF022` `__all__`-sort gotcha from the same change
+- `docs/learned/pi/tool-loadout.md` — gate postures (`gated: blocked`) and the derived gated view

@@ -140,7 +140,7 @@ injection). `isPlanModeActive` reads the gate's own `mode === "read-only"` field
 Plus the **stage-field coupling break**: plan mode **defers** when
 `rebuildWorkflowState(branch).stage === OBJECTIVE_AUTHOR_STAGE` (`extension/objectiveAuthor.ts`), so
 an objective-author session — also read-only — gets its own authoring context instead of the plan
-one. Wired in `extension/index.ts` in the order `registerToolGating` → `registerPlanMode` →
+one. Wired in `extension/index.ts` (now `extension/pi/activation.ts::activatePerk`) in the order `registerToolGating` → `registerPlanMode` →
 `registerPlanSave`, with the single gate instance shared across all three.
 
 **Behavior-preserving default.** perk-owned `planMode` + `planSave` over `toolGating` is the
@@ -246,7 +246,7 @@ Per the repo's anti-fiction rule, the following belong to **Node 1.3** and are o
   `gatedToolsFor`, the bash verdict lives in `substrate/readOnlyBash.ts`), `extension/cache.ts`
   (`PlanRef`, `planRefPath`/`readPlanRef`/`writePlanRef`), `perk/plan.py` (`PlanRef` — the canonical
   twin), `extension/objectiveAuthor.ts` (`OBJECTIVE_AUTHOR_STAGE`, the coupling break),
-  `extension/index.ts` (the registration order, gate shared).
+  `extension/index.ts` (now `extension/pi/activation.ts::activatePerk`) (the registration order, gate shared).
 - **Todo seam:** `extension/checkpoints.ts` (`registerCheckpoints`, `CHECKPOINT_TYPE`,
   `CheckpointStep`/`CheckpointState`, `extractSteps`, `rebuildCheckpoint`, `markCompletedSteps`,
   `extractDoneSteps`/`extractWipSteps`/`latestWipStep`/`computeCurrent`, `isInert`), `extension/cache.ts`

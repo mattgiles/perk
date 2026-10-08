@@ -11,6 +11,27 @@ and hands an evidence bundle to a fan-out of analyst children. Contracts §8.35 
 doc carries the why + the traps. Siblings: `learn-docs-scan.md` (docs scanner + routing tier),
 `learn-harvest-dream-core.md` (harvest/dream core).
 
+## Distillation
+
+- Five stages — pointers, JSONL byte-copy export, the bundle manifest, `--render` normalization,
+  the code-owned analyst wave; every stage degrades, nothing crashes `/learn` — "The pipeline
+  spine".
+- The plan header is the canonical linkage, the run cache the pointer store; never cross-process
+  writes — "Cross-run linkage"; four capture sites, first-write-wins against child shadowing —
+  "Capture sites + fork provenance".
+- A reader's exception posture matches its consumer's contract; `to_domain()` runs OUTSIDE the
+  parse's `except ValueError`, so every projection must be total — "Match a reader's exception
+  posture to its consumer's contract".
+- Pi persists `role: "system"` messages since 0.99 and records nested `ctx.executeTool` calls in
+  `message.nestedCalls`; tolerate a field by not declaring it — "The Pi session JSONL grammar".
+- One rejected line can cut off the whole active branch (`malformed_lines > 0` ⇒ suspect a grammar
+  gap); dedup must exclude entries a later prune deletes; `↑ duplicate of entry <id>` is a
+  projection — read the raw entry — "The `--render` normalization pass".
+- Session files survive worktree deletion; the stored `session_file` is authoritative — "Pi
+  session-file persistence facts".
+- Redaction is iterative; a failed confirmation is a recorded coverage limit — "Privacy gates for
+  session-derived packets".
+
 ## The pipeline spine
 
 1. **Pointer carrier + resolver** — `perk/state/session_pointers.py` + `perk/learn/sessions.py`
@@ -54,8 +75,8 @@ while the entry keeps the worktree `cwd` (realpath both sides) (#2474). The carr
 
 ## Capture sites + fork provenance
 
-Four loud-but-non-fatal TS capture sites: `savePlan` → `planning/main`; `extension/index.ts`
-`session_start` → `implementation/main` (claimer-only, first-write-wins); worker `runStage` →
+Four loud-but-non-fatal TS capture sites: `savePlan` → `planning/main`; the `session_start`
+handler in `extension/pi/activation.ts::activatePerk` → `implementation/main` (claimer-only, first-write-wins); worker `runStage` →
 `implementation/worker`; the `/submit` publish operation
 (`extension/delivery/submit.ts::publishVerified`, deps from
 `extension/pi/v1/delivery/submit.ts::publishDepsFor`) → `implementation/main` when stamping
@@ -78,6 +99,14 @@ for a missing/bad record" must catch `(OSError, JSONDecodeError, CacheError)` �
 the consumer's contract and the cross-plane twin, not a sibling reader. Corollary: a seam that
 degrades *absence* to missing can still raise on a real backend error; the composing helper owns
 that boundary (`resolve_plan_sessions` re-fetching the plan).
+
+**The session parser's boundary is narrower than "never raises" suggests.** In
+`perk/learn/session_jsonl.py::parse_session_jsonl` only `model_validate` sits inside the
+`except ValueError` arm; `to_domain()` runs outside it, so any exception a projection raises aborts
+the whole file. Every projection must therefore be total by construction: `json.loads` accepts
+`NaN`/`Infinity` and turns `1e309` into `inf`, and `int(inf)` / `int(nan)` raise — `_opt_count`
+converts finite floats only; type lenient sub-record fields as `object` and `cast` after an
+`isinstance(…, dict)` check.
 
 ## The JSONL byte-copy export seam
 
@@ -109,6 +138,36 @@ streaming timeline lives in top-level `custom_message` shapes
 (`customType: "subagent_supervisor_request"` progress, `"subagent-notify"` completion; typed
 payloads under `message.details`) that `message.role` filters miss.
 
+**System messages (Pi ≥ 0.99, session format v3).** The pi-ai `SystemMessage` grammar is
+byte-identical at `0.99.2` and `1.0.0`: `content: string | TextContent[]` plus `sections`,
+`toolsAdded`, `toolsRemoved`. A leading snapshot is an ordinary `type:"message"` entry with
+`content: ""`, the prompt in `sections` and the tool set in `toolsAdded`; later deltas use the same
+entry type; compaction entries carry a `systemMessage` snapshot.
+
+- The `content` read edge accepts `str | tuple[blocks] | None` — the string arm for every role,
+  `null`/absent projecting as empty, any other shape a malformed line. Pydantic's lax smart union
+  still rejects int/bool/dict (no `str←int` coercion; a dict is not a tuple input), so widening
+  keeps other shapes malformed.
+- The delta fields stay undeclared so `extra="ignore"` tolerates any shape — **not declaring a
+  field is how to tolerate it; never declare loose types.**
+- System entries render only through the generic `<message role="system">` arm, bounded by payload
+  truncation, never as `<user>` — context evidence, never user authorization or a workflow event
+  (contracts §8.35). On Pi 1.0.0 a live `/learn` renders none, because every system entry has empty
+  content.
+- Interpreting `sections` and the tool deltas is unbuilt (a residual: `/learn` evidence cannot show
+  which prompt sections or tools changed).
+
+**Nested calls (Pi ≥ 0.99).** Pi records nested `ctx.executeTool` calls in `message.nestedCalls` on
+the calling tool's toolResult: `{ calls: [{ id "<parent>/<n>", name, status ok|error|unfinished,
+arguments?|argumentsBytes?, durationMs?, error? }], complete }`. Nested results are not recorded
+and create no entries; Pi's limits (256 calls, 500 error chars) are copied by perk's cap
+(`_project_nested_calls`). Codemode's own `details.calls` is a different structure (stringified
+`args`, float `durationMs`).
+
+**Which version introduced a grammar?** Diff the tagged library mirror
+(`git diff v0.99.2 v1.0.0 -- packages/ai/src/types.ts`) or grep the current session's own JSONL —
+a free live fixture.
+
 ## The `--render` normalization pass
 
 - **Split at entry boundaries, never elide the middle:** open a new chunk when the next entry would
@@ -117,6 +176,24 @@ payloads under `message.details`) that `message.role` filters miss.
   off-branch entries are pruned). Any windowing consumer must be branch-aware, since file adjacency
   is not causal adjacency after a fork (`packages/perk-dev/src/perk_dev/audit/bounding.py`'s
   `<branch_point/>` marks a lineage jump).
+- **One rejected JSONL line can silently cut off the whole active branch.**
+  `normalize.py::select_active_branch` stops at the first missing parent, so a line the lenient
+  parser rejects loses its `id`/`parentId` and everything recorded before it drops off — the
+  `model_change` root, the `perk:workflow-state` entries, the early turns (one planning transcript
+  kept 36 of 208 entries until system messages parsed). `malformed_lines > 0` on a
+  `render.sessions[]` row means suspect a grammar gap in `session_jsonl.py` before trusting the
+  chunks; compare the branch length with `entries_read`.
+- **Dedup must exclude entries a later prune will delete.** `_dedup` ran before the
+  non-substantive prune: two empty entries matched, the later became `↑ duplicate of entry <id>`,
+  and the pointer survived while its target was pruned. Now an entry `_is_substantive` would drop
+  is never a dedup candidate. General rule: a step that rewrites entries into references excludes
+  anything a later step deletes. Older bundles can still carry dangling pointers.
+- **Nested calls render inside the parent `<tool_result>`** as
+  `<nested_calls complete=… [malformed=N] [dropped=N]>`; the parent's `error` flag is the outer
+  result's own; omitted arguments appear as `args_omitted_bytes`; loss diagnostics join the dedup
+  signature while ids and durations are excluded.
+- **Rendering a probe transcript**: `perk learn evidence` gathers only a plan's own linked
+  sessions — call `perk.learn.normalize.render_evidence` directly.
 - **Lone-surrogate write hazard:** an escaped `\ud800` survives `json.loads` and raises
   `UnicodeEncodeError` (ValueError family, not `OSError`) at the UTF-8 write, past any
   `except OSError` boundary. `sanitize_surrogates` (`perk/learn/normalize.py`) runs at every learn
@@ -127,8 +204,9 @@ payloads under `message.details`) that `message.role` filters miss.
   lenient parse safe). Dedup is a separate step.
 - **`↑ duplicate of entry <id>` is a dedup projection, not chronology:** read the raw entry before
   alleging missing execution; never rerun CI to compensate.
-- `LenientParseModel` → `to_domain()` → frozen dataclass, never raises; `render` is declared last,
-  always serialized, `null` unless `--render`, so the base envelope stays byte-stable.
+- `LenientParseModel` → `to_domain()` → frozen dataclass (total by construction — see "Match a
+  reader's exception posture…"); `render` is declared last, always serialized, `null` unless
+  `--render`, so the base envelope stays byte-stable.
 
 ## The bundle-manifest CLI
 

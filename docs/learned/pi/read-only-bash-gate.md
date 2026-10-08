@@ -10,7 +10,7 @@ cluster: pi-extension
 
 - Two layers, two files: a whole-string destructive veto over the walker's **veto view**, then
   `SAFE_PATTERNS` at **every command position**; destructive wins. The inventory is `SAFE_PATTERNS`
-  — never mirror it into prose — "Orientation — two layers, two files".
+  in `readOnlyBash.ts` — never mirror it into prose — "Orientation — two layers, two files".
 - Lexing is separate from policy: refusals ride on tree nodes, so the fail-closed gate and the
   fail-open scan-timeout classifier share one lexer — "Lexing is separate from policy".
 - The same word means different things at shell / env / external positions; refuse an unmodeled
@@ -51,10 +51,12 @@ The gate decides whether a `bash` call may run in a read-only (`mode: read-only`
 - `extension/substrate/commandPositions.ts` — the pure lexer + dispatcher. The provenance comment at
   its head is the "what" carrier for command positions, their provenance and the walker's accepted
   limits; `REFUSAL_REASONS` holds one human-readable line per refusal.
-- `extension/substrate/toolGating.ts` — `readOnlyBashVerdict`, `SAFE_PATTERNS`,
+- `extension/substrate/readOnlyBash.ts` — `readOnlyBashVerdict`, `SAFE_PATTERNS`,
   `DESTRUCTIVE_PATTERNS`, the row builders `git()`/`keyed()`/`listForm()`/`veto()`, the regex
   vocabulary (each constant with its own explanatory comment) and the numbered accepted-leniency
-  comment.
+  comment. The verdict moved here from `toolGating.ts` byte-identically (#2644), so every
+  recorded leniency still holds; `toolGating.ts` only *consumes* it (it imports
+  `readOnlyBashVerdict` for the `tool_call` backstop).
 - The block message keeps its two-line head (the
   `perk read-only mode: command blocked (not allowlisted).` line + `Command:`) and adds a `Reason:`
   line — a `REFUSAL_REASONS` line, `matches the destructive veto <regex>`, or
@@ -165,7 +167,7 @@ text with ad-hoc span edits; normalize through the syntax model.
     refuse outside list mode (`git tag --format -l v9` creates the tag).
   - **Bare display-only rows**: `git branch`/`git tag` with display modifiers and no positional,
     exactly one `symbolic-ref` ref, single-key `git config` reads and their `--get`/`--list` forms.
-    `toolGating.test.ts` pins `git branch`, `git tag`, `git symbolic-ref HEAD` and
+    `readOnlyBash.test.ts` pins `git branch`, `git tag`, `git symbolic-ref HEAD` and
     `git config core.hooksPath` as allowed.
 
   Both kinds make positional-only writes (`git branch <name>`, `git tag <name>`,
@@ -195,12 +197,12 @@ text with ad-hoc span edits; normalize through the syntax model.
   tree and no lock file — so that removing the worker's preflight turns them red.
 - **Reach a mutating worker through a tool, not the gate.** `perk librarian prepare docs|refresh …
   --json` stays blocked; `run_librarian` reaches it through the extension's own exec
-  (`runColdDoor`), and negative gate cases in `toolGating.test.ts` pin both forms.
+  (`runColdDoor`), and negative gate cases in `readOnlyBash.test.ts` pin both forms.
 
 ## Cross-row regex rules
 
 The per-constant semantics of `SEP`, `WORD`, `INPUT_REDIRECT`, `WORDS`, `Q`, `END` and `TOKEN_END`
-are documented beside each constant in `toolGating.ts` — read them there. The rules that span rows:
+are documented beside each constant in `readOnlyBash.ts` — read them there. The rules that span rows:
 
 - **Argument walks never cross a bare newline** — a walk must not read into the next command.
 - **An allowlist row and its paired veto must share separator vocabulary.** The npm row accepted
@@ -220,7 +222,7 @@ are documented beside each constant in `toolGating.ts` — read them there. The 
   of a docs entry launched a write-capable session — caught in PR review, not by the plan's "no gate
   change needed" reading of the regex. The fix: each free-argument word must not start with `#` and
   must not contain `<` or `>` (a `#` inside a word, such as a URL fragment, stays admitted) — the
-  librarian row in `extension/substrate/toolGating.ts`, regressions in `toolGating.test.ts`. The
+  librarian row in `extension/substrate/readOnlyBash.ts`, regressions in `readOnlyBash.test.ts`. The
   deeper fix (the walker drops trailing comments) was rejected: it changes pinned `commandPositions`
   behavior and leaves the redirection case open.
 
@@ -254,14 +256,14 @@ The classes, each found live by a review of a gate change:
 
 ## Leniency vs fix — and pin every leniency
 
-The inventory of accepted leniencies lives in `toolGating.ts`'s numbered comment and
+The inventory of accepted leniencies lives in `readOnlyBash.ts`'s numbered comment and
 `commandPositions.ts`'s header — read them there. The rules:
 
 - **Record shapes a model would not reach by accident; don't ship a fix that closes one spelling of
   a class.** Canonical example: `find . $'-exec' …` — a partial fix for escape-free `$'…'` would
   still leave `$'\x2dexec'` open, and closing the class would refuse ordinary `find "$dir"`.
 - **Every recorded leniency is an allowed test case** (the "recorded leniencies stay as recorded"
-  block in `toolGating.test.ts`), so tightening one is a deliberate change.
+  block in `readOnlyBash.test.ts`), so tightening one is a deliberate change.
 - **A gate's contract and user docs must name its accepted limits** — §8.3 and `model-tools.md` list
   them; a review flagged the earlier universal-checking promise.
 - Known, accepted performance notes: one quadratic regex shape (a command word repeated thousands of
@@ -290,14 +292,14 @@ The inventory of accepted leniencies lives in `toolGating.ts`'s numbered comment
 
 A gate change moves every carrier in the same turn:
 
-- **Production** — `SAFE_PATTERNS`/`DESTRUCTIVE_PATTERNS` in `toolGating.ts`; `commandPositions.ts`
+- **Production** — `SAFE_PATTERNS`/`DESTRUCTIVE_PATTERNS` in `readOnlyBash.ts`; `commandPositions.ts`
   for grammar changes.
-- **Tests** — the paired allowed/blocked lists in `toolGating.test.ts` (including a `cd repo && <cmd>`
+- **Tests** — the paired allowed/blocked lists in `readOnlyBash.test.ts` (including a `cd repo && <cmd>`
   case, redirect-veto cases and the pinned-leniencies block); `commandPositions.test.ts`.
 - **`shared/contracts.md` §8.3** and **`docs/user-docs/reference/in-session/model-tools.md`** §
   "Structural read-only gate".
 - **This doc** and **`CONTEXT.md`** § "Read-only bash gate" (the glossary).
-- **The source "what" carriers** — `toolGating.ts`'s numbered accepted-leniency comment and
+- **The source "what" carriers** — `readOnlyBash.ts`'s numbered accepted-leniency comment and
   `commandPositions.ts`'s provenance comment.
 - **Design docs that quote a gated command** — widening the reviewer children's
   `perk pr review-context` row to one anchored alternation walked the five surfaces and missed a
@@ -307,14 +309,14 @@ A gate change moves every carrier in the same turn:
 **Mechanism-choice lesson:** perk **cannot own `grep`** — it's a Pi builtin, not a perk-registered
 tool, so there is nothing to swap or remove. Steering toward structural search is therefore the
 managed `AGENTS.md` bullet (ambient every session) + a bundled ambient skill + the read-only
-allowlist row — no custom tool, no `READ_ONLY_TOOLS`/active-tools change, no default binding.
+allowlist row — no custom tool, no tool-policy/active-tools change, no default binding.
 
 ## A def-taught shell recipe needs two tests — gate admissibility AND byte semantics
 
 Pi's own oversized-line hint — `sed -n 'Np' <path> | head -c 51200` — is **not a slicer**: it
 re-exposes the same first 51,200 bytes of the line on every call. The offset-capable, gate-admitted
 form the review defs teach is `sed -n 'Np' <path> | tail -c +<offset> | head -c 51200` (offsets `+1`,
-`+51201`, …). A `toolGating.test.ts` case pins that exact pipeline as allowed (and its
+`+51201`, …). A `readOnlyBash.test.ts` case pins that exact pipeline as allowed (and its
 `> slice.txt` redirect as blocked), so the allowlist cannot silently drop a pipeline segment out from
 under the defs. Rule: when an agent def teaches a shell recipe, test both that the gate admits it and
 that it does what the prose claims byte-for-byte — a recipe that passes the gate but pages nothing
@@ -363,10 +365,13 @@ fails silently in every lane.
 
 - `extension/substrate/commandPositions.ts` — the lexer + dispatcher; `commandPositions()`,
   `splitTopLevelSegments`, `REFUSAL_REASONS`, `TIME_OPENERS`, `RESERVED_NAME`, the provenance comment
-- `extension/substrate/toolGating.ts` — `readOnlyBashVerdict`, `SAFE_PATTERNS`,
+- `extension/substrate/readOnlyBash.ts` — `readOnlyBashVerdict`, `SAFE_PATTERNS`,
   `DESTRUCTIVE_PATTERNS`, the row builders, the regex vocabulary comments, the leniency block
-- `extension/substrate/toolGating.test.ts` + `extension/substrate/commandPositions.test.ts` — the
+- `extension/substrate/readOnlyBash.test.ts` + `extension/substrate/commandPositions.test.ts` — the
   paired allowed/blocked lists and the pinned leniencies
+- `extension/substrate/toolGating.ts` — the gate that consumes the verdict (the `tool_call`
+  backstop); `docs/learned/pi/tool-loadout.md` — the rest of the gate (activation, presentation,
+  enforcement)
 - `shared/contracts.md` §8.3 — the gate contract and its accepted limits
 - `docs/user-docs/reference/in-session/model-tools.md` § "Structural read-only gate"
 - `CONTEXT.md` § "Read-only bash gate" — the glossary

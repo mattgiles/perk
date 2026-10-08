@@ -23,19 +23,19 @@ cluster: config-and-convergence
 - Environment checks need fixture coverage at their actual primitive, required-only filtering in
   every derived diagnostic, and remediation for absent and version-invalid arms — "The optional
   `EnvCheck` tier".
+- The host floor makes `init` fatal but not `doctor --fix` (plan `doctor --fix` as the
+  reconvergence path); settings converge in three shapes — "Host-floor rows and the three
+  settings-convergence shapes".
 - A report-only check gated on an unpinned package's version range parses strict semver against a
   half-open range (non-semver ⇒ `info`, never a mismatch), mirrors the foreign tool's own
   precedence, and takes an `environ` seam with autouse test hermeticity — "Report-only checks
   gated on an installed package's version range"; the source-literal probe table is retired
   precedent — "Marker-probe table craft".
-- Pieces acting on the user's agent dir resolve it through `launch_pi_agent_dir` (never a parallel
-  `Path.home()` copy), rewrite in place without creating, and need autouse `PI_CODING_AGENT_DIR`
-  hermeticity — "Managed pieces and checks that act on files OUTSIDE the repo"; a legacy-cleanup
-  `--fix` models the retired writer's flat output and shares one classification with its check —
-  "Legacy-cleanup migrations model the retired writer's shape"; whole-directory
-  safety checks probe representative artifacts and use `:(literal)` pathspecs — "Whole-directory
-  safety checks need representative probes and literal pathspecs"; every write site behind an
-  ignore-probe fence opens link-blind — "Every write site behind an ignore-probe fence…".
+- Agent-dir pieces resolve through `launch_pi_agent_dir`, rewrite in place, need autouse
+  `PI_CODING_AGENT_DIR` hermeticity — "Managed pieces and checks that act on files OUTSIDE the
+  repo"; legacy cleanups model the retired writer — "Legacy-cleanup migrations…"; whole-directory
+  checks use `:(literal)` pathspecs — "Whole-directory safety checks…"; fenced writes open
+  link-blind — "Every write site behind an ignore-probe fence…".
 
 ## The split
 
@@ -304,6 +304,60 @@ Three adjacent traps matter whenever this environment-check family grows:
 - **Model absent and version-invalid remediation as separate arms.** A per-tool table covering
   only missing binaries leaves installed-but-outdated tools with stale, command-free guidance.
   Exercise and populate remediation for both states.
+
+## Host-floor rows and the three settings-convergence shapes
+
+**The host-floor rows.** `env.py::_check_pi` / `_check_node` read `shared/host-floor.yaml`
+(contracts §8.76) — `_check_pi` through the same `probe_pi_host` the launch admission uses, an
+unparsable Node version counting as outdated. They feed `perk init`'s fatal preflight, so `init`
+refuses on an outdated Pi/Node, while `perk doctor` reports the `fail` row and does **not** gate
+`--fix` on it (`doctor/__init__.py::run_doctor`). Hence:
+
+- **A plan that raises a requirement the dev host fails should plan `doctor --fix` as its
+  reconvergence path.** At the 1.0.0 floor raise it regenerated `action.yml` and
+  `managed-state.toml`, created the gitignored `.perk/local.toml` and ran the skills sync; the
+  `.pi/settings.json` refresh it performed was the legitimate `desired == live` refresh "Managed
+  convergence is the SSOT for doctor checks" describes.
+- `.perk/local.toml` is not materialized into worktrees, so a doctor `config` fail there is
+  environmental.
+- A hand edit that drops `.pi/settings.json`'s trailing newline reads as `settings-wiring` drift.
+- `_converge_discovery` re-adds a deleted `defaultTools` at the END of the JSON object, so
+  byte-identical repair criteria depend on where the committed file puts the key (the committed
+  self-repo file now puts it last).
+- **The `pi` row has side effects** (Pi 1.0.0): `pi --version` runs `cleanupManagedInstall()` and
+  takes the global settings lock before its version branch. The probe runs in the invocation
+  directory, so a directory-dependent version-manager shim could report a different Pi (untested).
+  A corrupt bundled floor crashes as `HostFloorError` rather than a typed refusal (routed follow-up
+  #2705 F3).
+
+**The three shapes in `init/settings.py::_converge_settings`:**
+
+1. **Write-when-present** — `_converge_compaction`, `_converge_models`.
+2. **Constant-desired** — `_converge_subagents`' `disableBuiltins`, with a delta-gated change
+   fragment.
+3. **Seed-when-unnamed** — `_converge_discovery` appends `+tool_search` when no string entry
+   names the tool in Pi's plain/`+`/`-` form; it appends at the end, never rewrites or reorders an
+   operator's entry, and never appends after an operator's `-tool_search` (Pi applies modifiers in
+   order). The `[7, null]` case: Pi drops non-strings before resolving, so a list with no string
+   entries resolves to "no builtin tools" and is left alone — the guard is
+   `not any(isinstance(entry, str) …)`, not emptiness.
+
+(There is no `tuiMode` seed: Pi 1.0's native fullscreen default replaced it.)
+
+**A user-ownable seed stays out of the managed-state desired/observed portions** — otherwise an
+opted-out repo is `locally-modified` forever. Its drift comes only from the `ManagedConvergence`
+dry-run, never the lens: deleting the key makes doctor `fail` while the recorded hash does not
+move, by design (`tests/test_init_idempotent.py::test_discovery_default_is_invisible_to_the_settings_portion`).
+
+**Rule — converge in the consumer's resolved semantics.** When converging a key someone else
+consumes, state the invariant in that consumer's resolved terms ("the resolved selection gains
+`tool_search` and nothing else"); enumerate every normalization step (Pi filters non-strings,
+treats a non-array as `[]`, merges project onto user); give the cross-plane fixture
+`shared/fixtures/default-tools-seed.json` one row per classification edge (consumed by
+`test_init_default_tools_seed_matches_the_shared_fixture` and
+`extension/substrate/discoveryPilot.test.ts`); and derive shape classes from those edges, never
+from JSON syntax — both defects in the seed came from reasoning over raw JSON. The `defaultTools`
+resolution facts themselves live in `pi/tool-loadout.md` § "`defaultTools` resolution".
 
 ## Fail-level checks, fix_errors, and the machine-surface co-owners
 
@@ -651,3 +705,6 @@ the `again.fixed == []` idempotency tests.
 - `docs/learned/pi/extension-api.md` — why selfcheck must be a command handler
 - `docs/learned/workflow/linear-backend.md` — the full Linear readiness probe shape
 - `docs/learned/workflow/distribution.md` — the npm extension-delivery lifecycle that superseded the git-clone lifecycle
+- `src/perk/convergence/env.py` (`_check_pi`, `_check_node`), `shared/host-floor.yaml`,
+  `src/perk/convergence/init/settings.py` (`_converge_settings` and its three shapes)
+- `docs/learned/pi/tool-loadout.md` — the `defaultTools` resolution the seed must respect

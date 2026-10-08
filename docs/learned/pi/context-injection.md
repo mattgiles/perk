@@ -23,7 +23,8 @@ withheld from the `context` event (`emitContext`'s role filter); the strip logic
   applied; the typed predicates in `contextEvidence.ts`), never a re-derived window; full-branch
   scans serve only historical latches — "Dedup against Pi's own live projection".
 - Check the submitting `event.prompt` BEFORE the projection read — a cold launch's prompt is not
-  yet persisted on the launch turn — "Dedup against Pi's own live projection".
+  yet persisted on the launch turn; the projection is pre-`context`-filter, an upper bound on the
+  next request (`/perk-selfcheck`'s `live=`) — "Dedup against Pi's own live projection".
 - The census of injections is source-owned: the `installInjectedContext` call sites and the
   `PLAN_GUIDANCE_EXCLUDED_STAGES` set (pinned by the registry guard test) — never a count in
   prose — "Dedup against Pi's own live projection", "Stage-field disambiguation".
@@ -99,6 +100,16 @@ predicate, `extension/pi/v1/contextInjection.ts::isPlanGuidanceStage`, plus `ins
 `pi/subagents.md` § "Native child execution — the two-boolean policy".) The new leaf answers only "is the
 delivery live in model context *now*". Projection failures propagate to the consumer (a read
 failure is never manufactured into a falsely clean empty projection).
+
+**The projection is an upper bound, not the request.** `buildSessionProjection().messages` applies
+compaction and `context_edit`, but it is built BEFORE any extension `context` filter runs
+(`extension/pi/v1/contextEvidence.ts::activeContextMessages` says so), so it over-counts what the
+next request carries — after `/plan` exits, `perk:mode-context` is still projected while
+`toolGating`'s `context` handler filters it out. A command cannot run Pi's filter chain, and
+re-implementing perk's filters in a diagnostic would drift, so `/perk-selfcheck`'s `live=` token is
+labelled as this pre-filter count — enough to prove "at most one copy reaches the request". Its
+`per source: builtin=N` census also counts Pi's core tools, because Pi's built-in extensions share
+the `builtin` source label.
 
 Two invariants carried over unchanged: the dedup key is each block's **marker literal**, not the
 customType (plannotator's flavors-share-one-customType case needs per-flavor markers so a stage

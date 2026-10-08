@@ -37,6 +37,9 @@ byte-parity render config, the two-tier parity tests, and the prompt-move decisi
   two-entry-point render seam".
 - Fixture completeness is the static union of variables across every conditional arm and include,
   not one StrictUndefined render path — "Static-union fixture validation".
+- A stage template can have two renderers: grep both planes before rewording, put plane-specific
+  tool mentions in pre-rendered fragment variables, never `{% if %}` — "One stage template, two
+  renderers".
 
 ## Which bundling tier a new top-level resource dir joins
 
@@ -287,6 +290,23 @@ Mechanics:
 - Both `cases.yaml` and `live.yaml` stay in the **miniYaml subset** (block maps/seqs, double-quoted
   strings, **string-only vars**, the backtick-quoting rule in the move checklist below, no `|`/`>`
   block scalars — the empty flow map `vars: {}` parses on both sides).
+
+## One stage template, two renderers
+
+A `prompts/stages/*.md` template can be rendered by both planes — Python cold seeds
+(`seed_template=` / `render(` callers) and TS warm guidance modules such as
+`extension/learning/prose.ts`. **Grep both planes before rewording one**: rewording `plan_save` →
+`/plan-save` in the learn templates broke the warm factories, whose gather writes no handoff for
+the door to consume.
+
+- **Put plane-specific tool mentions in pre-rendered per-plane fragment variables**, never
+  `{% if %}` branches — `read_clause` and `save_step` (the latter rendered from
+  `prompts/common/learn-save/{cold,warm}.md`). The Python prompt guard scans raw template
+  source, tags included, so a branch naming a tool counts on both planes.
+- **Classify every new fragment in both prompt guards**: the TS `DRIVE_COVERAGE` landings
+  (`extension/substrate/stageTools.test.ts`) and the Python `LANDINGS` / `TOOL_FREE_FRAGMENTS`
+  (`tests/test_tool_matrix_prompts.py`) — `docs/learned/pi/tool-loadout.md` § "The prompt guard
+  (both planes)".
 
 ## Seed prompts need their own semantic-contract test (#1990)
 
