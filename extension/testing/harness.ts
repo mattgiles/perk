@@ -991,11 +991,13 @@ export async function loadPerkSession(opts: {
    */
   modelRuntime?: ModelRuntime;
   /**
-   * Extra extension factories bound AFTER perk (e.g. a fake plannotator registering its
+   * Extra extension factories (e.g. a fake plannotator registering its
    * `plannotator-review` command so presence probes see it). Offline like everything here. Pi's
    * full `InlineExtension` shape: a bare factory loads as `<inline:N>` (unknown provenance), a
    * named one as `<inline:name>`, and `{ name, factory, builtin: true }` through the
    * `builtin:<name>` path with `source: "builtin"` (the CLI's own tool_search/codemode shape).
+   * Load order is Pi's: in Mode A (inline perk) `builtin: true` extras load BEFORE perk and the
+   * rest after it; production's perk-first order holds only in Mode B.
    */
   extraExtensions?: InlineExtension[];
   /**

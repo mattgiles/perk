@@ -106,7 +106,9 @@ loading a second SDK copy.
    `subagent-host-tools` row), then one `/plan-review-browser` wave and one `/pr-review-browser`
    wave to N/N coverage
    — the `perk:wave` marker appears at launch and clears at collection, and the final
-   annotations land after `collect_*`. **The stamp moves only on a passing leg**: bump
+   annotations land after `collect_*`. A leg passes on the five push-receipt criteria (launch,
+   collect, delivery, decision order, owner observation) in `docs/learned/pi/subagents.md`
+   § Sources — the push receipts, not the collect result, are the instrument. **The stamp moves only on a passing leg**: bump
    `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` and
    `tests/test_doctor.py::test_subagent_compat_verified_version_stamp_is_pinned` together. A
    failed leg is diagnosed, fixed, and re-run once; if it still fails, record the FAIL verdict
@@ -148,6 +150,9 @@ the same drift through `settings-wiring`. Pi installs whatever the checkout's ow
 The re-verify ritual above decides **moving the pin**: the pin and the guidance stamp are two
 distinct facts (what consumers install vs. what perk's guidance was verified against) that move
 together only on evidence covering both — the source re-read, `run_ci` with the census drift
-guard, and the live leg. The PR-door browser half is merge-blocking for a change that moves them;
-an owner may elect to owe the plan-door half (step 4). A release that breaks a surface perk sends
+guard, and the live leg. The browser-door halves cannot gate the stamp PR's own merge — a leg
+scheduled on that PR's own review door waits on the review of itself and does not run — so elect
+both halves up front as owed to the next node's sessions, or give the live leg its own node
+(step 4's owner-election arm); the evidence-contingent prose stays in its owed form until the
+commit that appends the evidence flips every carrier. A release that breaks a surface perk sends
 needs its migration first, in the same change as the pin.

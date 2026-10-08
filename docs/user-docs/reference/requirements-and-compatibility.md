@@ -120,8 +120,11 @@ is not a version). Both refusals exit 1 and there is no override. `--dry-run` pr
 probe, and `perk init`, `perk doctor` and `--help` are never gated by the launch check — the
 environment checks report the floor instead, so the repair path stays reachable. The managed
 remote runner installs exactly Pi 1.0.0 for both the global `pi` CLI and the consumer worker's
-SDK, and sets up exactly Node 22.19.0. Pi 1.0.0 is the enforced host floor; its certification
-record, `docs/design/archive/pi-1.0.0-certification.md`, is still waiting on its PR-door rows.
+SDK, and sets up exactly Node 22.19.0. Pi 1.0.0 is the enforced host floor. Its certification
+record, `docs/design/archive/pi-1.0.0-certification.md`, has the verdict PENDING: its three PR-door
+rows (X5b, S7 and I7b's launch proof) were deferred by an operator decision, and perk 4.0.0
+shipped with that verdict. The upgrade command is unpinned, so it installs the newest Pi release
+— perk admits any release at or above the floor, but releases after 1.0.0 are not certified.
 
 **The same floor at the SDK boundary.** The perk extension checks the Pi it is loaded into (the
 SDK's `VERSION`) before it registers anything, and refuses to load on an older Pi or a prerelease
@@ -163,7 +166,8 @@ is an early-warning check that never fails the doctor run. The stamp is currentl
 source was re-verified, the Pi 1.0.0 trust matrix passed, and the doctor and scout waves and both
 browser-door waves (the plan door and the PR door) passed on the Pi 0.99.2 host. See
 `docs/design/archive/pi-subagents-0.75.0-reverify.md`. On the Pi 1.0.0 host, the plan door
-passed and the PR door is still pending in `docs/design/archive/pi-1.0.0-certification.md`.
+passed and the PR door was deferred unmeasured, so
+`docs/design/archive/pi-1.0.0-certification.md` records its verdict as PENDING.
 
 Plannotator 0.27.16 or newer is required by the stack review browser (`/stack-review-browser`,
 `perk objective stack review`), which opens Plannotator's static-patch mode over the pinned
