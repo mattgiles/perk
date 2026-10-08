@@ -33,13 +33,13 @@ the session-data path guards in both planes.
 - External-SDK policy registries pair compile-time key exhaustiveness with runtime unknown-field
   findings; adoption of a corpus guard includes the normalization sweep — "Compile-time census
   pins" and "Guard-adoption ripple".
+- Registration stays in `pi/` (Rule E), raw tool registration in `pi/perkTool.ts` (Rule I),
+  writes behind `atomicWriteFileSync`; run the repo-wide guards while iterating — "Registration
+  and write seams".
 - Import-graph guards fail on unresolvable specifiers, freeze birth censuses, and pin direction
-  prefix arrays to literal contract lists — "Import-graph guard vacuity holes"; a textual rule
-  that matches only docstrings has rotted (liveness test + strict-superset widening), and
-  "everything found was excluded" is as empty as an empty walk — "Guards that pass while proving
-  nothing". Vendored upstream
-  JS = widen the bare-import corpus + declare the closure an opaque leaf + prove the exemption
-  live — "Vendored upstream JS: widen, carve out, prove live".
+  prefix arrays to literal lists — "Import-graph guard vacuity holes"; docstring-only matches and
+  "everything found was excluded" prove nothing — "Guards that pass while proving nothing";
+  vendored JS is an opaque leaf proven live — "Vendored upstream JS…".
 
 ## The node:test-as-grep-guard recipe
 
@@ -268,6 +268,29 @@ live finding against that set, but also fail when a baseline entry matches zero 
 that stale-entry arm turns the baseline into a shrink-only ratchet and enforces burn-down. Let the
 checked-in constants be the default parameters; tests can pass empty baselines through the same
 seam to stay hermetic without weakening production behavior.
+
+## Registration and write seams — Rules E and I, writeGuard
+
+`extension/importDirectionGuard.test.ts` carries two seam rules beside the direction rules:
+
+- **Rule E** — Pi registration tokens (`pi.on(`, `pi.registerCommand(`, …) appear only under `pi/`
+  or in the approved registrar files (`index.ts`, `workerMain.ts`; the bootstrap entry still
+  listed though it registers nothing — routed follow-up #2705 F10). Never rename the `pi`
+  parameter to slip the token regex. Keep decisions pure in `substrate/`/`worker/` and register
+  through a generic `pi/` factory — `pi/v1/toolCallRefusal.ts::toolCallRefusalHook(decision)` over
+  `worker/modelCallPolicy.ts::codemodeCallRefusal` is the reusable shape; worker → `pi/` imports
+  are allowed.
+- **Rule I** — only `pi/perkTool.ts` calls `pi.registerTool(`. The source-slice tripwire in
+  `extension/pi/perkToolSeam.test.ts` (the `registerLoadoutHost` literal) is textual: a `...`
+  inside a string literal or a reformat gives a false failure.
+- **writeGuard** (`extension/writeGuard.test.ts`) — production writes go through
+  `substrate/cache.ts::atomicWriteFileSync`.
+
+**Rule: when editing production `extension/` files, run the repo-wide guards** (`writeGuard`,
+`importDirectionGuard`, `surfacesGuard`) in the narrow iteration set — a writeGuard violation was
+caught only by the full suite. **A tier guard must not take its expected set from the selector's
+own constant**: expand the recipe's globs independently and compare both ways
+(`extension/testing/jsTestTiers.test.ts`).
 
 ## Import-graph guard vacuity holes
 

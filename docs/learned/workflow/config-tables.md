@@ -312,6 +312,14 @@ The gating above makes a `run_ci` report's meaning **scope-dependent**:
   verification gate. perk's own gap was `changelog-check` — absent from the rows until plan #1568
   closed it, so a "green run-all" silently under-verified. `setup` is deliberately excluded: it is
   `[worktree] setup`-hook-owned env prep, not verification.
+- **The scope of "definitive" today.** perk's rows mirror `just ci` **except** that the JS row runs
+  only the fast node:test tier (`just test-js-fast`); the slow manifest
+  (`extension/testing/jsTestTiers.ts::SLOW_JS_TEST_FILES`) runs in `just ci` / GitHub CI and ad hoc
+  via `just test-js-slow`, and the opt-in prose suites are outside both. So a green run-all
+  `run_ci` is definitive for everything the rows cover; a change to a slow-tier file, or to code
+  one exercises, needs `just test-js-slow` (or the file itself) run by the implementer.
+  `test-py-slow` is host-dependent: its live smokes skip without an admitted PATH `pi`
+  (`docs/learned/pi/extension-api.md` § Dogfooding, the floor-lockout bullet).
 - **Two cadence registers**, and guidance must name both: *iteration* (narrow targeted checks — a
   single test file, one check name — cheap and frequent) vs *gate* (ONE run-all, immediately
   before submit, terminal). Cadence guidance that says "run `run_ci` often" without naming the

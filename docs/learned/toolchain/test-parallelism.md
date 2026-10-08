@@ -99,6 +99,26 @@ the lever is **splitting the largest harness-heavy files** into siblings.
 - **`node --test` (Node 22+) defaults to the spec reporter** (`✔`/`✖`, `ℹ pass N`), not TAP
   `ok`/`# pass` — filter output on those glyphs or trust the exit status (#2475).
 
+### The fast/slow tier split (`extension/testing/jsTestTiers.ts`)
+
+**Why.** Inside `run_ci` the `test-js` row took > 1,267 s against 266 s standalone: spawn/IO-bound
+files slow ≈5× beside the concurrent typecheck and docs-check rows. Splitting by glob does not
+help, because the floor is still the slowest file.
+
+- **The manifest**: `SLOW_JS_TEST_FILES` lists the measured files (≥ 20 s each, ≈91 % of wall
+  time) — a manifest rather than `*.slow.test.ts` renames, which would conflict across worktrees.
+  `just test-js-fast` / `just test-js-slow` run the tiers through
+  `extension/testing/runJsTestTier.ts`; `just test-js` still runs everything; the `run_ci`
+  `test-js` row runs only the fast tier (`workflow/config-tables.md` § "The scope-aware CI report
+  contract").
+- `runJsTestTier.ts` refuses an empty selection (exit 1) — node:test would otherwise fall back to
+  default discovery and run everything.
+- **Add a new slow file to the manifest in the change that makes it slow.**
+- node:test flags such as `--test-name-pattern` must precede the file positional on Node 22.19
+  (after it, the whole file ran).
+- TAP output carries no file names — a test title shared across files needs a per-file run to
+  attribute.
+
 ### Measuring per-file durations
 
 No built-in reporter (`spec` / `dot` / `tap`) prints a per-file duration for successful files. The
