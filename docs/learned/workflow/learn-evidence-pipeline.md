@@ -54,8 +54,8 @@ while the entry keeps the worktree `cwd` (realpath both sides) (#2474). The carr
 
 ## Capture sites + fork provenance
 
-Four loud-but-non-fatal TS capture sites: `savePlan` → `planning/main`; `extension/index.ts`
-`session_start` → `implementation/main` (claimer-only, first-write-wins); worker `runStage` →
+Four loud-but-non-fatal TS capture sites: `savePlan` → `planning/main`; the `session_start`
+handler in `extension/pi/activation.ts::activatePerk` → `implementation/main` (claimer-only, first-write-wins); worker `runStage` →
 `implementation/worker`; the `/submit` publish operation
 (`extension/delivery/submit.ts::publishVerified`, deps from
 `extension/pi/v1/delivery/submit.ts::publishDepsFor`) → `implementation/main` when stamping

@@ -257,7 +257,7 @@ guidance between the gather list and the executor paragraph.**
 
 - **Plannotator arms open an in-TUI chooser before anything launches.** Eligibility is
   drafts-only AND presence-probed, via injected `WaveLaunch` deps composed at the
-  `installPlanBindings` call site in `extension/index.ts` — the review arm imports nothing from
+  `installPlanBindings` call site in `extension/pi/activation.ts::activatePerk` — the review arm imports nothing from
   door modules, breaking the value-import cycle (the browser door value-imports the review door).
 - **The wave choice delegates to the guidance-RETURNING door open cores** (the doors became thin
   `sendUserMessage` wrappers) and returns a non-terminating `wave_launched` result carrying the

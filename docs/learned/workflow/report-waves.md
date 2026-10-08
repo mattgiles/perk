@@ -63,7 +63,8 @@ lifecycle — `start`/`collect`/`run` over opaque `ReportWaveRef`s: they supply 
 consume typed outcomes, never adapters, run handles, or result promises (the blocking `run` is
 start + await inside the instance; pending execution is instance-owned with drain-once,
 delete-as-claim collection). Adapter selection is wave-owned: `createReportWave(bus)` constructs
-the ONE per-activation production instance at the composition root (`extension/index.ts`) — it
+the ONE per-activation production instance at the composition root
+(`extension/pi/activation.ts::activatePerk`) — it
 takes **no supplier** (the child restriction packet is a constant, below); `reportWaveOver(adapter)`
 is the test injection seam. `renderWaveScript` + assignment validation
 are module-private — script text is invisible outside `waves/`, so renderer assertions observe
@@ -576,7 +577,7 @@ pending execution is INSTANCE-OWNED: the `ReportWave` instance holds every launc
 uncollected run behind opaque `ReportWaveRef`s with drain-once (delete-as-claim) collection.
 Flow state holds only the opaque ref — which wave is *current* is flow policy: the draft pair's
 `DraftReviewWaveState.pending` slot (with the door-primed `context` beside it) lives in
-`extension/authoring/review/draftContext.ts`, created per-activation in `index.ts` and threaded
+`extension/authoring/review/draftContext.ts`, created per-activation in `activatePerk` (`extension/pi/activation.ts`) and threaded
 to the tool pair AND both browser doors, never module-global. Collect races the pending result
 against a bounded, environment-overridable grace (`PERK_WAVE_COLLECT_GRACE_MS` — wave-owned) to
 absorb ordering skew between native workflow-completion delivery and aggregate resolution.

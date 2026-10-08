@@ -36,7 +36,9 @@ narrative: identity → data dirs → provenance → the read-only writer → GC
 
 ## Warm run_id minting
 
-- **The mint lives in `index.ts`'s `session_start` `none` arm, NOT in `decideClaim`** — keeping the
+- **The mint lives in the mint (`none`) arm of `establishSessionIdentity`
+  (`extension/session/lifecycle.ts`, called from `activatePerk`'s `session_start`), NOT in
+  `decideClaim`** — keeping the
   pure decision function byte-identical bought claim/keep/fork stability *by construction* (the
   existing lifecycle tests were the regression proof, literally).
 - `extension/substrate/runId.ts` is a **hand-rolled spec-conformant ULID** (~40 lines, no npm dep): 10 time
@@ -55,8 +57,9 @@ narrative: identity → data dirs → provenance → the read-only writer → GC
 
 ## The `perk_version` vintage stamp
 
-(Anchors: `extension/substrate/resources.ts` `versionStamp`, the `session_start` identity arms in
-`extension/index.ts`, the additive `WorkflowState.perk_version` field, contracts §8.3.)
+(Anchors: `extension/substrate/resources.ts` `versionStamp`, the `session_start` identity arms of
+`extension/session/lifecycle.ts::establishSessionIdentity` (called from
+`extension/pi/activation.ts::activatePerk`), the additive `WorkflowState.perk_version` field, contracts §8.3.)
 
 - The running perk version is stamped into workflow-state at **run-identity establishment** (all
   four identity arms — claim/fork/adopt/mint); the read side is the audit census's vintage

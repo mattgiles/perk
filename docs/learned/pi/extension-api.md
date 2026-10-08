@@ -259,7 +259,8 @@ consumers stay uniform.
 
 ## A new Pi registration needs a live factory/harness assertion (#1761)
 
-A seam-forwarding test plus sink tests do not prove `extension/index.ts` registered the
+A seam-forwarding test plus sink tests do not prove the composition root
+(`extension/pi/activation.ts::activatePerk`) registered the
 implementation (the entry renderer was the caught instance) — every new Pi registration needs a
 live factory/harness assertion resolving through `ExtensionRunner` and exercising the registered
 implementation against a real appended entry.

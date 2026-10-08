@@ -229,8 +229,8 @@ now three distinct vacating mechanisms plus two limit-case postures:
   deleted).
 - **Install-site / runtime vacating, keyed off `ctx.cwd`** (footer — **the new third mechanism**) —
   perk installs its footer with `installPerkFooter` **inside the `session_start` event handler**
-  (`extension/index.ts`), not at factory-bind. So the natural guard is a **runtime check at that
-  single install site**: `index.ts` calls `installPerkFooter` only when
+  (`extension/pi/activation.ts::activatePerk`), not at factory-bind. So the natural guard is a
+  **runtime check at that single install site**: `activatePerk` calls `installPerkFooter` only when
   `isPerkFooterReferenceSelected(ctx.cwd)`. There is **no name collision** (`setFooter` is a single
   last-wins slot, not a named registration), so the guard isn't about suffixing — it's about not
   clobbering the foreign footer's slot. **Easier test tier:** because `ctx.cwd` flows through the
@@ -653,7 +653,7 @@ guarantee in every mode — with the one novelty that the **web default's `packa
 - `extension/pi/v1/providers/tombell.ts` — the injection-only plan adapter shim (always registered, inert by default)
 - `extension/authoring/plan/save.ts` + `extension/pi/v1/plan.ts` — the seam-shared save substrate that never defers
 - `extension/surfaces/footerProvider.ts` — `isPerkFooterReferenceSelected` (the install-site/runtime footer vacating, keyed off `ctx.cwd`)
-- `extension/index.ts` — the `session_start` install site that gates `installPerkFooter` on `isPerkFooterReferenceSelected(ctx.cwd)`
+- `extension/pi/activation.ts::activatePerk` — the `session_start` install site that gates `installPerkFooter` on `isPerkFooterReferenceSelected(ctx.cwd)`
 - `docs/learned/workflow/borrowed-packages.md` — the borrow-ban footer-clobber rule reconciled vs a selected footer provider; the live home of the two required borrows the askuser/todo seams retired to
 - `docs/design/archive/provider-smoke-juicesharp-ask-user.md` — the askuser per-file mechanics + recorded select/deselect smoke
 - `extension/substrate/providers.ts` — `resolveProviders`, `PERK_PLAN_PROVIDER_ID`

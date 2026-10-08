@@ -44,7 +44,7 @@ properties inert. `createReportWave(bus)` takes no supplier and has no capture-f
 
 A non-runner never gets a floor, whatever the envelope. Unrelated namespaces are opaque.
 
-`extension/index.ts` reads both booleans at the top of every `session_start` and **latches** the
+`extension/index.ts` (now `extension/pi/activation.ts::activatePerk`) reads both booleans at the top of every `session_start` and **latches** the
 floor for the activation (`readOnlyFloor ||= …`): a same-activation `session_start` re-emit, a
 gate `exit()`, or a `session_tree` navigation cannot clear it; a `/reload` re-runs the factory and
 re-reads the env. The floor composes into `extension/substrate/toolGating.ts` unchanged:

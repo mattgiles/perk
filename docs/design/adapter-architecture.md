@@ -71,7 +71,7 @@ provider, and the asymmetry is forced by perk's packaging:
 - **The foreign package is filtered.** It is its own `packages` entry, so Pi filtering can enable or
   disable its extensions surgically.
 - **perk is never filtered; it defers at runtime.** perk's entire extension is a **single package
-  entry** (`extension/index.ts` registers `planMode`, `planSave`, `checkpoints`, `toolGating`,
+  entry** (`extension/index.ts` (now `extension/pi/activation.ts::activatePerk`) registers `planMode`, `planSave`, `checkpoints`, `toolGating`,
   objectives, CI, … all together). Pi filtering operates at package/extension-file granularity, so
   it **cannot disable just `planMode`** without tearing out unrelated perk surfaces. Therefore perk's
   reference provider **steps aside at runtime** — when a foreign plan provider is selected, perk's

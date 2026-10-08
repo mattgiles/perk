@@ -210,18 +210,18 @@ anchored to real symbols.
 - **What exists:** the mode/UI matrix (`docs/extensions.md` "Mode Behavior"): `tui`→hasUI true;
   `rpc`→hasUI true; **`json`→hasUI false (UI methods no-ops)**; **`print` (`-p`)→hasUI false
   ("extensions run but can't prompt")**. perk's extension is **already audited headless-safe**:
-  `extension/index.ts` records `ctx.mode ?? null` as `run_mode` and guards the load notify with
+  `extension/index.ts` (now `extension/pi/activation.ts::activatePerk`) records `ctx.mode ?? null` as `run_mode` and guards the load notify with
   `ctx.hasUI`; every UI call across the extension is `ctx.hasUI`-guarded with a `console.error`
   fallback (verified in `address.ts`, `submit.ts`, `land.ts`, `learn.ts`, `objective.ts`,
   `checkpoints.ts`, `planMode.ts`, `lifecycleGates.ts`, `objectivePlanning.ts`,
   `objectiveAuthoring.ts`, `learnDocs.ts`, `ready.ts`, `selfcheck.ts`). The session-lifecycle linkage error path is
-  explicitly headless-safe (`extension/index.ts` `reportError`; tests
+  explicitly headless-safe (`extension/index.ts` (now `extension/pi/activation.ts::activatePerk`) `reportError`; tests
   `extension/session/lifecycle.test.ts` "unclaimed: …" (the loud problem, nothing consumed) +
   `extension/surfaces/report.test.ts` "headless writes the complete value to stderr exactly once
   without notifying or sinking"). The CI executor **fails closed headless**
   (`decideCiScope` → `"refuse"` when `!hasUI && !flag`).
 - **The gaps to record:**
-  1. **`ctx.mode` is undefined in a bare SDK drive.** `extension/index.ts` already writes
+  1. **`ctx.mode` is undefined in a bare SDK drive.** `extension/index.ts` (now `extension/pi/activation.ts::activatePerk`) already writes
      `ctx.mode ?? null` — i.e. the SDK session may present `ctx.mode === undefined`. The worker must
      establish a mode where `ctx.hasUI === false`. (The driving model is irrelevant — perk gates on
      `ctx.hasUI`, not on `ctx.mode`, everywhere except the `run_mode` observability sentinel.)
@@ -253,7 +253,7 @@ anchored to real symbols.
 
 - **Requirement:** the driven session must claim its `run_id` and link its workflow-state exactly as
   a cold `pi` would, so checkpoints/plan-ref/gating all engage.
-- **What exists:** `extension/index.ts` `session_start` reads `process.env.PERK_RUN_ID`, verifies
+- **What exists:** `extension/index.ts` (now `extension/pi/activation.ts::activatePerk`) `session_start` reads `process.env.PERK_RUN_ID`, verifies
   `handoff/<run_id>.json` (establish-before-consume), appends `perk:workflow-state`, marks the
   handoff consumed, reconciles `active_plan_ref` for ref-consuming stages, and syncs tool gating from
   `mode`. `perk/launch.py` already materializes the handoff + plan-ref + plan body into the worktree
@@ -469,7 +469,7 @@ The worker's landed shape moved behind a confined seam (Objective #2083, contrac
 - `extension/worker/worker.ts` → **`extension/worker/stageExecution.ts`**; `driveStage` →
   **`runStage`**; `DriveStageOptions`/`DriveStageDeps` → `StageRunOptions`/`StageRunDeps`. The
   SDK-typed `model`/`thinkingLevel`/`modelRuntime` input triple collapsed into one opaque nominal
-  `WorkerModelSelection`.
+  `WorkerModelSelection` (since renamed `WorkerModelRequest`).
 - Every `@earendil-works` import on the drive path — construction (`defaultCreateRuntime`),
   raw session events, prompt/abort, token accumulation — lives in the **private
   `extension/worker/sdkAdapter.ts`** (the `createBindManager` rebind manager grew into its

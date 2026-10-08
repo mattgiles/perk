@@ -68,7 +68,8 @@ floor; no env var ⇒ no floor (the delegation-dispatched writer's case); an obj
 `perk.parent-restrictions/…` key ⇒ **no floor** (unrelated namespaces are opaque); invalid JSON, a
 non-object envelope, any `perk.parent-restrictions/` key other than exactly `/1`, or `/1` holding
 anything but exactly `{readOnly: boolean}` ⇒ **floor (fail closed)**; valid ⇒ the boolean.
-`extension/index.ts` reads both at every `session_start` and **latches** the floor
+`extension/pi/activation.ts::activatePerk` (the composition root) reads both at every
+`session_start` and **latches** the floor
 (`readOnlyFloor ||= …` — a re-emitted `session_start`, a gate `exit()` or `session_tree` navigation
 cannot clear it); `toolGating.ts` composes it as `isActive = active || hasFloor()` plus the all-names
 `tool_call` backstop; a throwing floor supplier is restrictive.

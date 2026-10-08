@@ -59,7 +59,9 @@ are absent (`createPerkStatus` in `surfaces.ts`). The objective publisher owns t
 is `ACTIVITY_BROWSER_REVIEW` ("waiting on browser review"), begun by the plannotator browser waits
 (grep `beginActivity(` for the live holders — at the last audit `planReviewBrowser.ts`,
 `objectiveReviewBrowser.ts`, `codeReview/browser.ts`, and the plan door's bridge in `plan.ts`)
-and ended when each wait settles; `session_shutdown` in `extension/index.ts` calls `clearActivity`
+and ended when each wait settles; `session_shutdown` in `extension/pi/activation.ts::activatePerk` (the
+composition root; the published `index.ts` entry is now only the thin SDK-admission bootstrap that
+dynamically imports it) calls `clearActivity`
 because a browser wait cannot outlive the session. Headless calls are FULL no-ops (record nothing).
 The RPC dual-publish and the footer's own-slot filtering are unchanged by the composition.
 
@@ -81,7 +83,7 @@ the slot was multi-segment.)
   not a silently status-less wait. (There is no gist browser door — gist review is a warm
   `plan_review` arm — so the sink rides only the plannotator browser doors and the plan door's
   bridge.)
-- **Shared handle**: created once in `extension/index.ts` and threaded into its publisher and the
+- **Shared handle**: created once in `extension/pi/activation.ts::activatePerk` and threaded into its publisher and the
   activity owners — the extension's zero-module-level-mutable-state invariant.
 - **Headless `set`/`beginActivity` must be FULL no-ops** — never record state. If a headless call
   recorded text, a later *headful* publish of the other half would resurrect ghost headless-era text
@@ -116,7 +118,7 @@ charter records why (`docs/design/tui-charter.md` §6: `setFooter` is an RPC no-
 - **Replaced-footer dispose is explicit as of pi 0.84.1**: `setExtensionFooter` disposes a
   replaced footer factory, and `resetExtensionUI` restores the built-in footer on `/reload` and
   before session replacement. Installing per headful `session_start` is therefore safe — perk's
-  once-only `footerInstalled` guard is retired (`extension/index.ts` installs on every headful
+  once-only `footerInstalled` guard is retired (`extension/pi/activation.ts::activatePerk` installs on every headful
   `session_start`, so each install's closures capture the *current* event's `ctx`; pinned by a
   same-activation re-emit test via the harness seams `footerInstallCount()` /
   `emitSessionStart()`).
@@ -323,7 +325,7 @@ the first production console-swap; prior swaps were all test-local):
 
 - `extension/surfaces/surfaces.ts`, `extension/surfaces/report.ts` — the surfaces module (the only sanctioned
   rich-UI call sites)
-- `extension/index.ts` — perk-status handle creation, `session_shutdown` → `clearActivity`, per-`session_start` footer install
+- `extension/pi/activation.ts::activatePerk` — perk-status handle creation, `session_shutdown` → `clearActivity`, per-`session_start` footer install (the `index.ts` entry is only the SDK-admission bootstrap that dynamically imports it)
 - `extension/testing/harness.ts` — factory-widget/placement capture, `invokeCommand`
 - `shared/contracts.md` §8.3 (progress tracking) — the composed slot's RPC dual-publish contract
 - `docs/design/tui-charter.md` — the charter the surfaces converge to; §6's "display-sanitizer law"

@@ -160,7 +160,7 @@ Phases 2–4 are each plausible objective nodes; phase 1 is a one-line addition 
   `pi/programmatic-usage/sdk.md`.
 - perk: `extension/workflowState.ts` (the live `getBranch` rebuild), `extension/worker/sdkAdapter.ts`
   (in-process `SessionManager` precedent; the earlier `readOnlySession.ts` runner was deleted as
-  dead code), `extension/index.ts` (`getSessionFile()`),
+  dead code), `extension/index.ts` (now `extension/pi/activation.ts::activatePerk`) (`getSessionFile()`),
   the `perk:*` custom entry types (`perk:workflow-state` / `perk:checkpoint` /
   `perk:objective-budget` / `perk:mode-context` / `perk:plan-context`).
 - related perk docs: `docs/bugs/learn-is-a-stub.md` (Tier 3 consumes this),
