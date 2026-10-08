@@ -22,13 +22,13 @@
       "themes": []
     }
   ],
-  "defaultTools": [
-    "+tool_search"
-  ],
   "subagents": {
     "disableBuiltins": true
   },
   "compaction": {
     "reserveTokens": 65536
-  }
+  },
+  "defaultTools": [
+    "+tool_search"
+  ]
 }
