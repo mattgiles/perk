@@ -78,8 +78,8 @@ test. `workflow/issue-backend.md` records the backend form; delivery routing exa
   add a no-loader (eager owner) case and a hidden-then-enabled case, then mutation-check: removing
   the branch failed 3 tests; name-only classification failed 8. A fake owner must mirror each
   real owner's replay rules — a single shared fake was corrected at plan review
-  (`extension/substrate/stageTools.test.ts`; the owner rules are `workflow/borrowed-packages.md`
-  § "Borrowed-tool stage scoping").
+  (`extension/substrate/stageTools.test.ts`; the lazy-owner rules it modeled are since retired for
+  provenance postures — `pi/tool-loadout.md`).
 
 ## Seam conversions must re-home every observer
 
