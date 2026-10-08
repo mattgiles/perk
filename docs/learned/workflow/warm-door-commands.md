@@ -14,24 +14,29 @@ semantics are owned by `docs/learned/workflow/cold-door-client.md` — this doc 
 
 ## Distillation
 
-- **Law 1 — commands stay visible while write tools are gated.** No write-capable tool rides the
-  gate-ON allowlist; a command delegates directly only when a validated artifact / committed state
-  carries the full payload, else it writes nothing and drives the session — "Law 1".
+- **Law 1 — commands stay visible while write tools are gated.** No write-capable tool is
+  eligible under the gate (each tool's `gated` posture; the view is `gatedToolsFor(stage)`); a
+  command delegates directly only when a validated artifact / committed state carries the full
+  payload, else it writes nothing and drives the session — "Law 1".
 - **Law 2 — warm handlers never issue a GitHub mutation directly**: `runColdDoor` with a validated
   payload, or `pi.sendUserMessage` guidance so the model works through the canonical tool — "Law 2".
 - **Law 3 — render EVERY cold-door outcome** — success / failure / absent, nonfatal sub-step failure
   included — through `report()`, which owns the headless fallback — "Law 3".
-- **Law 4 — every tool a drive's guidance names must be active in every stage the drive can land
-  in**; a stage-list widening audits the dispatch arms it makes reachable — "Law 4".
+- **Law 4 — every tool a drive's guidance names must be eligible in every `{stage, mode}` landing
+  the drive can have** (`stageToolsFor(stage)` / `gatedToolsFor(stage)`, one `isEligible` formula);
+  a carrier naming a `declared: deferred` tool primes it first; a widening audits the dispatch arms
+  it makes reachable — "Law 4".
 - Human-facing gestures are emitted deterministically by the door, never left to model-facing
   guidance — "Human-facing gestures belong in the door".
 
 ## Law 1 — visible commands, gated write tools, the payload test
 
-Gate on, `extension/substrate/toolGating.ts` installs exactly `gatedToolsFor(stage)` —
-`READ_ONLY_TOOLS` (builtins + the carve-outs justified in place; never enumerate them elsewhere) or
-the refinement stage's own selection. **No save/mutation tool ever rides the gate-ON set**; a custom
-tool is hidden unless carved in; a `pi.registerCommand` command stays **visible regardless of
+Gate on, `extension/substrate/toolGating.ts` activates perk's tools for `gatedToolsFor(stage)` =
+`perkToolsFor(stage, "read-only")` (`extension/substrate/toolPolicy.ts`) — each tool's `gated`
+posture in its `registerPerkTool` policy (`allowed`, `blocked`, or `{ carveOut }` justified in the
+policy itself; never enumerate them elsewhere); builtins follow `BUILTIN_TOOL_POLICY`, foreign tools
+their provenance posture (`docs/learned/pi/tool-loadout.md`). **No save/mutation tool is eligible
+under the gate** except a declared carve-out; a custom tool is absent unless carved in; a `pi.registerCommand` command stays **visible regardless of
 mode**. A gated `/command` is thus often the only save affordance the agent sees, and only a human
 gesture toggles the gate (`/plan`, `Ctrl+Alt+P`: `installPlanMode`, `extension/pi/v1/plan.ts`).
 
@@ -147,34 +152,47 @@ concluding it never fired.
 
 ## Law 4 — guidance-named tools in every stage scope
 
-Gate-OFF sessions are stage-scoped: `STAGE_TOOLS` (`toolGating.ts`) subtractively filters the scoped
-universe `PERK_TOOLS ∪ BORROWED_TOOLS` per registry stage. A drive names companion tools by name, so
-**every tool a drive's guidance names must be in `STAGE_TOOLS[stage]` for every stage the drive can
-land in**, or it dead-ends (observed live: a post-land auto-drive in a worktree session whose list
-had filtered the reconcile trio off).
+Sessions are stage-scoped by each tool's policy: its `stages` (plus `modeOverStage` for the `/plan`
+toggle's flow), viewed per stage by `stageToolsFor(stage)` gate-off and `gatedToolsFor(stage)`
+gate-on — one `isEligible` formula for both views (`extension/substrate/toolPolicy.ts`); foreign
+tools follow their provenance posture. A drive names companion tools by name, so **every tool a
+drive's guidance names must be eligible in every `{stage, mode}` landing the drive can have**, or it
+dead-ends (observed live: a post-land auto-drive in a worktree session whose list had filtered the
+reconcile trio off).
 
 - **The drive-coverage guard** (`extension/substrate/stageTools.test.ts`): the static `DRIVE_COVERAGE`
-  table pairs each gate-OFF drive with every stage it can land in; `referencedScopedTools`
-  word-boundary-scans the rendered guidance (all optional params set) against the scoped universe;
-  every name must be in each listed stage. A row extracting **zero** names fails unless it opts out
-  with `namesNoTools: true` — a tool-free drive still joins the table. Gated-landing drives are
-  excluded: gate-ON ignores stage lists (the gated-stage test + the `READ_ONLY_TOOLS` exact-set pin
-  cover that surface).
-- **Maintenance.** A new drive joins the table; a changed stage list must satisfy every drive that
+  table pairs each carrier (a gate-off drive, a gated context, a mode-over-stage flow) with every
+  `{stage, mode}` landing it can have — gated landings are rows too; `referencedScopedTools` scans
+  the rendered guidance (all optional params set) and every named tool must be eligible in each
+  landing. A row extracting **zero** names fails unless it opts out with `namesNoTools: true` — a
+  tool-free drive still joins the table.
+- **The match rule.** A name containing `_` matches as a bare word; a single-word name (`submit`,
+  `ready`, `land`, `learn`, …) matches only when backtick-quoted — so backtick a single-word tool
+  reference to make it checkable; an unquoted single word is an accepted miss. The Python half,
+  `tests/test_tool_matrix_prompts.py` (`LANDINGS`, `TOOL_FREE_FRAGMENTS`, `WARM_ONLY`), scans the cold
+  templates' raw source with the same rule.
+- **Maintenance.** A new drive joins the table; a changed `stages` list must satisfy every drive that
   can land there. When the scanner demands a tool, first ask whether the prompt should stop naming
-  gesture tokens (retry guidance belongs on human-facing surfaces) before widening. The scan is
-  word-boundary, so natural-language use of a tool-named word ("before the browser is **ready**")
-  reads as the `ready` tool — reword the prose ("browser readiness"), never widen the stage list;
-  other risky bare words: `land`, `learn`, `submit` (#2522).
+  gesture tokens (retry guidance belongs on human-facing surfaces) before widening.
+- **Corollary — prime a named deferred tool.** A carrier that names a `declared: deferred` tool must
+  prime it before the carrier reaches the model: an exported `*_PRIMES` constant passed to
+  `gating.primeDeferred` — doors at their surface-prime moment, wave launchers on their success arm.
+  `DRIVE_COVERAGE.primes` pins it two-way (every named deferred tool primed; every prime a named
+  deferred tool), and a carrier census forbids tool descriptions/guidelines naming another tool's
+  deferred member (reword, don't widen). Detail: `docs/learned/pi/tool-loadout.md` § "Native
+  discovery and priming".
 - **Widening audits reachability.** When stage S gains tool T, audit T's execute core for
   stage-conditional dispatch — an arm that assumed "T can't run at S" is now live. A "no routing
-  change" non-goal is settled by what the change makes reachable, never by intent.
+  change" non-goal is settled by what the change makes reachable, never by intent. A stage-blind
+  `modeOverStage` writer widens writers into every gated stage — audit its reachability there too
+  (`plan_draft` in `objective-refine` is "reachable but unsaveable").
 - **Zero-argument, selector-dependent tools never ride unbound (main-root) sessions** — the cached
   plan selector can point at a different plan than the one the session launched for.
-- **Plan census.** A plan adding any warm tool names its `toolGating.ts` rows (`PERK_TOOLS` + the
-  stage lists) beside its bindings/skills census. `PERK_TOOLS` is pinned set-equal to what a session
-  registers, so the census doubles as a dormancy enforcer: a dormant-by-design tool rides the same
-  PR as its registration (`report-waves.md`).
+- **Plan census.** A plan adding any warm tool names its `registerPerkTool` policy descriptor
+  (`stages`, `gated`, `kind`, `declared`) beside its bindings/skills census and regenerates
+  `shared/fixtures/tool-matrix.json`. The catalog is exactly what a session registers, so the census
+  doubles as a dormancy enforcer: a dormant-by-design tool rides the same PR as its registration
+  (`report-waves.md`).
 
 ## Human-facing gestures belong in the door
 
@@ -221,10 +239,22 @@ the yield); cross-door **ordering** rides the fake-router `argvFile` capture
 - The `/address` hand-off line keyed on a rendered publication suffix, which proves nothing when
   absent; it was re-keyed on the structured `delivery` field with an explicit incremental value
   (#2468).
+- The drive-coverage scan was word-boundary for every name, so prose like "before the browser is
+  ready" read as the `ready` tool and was reworded (#2522); the underscore/backtick match rule
+  replaced it.
+- #2644 introduced `registerPerkTool` and the catalog. Its read-only marker grammar:
+  `[READ-ONLY MODE] (unscoped)` / `[READ-ONLY MODE] (stage <id>)` are rendered;
+  `[READ-ONLY REFINEMENT MODE]` is detection-only and never rendered again. Eligibility/marker
+  changes broke tests off the plan's list — grep every `*.test.ts` for the affected tool names and
+  marker literals before the final gate.
 
 ## Cross-references
 
-- `extension/substrate/toolGating.ts` — `READ_ONLY_TOOLS` / `gatedToolsFor`, `STAGE_TOOLS`,
-  `PERK_TOOLS`; `extension/substrate/stageTools.test.ts` — the drive-coverage guard
+- `extension/substrate/toolPolicy.ts` — the catalog, `isEligible`, `gatedToolsFor`, `stageToolsFor`;
+  `extension/pi/perkTool.ts` — `registerPerkTool`; `extension/substrate/toolGating.ts` — the gate
+  runtime and `primeDeferred`; `shared/fixtures/tool-matrix.json` — the golden matrix
+- `extension/substrate/stageTools.test.ts` — the drive-coverage guard (`DRIVE_COVERAGE`);
+  `tests/test_tool_matrix_prompts.py` — its Python half
+- `docs/learned/pi/tool-loadout.md` — activation vs presentation vs enforcement, postures, priming
 - `extension/substrate/coldDoor.ts` + `docs/learned/workflow/cold-door-client.md` — the client;
   `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the mode floor, the capped drive
