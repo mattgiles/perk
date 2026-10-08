@@ -483,7 +483,8 @@ _Avoid_: version check, gate
 
 **Remote install pin**:
 The exact Pi the managed remote artifacts install (`REMOTE_PI_VERSION`) for both the global CLI
-and the consumer worker SDK; never below the host floor, and never the floor itself.
+and the consumer worker SDK; never below the host floor; an exact pin, not a minimum (it may equal
+the floor's version).
 _Avoid_: floor
 
 **Dev pins**:

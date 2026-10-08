@@ -113,14 +113,15 @@ Node ≥ 22.19.0 — in the bundled `shared/host-floor.yaml`, and compares again
 precedence. Every local launch (bare `perk`, a stage launch such as `perk plan`, `perk resume`)
 runs `pi --version` once before anything else in the launch's exec phase and ends in one of three
 outcomes: *admitted* (the version is at or above the floor — later releases such as 1.0.3 or 1.10.0
-are admitted; perk certifies 1.0.0 and admits newer Pi), *unsupported* (`pi_version_unsupported` —
+are admitted), *unsupported* (`pi_version_unsupported` —
 an older version or a prerelease of the floor such as `1.0.0-rc.1`), or *unverifiable*
 (`pi_version_unverifiable` — the command failed, timed out after 20 s, or printed something that
 is not a version). Both refusals exit 1 and there is no override. `--dry-run` previews never
 probe, and `perk init`, `perk doctor` and `--help` are never gated by the launch check — the
 environment checks report the floor instead, so the repair path stays reachable. The managed
 remote runner installs exactly Pi 1.0.0 for both the global `pi` CLI and the consumer worker's
-SDK, and sets up exactly Node 22.19.0.
+SDK, and sets up exactly Node 22.19.0. Pi 1.0.0 is the enforced host floor; its certification
+record, `docs/design/archive/pi-1.0.0-certification.md`, is still waiting on its PR-door rows.
 
 **The same floor at the SDK boundary.** The perk extension checks the Pi it is loaded into (the
 SDK's `VERSION`) before it registers anything, and refuses to load on an older Pi or a prerelease
@@ -161,7 +162,8 @@ version perk's engine guidance was last re-verified against, and warns on any ot
 is an early-warning check that never fails the doctor run. The stamp is currently 0.75.0: the
 source was re-verified, the Pi 1.0.0 trust matrix passed, and the doctor and scout waves and both
 browser-door waves (the plan door and the PR door) passed on the Pi 0.99.2 host. See
-`docs/design/archive/pi-subagents-0.75.0-reverify.md`.
+`docs/design/archive/pi-subagents-0.75.0-reverify.md`. On the Pi 1.0.0 host, the plan door
+passed and the PR door is still pending in `docs/design/archive/pi-1.0.0-certification.md`.
 
 Plannotator 0.27.16 or newer is required by the stack review browser (`/stack-review-browser`,
 `perk objective stack review`), which opens Plannotator's static-patch mode over the pinned
