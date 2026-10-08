@@ -17,10 +17,10 @@ surfaces beside them evolve.
 - The launcher contains every URL-derived read, passes websockets through only under the current
   no-websocket-route posture, rebuilds from disk, and has one `dist/` writer — "Launcher security
   and the development loop".
-- Catalog failures are fail-closed by result trustworthiness (policy-definition errors block
-  discovery, registration-shape errors become typed findings); `sync` is whole-projection (sweep
+- Catalog failures are fail-closed by result trustworthiness; `sync` is whole-projection (sweep
   foreign `unmapped-unit` drift, re-measure count pins from the catalog); a new governed tool bumps
-  three pins under the opt-in suites `run_ci` never runs — "Prose-map catalog governance".
+  three pins under the opt-in suites `run_ci` never runs; a prose-free perk registration is
+  discoverable-but-excluded (`perk_stage`) — "Prose-map catalog governance".
 - Closed adapter vocabularies are exhaustive at domain/DTO/route boundaries; syntax validation
   precedes selectors and subprocess adapters are bounded — "Source-adapter contract craft".
 - PyYAML merge tags, inherited values, and comment-suffixed document markers require lexical and
@@ -111,6 +111,39 @@ default gate reports green while all three are stale. Run the carve-out suites e
 that touches a governed tool's prose, the prose map, or adds a `python-symbol` wrapper — and run
 them once at base first ("Standing proof gap"). `typescript-symbol` is a valid catalog kind (`ProseKind` in
 `tools/prose-map/catalog.ts`) that no adapter currently produces — do not "fix" its absence.
+
+**The discoverable-but-excluded pattern.** A perk-owned registration none of whose text reaches a
+model must still satisfy `missing-tool-contract` / `ungoverned-tool-contract` — the loadout host
+`perk_stage` (`extension/pi/perkTool.ts::registerLoadoutHost`) is the case:
+
+- **Stay discoverable.** `name` must be a string literal — the selector's `staticString`
+  (`tools/prose-map/selector.ts`) reads only literals and does not unwrap `satisfies`/`as` — and
+  policy-derived metadata is written as named shorthand fields, never a spread (a spread yields an
+  `opaque`/`spread-assignment` field issue). The literal duplicates `LOADOUT_HOST_NAME`, and a
+  runtime test keeps the two equal.
+- **Exclude by id.** Record it under `exclusions:` by `ids` in `docs/design/prose-prompt-map.yaml`.
+  `prose_map/catalog.py` computes `discovered_tools` over all candidates before exclusions,
+  `stale-exclusion` fires if the candidate becomes undiscoverable, and excluded candidates are not
+  units, so counts do not move.
+- **Rejected alternatives**: routing the host as a unit leaves an unresolvable shorthand
+  `prepareLoadout` fragment; a `kind: host` carve-out forces undiscoverability.
+- **The premise is pinned on both planes**: the `perkToolSeam.test.ts` source slice, and
+  `tests/test_prose_map.py::test_loadout_host_is_discovered_and_excluded_without_model_facing_prose`
+  asserting the excluded fragment set is exactly `{description, prepareLoadout}` — Pi still renders
+  a hidden tool's `promptGuidelines`, so hiding alone does not keep the host prose-free.
+- **The type-level closure**: `LoadoutPresentation.descriptions?: never` in the Pi-free
+  `extension/substrate/toolPolicy.ts`, with a `@ts-expect-error` negative and both runtime arms.
+  General lesson: narrow a Pi hook's return type when it has a prose-bearing optional field perk
+  never uses. Narrowing an interface member breaks hand-written fakes
+  (`extension/testing/harness.ts::fakeGating`, the `objectiveRefinement.test.ts` fixtures) — grep
+  every implementer, test fakes included, and list them in the plan.
+
+**Registration call shape is a selector contract.** The selector collects `description` strings
+from an inline policy `result` as `parameter-schema` fragments — keep `result` inline (an
+identifier is invisible). Any change to the registration call shape needs a matching selector
+change: the census went silently empty when `registerPerkTool(pi, <def>, <policy>)` moved the
+definition to `arguments[1]`. Refresh a generated artifact in the same PR even when the generator
+is blocked by unrelated findings (render with the known finding filtered).
 
 ## Source-adapter contract craft
 
@@ -383,7 +416,10 @@ the Python-symbol unit count in `tests/test_prose_review_source.py` and the exac
 `tests/test_prose_map.py::test_python_owned_prompt_wrappers_are_ast_selected` from new
 `python-symbol` wrappers. To isolate inherited drift: `git stash` covers only uncommitted edits, so
 also `git checkout <base> -- <files you already committed>`, rerun, then restore; what remains red
-is pre-existing — re-measure it from the synced catalog, never by delta. And adding a concern that
+is pre-existing — re-measure it from the synced catalog, never by delta. **A refreshed map with 0
+findings is not evidence the opt-in pins are green**: a sibling that ran `prose-map sync` without
+`just prose-review-test` left the TS-fragment pin stale (323 → 325). Because the prose suites stay
+outside `run_ci` / `just ci`, sibling drift accumulates. And adding a concern that
 includes a unit already in another concern changes `concerns_for_unit` / `concern_relatives`:
 `tests/test_prose_review_catalog.py` and `tests/test_prose_review_comparison.py` use
 `markdown:skills/perk-plan/SKILL.md` as their fixture, so a new concern touching perk-plan breaks
