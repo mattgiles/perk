@@ -10,8 +10,7 @@ cluster: pi-extension
 
 - Two layers, two files: a whole-string destructive veto over the walker's **veto view**, then
   `SAFE_PATTERNS` at **every command position**; destructive wins. The inventory is `SAFE_PATTERNS`
-  in `readOnlyBash.ts` (moved byte-identically out of `toolGating.ts`, which now only consumes the
-  verdict) — never mirror it into prose — "Orientation — two layers, two files".
+  in `readOnlyBash.ts` — never mirror it into prose — "Orientation — two layers, two files".
 - Lexing is separate from policy: refusals ride on tree nodes, so the fail-closed gate and the
   fail-open scan-timeout classifier share one lexer — "Lexing is separate from policy".
 - The same word means different things at shell / env / external positions; refuse an unmodeled
