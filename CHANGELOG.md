@@ -7,7 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of f03b171 -->
+<!-- As of e8903ab -->
+
+### Major Changes
+
+- **Pi 1.0 is the minimum host.** perk now requires Pi 1.0.0 or newer and Node.js 22.19.0 or newer, and checks before anything runs: `perk`, the stage launchers and `perk resume` refuse an older or unidentifiable `pi` on PATH, the extension refuses to load into an older Pi session, and a headless worker whose installed Pi SDK is older ends with a typed refusal. Each message names the version found and the `npm install -g @earendil-works/pi-coding-agent` upgrade, and `perk init` and `perk doctor` report the same `pi` and `node` requirements. This is a breaking change for operators on Pi 0.99.x: upgrade Pi before upgrading perk. (ab47513)
+- **pi-subagents 0.75.0.** perk's reviewer, scout and analyst waves now run on pi-subagents 0.75.0, whose children start on Pi 1.0. Run `perk init` (or `perk doctor --fix`) after upgrading so the repo's `.pi/settings.json` pins `npm:pi-subagents@0.75.0`; Pi installs it at the next launch and `perk doctor` reports `subagent-compat` ✓. A checkout still pinned to an older pi-subagents cannot run perk's waves on Pi 1.0. (9c4e52c)
+
+### Added
+
+- Turn on Pi's native tool discovery by default: `perk init` seeds `"defaultTools": ["+tool_search"]` in `.pi/settings.json`, and four optional, schema-heavy perk tools (`objective_stack_status`, `collect_review_wave`, `collect_draft_review_wave`, `push_annotations`) stay out of model requests until a door activates them or `tool_search` finds them. `perk doctor` reports a missing entry and `--fix` adds it; commit `"-tool_search"` to opt out. (2d8d635)
+- Give the headless worker Pi's builtin `tool_search` and `codemode`, following the repo's `defaultTools`; `-builtin:<name>` disables one. The worker still loads no MCP servers. (919c34d)
+- Report headless-worker model problems as typed refusals: the worker selects its model after the repo's extension providers register, so an unknown `--model` ends as `model_not_found`, a provider without credentials as `model_auth`, and no available model as `no_model` — never as a usage error. (b7a0aa1)
+
+### Changed
+
+- Let the headless worker compact and retry like an interactive session, following the repo's `compaction` and `retry` settings; a compaction's model usage counts toward the run's token budget. (71e8ab5)
+- Bound model calls in the headless worker: model usage a tool reports is counted once toward the budget, the worker's `codemode` has no `models` namespace, and a script's image-generation or classifier call is refused with a typed, non-terminal error. (5cba294)
+- Install exactly Pi 1.0.0 on Node.js 22.19.0 in remote runs (the `perk-remote-setup` action), for perk's own repo and consumer repos alike. (e108044)
+- Accept Pi 1.0 system messages in `/learn` evidence, and render nested tool calls (codemode scripts and other callers) inside their parent tool result. (91719e4)
+- Stop seeding `tuiMode` in `.pi/settings.json`: Pi 1.0's own fullscreen default applies, and a `tuiMode` you set is kept. (c829e46)
+- Carry Pi's structured result fields on perk tool results: a perk soft failure reaches the model as an error-flagged result (rendered in the error style), and a codemode script calling a perk query tool receives its structured `{ ok, … }` value. (eb3c526)
+- Switch on only perk's own tools: other extensions' tools follow their declared read-only posture instead of a fixed census, and `/btw`'s read-only side session gets `read`, `grep`, `find` and `ls`. (012cbd6)
 
 ### Fixed
 
