@@ -102,7 +102,8 @@ censuses raw `WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
   constant — the migration that killed the hand-transcribed `outputSchema` blocks.
 - `extension/learning/audit.ts` (`judgeAuditBundle`) — the perk-dev session-audit wave behind
   `run_audit_wave` (the `extension/pi/v1/learning/audit.ts` adapter): the analyst-wave-shaped
-  sibling with a **structural write binding**. The tool is a `READ_ONLY_TOOLS` member whose write target comes only from the cold
+  sibling with a **structural write binding**. The tool registers with a `gated: { carveOut }` policy (its `registerPerkTool` call in the
+  adapter; the carve-out prose renders into the read-only context) whose write target comes only from the cold
   door's workflow-state (`audit_bundle_dir`), with **no parameters** — no model-relayed path ⇒ no
   aimable writer. This is the precedent for read-only-gated tools that must write. Side effect
   worth sweeping for: adding an isolated registry stage (empty `successors`) implicitly grows
@@ -216,8 +217,9 @@ a flow-scoped tool predictably touches:
   judgment-prose pins stay on the guidance; and an interface-level harness e2e replaces the
   deleted rendered-mechanics pins — plus *negative* pins that `workflowScript`/`runs.all`/
   `outputSchema` no longer appear in the guidance.
-- **Name the `extension/substrate/toolGating.ts` lockstep explicitly** (`PERK_TOOLS` + the
-  worktree-stage family). Two consecutive flow plans missed it; the `stageTools.test.ts`
+- **Name the tool-policy lockstep explicitly** — the tool's `registerPerkTool` policy (its
+  `stages`, e.g. the worktree-stage family `WORKTREE_STAGES`) plus the regenerated
+  `shared/fixtures/tool-matrix.json` (`docs/learned/pi/tool-loadout.md`). Two consecutive flow plans missed it; the `stageTools.test.ts`
   drive-coverage guard forces it the moment the guidance names the tool, but catching it at plan
   time avoids the late scramble commit (see also `warm-door-commands.md`).
 
@@ -569,8 +571,8 @@ intentional ripple detectors, not unrelated test churn.
 
 The registered-tool census has a fourth leg: the docs-site table
 `docs/user-docs/reference/in-session/model-tools.md`, guarded by
-`docs/site/src/in-session-reference.test.mjs` (set-equal to `PERK_TOOLS` and a live harness
-registration) — keep that guard in mind when registering tools (#1997).
+`docs/site/src/in-session-reference.test.mjs` (set-equal to the tool catalog via
+`shared/fixtures/tool-matrix.json`, and a live harness registration) — keep that guard in mind when registering tools (#1997).
 
 For start/collect wave pairs, `executionMode: "sequential"` remains the concurrency guard — and
 pending execution is INSTANCE-OWNED: the `ReportWave` instance holds every launched,
@@ -773,6 +775,7 @@ Instances:
 - `docs/learned/pi/subagents.md` — the upstream pi-subagents mechanics (RPC envelope,
   `outputSchema`, supervisor channel) and the pre-digest recipe
 - `docs/learned/workflow/warm-door-commands.md` — the toolGating census + drive-coverage guard
+- `docs/learned/pi/tool-loadout.md` — the `registerPerkTool` catalog, postures and the matrix fixture
 - `docs/learned/workflow/learn-evidence-pipeline.md` — the `/learn` orchestrator that rides
   `extension/learning/analystWave.ts`
 - `docs/learned/workflow/plan-review-flow.md` — the annotation-push module (the sibling

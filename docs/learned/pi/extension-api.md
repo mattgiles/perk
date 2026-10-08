@@ -278,12 +278,10 @@ Two contours of `registerTool` partial updates:
 
 ## Read-only gating trap
 
-A custom tool that must stay callable inside a read-only gate has to be named in that stage's
-gate-ON allowlist in `extension/substrate/toolGating.ts` — `READ_ONLY_TOOLS`, or
-`REFINEMENT_READ_ONLY_TOOLS` for the refinement stage (`gatedToolsFor` picks) — or the
-`setActiveTools` filter drops it the moment the gate engages. (The second list this section once
-named, the in-process read-only SDK child's `SDK_READ_ONLY_TOOLS`, retired with that child in
-#2100.)
+A custom tool is absent under the read-only gate unless its `registerPerkTool` policy carves it in
+(`gated: allowed` or `gated: { carveOut }`; the gated view is `gatedToolsFor(stage)`), and the
+`tool_call` backstop blocks it there even if something else activates it. The policy descriptor,
+the derived views and the foreign-tool postures live in `docs/learned/pi/tool-loadout.md`.
 
 ## Registration-time `process.cwd()` config reads make harness tests host-repo-sensitive
 
@@ -542,6 +540,8 @@ tools or *months-old* code:
 - `docs/learned/pi/context-injection.md` — conditional strip on the every-call `context` event
 - `docs/learned/workflow/skill-bindings.md` — branch persistence powering the cold↔warm dedup
 - `docs/learned/toolchain/worktree-node-modules.md` — getting the right installed SDK in a worktree
+- `docs/learned/pi/tool-loadout.md` — activation vs presentation vs enforcement, the
+  `registerPerkTool` catalog and the provenance postures
 - `docs/learned/pi/tool-param-decode.md` — the pure-decode export (the preferred decode-coverage
   shape beside `invokeTool`'s `opts.ui` overlay)
 - `extension/pi/v1/simplify.ts` — the `session_shutdown` liveness latch for detached command work

@@ -335,7 +335,8 @@ reset wipes it); snapshot/stash first and revert only the temporary mutation (#1
   delimiter** (#2521) — a `[^<>]*` class swallowed the inserted backslash; prove the oracle against
   the unsafe implementation.
 - **Pin the absence invariant itself, not one instance** (#2475) — an exhaustive
-  `Object.entries(STAGE_TOOLS)` sweep over the census-only family, mutation-checked — and pick the
+  sweep over `stageToolsFor(stage)` for every registry stage (`REGISTRY_STAGE_IDS`, both in
+  `extension/substrate/toolPolicy.ts`) over the census-only family, mutation-checked — and pick the
   fake that reproduces the load-order MECHANISM, not the foreign owner's toggle.
 
 ## Fold and extraction test craft
@@ -436,3 +437,4 @@ Before accepting a test claim, ask:
 - `docs/learned/workflow/prose-review-workbench.md` — closed adapter matrices and wire boundaries
 - `docs/learned/toolchain/jsdom-react-component-harness.md` — component identity and stale-state
   fixtures
+- `docs/learned/pi/tool-loadout.md` — the derived tool views (`stageToolsFor`) negative-space sweeps run over

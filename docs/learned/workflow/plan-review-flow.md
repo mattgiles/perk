@@ -499,7 +499,7 @@ lives in `extension/pi/v1/providers/plannotatorHandoff.ts`) and the reusable cro
   mirrors `pr review-context`'s resolution path; registering a new `pr` worker is the
   established 3-edit recipe (import + `mark_kind(..., "worker")` + `pr_group.add_command(...)`) plus
   the alphabetically-sorted `EXPECTED_SURFACE` entry. The door is a plain warm command (no
-  registry stage, no model tool) → no `shared/registry.yaml` / `READ_ONLY_TOOLS` change; all UI
+  registry stage, no model tool) → no registry / tool-policy change; all UI
   via `report()` so `surfacesGuard` stays green. (The tsc combined-literal-discriminant
   `||`-narrowing gotcha hit here is recorded in `toolchain/biome.md`.)
 - **Terminal vs browser active arms compute the target differently.** Both share the `perk pr url`
@@ -571,3 +571,4 @@ detected only at push time as `push_rejected` — loud but late, by design.
 - `extension/pi/v1/draftReview.ts` (+ `draftReview.test.ts`) — the current-review slot + the decision ladder
 - `extension/session/saveDestination.ts` (+ `saveDestination.test.ts`) — the per-component save-destination fence
 - `docs/learned/workflow/lease-outbox-delivery.md` — the persisted-evidence rule + the exclusion-primitive table
+- `docs/learned/pi/tool-loadout.md` — the tool-policy catalog a new model tool registers through

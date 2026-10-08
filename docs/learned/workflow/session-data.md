@@ -218,9 +218,12 @@ the `plan_draft` checklist generalizes — a third stage-scoped draft tool shoul
 1. A **fixed artifact-name constant** — no path/name tool parameter.
 2. The path derived **exclusively through the session-data accessor seam**
    (the session seam's `writeArtifact` = file + provenance pointer in one gesture).
-3. Allowlist only the tool *name* in `extension/substrate/toolGating.ts::READ_ONLY_TOOLS`, with a carve-out
-   comment — the gate's edit/write/bash blocking stays untouched.
-4. Register in the installer **before the gate snapshots tools**.
+3. Register through `registerPerkTool` (`extension/pi/perkTool.ts`) with a `gated: { carveOut }`
+   posture whose prose names the one bounded write (it renders verbatim into the read-only context)
+   — the gate's edit/write/bash blocking stays untouched. See `docs/learned/pi/tool-loadout.md`.
+4. Regenerate the golden `shared/fixtures/tool-matrix.json` (the gated view `gatedToolsFor(stage)`
+   is derived from the policy; the gate's reconciliation points read the catalog, so there is no
+   registration-order constraint).
 5. The `invalid_input`/`no_run_id`/`write_failed` failure taxonomy via `failFor`.
 6. A contracts §8.1 paragraph + registry `cache.session-data` in the owning stage's `writes` +
    both planes' registry tests.
@@ -231,9 +234,10 @@ part ride verbatim (`unknown[]`) — deep validation stays with the owning plane
 `objective-lifecycle.md` for the store-as-JSON / render-at-the-door split).
 
 Harness proof pattern: plant a session with `mode: "read-only"`, then `invokeTool` succeeds while
-`workflowState().mode` confirms the gate is up. `READ_ONLY_CONTEXT` is exported and interpolates
-`READ_ONLY_TOOLS.join(", ")` — allowlist changes track automatically; tests pin one representative
-name.
+`workflowState().mode` confirms the gate is up. The read-only context is rendered per call by
+`renderReadOnlyContext(stage)` (`extension/substrate/toolGating.ts`), naming exactly the carve-out
+writers eligible in that stage (`carveOutWritersFor`) — policy changes track automatically; tests
+pin one representative name.
 
 ## Session names — the identity arms' append shapes are a consumer contract
 
@@ -323,3 +327,5 @@ Key policies:
 - `docs/learned/workflow/plan-save-surfaces.md` — the save surface that consumes the plan-draft
   artifact
 - `docs/learned/workflow/source-scan-guards.md` — the path guards confining the data-dir literals
+- `docs/learned/pi/tool-loadout.md` — the `registerPerkTool` policy (`gated` postures, carve-outs)
+  and the derived gated/stage views

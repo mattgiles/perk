@@ -19,8 +19,8 @@ cluster: pi-extension
   fails OPEN (a performance guard, the opposite of the gate); pure policy under `substrate/`, Pi
   glue under `pi/v1/`; match rules loose, exemption rules tight — "The bash scan-timeout guard".
 - Latch the fail-closed gate state BEFORE any new fallible read in `apply()` — a throw after a
-  census read left the gate open under read-only — "Gate engagement: latch the fail-closed
-  state BEFORE any new fallible read".
+  read placed ahead of the latch left the gate open under read-only — "Gate engagement: latch the
+  fail-closed state BEFORE any new fallible read".
 
 ## No in-file `@`-transclusion
 
@@ -59,7 +59,7 @@ double-load is pi discovery behavior and remains.
 
 The read-only gate is an allowlist at **every command position** AND a not-destructive check over a
 lexer-built **veto view**; destructive wins. The inventory is `SAFE_PATTERNS`
-(`extension/substrate/toolGating.ts`) — never mirrored into prose. Everything about extending or
+(`extension/substrate/readOnlyBash.ts`) — never mirrored into prose. Everything about extending or
 reviewing it — the command-position walker, the veto view, allowlist/veto row craft, the
 bypass-class checklist, the lockstep list — is `docs/learned/pi/read-only-bash-gate.md`. Plan
 factories still prefer the materialized inbox over ad-hoc `gh` queries
@@ -108,13 +108,14 @@ Facts worth carrying:
 
 ## Gate engagement: latch the fail-closed state BEFORE any new fallible read
 
-`toolGating.ts::apply()`'s first-engagement path grew a second fallible read — the `getAllTools()`
-census that feeds late-tool admission (`workflow/borrowed-packages.md`) — placed *before* the
-trailing `active = nextActive` assignment. A throw there left `active === false`; the startup
-`resources_discover` re-apply then re-ran the same path, re-installed the census, and the
-`tool_call` backstop **failed open under read-only** for the whole session. The fix is one line at the
-top of `apply()`: `if (nextActive) active = true` — engage the in-memory gate before any read or
-install, released only by the trailing assignment. Deliberately NOT over-corrected to "set the
+`toolGating.ts::apply()`'s first-engagement path once grew a second fallible read (a since-retired
+tool census) placed *before* the trailing `active = nextActive` assignment. A throw there left
+`active === false`; the startup `resources_discover` re-apply then re-ran the same path and the
+`tool_call` backstop **failed open under read-only** for the whole session. The fix, which survives
+in today's `apply()`, is one line at its top: `if (nextActive) active = true` — engage the
+in-memory gate before any read or install, released only by the trailing assignment. The current
+fail postures (presentation fails open, enforcement fails closed) are in
+`docs/learned/pi/tool-loadout.md` § "perk's activation design". Deliberately NOT over-corrected to "set the
 desired state first" unconditionally: a failing read-only→read-write sync must keep the gate
 closed, so only the engaging direction is latched early. The test lesson: the failure-path fixture
 had hard-coded the new read as infallible — every new fallible read inside a fail-closed path needs
@@ -127,7 +128,7 @@ its own failure-mode case.
 - `docs/learned/pi/read-only-bash-gate.md` — the read-only bash gate (walker, veto view, row craft)
 - `extension/substrate/bashScanTimeout.ts` + `extension/pi/v1/bashScanTimeout.ts` — the scan-timeout guard (policy + Pi glue)
 - `shared/contracts.md` §8.69 — the bash scan-timeout contract
-- `docs/learned/workflow/borrowed-packages.md` — the late-tool admission model the census read serves
+- `docs/learned/pi/tool-loadout.md` — the gate's fail postures and reconciliation points
 - `docs/learned/workflow/plan-factories.md` — inbox-over-gh pattern using this constraint
 - `.pi/APPEND_SYSTEM.md` — the live ambient routing index
 - `docs/learned/index.md` — the full on-demand catalog
