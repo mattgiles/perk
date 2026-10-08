@@ -94,8 +94,7 @@ silently re-recorded) and safe to delete; no doctor check or init convergence to
 
 **The host floor (Pi ≥ 1.0.0, Node ≥ 22.19.0).** perk declares its minimum supported host
 versions once in the bundled `shared/host-floor.yaml` and compares with semver precedence (a
-`1.0.0-rc.1` prerelease is below the floor; 1.0.3 or 1.10.0 is admitted — perk certifies 1.0.0 and
-admits newer Pi). Every local launch (bare `perk`, a stage launch, `perk resume`) runs `pi --version`
+`1.0.0-rc.1` prerelease is below the floor; 1.0.3 or 1.10.0 is admitted). Every local launch (bare `perk`, a stage launch, `perk resume`) runs `pi --version`
 once (20 s timeout) as the first exec-phase step, before any lock sweep, chdir or exec, and refuses
 `pi_version_unsupported` (older or a floor prerelease) or `pi_version_unverifiable` (non-zero exit,
 timeout, spawn failure, or output that is not a version) — exit 1, naming the executable, the
@@ -105,7 +104,9 @@ and `--help` are never gated by it. Instead the environment checks report the sa
 row is presence + version and the `node` row compares the full version, and an outdated or
 unverifiable one is `ok=False` like a missing one (init exits 2 `missing_tool`; doctor `fail`). The
 managed remote runner installs exactly Pi 1.0.0 (`REMOTE_PI_VERSION`) for both the global CLI and
-the consumer worker SDK and sets up exactly Node 22.19.0. The floor is a minimum, separate from the
+the consumer worker SDK and sets up exactly Node 22.19.0. Pi 1.0.0 is the enforced host floor; its
+certification record (`docs/design/archive/pi-1.0.0-certification.md`) is still waiting on its
+PR-door rows. The floor is a minimum, separate from the
 development pins, the pi-subagents pin below, and that remote install pin. The same floor is
 admitted at the SDK boundary, independently of the PATH `pi`: the loaded extension checks the Pi
 SDK it runs in and refuses to load (Pi reports a failed extension load carrying perk's refusal;
@@ -127,7 +128,8 @@ the engine's own setting-naming message (per the engine source, `missions` and
 `extension-bindings` refuse every wave too). The doctor `subagent-compat` stamp
 (`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`, currently 0.75.0 — source re-verified; the Pi 1.0.0 trust
 matrix passed, and the doctor and scout waves and both browser-door waves, plan door and PR door,
-passed on the Pi 0.99.2 host) records what
+passed on the Pi 0.99.2 host; on the Pi 1.0.0 host the plan door passed and the PR door is pending
+in `docs/design/archive/pi-1.0.0-certification.md`) records what
 perk's guidance was verified against — a separate fact from this pin
 (`docs/design/archive/pi-subagents-0.75.0-reverify.md`).
 
