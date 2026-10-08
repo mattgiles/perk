@@ -44,10 +44,9 @@ duplicate them here.
   by refusal, never escaped; outcome loops walk the plan, not the aggregate — "Validate
   downstream identifier contracts"; `blocked` reports reclassify to `lane-failed` before coverage
   (`blockedReports.ts`) — "Lane semantics".
-- A `no_active_session` RPC reply is held for a later success (a duplicate responder), never
-  first-reply — "The context-less RPC hold".
-- "Watch items / residuals" is the flagged-edges register — check it before extending the
-  module.
+- A `no_active_session` RPC reply is held for a later success, never first-reply — "The
+  context-less RPC hold"; a lane's compaction survival lives in `pi/subagents.md`.
+- "Watch items / residuals" is the flagged-edges register — check it before extending.
 
 ## Orientation
 
@@ -438,6 +437,10 @@ is therefore effective evidence a retry can never supersede — only a `blocked`
 `lane-failed`) is retried away. A retry-policy change re-audits downstream end-to-end fixtures for
 REACHABILITY (a stale `extension/codeReview/automated.test.ts` composition kept asserting a path
 the new policy could no longer reach).
+
+**A compacted lane is not a failed lane.** A floored report child can be compacted mid-run; its
+task restore and the `structured_output` hold live entirely in the child's extension runtime (the
+wave module is unchanged) — `docs/learned/pi/subagents.md` § "Report children survive compaction".
 
 Extra defensive arms worth keeping when extending the module: a pre-aborted `AbortSignal` cancels
 before launch (no spawn issued); malformed async-complete payloads are dropped, never surfaced as

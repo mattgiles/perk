@@ -21,14 +21,15 @@ never an `> **Update**` blockquote, a `(historical)` `##` section, or WAS-tensed
 
 ## Distillation
 
-- A perk child's authorization is TWO booleans — the runner bit `PI_SUBAGENT_CHILD=1` + the
-  constant packet `perk.parent-restrictions/1 = {readOnly: true}` in
-  `PI_SUBAGENT_EXTENSION_BINDINGS` — decoded fail-closed, latched per activation, composed into
-  every gate observation; plan guidance rides the gate behind `isPlanGuidanceStage` + the runner
-  fence — "Native child execution — the two-boolean policy".
-- Agent defs ship in the npm package (`agents/*.md`, `pi-subagents.agents`), discovered as
-  `source: "package"`; the census is `agents/*.md` ↔ `SUBAGENT_KEYS` ↔ `SubagentsTable`; no
-  reconverge — "Agent-def delivery".
+- A perk child's authorization is TWO booleans — `PI_SUBAGENT_CHILD=1` + the constant packet
+  `perk.parent-restrictions/1 = {readOnly: true}` — decoded fail-closed, latched per activation;
+  in-child engine tools are classified by the child-engine provenance row — "Native child
+  execution — the two-boolean policy".
+- A floored report child survives compaction: its first prompt is re-injected as a
+  `perk:task-restore` steer and `structured_output` held until it is live — "Report children
+  survive compaction".
+- Agent defs ship in the npm package (`agents/*.md`), discovered as `source: "package"`; census
+  `agents/*.md` ↔ `SUBAGENT_KEYS` ↔ `SubagentsTable` — "Agent-def delivery".
 - Model knob: `[models.subagents] <agent>` applied as the workflow-level `model` at spawn time (wins
   over the def's frontmatter however set); builtins are OFF in every perk repo, re-enable only at
   PROJECT scope; `agentOverrides` is never perk's mechanism — "Models, overrides and builtins".
@@ -39,15 +40,14 @@ never an `> **Update**` blockquote, a `(historical)` `##` section, or WAS-tensed
   AND a schema-valid report (a valid report alone is evidence — since 0.71.0 it survives a later
   provider error/abort); every wave spawn disables acceptance auto-inference explicitly; `runs.all`
   is all-settled for config-object items only — "Execution surfaces and structured output".
-- Waves are completion-only: every spawn carries `intercomBridge: {mode: "off"}` (0.68.0 discards
-  parent-side `progress_update`); a successful child completion no longer wakes the parent; the
-  completion notice is a preview — collect via the typed wave tools; engine deadline + 60 s
-  settlement grace; reports ride only the completion `results[]` — "Supervisor channel".
-- perk reaches the engine only through public surfaces (v1 RPC envelope pinned as module constants,
-  delegation events, def frontmatter, package `exports`); doctor `subagent-compat` is a version
-  tripwire, never a source probe; the accepted coverage gap is named — "Engine-coupling posture".
-- `## Sources` records the guidance baseline (doctor constant) and the last engine source re-read;
-  superseded claims live only under "History (dated)".
+- Waves are completion-only (`intercomBridge: {mode: "off"}`); a successful child completion no
+  longer wakes the parent; the notice is a preview — collect via the typed wave tools; engine
+  deadline + 60 s grace; reports ride only the completion `results[]` — "Supervisor channel".
+- perk reaches the engine only through public surfaces; doctor `subagent-compat` is a version
+  tripwire, never a source probe; the coverage gap and the 0.75.0 watch items are named —
+  "Engine-coupling posture".
+- `## Sources` records the guidance baseline, the last source re-read and the browser-door
+  re-verify criteria; superseded claims live only under "History (dated)".
 
 ## Native child execution — the two-boolean policy
 
