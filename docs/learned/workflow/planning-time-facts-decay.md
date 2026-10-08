@@ -71,6 +71,11 @@ neither reads the plan's caps. Only the plan-fidelity review lane will notice, a
   your delta.** A pin like `len(catalog.governed_tools) == 39` sits over a projection that other
   landed work also moves (`workflow/prose-review-workbench.md`'s `sync` sweep is the sharpest case);
   regenerate, then read the real number.
+- **Never inherit an earlier characterization's "nothing to fix".** A node's fix list written
+  against an older pin or repo state is stale once sibling nodes land — the Pi 1.0.0 dev-pin node
+  needed two test-only repairs its "empty fix list" denied
+  (`docs/design/archive/pi-1.0.0-dev-pins.md`).
+- **Plan count predictions are hypotheses** — re-measure from the synced artifact, never by delta.
 - **Pre-decided lever rules over measurements must define the measured population** (#2501) —
   wrapper frames vs distinct roots in a nested `-X importtime` tree (`startup-profiling.md` §
   "Measurement discipline").

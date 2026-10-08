@@ -16,8 +16,9 @@ and the authoring loop both carry non-obvious design decisions worth preserving.
   head node blocks the whole objective — "The resumable-lease node state machine".
 - A node whose deliverable is a decision/spec (no code) follows the design-only pattern —
   "The 'design-only node' pattern".
-- A PR that merges with the node's work incomplete gets a REMAINDER node, not a reopened one —
-  "The remainder-node reconcile playbook".
+- A PR that merges with the node's work incomplete gets a REMAINDER node (owner-gated) or a
+  DEFERRED note in the narrowed description, never a reopened node — "The remainder-node
+  reconcile playbook".
 - No node deletion (`skipped` + a recorded decision is the removal record); census the CURRENT
   roadmap before a plan-baked node-add — "Roadmap edit hygiene".
 - Out-of-order sibling landings can push a node past the objective's boundary line — handle it
@@ -177,6 +178,15 @@ plan's deliverables depended on operator action after the first `/submit`), the 
 - For *why* these landings recur (post-`/submit` operator-interactive work systematically lands
   incomplete) and how to plan against them, see `workflow/doc-reconciliation.md`'s sequencing
   section.
+
+**The owner gate.** Never call `add_objective_node` during reconcile without asking the owner
+first — a plan's *Lifecycle handoff* that pre-decides a successor node does not authorize creating
+it. The valid alternative disposition: keep the node `done`, narrow its description to what landed,
+and record the unrun remainder in that description as "DEFERRED (operator decision at reconcile)"
+with no new node. Out-of-scope follow-ups (a release, say) are not tracked in the objective at all.
+When the owner's reply answers one item with a counter-question, answer the question plainly and
+wait — a decision on one item does not settle the others (an agent that proceeded on its own
+default drew a sharp correction).
 
 ### Cross-node accounting when shared plumbing pre-delivers a later node's clause
 

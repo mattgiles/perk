@@ -36,8 +36,8 @@ after all edits and stamped with the measured HEAD SHA) — is
 - Pi's `edit` fuzzy fallback rewrites touched lines to ASCII dashes/quotes; after a glyph failure
   use an asserting Python script — "Pi's edit tool on em-dash-heavy prose".
 - Post-submit choreography fails on every observed instance: front-load; live legs the human
-  can run now are a submit gate; artifact-anchored forward refs; pre-`/submit` carriers —
-  "Validation-record reconciliation".
+  can run now are a submit gate; evidence-contingent prose ships in its owed form; self-referential
+  gates never run; pre-`/submit` carriers — "Validation-record reconciliation".
 - Ship the derivation command; re-check the prior node's narrative; append one landing-log entry
   — "Objective-roadmap reconciliation craft".
 
@@ -96,6 +96,12 @@ construction (the `fail()`/`EXIT_FOR_TYPE` consolidation missed a third file's r
   "plan/todo/askuser/footer/web" catalog line in `shared/README.md`): grep *adjacent* member
   names, or one bare-word grep hand-triaged. **Concept-level glossary/index blocks** slip it too
   — sweep for the retired *concepts*.
+- **A moved body behind a kept path needs a budgeted pointer sweep.** When a plan moves a module's
+  body but keeps its path, every pointer still resolves and no scanner flags it — sweep code
+  comments, `shared/contracts.md`, `docs/design/` and `docs/learned/` (the `index.ts` →
+  `pi/activation.ts` split left ≈30 comments in 17 files plus 5 contract lines; `learn-docs-scan.md`
+  § "Detector blind spots" item 6). `docs/learned/` is reachable only through `/learn`, so name it
+  in the moving plan's follow-ups.
 - **Glossary growth must sweep the docs that *enumerate* the glossary** — an "exhaustive list"
   presentation stales on every added term (`CONTEXT.md` § Objective delivery).
 - **An exact-survivor-set gate constrains NEW prose too**: paraphrase retired grammar in new
@@ -349,6 +355,9 @@ backslash-u-plus-four-hex-digits text instead of the glyph, and nothing reports 
 - After any prose edit, `grep -n` the touched files for the four-hex-digit backslash-u escape
   pattern (expect only the corpus's deliberate data-format examples) and read the diff for
   unintended `—`→`-` changes before committing.
+- **Prose guidance has not held the escape hazard**: three slips in one session, two of which landed
+  in `shared/contracts.md`. A CI guard over tracked `*.md` (flag the escape outside backtick code
+  spans) is routed follow-up #2705 F4.
 
 ## Validation-record reconciliation — sequencing, forward references, evidence classification
 
@@ -400,6 +409,27 @@ instance, "ALWAYS" labels included; prose awareness does not enforce itself:
     phase's logs/JSONL before sending the next dependent phase. Put edits the human would make by
     hand into commands (a `jq` rewrite of `.pi/settings.json`, not "edit the file"). Batching
     every phase into one hand-off drew the operator's "be much less ambiguous".
+
+**Evidence-contingent prose and self-referential gates** (recurrences #2561, #2661, #2683):
+
+- **Write evidence-contingent prose in its pending/owed form**, and let the commit that appends the
+  evidence flip every carrier at once (the record's verdict line, the requirements page, the
+  perk-expert mirror, `pi/subagents.md` § Sources). Never plan "claim now, revert on FAIL": the
+  revert arm never runs when the gate is skipped — #2661 shipped a PR-door pass that never ran, and
+  #2683 shipped "still waiting" wording that reached a release.
+- **"Interim" wording committed before `/submit` lands as written** — text must be true as a final
+  state (the same principle as no commit-anchored forward references below).
+- **A plan's "binding" gate on a human action is advisory.** `land` enforces nothing written in a
+  record (a land-time review check is routed follow-up #2705 F5) and the operator may override;
+  the record and the docs must be truthful whatever is decided.
+- **Self-referential gates are a sequencing trap.** A leg scheduled on the node's own PR door
+  (`/pr-review-browser`, a live `collect_review_wave`) structurally waits on the node's own review
+  and will not run. `/pr-review-browser` needs *an* open PR, so run it before `/submit` against
+  another open or scratch PR — or elect both browser halves as owed to the next node's sessions up
+  front, or give the leg its own node.
+- **When the PR's own browser review IS the leg being measured**, a review run between the two
+  planned commits correctly flags the pending row as actionable — `/address` must stop rather than
+  invent evidence; the second commit resolves the thread once the leg has run.
 
 **Re-verify passes sweep the CHANGELOG against the claims, not only the claims against source.**
 Checking each doc claim against source misses a source change no claim mentions — the 0.70.1
