@@ -148,6 +148,26 @@ named here and left alone.
 | `just test-js-slow` (explicit) | **1001 / 1001**, 0 skipped |
 | `uv run perk learn docs-check` | fresh; no `docs/learned` edit |
 
+**Final gate** at `b761c35d` (the complete change). This paragraph is the only later edit, and it
+is docs-only. Five rows **executed** (`lint-py`, `typecheck-py`, `test-py-fast`, `test-py-slow` —
+which re-runs the live bridge smoke on the PATH `pi` — and `docs-check`); five were
+**glob-skipped** and are not runs (`lint-js`, `typecheck-js`, `typecheck-prose-review`, `test-js`,
+`changelog-check`). The JS tiers the skipped `test-js` row stands for ran explicitly above.
+
+```text
+perk CI: all checks passed.
+✓ lint-py (0s)
+⊘ lint-js (skipped — no changed files match *.ts,*.tsx,*.js,*.jsx,*.mjs,docs/site/**,biome.json)
+✓ typecheck-py (4s)
+⊘ typecheck-js (skipped — no changed files match extension/**,tools/**,tsconfig.json,package.json,package-lock.json)
+⊘ typecheck-prose-review (skipped — no changed files match tools/prose-review/**,package.json,package-lock.json)
+✓ test-py-fast (140s)
+✓ test-py-slow (50s)
+⊘ test-js (skipped — no changed files match *.ts,*.tsx,*.js,*.jsx,*.mjs,docs/site/**,package.json,package-lock.json)
+✓ docs-check (117s)
+⊘ changelog-check (skipped — no changed files match CHANGELOG.md)
+```
+
 ### Captured `/perk-selfcheck` transcripts
 
 A green pytest run surfaces no transcript, so each host got one explicit launch from `$WT`:
