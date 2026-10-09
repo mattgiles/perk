@@ -1087,7 +1087,7 @@ def test_init_collapses_mixed_perk_duplicates_object_canonical(tmp_path):
 
 
 def test_npm_version_reads_the_version_suffix_only():
-    assert _npm_version("npm:pi-subagents@0.75.0") == "0.75.0"
+    assert _npm_version("npm:pi-subagents@0.76.1") == "0.76.1"
     assert _npm_version("npm:@scope/name@1.2.3") == "1.2.3"
     assert _npm_version("npm:pi-subagents") is None
     assert _npm_version("npm:@scope/name") is None  # a scope's leading @ is not a version
@@ -1096,9 +1096,9 @@ def test_npm_version_reads_the_version_suffix_only():
 
 
 def test_subagents_borrow_is_version_pinned():
-    # The one version-carrying borrow names the re-verified release (perk's waves send the
-    # `script` RPC spawn key, accepted since 0.74.0).
-    assert _npm_version(SUBAGENTS_PACKAGE) == "0.75.0"
+    # The one version-carrying borrow names the release characterized against Pi 1.1.0; the
+    # `script` RPC spawn key is accepted since 0.74.0.
+    assert _npm_version(SUBAGENTS_PACKAGE) == "0.76.1"
 
 
 def test_init_pins_an_unversioned_subagents_entry_in_place(tmp_path):

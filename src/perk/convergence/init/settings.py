@@ -89,14 +89,17 @@ def _perk_npm_entry() -> str:
 # `pi-subagents` is the one VERSION-CARRYING borrow: perk's report waves drive the engine's v1
 # RPC (the inline script text travels as the `spawn` key `script` since 0.74.0) and perk's
 # guidance is re-verified per release (docs/developers/pi-subagents-reverify.md), so consumers
-# install exactly the re-verified release. A pinned spec is reconciled forward like perk's own
+# install exactly the adopted release. A pinned spec is reconciled forward like perk's own
 # entry (`_merge_static_packages`), and Pi reinstalls a ranged npm source whose installed version
 # no longer matches its OWN checkout's configured spec
-# (`package-manager.ts::installedNpmMatchesConfiguredVersion`, verified at Pi v1.0.0), so the pin
-# walks an older install (0.73.1, which cannot accept `script`) forward once the checkout's
-# settings carry it. The doctor `subagent-compat` stamp records what perk's guidance was verified
-# against — a distinct fact that coincides today.
-SUBAGENTS_PACKAGE = "npm:pi-subagents@0.75.0"
+# (`package-manager.ts::installedNpmMatchesConfiguredVersion`, verified at Pi v1.0.0 and re-read
+# at Pi 1.1.0's `dist/core/package-manager.js` — the same `satisfies(installed, range)` rule), so
+# the pin walks any older install (0.73.1, which cannot accept `script`, or 0.75.0 alike) forward
+# once the checkout's settings carry it. The doctor `subagent-compat` stamp records what perk's
+# guidance was last fully re-verified against — a distinct fact that may lag this pin while a
+# newer supplier is adopted on characterization evidence ahead of its live certification; the
+# stamp's WARN is the truthful signal of that gap.
+SUBAGENTS_PACKAGE = "npm:pi-subagents@0.76.1"
 PONYTAIL_PACKAGE = "npm:@dietrichgebert/ponytail"
 PONYTAIL_NPM_NAME = "@dietrichgebert/ponytail"
 PACKAGE_RESOURCE_FILTERS = ("extensions", "skills", "prompts", "themes")
