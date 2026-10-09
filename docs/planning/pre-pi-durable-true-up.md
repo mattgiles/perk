@@ -394,11 +394,12 @@ parallel dependency-update service or silently refresh version stamps.
 
 ## Deviations recorded by Objective #2707
 
-Recorded by node 1.1 ([characterization record][characterization-1.1.0]); the prose above is the seed as written and is not rewritten here.
+Items 1–3 recorded by node 1.1 ([characterization record][characterization-1.1.0]); item 4 by node 1.2 ([dev-pins record][dev-pins-1.1.0]); the prose above is the seed as written and is not rewritten here.
 
 1. **Phase 5 mechanism (WP5).** Factory-scoped isolation through Pi's public `McpExtensionOptions` (`loadConfig`, `credentials`, `logPath`, `openUrl`, `updateConfig`) replaces the process-wide `PI_CODING_AGENT_DIR` override and the explicit `ModelRuntime.create({authPath, modelsPath})` — the seed assumed those options were private; they are public, and the override would break supplier-child model auth (pi-subagents' child factory calls a bare `ModelRuntime.create()` and `getAgentDir()`; background children inherit the process env) and worker session persistence (`SessionManager.create(worktree)` places the transcript under the directory the worker deletes at disposal).
 2. **Lockfile rule in node 1.2 (WP1).** Pi ≥ 1.0.1 ships no `npm-shrinkwrap.json` (1.1.0 `_hasShrinkwrap: false`; the current lock's `hasShrinkwrap: true` describes the installed 1.0.0): the nested pi-coding-agent tree's removal/dedup is an intentional upgrade change to keep, not churn to revert; the learned pin-bump mechanics' "keep the shrinkwrapped tree" clause is 1.0.0-era and is corrected through `/learn`.
 3. **Codemode `only` in node 4.3 (WP4).** Conditional: `only` is lifted only if a supported exposure/loadout treatment keeps the bounded writers (`plan_draft`, `objective_draft`, `objective_refinement_draft`) directly declared — Pi's `prepareCodemodeLoadout` hides every direct-exposure declared tool in `only` — instead of the seed's unconditional "on and only".
+4. **Lockfile reverts in node 1.2 (WP1).** The node text's "revert only re-resolutions the edited lockfile's own declarations do not force" (node 1.1 classed 7 of the 24 non-Pi version moves revertable) was set aside at planning on 2026-10-09 by operator decision: node 1.2 commits the dependency graph npm produces for the 1.1.0 pins whole — no non-Pi entry is reverted, the 15-entry `@aws-sdk/*`/`@smithy/*` chain stays as one unit — and records the revertable/forced classification as evidence in [`docs/design/archive/pi-1.1.0-dev-pins.md`][dev-pins-1.1.0]. The committed lockfile is npm's own `npm install --package-lock-only` output (byte-identical), and a registry preflight (no `^1.1.0`-satisfying release of `chord`/`pi-codemode`/`pi-mcp`/`pi-telemetry` other than 1.1.0) is what ties it to the characterized graph.
 
 ### Dispositions the characterization falsified
 
@@ -481,5 +482,6 @@ pi-durable program is a separate planning decision.
 [reverify]: ../developers/pi-subagents-reverify.md
 [characterization]: ../design/archive/pi-1.0.0-characterization.md
 [characterization-1.1.0]: ../design/archive/pi-1.1.0-characterization.md
+[dev-pins-1.1.0]: ../design/archive/pi-1.1.0-dev-pins.md
 [certification]: ../design/archive/pi-1.0.0-certification.md
 [mcp-restoration]: ../design/archive/pi-1.0.0-mcp-restoration.md

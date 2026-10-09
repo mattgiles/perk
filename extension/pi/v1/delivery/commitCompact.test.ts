@@ -66,9 +66,12 @@ function commitAll(cwd: string, subject: string): void {
   g("commit", "-qm", subject);
 }
 
-/** Fire the one-shot settle hook exactly as the agent session does (the real registered path). */
-async function emitSettled(h: PerkSession): Promise<void> {
-  await h.session.extensionRunner.emit({ type: "agent_settled" });
+/**
+ * Fire the one-shot settle hook exactly as the agent session does — `aborted` as Pi ≥ 1.1.0
+ * reports it (the real registered path).
+ */
+async function emitSettled(h: PerkSession, aborted = false): Promise<void> {
+  await h.session.extensionRunner.emit({ type: "agent_settled", aborted });
 }
 
 /** Replace Pi's async compaction boundary with a manually settled promise. */
@@ -256,7 +259,7 @@ test("report pins: a clean worktree compacts immediately with the direct instruc
   }
 });
 
-test("report pins: the dirty arm drives, then a real commit settles into compaction", async () => {
+test("report pins: the dirty arm drives, then a real commit settles into compaction (aborted: false — also the path a retry-wait or auto-compaction Escape settles through)", async () => {
   const cwd = scaffoldRepo();
   gitInit(cwd, { dirty: true });
   const h = await loadPerkSession({ cwd });
@@ -275,7 +278,7 @@ test("report pins: the dirty arm drives, then a real commit settles into compact
     assert.equal(deferred.instructions.length, 0, "no compaction before the run settles");
 
     commitAll(cwd, "the driven commit");
-    await emitSettled(h);
+    await emitSettled(h, false);
     assert.ok(
       h.notifies.includes("perk: commit-and-compact — committed — compacting the session…"),
     );
@@ -283,6 +286,38 @@ test("report pins: the dirty arm drives, then a real commit settles into compact
     const expected = commitsSince(cwd, before);
     assert.ok(expected?.includes("the driven commit"));
     assert.ok(deferred.instructions[0]?.includes(expected ?? "@@missing@@"));
+  } finally {
+    h.dispose();
+  }
+});
+
+test("report pins: a driven run stopped through session.abort() (aborted: true) skips compaction and the continuation even after a commit landed", async () => {
+  const cwd = scaffoldRepo();
+  gitInit(cwd, { dirty: true });
+  const h = await loadPerkSession({ cwd });
+  const seen = spyInjections(h);
+  const deferred = deferCompaction(h);
+  try {
+    await h.invokeCommand("commit-and-compact");
+    // HEAD moves, so the skip is provably the abort arm — the no-commit arm cannot fire.
+    commitAll(cwd, "the driven commit");
+    await emitSettled(h, true);
+    assert.ok(
+      h.notifies.includes(
+        "perk: commit-and-compact — the driven run was aborted — compaction skipped; run /compact " +
+          "to compact anyway.",
+      ),
+    );
+    assert.ok(!h.notifies.some((n) => n.includes("committed — compacting")));
+    assert.deepEqual(deferred.instructions, [], "an explicit stop never compacts");
+    await flushCallbacks();
+    assert.equal(seen.length, 1, "the drive guidance only — no continuation");
+
+    const noticeCount = h.notifies.length;
+    await emitSettled(h);
+    assert.equal(h.notifies.length, noticeCount, "the record was consumed — strictly one-shot");
+    assert.deepEqual(deferred.instructions, []);
+    assert.equal(seen.length, 1);
   } finally {
     h.dispose();
   }

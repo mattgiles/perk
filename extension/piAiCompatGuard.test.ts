@@ -2,12 +2,13 @@
 //
 // Settings-delivered Pi packages are deliberately unpinned, and the current pi-web-access imports
 // `@earendil-works/pi-ai/compat`. The extension loader of the repo-pinned SDK resolves that import
-// against the pi-ai copy nested inside the SDK — so if the devDeps pin regresses below pi-ai 0.80
-// (the first compat-bearing line), every remote-runner drive logs a non-fatal
-// "Failed to load extension: Cannot find module '…/pi-ai/dist/index.js/compat'" and silently loses
-// the web tools. This guard resolves the pi-ai copy *as the SDK's loader would* (the nested copy
-// when present, else the deduped top-level — mirroring the harness's `fauxModelRuntime`
-// probe) and asserts its `exports` map carries `"./compat"`.
+// against the pi-ai copy pi-coding-agent itself uses — the nested copy when the SDK ships one (the
+// shrinkwrapped ≤ 1.0.0 line), else the deduped top-level (≥ 1.0.1) — so if the devDeps pin
+// regresses below pi-ai 0.80 (the first compat-bearing line), every remote-runner drive logs a
+// non-fatal "Failed to load extension: Cannot find module '…/pi-ai/dist/index.js/compat'" and
+// silently loses the web tools. This guard resolves the pi-ai copy *as the SDK's loader would*
+// (the nested copy when present, else the deduped top-level — mirroring the harness's
+// `fauxModelRuntime` probe) and asserts its `exports` map carries `"./compat"`.
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
