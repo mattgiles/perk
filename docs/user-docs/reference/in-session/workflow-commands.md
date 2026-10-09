@@ -432,10 +432,15 @@ generically. This selection reflects persisted session linkage only — the comm
 the plan against its backend issue. Before continuing, the agent reorients from repository evidence (`git status`,
 recent log, and relevant diffs) instead of trusting the compacted summary alone. If worktree state
 cannot be determined or no commit appears, compaction is skipped loudly; a skipped or failed
-compaction never dispatches the continuation. If a compaction already landed during the driven turn
-(Pi's automatic threshold/overflow compaction, or perk's objective threshold compaction), perk skips
-its own compaction and starts the continuation directly. Pi's `/compact` remains the escape hatch.
-No paired tool.
+compaction never dispatches the continuation. If you stop the driven turn with Escape while the
+model is working (streaming or running tools), perk reports the abort and skips both the compaction
+and the continuation — even when a commit already landed — leaving `/compact` as the escape hatch.
+Escape during a retry wait or an automatic compaction cancels only that wait or compaction, not the
+run, so the turn then settles normally. (Pi 1.1.0 or newer reports the abort; an older host settles
+as before.) If a compaction already landed during the driven turn (Pi's automatic
+threshold/overflow compaction, or perk's objective threshold compaction), perk skips its own
+compaction and starts the continuation directly. Pi's `/compact` remains the escape hatch. No paired
+tool.
 
 ### `/draft-and-compact`
 
@@ -457,9 +462,11 @@ carrying that section is a checkpoint, never a review candidate.
 
 Compaction runs only once the draft artifact provably changed on the same run (a new digest, or no
 valid draft → a valid draft). No write, a byte-identical rewrite, or a run-identity change skips
-compaction loudly; a skipped or failed compaction never dispatches the continuation. If a compaction
-already landed during the driven turn, perk skips its own and starts the continuation directly, as
-with `/commit-and-compact`. The continuation embeds the just-written draft, re-verifies its anchors
+compaction loudly; a skipped or failed compaction never dispatches the continuation. Stopping the
+driven turn with Escape while the model is working skips compaction and the continuation with the
+same notice and the same limits as `/commit-and-compact`. If a compaction already landed during the
+driven turn, perk skips its own and starts the continuation directly, as with
+`/commit-and-compact`. The continuation embeds the just-written draft, re-verifies its anchors
 (file paths, symbols, behaviors) against the checkout, and works each `## Unresolved` item —
 exploring the codebase, or asking with `ask_user_question` where the decision is yours (a refinement
 keeps assumptions about future code named as assumptions rather than inventing certainty). It folds
