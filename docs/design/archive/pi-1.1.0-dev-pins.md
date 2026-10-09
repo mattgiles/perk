@@ -242,6 +242,31 @@ fields are unchanged.
 | `extension/pi/v1/delivery/commitCompact.test.ts` / `draftCompact.test.ts` | 37 / 37 and 16 / 16 |
 | `bump-pi` gate lines run individually (D7) | the `npm ls` gate exits 0; `node --test extension/piAiCompatGuard.test.ts` 1 / 1; `test_pi_toolchain_pin_lockstep` passes (with `tests/test_pi_host.py` and `tests/test_workflow_artifacts.py`: 47 passed) |
 
+**Final gate** at `4ed85111` (the complete change). This paragraph is the only later edit, and it
+is docs-only:
+
+```text
+perk CI: all checks passed.
+✓ lint-py (0s)
+✓ lint-js (5s)
+✓ typecheck-py (8s)
+✓ typecheck-js (52s)
+✓ typecheck-prose-review (24s)
+✓ test-py-fast (132s)
+✓ test-py-slow (55s)
+✓ test-js (34s)
+✓ docs-check (128s)
+⊘ changelog-check (skipped — no changed files match CHANGELOG.md)
+```
+
+The first run-all at the same commit failed one case in `test-py-fast`:
+`tests/test_implement_cmd.py::test_implement_explicit_id_inside_linked_worktree_writes_main_selector_only`
+failed with `git worktree list failed: fatal: not a git repository` inside its tmp repo, and the
+other 8309 passed. The change touches no Python logic. The case passed alone 3 / 3 (the file 9 / 9
+each time) and in the earlier standalone full `uv run pytest` above. It is recorded as a flake
+under the gate's concurrent checks, not triaged further here. The re-run above is the gate of
+record.
+
 ## Fixes taken (with triage-ladder rung)
 
 There were no rung-1 (install staleness), rung-3 (test expectation) or rung-4 (production
