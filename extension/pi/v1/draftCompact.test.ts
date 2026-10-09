@@ -46,9 +46,12 @@ const GIST_CARRY = ["title", "scope"];
 const OPEN_FENCE = "\n<working-draft>\n";
 const CLOSE_FENCE = "\n</working-draft>";
 
-/** Fire the one-shot settle hook exactly as the agent session does (the real registered path). */
-async function emitSettled(h: PerkSession): Promise<void> {
-  await h.session.extensionRunner.emit({ type: "agent_settled" });
+/**
+ * Fire the one-shot settle hook exactly as the agent session does — `aborted` as Pi ≥ 1.1.0
+ * reports it (the real registered path).
+ */
+async function emitSettled(h: PerkSession, aborted = false): Promise<void> {
+  await h.session.extensionRunner.emit({ type: "agent_settled", aborted });
 }
 
 /** Replace Pi's async compaction boundary with a manually settled promise. */
