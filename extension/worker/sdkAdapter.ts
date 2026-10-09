@@ -277,6 +277,8 @@ export function translateEvent(event: DriveEvent): StageEvent | null {
       message: event.errorMessage ?? "Unknown error",
     };
   }
+  // `agent_settled` (and its Pi ≥ 1.1.0 `aborted` flag) is deliberately untranslated: the worker's
+  // abort verdict is its own signal/budget trip (`stageExecution.ts`), never Pi's settle payload.
   return null;
 }
 

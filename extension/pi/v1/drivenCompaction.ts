@@ -16,6 +16,14 @@
 //     compacted`. A `session_compact` observed while a record is armed therefore makes the settle
 //     arm skip its own compaction and dispatch the continuation directly; one observed while our
 //     own compaction is in flight lets a failed compaction still resume on the foreign result.
+//   - A driven run that settles `aborted: true` — Pi sets it only when the run was stopped
+//     through `session.abort()`, which is Escape while the model streams or tools run — settles
+//     into a loud skip: no compaction, no continuation, the record consumed. The user stopped the
+//     agent; compacting and auto-starting a new turn would override that. Value-detected, so a
+//     host without the field settles as before. Escape during a retry wait or an automatic
+//     compaction aborts only that controller (`abortRetry()` / `abortCompaction()`), never the
+//     run, so such a run settles `aborted: false` and takes the ordinary settle path — a known
+//     residual, not handled here.
 //
 // The pending record is in-memory by design (lost on `/reload` — the user re-runs the command).
 // Human-only: registers a command, never a tool. The regression net for this seam is the
@@ -123,11 +131,22 @@ export function installDrivenCompaction<P, C>(
     });
   };
 
-  pi.on("agent_settled", async (_event, ctx) => {
+  pi.on("agent_settled", async (event, ctx) => {
     if (armed === null) return;
     const { record } = armed;
     armed = null; // consume-then-clear: the record is strictly one-shot
     try {
+      // Checked before `spec.settle`: an explicit stop outranks every door's settle verdict, even
+      // one that would prove a commit landed. `compactedMeanwhile` is left to the next
+      // invocation's reset (the drive arm and `compactNow` both reset it).
+      if (event.aborted === true) {
+        say(
+          ctx,
+          "warning",
+          "the driven run was aborted — compaction skipped; run /compact to compact anyway.",
+        );
+        return;
+      }
       const outcome = spec.settle(ctx, record);
       switch (outcome.kind) {
         case "skip":

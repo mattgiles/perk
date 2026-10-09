@@ -237,6 +237,10 @@ test("translateEvent: message_end is no longer observed (the error rides turn_en
     );
   }
   assert.equal(translateEvent({ type: "agent_settled" }), null);
+  // Hoisted const: `aborted` is not a `DriveEvent` field (the worker deliberately ignores it), so
+  // a plain object (not a typed literal) carries Pi's settle flag past structural typing.
+  const settledAborted = { type: "agent_settled", aborted: true };
+  assert.equal(translateEvent(settledAborted), null, "Pi's abort flag never becomes a verdict");
   assert.equal(translateEvent({ type: "compaction_start", reason: "threshold" }), null);
   assert.equal(translateEvent({ type: "auto_retry_end" }), null);
 });
