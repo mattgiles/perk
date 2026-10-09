@@ -2906,8 +2906,9 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   exists but the full spec differs from the desired pin — so a stale `npm:@mgiles/perk@0.0.0` is
   reconciled to `@{__version__}` (extra string duplicates of that identity collapse to one).
   perk's own identity and any **version-carrying** desired borrowed spec (today
-  `npm:pi-subagents@0.75.0` — `SUBAGENTS_PACKAGE`, the re-verified release perk's `script` RPC
-  spawn targets) are version-reconciled
+  `npm:pi-subagents@0.76.1` — `SUBAGENTS_PACKAGE`, the release characterized against Pi 1.1.0
+  that perk's `script` RPC spawn targets; the doctor guidance stamp is a separate fact that may
+  lag it) are version-reconciled
   forward through the same in-place rewrite (`_reconcile_pinned_entry`, selected by the desired
   spec carrying an `_npm_version`), so an existing consumer's unversioned or stale-pinned entry is
   `settings-wiring` drift that `perk init` converges and `doctor --fix` repairs; unversioned
@@ -3472,7 +3473,7 @@ ignores the keys (the documented fail-safe posture, pinned by test on both plane
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
 `_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
-`npm:pi-subagents@0.75.0` (the one version-pinned borrow, §8.6a), `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
+`npm:pi-subagents@0.76.1` (the one version-pinned borrow, §8.6a), `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
 perk injects **no** pi-fff search mode at either spawn site (local `_exec_pi`, remote
 `_spawn_worker`): pi-fff runs under its own precedence (CLI flag → `PI_FFF_MODE` → `pi-fff.json`
 → its additive `tools-and-ui` default, which keeps pi's builtin `find`/`grep` beside

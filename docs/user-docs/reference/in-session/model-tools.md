@@ -191,7 +191,7 @@ its package's row today.
 | `<inline:pi-subagents:prompt-runtime>` | child-engine | every stage | allowed |
 <!-- END foreign posture table -->
 
-Package rows match the spec without its version (`npm:pi-subagents@0.75.0` is
+Package rows match the spec without its version (`npm:pi-subagents@0.76.1` is
 `npm:pi-subagents`). **research** tools are external reads (web search and fetch, Linear reads,
 code search) and **universal** is the questionnaire every stage keeps; the two behave the same.
 **delegation** — spawning and supervising subagents, and the implementation checklist — belongs to

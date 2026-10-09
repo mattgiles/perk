@@ -116,13 +116,13 @@ nothing registers), and the headless worker checks the SDK it loaded and ends th
 `pi_version_unsupported` / `pi_version_unverifiable` failure before any drive work.
 
 **The perk-managed `.pi/settings.json` slice pins pi-subagents.** The borrowed set is unpinned
-except `npm:pi-subagents@0.75.0`: perk's report waves send the inline script text under the RPC
-spawn key `script`, which releases before 0.74.0 do not accept (0.75.0 is also the first release
-whose background children start on Pi 1.0.0). `perk init` writes the pinned spec and rewrites an
-existing unpinned or differently pinned entry in place (an object-form entry keeps its filter keys;
-only `source` changes); `perk doctor` reports such an entry as `settings-wiring` drift and `perk
-doctor --fix` repairs it. Pi installs the version the checkout's own committed
-`.pi/settings.json` names at the next launch, so an existing repo picks up the new entry from
+except `npm:pi-subagents@0.76.1`, the release characterized against Pi 1.1.0: perk's report waves
+send the inline script text under the RPC spawn key `script`, which is accepted since 0.74.0, and
+0.75.0 was the first release whose background children start on Pi 1.0.0. `perk init` writes the
+pinned spec and rewrites an existing unpinned or differently pinned entry in place (an object-form
+entry keeps its filter keys; only `source` changes); `perk doctor` reports such an entry as
+`settings-wiring` drift and `perk doctor --fix` repairs it. Pi installs the version the checkout's
+own committed `.pi/settings.json` names at the next launch, so an existing repo picks up the new entry from
 `perk init` or `perk doctor --fix` after upgrading perk, and an older branch or worktree keeps its
 own committed entry until rebased. perk's waves need pi-subagents' workflow scripts: a
 `disabledFeatures` entry of `workflow-scripts` in pi-subagents' `config.json` fails every wave with
@@ -133,7 +133,10 @@ matrix passed, and the doctor and scout waves and both browser-door waves, plan 
 passed on the Pi 0.99.2 host; on the Pi 1.0.0 host the plan door passed and the PR door was
 deferred unmeasured — PENDING in `docs/design/archive/pi-1.0.0-certification.md`) records what
 perk's guidance was verified against — a separate fact from this pin
-(`docs/design/archive/pi-subagents-0.75.0-reverify.md`).
+(`docs/design/archive/pi-subagents-0.75.0-reverify.md`) — today behind the pin: 0.76.1 is
+installed on characterization evidence while the stamp waits for the live certification, so
+`subagent-compat` warns on every converged checkout by design
+(`docs/design/archive/pi-subagents-0.76.1-pin.md`).
 
 **The perk-managed `.pi/settings.json` slice keeps a load order.** Besides converging the
 `packages` set (perk's pinned entry, the borrowed set, the provider-selected packages), `perk init`

@@ -144,15 +144,16 @@ The perk CLI and the `@mgiles/perk` Pi extension are expected to have matching v
 mismatch produces a soft, non-fatal launch warning. `perk doctor --fix` reconverges the
 repo-managed package pin and reinstalls the matching extension.
 
-`pi-subagents` is pinned to 0.75.0: `perk init` writes `npm:pi-subagents@0.75.0` into
+`pi-subagents` is pinned to 0.76.1: `perk init` writes `npm:pi-subagents@0.76.1` into
 `.pi/settings.json` and rewrites an existing unpinned or differently pinned entry in place, and
 `perk doctor` reports such an entry as `settings-wiring` drift that `perk doctor --fix` repairs.
 The pin exists because perk's report waves send the inline script text under pi-subagents' RPC
-spawn key `script`, which releases before 0.74.0 do not accept; 0.75.0 is also the first release
-whose background children start on Pi 1.0.0. Pi installs the version that the checkout's own
-committed `.pi/settings.json` names, at launch. An existing repo gets the new entry from
-`perk init` or `perk doctor --fix` after you upgrade perk. An older branch or worktree keeps its
-own committed entry (and its older perk) until it is rebased.
+spawn key `script`, which releases before 0.74.0 do not accept; 0.75.0 was the first release
+whose background children start on Pi 1.0.0, and 0.76.1 is the release characterized against
+Pi 1.1.0 (`docs/design/archive/pi-1.1.0-characterization.md`). Pi installs the version that the
+checkout's own committed `.pi/settings.json` names, at launch. An existing repo gets the new entry
+from `perk init` or `perk doctor --fix` after you upgrade perk. An older branch or worktree keeps
+its own committed entry (and its older perk) until it is rebased.
 
 perk's waves need pi-subagents' workflow scripts. A `disabledFeatures` list in pi-subagents'
 `config.json` that contains `workflow-scripts` fails every wave with the engine's own message
@@ -167,7 +168,10 @@ source was re-verified, the Pi 1.0.0 trust matrix passed, and the doctor and sco
 browser-door waves (the plan door and the PR door) passed on the Pi 0.99.2 host. See
 `docs/design/archive/pi-subagents-0.75.0-reverify.md`. On the Pi 1.0.0 host, the plan door
 passed and the PR door was deferred unmeasured, so
-`docs/design/archive/pi-1.0.0-certification.md` records its verdict as PENDING.
+`docs/design/archive/pi-1.0.0-certification.md` records its verdict as PENDING. With the 0.76.1
+pin installed, `perk doctor` therefore reports `subagent-compat` as a warning on every converged
+checkout. That is expected and truthful: the warning stays until the live certification of
+0.76.1 moves the stamp (`docs/design/archive/pi-subagents-0.76.1-pin.md`).
 
 Plannotator 0.27.16 or newer is required by the stack review browser (`/stack-review-browser`,
 `perk objective stack review`), which opens Plannotator's static-patch mode over the pinned
