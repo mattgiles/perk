@@ -20,8 +20,9 @@
 //    cohort-deferred member outside the loadout being applied, so the gate and the diet reach
 //    foreign tools without touching their activation, and a name removed at the restoration
 //    window's close stays hidden in the first request Pi builds from the pre-removal snapshot.
-//    Hidden tools stay active and callable; their prompt snippets drop out of the request, their
-//    guidelines do not. Fail-open.
+//    Hidden tools stay active and callable; their prompt snippets and (since Pi 1.0.4) their
+//    guidelines drop out of the request — Pi builds the tool list and the rules from the
+//    declared set minus the hidden names. Fail-open.
 //  - ENFORCEMENT is the read-only `tool_call` backstop: under the gate, edit/write, an
 //    unregistered name, an ineligible tool and an unsafe bash command are blocked. Fail-closed.
 //  - THE DISCOVERY COHORT: a session whose host has Pi's builtin `tool_search` registered and

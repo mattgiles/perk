@@ -8058,12 +8058,16 @@ pre-removal snapshot; masking an undeclared name is a no-op, and a deferred memb
 the very application that activates it (a `tool_search` hit, a prime). Pi runs every active hook on each `setActiveTools` and again right
 before each request (after `before_agent_start`), over the same unfiltered loadout, and unions the
 hidden sets. A hidden tool stays active, callable and declared in the transcript; Pi strips it
-from the request's declarations, and (verified on 0.99.2) its `promptSnippet` is dropped from the
-system prompt (`_rebuildSystemPrompt` builds the snippet map excluding the names hidden at that
-install; the pre-request pass only filters further) while its `promptGuidelines` still render.
-Because the presented mode leads every install, the hook run inside a gate-exit install already
-presents read-write, so `edit`/`write`'s snippets return in that same install. The hook never
-throws: a failure reports and hides only the host (presentation is fail-open). Its result is
+from the request's declarations and, since Pi 1.0.4 (`c30840c2`), from the system prompt's tool
+list AND rules: `_rebuildSystemPrompt` hands the hidden set to `buildSystemPromptSections` as
+`hiddenTools`, which lists tools and builds rules from `declaredTools = selectedTools −
+hiddenTools`, so a hidden tool contributes neither its `promptSnippet` nor its `promptGuidelines`
+(`ToolLoadout.getPromptGuidelines()` is a raw lookup for codemode's display, not the filter).
+Historical: 0.99.2–1.0.3 excluded only the snippet, at install time in `_rebuildSystemPrompt`,
+while the guidelines still rendered (verified on 0.99.2). Because the presented mode leads every
+install, the hook run inside a gate-exit install already presents read-write, so `edit`/`write`'s
+snippets return in that same install. The hook never throws: a failure reports and hides only the
+host (presentation is fail-open). Its result is
 hidden declarations only, on both arms: the `LoadoutPresentation` type (`toolPolicy.ts`) forbids
 Pi's `descriptions`, so the host never rewrites a model-facing description at request time. The
 host registers under a literal `name: "perk_stage"` with its policy-derived `exposure`/

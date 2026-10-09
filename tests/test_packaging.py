@@ -85,9 +85,9 @@ def test_npm_pin_lockstep():
 
 
 def test_pi_toolchain_pin_lockstep():
-    # The pinned pi SDK (`@earendil-works/pi-coding-agent`) resolves its own nested pi-ai; a
-    # top-level pi-ai pin that diverges from it puts test code and the session runtime in two
-    # different pi-ai module instances (separate api registries — see
+    # The pinned pi SDK declares pi-ai at a caret range of its own version; a diverging top-level
+    # pi-ai pin would make npm nest a second copy under the SDK, putting test code and the
+    # session runtime in two different pi-ai module instances (separate api registries — see
     # docs/learned/pi/headless-session-drive.md). The host-SDK bridge captures pi-agent-core and
     # pi-tui for the native consumers' facades, and perk's direct imports of both must never
     # typecheck against a stale peer resolution; the self-repo remote worker (`npm ci`) runs on
