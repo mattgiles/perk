@@ -1099,8 +1099,15 @@ One fresh owned-leaf request per dispatch (UUID, parent `ownerRunId`, `nodeId`
 submit-conflict|retained-conflict) carries `agent`, code-built `task`, worktree `cwd`, `context:
 "fresh"`, `timeoutMs`, the mode's plain-JSON `result` schema and the optional model — **no
 `extensionBindings`** (no read-only floor; fake-bus-pinned), no async/mission/worktree/acceptance
-keys. pi-subagents' global `worktree` default (`<agent dir>/extensions/subagent/config.json`) is
-read **once at engine activation**: missing/absent/`false` passes; anything else refuses every
+keys. Every request also carries `intercomBridge: {mode: "off"}` — an unconditional invariant of
+the transport (`FOREGROUND_INTERCOM_BRIDGE`, byte-equal to `WAVE_INTERCOM_BRIDGE`), not a
+`ForegroundLaunch` field, fake-bus-pinned: no `contact_supervisor` tool and no progress-update
+template reach either writer child, and a settings-scope `subagents.intercomBridge.mode` no longer
+affects either writer. The fake engine (`extension/testing/fakeConflictResolver.ts`) mirrors the
+engine's delegation-request field census and bridge validation as read at 0.76.1, answering a
+request the engine would reject `invalid_request`. pi-subagents' global `worktree` default
+(`<agent dir>/extensions/subagent/config.json`) is read **once at engine activation**:
+missing/absent/`false` passes; anything else refuses every
 dispatch as `incompatible-worktree-default` (stricter than the engine's fallback) stamping
 `nativeWorktreeConfig {path, observed}` (a text-free scalar or type name), rendered by both surfaces
 via `nativeWorktreeRefusal` with the fix (set `"worktree": false`/delete the key, quit and resume).
@@ -1222,8 +1229,17 @@ still fails the lane) and non-mutation is enforced by Perk's restrictions + the 
 prohibitions. `conflict-resolver` and `librarian` leave definition async absent (the engine
 default — each IS expected to mutate), retaining writer tools and project/skill inheritance true.
 All fourteen explicitly set `inheritGlobalContext: false` and omit both
-`extensions` and `subagentOnlyExtensions` (empty is not equivalent). Reports use ambient runner
-discovery; foreground writers have no ambient extensions or transported Perk handoff. Canonical
+`extensions` and `subagentOnlyExtensions` (empty is not equivalent). All fourteen also carry a
+blank `allowedAgents:` **descendant ceiling** directly after `tools:` — pi-subagents' empty list,
+denying every descendant launch from the child in foreground and background children alike; never
+the literal `[]`, which parses as the one-item list `["[]"]` and fails ceiling name validation at
+load, taking the def out of discovery. None grants nesting (`tools` without `subagent`, no
+`allowNestedSubagents`), so the ceiling is the engine backstop behind the prose prohibition; parent
+launch access is unaffected (a def's ceiling governs its descendants, never its own launch). The
+layout is pinned offline (`tests/_agent_defs.py`, the packed census included) and the engine's
+enforcement measured live (`docs/design/archive/pi-subagents-descendant-ceilings.md`). Reports use
+ambient runner discovery; foreground writers have no ambient extensions or transported Perk
+handoff. Canonical
 models stay intact — ONE `model:` per def, no `fallbackModels` (pi-subagents ≥ 0.68.0 rejects
 any def carrying that removed field wholesale at load; `[models.subagents]` remains the
 spawn-time override) — as do exact-source Ponytail skillPath exceptions
@@ -2869,8 +2885,9 @@ second `--fix` at `fixed == []`).
   known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` + `perk init` + session restart)
   — all report-only probes warn at worst and have no `--fix` arm (`subagent-engine`'s leftover
   arm being the one migration-repaired exception). (The former
-  `subagent-bridge-config` probe is retired: perk waves spawn with the intercom bridge off, so
-  a settings-scope `subagents.intercomBridge.mode` no longer affects any perk flow.) `--fix` also migrates a former
+  `subagent-bridge-config` probe is retired: perk waves and both foreground writer dispatches
+  spawn with the intercom bridge off, so a settings-scope `subagents.intercomBridge.mode` no longer
+  affects any perk flow.) `--fix` also migrates a former
   git-clone consumer forward by removing the orphaned clone. A managed piece `--fix` cannot
   verify (a malformed `.pi/settings.json` or pi-subagents `config.json`) is reported on
   `fix_errors` (`<check>: <message>`) instead of aborting the run — the file stays untouched and
@@ -7179,7 +7196,8 @@ workflow-defaults spread, suppressing the auto-inferred acceptance contract whos
 `acceptance-report` completion instruction competes with the engine-validated `structured_output`
 report; module-wide, no opt-out) beside the fixed `intercomBridge: {mode: "off"}`
 (`WAVE_INTERCOM_BRIDGE` — the same per-launch override spread: no `contact_supervisor` tool and
-no appended progress-update template reach any perk child; pi-subagents ≥ 0.68.0 discards
+no appended progress-update template reach any perk child (the foreground writers through
+`FOREGROUND_INTERCOM_BRIDGE`); pi-subagents ≥ 0.68.0 discards
 parent-side progress updates anyway, so the bridge would be pure cost — module-wide, no
 opt-out), blocks until the engine deadline plus perk's fixed settlement grace,
 and reads the durable `status.json` aggregate — the wave mechanics are CODE, never model-authored
@@ -14997,7 +15015,8 @@ shared transport `extension/pi/v1/foregroundDelegation.ts`, the snapshot policy
   foreground dispatch through the transport (`agent perk.librarian`, `cwd` = the main checkout,
   `nodeId librarian`, parent `ownerRunId` = the run id or the session id, `context: "fresh"`,
   `timeoutMs` the transport's 30 min, the plain-JSON record schema, the optional model, **no
-  `extensionBindings`**; the engine and the transport each refuse an already-aborted signal before
+  `extensionBindings`**, the intercom bridge off (`FOREGROUND_INTERCOM_BRIDGE`,
+  §8.3); the engine and the transport each refuse an already-aborted signal before
   emitting) → the **end-state bracket, always once a request was emitted** (a transport failure,
   a cancelled or an unconfirmed child included) → classification → corroboration.
 - *The record* (`LIBRARIAN_RECORD_SCHEMA`, closed): `action`, `outcome` ∈ `published` /

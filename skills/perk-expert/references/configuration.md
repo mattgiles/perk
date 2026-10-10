@@ -445,7 +445,11 @@ thinking = "high"
 
 Per-agent model overrides for perk's own project agents. **Fixed-key** — no effect on your custom
 subagents (they set `model` in frontmatter). An absent key falls back to the agent's frontmatter
-default.
+default. The table configures only the model; the rest of each profile is fixed by the shipped
+def — every shipped def and the session auditor carry a blank `allowedAgents:` (the empty
+descendant ceiling: no child can launch a subagent of its own), and both writers
+(`conflict-resolver`, `librarian`) are dispatched with the intercom bridge off, like the report
+waves.
 
 | Key | Type | Default |
 | --- | --- | --- |
