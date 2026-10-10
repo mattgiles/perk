@@ -42,6 +42,7 @@ from perk.convergence.doctor import (
 from perk.convergence.doctor import checks as doctor_checks
 from perk.convergence.doctor.checks import _SUBAGENTS_GUIDANCE_VERIFIED_VERSION
 from perk.convergence.init import run_init
+from perk.convergence.init.settings import _npm_version
 from perk.substrate import git, paths
 
 
@@ -1093,6 +1094,23 @@ def test_subagent_compat_unreadable_package_json_is_warn(scaffolded_perk_repo, m
 def test_subagent_compat_verified_version_stamp_is_pinned():
     # Only a full re-verify (docs/developers/pi-subagents-reverify.md) moves the stamp.
     assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.75.0"
+
+
+def test_subagent_compat_on_the_pinned_install_follows_the_stamp(scaffolded_perk_repo):
+    # A converged checkout installs exactly the settings pin. The pin may lead the guidance stamp
+    # (a release adopted on characterization evidence ahead of its live certification): then the
+    # warn is the truthful signal of that gap, and it clears to ok once the stamp catches up.
+    pinned = _npm_version(init.SUBAGENTS_PACKAGE)
+    assert pinned is not None
+    _plant_subagents_package(scaffolded_perk_repo, version=pinned)
+    compat = _subagent_compat_check(scaffolded_perk_repo)
+    if pinned != _SUBAGENTS_GUIDANCE_VERIFIED_VERSION:
+        assert compat.status == "warn"
+        assert pinned in compat.message
+        assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION in compat.message
+        assert init.SUBAGENTS_PACKAGE in compat.detail
+    else:
+        assert compat.status == "ok"
 
 
 # --- subagent-package-scope: a user-scope pi-subagents entry beside the project entry --------

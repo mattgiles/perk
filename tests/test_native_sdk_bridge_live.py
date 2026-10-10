@@ -135,7 +135,7 @@ def test_real_pi_selfcheck_reports_the_bridge_installed_and_both_consumers_loade
     per_source = next((line for line in stderr.splitlines() if "per source:" in line), None)
     assert per_source is not None, f"no per-source tool row:\n{stderr}"
     for name in CONSUMERS:
-        # A version-pinned source (`npm:pi-subagents@0.75.0`) carries its spec in the row.
+        # A version-pinned source (`npm:pi-subagents@0.76.1`) carries its spec in the row.
         match = re.search(rf"npm:{re.escape(name)}(?:@[^=;\s]+)?=(\d+)", per_source)
         assert match is not None and int(match.group(1)) >= 1, (
             f"{name} registered no tools through the facades:\n{per_source}"

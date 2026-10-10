@@ -758,8 +758,10 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 
 # The pi-subagents version perk's guidance was source-read against; bumped only on a deliberate
 # re-verify of the guidance. Distinct from the settings pin (`init.SUBAGENTS_PACKAGE`, what
-# consumers install, converged by `settings-wiring`): the two facts coincide today but move
-# independently.
+# consumers install, converged by `settings-wiring`): the two facts move independently — the pin
+# may lead this stamp while a newer supplier is adopted on characterization evidence ahead of its
+# live certification, and the resulting WARN is the truthful signal of that gap, never grounds to
+# advance the stamp without evidence.
 _SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.75.0"
 
 

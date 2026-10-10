@@ -36,7 +36,7 @@ hash = "sha256:0406c7c1a9bbbf39426d6d93020bf6f4baaac08e84fda322cfecb847c4bd4c28"
 path = ".pi/settings.json"
 kind = "block"
 version = "4.0.0"
-hash = "sha256:e122bd5c802ce7bdce3d3cd789985274d3562cce40f8f5168768befb2ebd3046"
+hash = "sha256:67dc51f74330df187c71bef6197e7e9c9a5975a0818a541dc2ecfd34b1982b8e"
 
 [managed.artifacts.skills-manifest]
 path = ".agents/manifest.d/perk.yaml"

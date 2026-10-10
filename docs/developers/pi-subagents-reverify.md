@@ -139,20 +139,26 @@ loading a second SDK copy.
 
 ## The standing pin decision
 
-pi-subagents is **pinned** to the re-verified release (`SUBAGENTS_PACKAGE =
-"npm:pi-subagents@0.75.0"` in `src/perk/convergence/init/settings.py`). perk's report waves send
+pi-subagents is **pinned** to exact 0.76.1 (`SUBAGENTS_PACKAGE =
+"npm:pi-subagents@0.76.1"` in `src/perk/convergence/init/settings.py`). perk's report waves send
 the inline script text under the RPC spawn key `script`, which pi-subagents accepts since 0.74.0
-(`docs/design/archive/pi-subagents-0.75.0-reverify.md`). `perk init` writes the pinned spec and
-reconciles an existing unpinned or differently pinned entry forward; `perk doctor --fix` repairs
-the same drift through `settings-wiring`. Pi installs whatever the checkout's own committed
-`.pi/settings.json` names, so the pin reaches a branch only with the change that moves it.
+(`docs/design/archive/pi-subagents-0.75.0-reverify.md`). The pin currently **leads** the
+guidance stamp (0.75.0): 0.76.1 was adopted on the characterization record, the offline and
+doctor halves and the in-process identity proof (`docs/design/archive/pi-subagents-0.76.1-pin.md`),
+and the stamp moves on the live certification (step 4), so `subagent-compat` warns by design until
+then. `perk init` writes the pinned spec and reconciles an existing unpinned or differently pinned
+entry forward; `perk doctor --fix` repairs the same drift through `settings-wiring`. Pi installs
+whatever the checkout's own committed `.pi/settings.json` names, so the pin reaches a branch only
+with the change that moves it.
 
 The re-verify ritual above decides **moving the pin**: the pin and the guidance stamp are two
 distinct facts (what consumers install vs. what perk's guidance was verified against) that move
 together only on evidence covering both — the source re-read, `run_ci` with the census drift
-guard, and the live leg. The browser-door halves cannot gate the stamp PR's own merge — a leg
-scheduled on that PR's own review door waits on the review of itself and does not run — so elect
-both halves up front as owed to the next node's sessions, or give the live leg its own node
-(step 4's owner-election arm); the evidence-contingent prose stays in its owed form until the
-commit that appends the evidence flips every carrier. A release that breaks a surface perk sends
-needs its migration first, in the same change as the pin.
+guard, and the live leg — or, when a release is adopted ahead of its live certification, the pin
+moves first on characterization and offline evidence and the stamp follows the certification;
+either way the record names which halves are owed. The browser-door halves cannot gate the stamp
+PR's own merge — a leg scheduled on that PR's own review door waits on the review of itself and
+does not run — so elect both halves up front as owed to the next node's sessions, or give the
+live leg its own node (step 4's owner-election arm); the evidence-contingent prose stays in its
+owed form until the commit that appends the evidence flips every carrier. A release that breaks a
+surface perk sends needs its migration first, in the same change as the pin.
