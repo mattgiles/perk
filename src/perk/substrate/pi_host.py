@@ -16,7 +16,7 @@ The decision is split from the I/O so it is testable without a process:
 
 The admission reads only the PATH CLI's own answer: it never consults ``package.json``,
 ``node_modules`` or a loaded SDK — those are independent observations, and equality between them
-is never required (a CLI ``1.0.0`` beside a ``0.99.2`` dev SDK pin is admitted on the CLI's own
+is never required (a CLI ``1.1.0`` beside a ``1.0.0`` dev SDK pin is admitted on the CLI's own
 reading).
 """
 

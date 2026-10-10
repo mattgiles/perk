@@ -92,9 +92,9 @@ machine-local store behind the one-line post-upgrade notice (the `perk release-n
 the max perk version this user has run interactively. Self-healing (missing/garbled content is
 silently re-recorded) and safe to delete; no doctor check or init convergence touches it.
 
-**The host floor (Pi ≥ 1.0.0, Node ≥ 22.19.0).** perk declares its minimum supported host
+**The host floor (Pi ≥ 1.1.0, Node ≥ 22.19.0).** perk declares its minimum supported host
 versions once in the bundled `shared/host-floor.yaml` and compares with semver precedence (a
-`1.0.0-rc.1` prerelease is below the floor; 1.0.3 or 1.10.0 is admitted). Every local launch (bare `perk`, a stage launch, `perk resume`) runs `pi --version`
+`1.1.0-rc.1` prerelease is below the floor; 1.1.1 or 1.10.0 is admitted). Every local launch (bare `perk`, a stage launch, `perk resume`) runs `pi --version`
 once (20 s timeout) as the first exec-phase step, before any lock sweep, chdir or exec, and refuses
 `pi_version_unsupported` (older or a floor prerelease) or `pi_version_unverifiable` (non-zero exit,
 timeout, spawn failure, or output that is not a version) — exit 1, naming the executable, the
@@ -103,13 +103,19 @@ observed version (or the reason), the required version and `npm install -g
 and `--help` are never gated by it. Instead the environment checks report the same floor: the `pi`
 row is presence + version and the `node` row compares the full version, and an outdated or
 unverifiable one is `ok=False` like a missing one (init exits 2 `missing_tool`; doctor `fail`). The
-managed remote runner installs exactly Pi 1.0.0 (`REMOTE_PI_VERSION`) for both the global CLI and
-the consumer worker SDK and sets up exactly Node 22.19.0. Pi 1.0.0 is the enforced host floor; its
-certification record (`docs/design/archive/pi-1.0.0-certification.md`) has the verdict PENDING —
-its three PR-door rows (X5b, S7, I7b's launch proof) were deferred by an operator decision and
-4.0.0 shipped with that verdict; the unpinned upgrade command installs the newest Pi, admitted
-when at or above the floor but uncertified after 1.0.0. The floor is a minimum, separate from the
-development pins, the pi-subagents pin below, and that remote install pin. The same floor is
+managed remote runner installs exactly Pi 1.1.0 (`REMOTE_PI_VERSION`) for both the global CLI and
+the consumer worker SDK and sets up exactly Node 22.19.0. Pi 1.1.0 is the enforced host floor and
+the remote install pin, **adopted** — not certified — on the characterization record
+(`docs/design/archive/pi-1.1.0-characterization.md`) plus the development-pin and pi-subagents-pin
+records (`pi-1.1.0-dev-pins.md`, `pi-subagents-0.76.1-pin.md`); its live certification on landed
+code is a later, separate record, still pending. The earlier 1.0.0 certification record
+(`docs/design/archive/pi-1.0.0-certification.md`, verdict PENDING — its three PR-door rows X5b, S7,
+I7b's launch proof were deferred by an operator decision and 4.0.0 shipped with that verdict) is
+historical and certifies nothing about 1.1.0. Only the pinned package is exact: its `^1.1.0`
+`@earendil-works/*` companions are resolved by npm at remote install time (Pi ships no shrinkwrap,
+and the remote installs use no lockfile). The unpinned upgrade command installs the newest Pi,
+admitted when at or above the floor but uncertified at 1.1.0 and after. The floor is a minimum,
+separate from the development pins, the pi-subagents pin below, and that remote install pin. The same floor is
 admitted at the SDK boundary, independently of the PATH `pi`: the loaded extension checks the Pi
 SDK it runs in and refuses to load (Pi reports a failed extension load carrying perk's refusal;
 nothing registers), and the headless worker checks the SDK it loaded and ends the run with a typed

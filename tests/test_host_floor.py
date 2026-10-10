@@ -49,9 +49,9 @@ def test_real_host_floor_loads_validates_and_pins_the_floors() -> None:
     floor = load_host_floor()
     assert validate(floor) == []
     assert floor.schema_version == 1
-    assert floor.pi_min_version == "1.0.0"
+    assert floor.pi_min_version == "1.1.0"
     assert floor.node_min_version == "22.19.0"
-    assert required_pi_version(floor) == Semver(1, 0, 0)
+    assert required_pi_version(floor) == Semver(1, 1, 0)
     assert required_node_version(floor) == Semver(22, 19, 0)
 
 

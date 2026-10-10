@@ -569,9 +569,9 @@ test("selfcheck (live): the report-detail entry carries the census block", async
     // CLI), so the bridge is the inert embedded-host state — and registers no hook.
     assert.match(msg, /; bridge=unsupported:embedded-host/);
     // The entry admitted the installed SDK; the census reports it beside the floor.
-    const installed = admitHostSdk(loadedHostSdkVersion(), "1.0.0").observed ?? "";
+    const installed = admitHostSdk(loadedHostSdkVersion(), "1.1.0").observed ?? "";
     assert.ok(
-      text.includes(`\n  host sdk: ${installed} (floor >= 1.0.0)\n  native sdk bridge:`),
+      text.includes(`\n  host sdk: ${installed} (floor >= 1.1.0)\n  native sdk bridge:`),
       text,
     );
     assert.match(

@@ -162,20 +162,20 @@ function assertRefusedBeforeDrive(
 // --- the worker entry ----------------------------------------------------------------------------
 
 test("worker: a below-floor SDK missing the adapter's exports is refused typed (exit 1), despite a passing PATH pi", () => {
-  const run = spawnWorker({ version: "0.95.0", pathPi: "1.0.0" });
+  const run = spawnWorker({ version: "0.95.0", pathPi: "1.1.0" });
   assertRefusedBeforeDrive(run, {
     errorType: "pi_version_unsupported",
-    message: formatHostSdkRefusal(admitHostSdk("0.95.0", "1.0.0"), "worker"),
+    message: formatHostSdkRefusal(admitHostSdk("0.95.0", "1.1.0"), "worker"),
   });
   // The refusal ran before the SDK-bearing graph could link.
   assert.doesNotMatch(run.stderr, /SyntaxError|does not provide an export/);
 });
 
 test("worker: a prerelease of the floor is unsupported", () => {
-  const run = spawnWorker({ version: "1.0.0-rc.1" });
+  const run = spawnWorker({ version: "1.1.0-rc.1" });
   assertRefusedBeforeDrive(run, {
     errorType: "pi_version_unsupported",
-    message: formatHostSdkRefusal(admitHostSdk("1.0.0-rc.1", "1.0.0"), "worker"),
+    message: formatHostSdkRefusal(admitHostSdk("1.1.0-rc.1", "1.1.0"), "worker"),
   });
 });
 
@@ -196,7 +196,7 @@ test("worker: an unparseable VERSION is unverifiable and names the value", () =>
 });
 
 test("worker: an at-floor SDK lacking the exports is a typed runtime_init (the lying SDK)", () => {
-  const run = spawnWorker({ version: "1.0.0" });
+  const run = spawnWorker({ version: "1.1.0" });
   assertRefusedBeforeDrive(run, {
     errorType: "runtime_init",
     message: /^worker runtime initialization failed: .*does not provide an export named/,
@@ -257,7 +257,7 @@ test("extension: the entry links nothing SDK-bearing before admission and refuse
   });
   assert.equal(run.status, 0, run.stderr);
   assert.deepEqual(JSON.parse(run.stdout.trim()), {
-    rejected: formatHostSdkRefusal(admitHostSdk("0.95.0", "1.0.0"), "extension"),
+    rejected: formatHostSdkRefusal(admitHostSdk("0.95.0", "1.1.0"), "extension"),
     touched: [],
   });
 });
@@ -279,7 +279,7 @@ test("extension: an SDK with no VERSION export is refused as unverifiable at the
   const result = JSON.parse(run.stdout.trim()) as { rejected?: string; touched: string[] };
   assert.equal(
     result.rejected,
-    formatHostSdkRefusal(admitHostSdk(undefined, "1.0.0"), "extension"),
+    formatHostSdkRefusal(admitHostSdk(undefined, "1.1.0"), "extension"),
   );
   assert.match(result.rejected ?? "", /exports no VERSION string/);
   assert.deepEqual(result.touched, []);

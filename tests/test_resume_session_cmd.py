@@ -232,7 +232,7 @@ def test_outdated_pi_refuses_after_the_picker_announce(git_repo, monkeypatch, la
 
     def _outdated(pi_path: str):
         raise UserFacingCliError(
-            f"pi at {pi_path} is version 0.99.2; perk requires Pi >= 1.0.0.",
+            f"pi at {pi_path} is version 0.99.2; perk requires Pi >= 1.1.0.",
             error_type="pi_version_unsupported",
         )
 
@@ -240,7 +240,7 @@ def test_outdated_pi_refuses_after_the_picker_announce(git_repo, monkeypatch, la
     result = _invoke(git_repo, [])
     assert result.exit_code == 1
     announce = result.stderr.index(f"opening Pi's session picker in {git_repo}: pi --resume")
-    assert announce < result.stderr.index("is version 0.99.2; perk requires Pi >= 1.0.0")
+    assert announce < result.stderr.index("is version 0.99.2; perk requires Pi >= 1.1.0")
     assert "pi_version_unsupported" not in result.stderr
     assert launch_exec_recorder.calls == [] and launch_exec_recorder.chdirs == []
 

@@ -173,10 +173,10 @@ def test_pi_with_undecodable_output_is_an_unverifiable_row_not_a_crash(monkeypat
     script.write_text('#!/bin/sh\nprintf "\\377\\n"\n', encoding="utf-8")
     script.chmod(0o755)
     monkeypatch.setattr(env, "which_absolute", lambda name: str(script))
-    pi = env._check_pi()  # the REAL probe
+    pi = env._check_pi()  # the REAL probe, against the shipped floor
     assert not pi.ok
     assert pi.detail == "version unverifiable (pi --version printed output that is not UTF-8)"
-    assert pi.remediation.startswith("Reinstall Pi (>= 1.0.0 required): ")
+    assert pi.remediation.startswith("Reinstall Pi (>= 1.1.0 required): ")
 
 
 def test_check_environment_carries_the_pi_row_in_place(monkeypatch):

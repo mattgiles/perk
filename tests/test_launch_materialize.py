@@ -320,7 +320,7 @@ def test_exec_pi_refuses_an_outdated_pi_before_any_exec_phase_side_effect(
     message = excinfo.value.format_message()
     assert str(script) in message
     assert "version 0.99.2" in message
-    assert "Pi >= 1.0.0" in message
+    assert "Pi >= 1.1.0" in message
     assert "npm install -g @earendil-works/pi-coding-agent" in message
     assert events == []  # neither chdir nor exec happened
     assert stale_lock.exists()  # the lock sweep never ran either
@@ -338,7 +338,7 @@ def test_exec_pi_refuses_an_unverifiable_pi(tmp_path, monkeypatch, launch_contex
     message = excinfo.value.format_message()
     assert str(script) in message
     assert "pi --version exited 3: nope" in message
-    assert "Pi >= 1.0.0" in message
+    assert "Pi >= 1.1.0" in message
     assert events == []
     assert stale_lock.exists()
 
