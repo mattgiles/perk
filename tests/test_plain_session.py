@@ -240,7 +240,7 @@ def test_outdated_pi_refuses_after_the_announce(git_repo, monkeypatch, launch_ex
 
     def _outdated(pi_path: str):
         raise UserFacingCliError(
-            f"pi at {pi_path} is version 0.99.2; perk requires Pi >= 1.0.0.",
+            f"pi at {pi_path} is version 0.99.2; perk requires Pi >= 1.1.0.",
             error_type="pi_version_unsupported",
         )
 
@@ -248,7 +248,7 @@ def test_outdated_pi_refuses_after_the_announce(git_repo, monkeypatch, launch_ex
     result = _invoke(git_repo)
     assert result.exit_code == 1
     assert result.stdout == ""
-    assert "is version 0.99.2; perk requires Pi >= 1.0.0" in result.stderr
+    assert "is version 0.99.2; perk requires Pi >= 1.1.0" in result.stderr
     assert "pi_version_unsupported" not in result.stderr  # the human surface never renders it
     _assert_announce_precedes_error(result.stderr, git_repo)
     _assert_untouched(launch_exec_recorder)  # admitted pre-chdir: no chdir, no exec

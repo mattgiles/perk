@@ -11,6 +11,6 @@
 # equality between observations is never required.
 schema_version: 1
 pi:
-  min_version: "1.0.0"
+  min_version: "1.1.0"
 node:
   min_version: "22.19.0"

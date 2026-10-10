@@ -130,6 +130,29 @@ test("formatHostSdkRefusal: worker texts", () => {
   );
 });
 
+test("the shipped floor: the previous floor and its prerelease are refused; the floor and an unequal later release are admitted", () => {
+  // Readings against the bundled floor itself (not an explicit argument): a raise refuses the
+  // floor it replaced, a prerelease of the new floor stays below it, and a later release unequal
+  // to the floor and to the dev pin is admitted on its own reading — never equality.
+  const floor = loadHostFloor().piMinVersion;
+  for (const observed of ["1.0.0", "1.1.0-rc.1"]) {
+    assert.deepEqual(admitHostSdk(observed, floor), {
+      outcome: "unsupported",
+      observed,
+      required: "1.1.0",
+      detail: "",
+    });
+  }
+  for (const observed of ["1.1.0", "1.2.0"]) {
+    assert.deepEqual(admitHostSdk(observed, floor), {
+      outcome: "admitted",
+      observed,
+      required: "1.1.0",
+      detail: "",
+    });
+  }
+});
+
 test("precondition: the installed SDK this suite runs on is admitted by the shipped floor", () => {
   // CI's real-runtime tier must run on an admitted SDK. A red pin here means a stale
   // node_modules (e.g. a worktree resolving an older SDK by walk-up) — repair the install.

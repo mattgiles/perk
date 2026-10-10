@@ -170,11 +170,15 @@ _PERK_INSTALL_SELF = "uv tool install --from . perk"
 _PERK_INSTALL_CONSUMER = f"uv tool install perk=={__version__}"
 
 # The exact Pi both remote installs use (the global CLI and the consumer worker SDK) — the
-# certified published subject (contracts.md §8.14, §8.76). Distinct from the host floor (a
+# adopted published subject (contracts.md §8.14, §8.76(b)). Distinct from the host floor (a
 # minimum, `shared/host-floor.yaml`), the development pins (`package.json` devDependencies) and
-# the pi-subagents supplier pin. Moved only after a live re-verify, and never below the floor
-# (a test pins that).
-REMOTE_PI_VERSION = "1.0.0"
+# the pi-subagents supplier pin. It moves with the floor on characterization + offline evidence;
+# the live certification of the pair follows as its own record; it is never below the floor (a
+# test pins that). Its caret-ranged `@earendil-works/*` companions (pi-ai, pi-tui, …) are
+# resolved by npm at install time — Pi ships no shrinkwrap since 1.0.1 and neither install uses a
+# lockfile — so the registry preflight run at each move is what ties them to the characterized
+# graph.
+REMOTE_PI_VERSION = "1.1.0"
 _PI_GLOBAL_INSTALL = f"npm install -g {PI_NPM_SPEC}@{REMOTE_PI_VERSION}"
 
 # The Node worker deps step differs by repo kind. The self-repo has the `package.json` + lockfile +

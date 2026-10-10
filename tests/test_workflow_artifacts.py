@@ -10,6 +10,8 @@ from perk.run.runner import GITHUB_ACTIONS_WORKFLOW
 from perk.substrate.host_floor import load_host_floor, required_pi_version
 from perk.substrate.semver import parse_semver, satisfies_floor
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 def test_workflow_path_matches_the_locked_dispatch_filename():
     # §8.13 locks `perk-run.yml` (runner.GITHUB_ACTIONS_WORKFLOW); the managed file must match.
@@ -138,7 +140,7 @@ def test_composite_action_pins_pi_and_node_for_both_repo_kinds():
     for self_repo in (True, False):
         doc = yaml.safe_load(wa.remote_setup_action(self_repo=self_repo))
         steps = {step["name"]: step for step in doc["runs"]["steps"]}
-        assert steps["Install pi"]["run"] == "npm install -g @earendil-works/pi-coding-agent@1.0.0"
+        assert steps["Install pi"]["run"] == "npm install -g @earendil-works/pi-coding-agent@1.1.0"
         node = steps["Set up Node 22.19.0"]
         assert node["with"]["node-version"] == "22.19.0"  # exact: CI exercises the floor
 
@@ -194,7 +196,7 @@ def test_composite_action_worker_deps_is_repo_kind_aware():
         if s["name"] == "Install Node worker deps"
     )
     assert deps["run"] == (
-        f"npm install @mgiles/perk@{__version__} @earendil-works/pi-coding-agent@1.0.0"
+        f"npm install @mgiles/perk@{__version__} @earendil-works/pi-coding-agent@1.1.0"
         " --prefix .pi/npm --legacy-peer-deps"
     )
     assert "--prefix .pi/npm" in consumer
@@ -236,6 +238,16 @@ def test_converge_reports_and_repairs_drift(tmp_path: Path):
     # Apply repairs it back to the template.
     wa.converge_runner_workflow(tmp_path, True, apply=True)
     assert workflow.read_text(encoding="utf-8") == wa.PERK_RUN_WORKFLOW
+
+
+def test_committed_self_repo_remote_artifacts_are_the_owners_render():
+    # The perk repo's own committed runner files are owner outputs: a floor / remote-pin / template
+    # move that forgets `perk doctor --fix` (the `runner-workflow` convergence) fails here, not on
+    # a runner. The self-repo render reads no `__version__`, so this holds across releases.
+    workflow = (REPO_ROOT / wa.RUNNER_WORKFLOW_PATH).read_bytes()
+    action = (REPO_ROOT / wa.REMOTE_SETUP_ACTION_PATH).read_bytes()
+    assert workflow == wa.PERK_RUN_WORKFLOW.encode("utf-8")
+    assert action == wa.remote_setup_action(self_repo=True).encode("utf-8")
 
 
 def test_run_name_template_and_parser_are_in_lockstep():

@@ -65,9 +65,10 @@ def test_a_long_malformed_output_is_truncated_in_the_detail() -> None:
 
 
 def test_the_dev_pin_satisfies_the_floor_and_the_cli_is_admitted_independently() -> None:
-    # Independent observations: the committed SDK devDependency satisfies the floor, yet the
-    # launch admission reads only the PATH CLI's own answer — a below-floor CLI is refused beside
-    # the pin, and an at-floor CLI is admitted on its own reading.
+    # Independent observations against the SHIPPED floor: the committed SDK devDependency
+    # satisfies it, yet the launch admission reads only the PATH CLI's own answer — the previous
+    # floor and a prerelease of the current one are refused beside the pin, while the floor and an
+    # unequal later release are each admitted on their own reading.
     package = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
     sdk_pin = package["devDependencies"]["@earendil-works/pi-coding-agent"]
     floor = required_pi_version(load_host_floor())
@@ -75,9 +76,15 @@ def test_the_dev_pin_satisfies_the_floor_and_the_cli_is_admitted_independently()
     assert pinned is not None, sdk_pin
     assert satisfies_floor(pinned, floor), sdk_pin
     assert admit_pi_version(PI, "0.99.2\n", floor).outcome == "unsupported"
-    admitted = admit_pi_version(PI, "1.0.0\n", floor)
-    assert admitted.outcome == "admitted"
-    assert admitted.observed == "1.0.0"
+    assert admit_pi_version(PI, "1.0.0\n", floor).outcome == "unsupported"
+    assert admit_pi_version(PI, "1.1.0-rc.1\n", floor).outcome == "unsupported"
+    at_floor = admit_pi_version(PI, "1.1.0\n", floor)
+    assert at_floor.outcome == "admitted"
+    assert at_floor.observed == "1.1.0"
+    later = admit_pi_version(PI, "1.2.0\n", floor)
+    assert later.outcome == "admitted"
+    assert later.observed == "1.2.0"
+    assert later.observed != sdk_pin
 
 
 def _code_strings(path: Path) -> list[str]:
@@ -119,12 +126,12 @@ def test_probe_runs_version_once_with_the_bounded_timeout(
 
     def fake_run(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
         calls.append((list(argv), timeout))
-        return _completed(0, "1.0.0\n")
+        return _completed(0, "1.1.0\n")
 
     monkeypatch.setattr(pi_host, "run_captured", fake_run)
-    host = probe_pi_host(PI)
+    host = probe_pi_host(PI)  # no floor argument: the bundled floor
     assert calls == [([PI, "--version"], 20)]
-    assert host == PiHost(PI, "admitted", "1.0.0", "1.0.0", "")
+    assert host == PiHost(PI, "admitted", "1.1.0", "1.1.0", "")
 
 
 def test_probe_defaults_to_the_bundled_floor(monkeypatch: pytest.MonkeyPatch) -> None:

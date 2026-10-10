@@ -4280,7 +4280,7 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   an exact-version-pinned PyPI install `uv tool install perk=={__version__}` for a consumer,
   baked in at `perk init` time so the runner reproduces the wiring perk version), pi (the interior the
   worker drives — `npm install -g @earendil-works/pi-coding-agent@<REMOTE_PI_VERSION>`, exactly
-  `1.0.0`), the **skills CLI** (`go install github.com/mattgiles/skills/cmd/skills@latest`
+  `1.1.0`), the **skills CLI** (`go install github.com/mattgiles/skills/cmd/skills@latest`
   — built from source because its release binaries are darwin-only; the runner's preinstalled Go +
   `GOTOOLCHAIN=auto` suffice, and the step is **fatal**: a failed install fails the job — no
   skills, no drive), the Node worker's peer deps, and a final **git-identity** step (`perk[bot]`,
@@ -4288,9 +4288,12 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   aware: **self** uses `npm ci` (the self-repo has the `package.json`/lockfile/devDeps the worker
   resolves; the committed pins); **consumer** installs the pinned `@mgiles/perk` **plus the pi SDK
   pinned to `REMOTE_PI_VERSION`** (`npm install @mgiles/perk@{__version__}
-  @earendil-works/pi-coding-agent@1.0.0 --prefix .pi/npm --legacy-peer-deps`, the perk pin baked in
+  @earendil-works/pi-coding-agent@1.1.0 --prefix .pi/npm --legacy-peer-deps`, the perk pin baked in
   at `perk init` time so the runner reproduces the wiring perk version; the consumer worker SDK is
-  the remote wave host, so it carries the same exact pin as the global CLI). `@mgiles/perk` ships **zero** runtime `dependencies` (the pi packages are peers) and
+  the remote wave host, so it carries the same exact pin as the global CLI). Only the pinned
+  package is exact: its `^1.1.0` `@earendil-works/*` companions are resolved by npm at install
+  time (Pi ships no `npm-shrinkwrap.json` since 1.0.1, and neither remote install uses a lockfile),
+  bound to the characterized graph by the registry preflight each pin move runs. `@mgiles/perk` ships **zero** runtime `dependencies` (the pi packages are peers) and
   `--legacy-peer-deps` makes npm skip peer installation entirely — the SDK spec is what lands the
   worker's imports: its real deps (pi-ai, pi-tui, typebox) close the worker graph's bare-import set
   under `.pi/npm/node_modules/`, resolvable from the staged `consumer-npm` entry (step 5 below).
@@ -15076,14 +15079,14 @@ The fourth parsed cross-plane contract (beside `registry.yaml`, `bindings.yaml`,
 ```yaml
 schema_version: 1
 pi:
-  min_version: "1.0.0"
+  min_version: "1.1.0"
 node:
   min_version: "22.19.0"
 ```
 
 A **floor** is a minimum (`>=`) compared with semver 2.0.0 precedence: a prerelease of the floor
-triple (`1.0.0-rc.1`) is below it, build metadata carries no precedence, and a later release
-(`1.0.3`, `1.10.0`) is admitted. Each entry is a plain release `MAJOR.MINOR.PATCH` string. The
+triple (`1.1.0-rc.1`) is below it, build metadata carries no precedence, and a later release
+(`1.1.1`, `1.10.0`) is admitted. Each entry is a plain release `MAJOR.MINOR.PATCH` string. The
 Python reader is authoritative: `load_host_floor` raises `HostFloorError` for structural failures
 (missing file, YAML error, not a mapping, unsupported `schema_version`, a wrong-typed present
 field), and `validate()` returns findings for content (missing, not semver, not a plain release).
@@ -15098,8 +15101,10 @@ Five facts, each in its own home, never conflated: the **host floor** (this file
 the **development pins** (`package.json` `devDependencies` — exact); the **pi-subagents supplier
 pin** (§8.10 settings wiring); the **doctor guidance stamp** (`subagent-compat`); and the **remote
 install pin** `REMOTE_PI_VERSION` (`perk/run/workflow_artifacts.py`, §8.14) — exact, the
-certified published subject, used by both remote installs (the global `pi` CLI and the consumer
-worker SDK), never below the floor (a test pins it). Every host observation — the PATH `pi` CLI,
+**adopted** published subject, used by both remote installs (the global `pi` CLI and the consumer
+worker SDK). It moves with the floor on characterization + offline evidence; the live
+certification of the pair follows as its own later record (adopted is not certified), and it is
+never below the floor (a test pins it). Every host observation — the PATH `pi` CLI,
 a loaded SDK — is admitted **independently** against the same floor; equality between
 observations is never required (a floor-satisfying CLI beside an older dev SDK pin is admitted on
 the CLI's own reading). The launch admission below reads no `package.json`, `node_modules` or
@@ -15185,7 +15190,7 @@ floor that cannot be read is a precondition failure (`perk worker: host floor un
 exit 2).
 
 **Independence.** Three observations — the PATH CLI ((c)), the extension's host SDK, the worker's
-SDK — against one minimum, never equality: a `1.0.0` CLI beside a `1.0.1` SDK is admitted on each
+SDK — against one minimum, never equality: a `1.1.0` CLI beside a `1.1.1` SDK is admitted on each
 reading, and a passing `pi --version` certifies neither runtime.
 
 **Not checked.** Node (its floor is the environment rows' and `engines.node`'s); the remote

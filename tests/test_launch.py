@@ -238,7 +238,7 @@ def _refuse_host(monkeypatch, events: list[str] | None = None) -> None:
         if events is not None:
             events.append("admit")
         raise UserFacingCliError(
-            f"pi at {pi_path} is version 0.99.2; perk requires Pi >= 1.0.0.",
+            f"pi at {pi_path} is version 0.99.2; perk requires Pi >= 1.1.0.",
             error_type="pi_version_unsupported",
         )
 
@@ -247,7 +247,7 @@ def _refuse_host(monkeypatch, events: list[str] | None = None) -> None:
 
 def test_exec_pi_admitted_host_execs(tmp_path, launch_exec_recorder):
     checkout = _exec_pi_direct(tmp_path, launch_exec_recorder, run_id="01X")
-    assert launch_exec_recorder.pi_version == "1.0.0"
+    assert launch_exec_recorder.pi_version == "1.1.0"
     assert launch_exec_recorder.chdirs == [checkout]
     assert [call[0] for call in launch_exec_recorder.calls] == [launch_exec_recorder.pi_path]
 

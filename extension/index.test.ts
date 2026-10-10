@@ -294,10 +294,10 @@ test("host admission: a below-floor host SDK rejects the factory before any regi
       },
     }),
     (err: Error) => {
-      assert.equal(err.message, formatHostSdkRefusal(admitHostSdk("0.99.2", "1.0.0"), "extension"));
+      assert.equal(err.message, formatHostSdkRefusal(admitHostSdk("0.99.2", "1.1.0"), "extension"));
       assert.match(
         err.message,
-        /^perk requires Pi >= 1\.0\.0; the Pi running this session is 0\.99\.2 /,
+        /^perk requires Pi >= 1\.1\.0; the Pi running this session is 0\.99\.2 /,
       );
       return true;
     },
@@ -309,7 +309,7 @@ test("host admission: a below-floor host SDK rejects the factory before any regi
 test("host admission: an unverifiable VERSION rejects with the reason", async () => {
   const { pi, touched } = recordingPi();
   await assert.rejects(perk(pi, { hostSdkVersion: () => undefined }), (err: Error) => {
-    assert.equal(err.message, formatHostSdkRefusal(admitHostSdk(undefined, "1.0.0"), "extension"));
+    assert.equal(err.message, formatHostSdkRefusal(admitHostSdk(undefined, "1.1.0"), "extension"));
     assert.match(err.message, /could not verify this Pi's version \(.*exports no VERSION string/);
     return true;
   });
@@ -320,7 +320,7 @@ test("host admission: a floor-satisfying, unequal host SDK activates independent
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
   const h = await loadPerkSession({
     cwd,
-    hostSdkVersion: () => "1.0.1",
+    hostSdkVersion: () => "1.1.1",
     env: { PERK_RUN_ID: "01RID", PERK_CLI_VERSION: "9.9.9-not-real" },
   });
   try {
@@ -336,7 +336,7 @@ test("host admission: a floor-satisfying, unequal host SDK activates independent
       data?: { text?: string };
     }[];
     const detail = entries.find((entry) => entry.customType === REPORT_DETAIL_TYPE);
-    assert.match(detail?.data?.text ?? "", /\n {2}host sdk: 1\.0\.1 \(floor >= 1\.0\.0\)\n/);
+    assert.match(detail?.data?.text ?? "", /\n {2}host sdk: 1\.1\.1 \(floor >= 1\.1\.0\)\n/);
   } finally {
     h.dispose();
   }
