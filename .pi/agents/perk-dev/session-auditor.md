@@ -4,6 +4,7 @@ package: perk-dev
 description: Grades ONE session-audit evidence packet against ONE judgment-tier expectation in a fresh, isolated session and returns a structured verdict (a lead, not a proof) — it never writes files, posts anywhere, or spawns subagents. Used by the perk-dev audit judgment wave (run_audit_wave inside a perk-dev audit judge session). Dev-only; repo-local.
 model: openai/gpt-5.6-luna
 tools: read, grep, find, ls, bash
+allowedAgents:
 systemPromptMode: replace
 async: true
 inheritGlobalContext: false

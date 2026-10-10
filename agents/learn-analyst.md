@@ -4,6 +4,7 @@ package: perk
 description: Analyzes a landed plan's session-grounded evidence bundle along ONE assigned angle in a fresh, isolated session (so the planning/implementation history never biases the analysis) and returns structured learning candidates, each with a reconciled decision — it never captures learnings, creates issues, posts, or writes files. The parent /learn orchestrator reconciles the per-angle reports into one classified decision. Used by /learn.
 model: anthropic/claude-sonnet-4-5
 tools: read, grep, find, ls, bash
+allowedAgents:
 systemPromptMode: replace
 async: true
 inheritGlobalContext: false

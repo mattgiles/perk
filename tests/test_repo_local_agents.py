@@ -4,13 +4,15 @@
 directory (never in the `@mgiles/perk` npm package) and outside the legacy `.pi/agents/perk/`
 the `doctor --fix` migration removes. The namespace's sole member today is `session-auditor`
 (the perk-dev session-audit judgment wave's auditor). These tests pin only the safety-bearing
-shape of the def — the read-only tool grant and the isolation/acceptance knobs — not the full
+shape of the def — the read-only tool grant, the blank `allowedAgents:` descendant ceiling, and the
+isolation/acceptance knobs — not the full
 prose, plus the retirement of the former `analyst` def (promoted to the shipped `perk.scout`).
 """
 
 from pathlib import Path
 
 import yaml
+from _agent_defs import assert_descendant_ceiling
 
 _REPO_ROOT = Path(__file__).parent.parent
 _PERK_DEV_DIR = _REPO_ROOT / ".pi" / "agents" / "perk-dev"
@@ -18,7 +20,8 @@ _PERK_DEV_DIR = _REPO_ROOT / ".pi" / "agents" / "perk-dev"
 
 def test_auditor_is_a_background_report_outside_delivery():
     path = _PERK_DEV_DIR / "session-auditor.md"
-    fm = yaml.safe_load(path.read_text(encoding="utf-8").split("---", 2)[1])
+    text = path.read_text(encoding="utf-8")
+    fm = yaml.safe_load(text.split("---", 2)[1])
     assert not (_REPO_ROOT / "agents" / "session-auditor.md").exists()
     assert fm["name"] == "session-auditor"
     assert fm["package"] == "perk-dev"
@@ -41,6 +44,9 @@ def test_auditor_is_a_background_report_outside_delivery():
     # the def carries no `completionGuard`; the auditor completes on its validated report, and
     # acceptance stays suppressed by the wave spawn, not by frontmatter.
     assert "completionGuard" not in fm
+    # The descendant ceiling (engine: the empty list; PyYAML: None) behind an absent nesting grant.
+    assert_descendant_ceiling(text, path)
+    assert fm["allowedAgents"] is None
     for absent in (
         "extensions",
         "subagentOnlyExtensions",
@@ -48,6 +54,7 @@ def test_auditor_is_a_background_report_outside_delivery():
         "skillPath",
         "acceptance",
         "mission",
+        "allowNestedSubagents",
     ):
         assert absent not in fm
 

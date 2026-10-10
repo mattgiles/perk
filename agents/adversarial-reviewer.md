@@ -4,6 +4,7 @@ package: perk
 description: Reviews a pull request (own or foreign) along ONE assigned angle in a fresh, isolated session, treating the PR text as unverified claims and never executing anything from the PR head; returns severity/confidence-tagged, diff-anchored findings for the driving door's human triage loop — it never posts, never writes files, and never touches the review surface. Used by the human-in-the-loop review doors (/pr-review-terminal, /pr-review-browser).
 model: anthropic/claude-fable-5
 tools: read, grep, find, ls, bash
+allowedAgents:
 systemPromptMode: replace
 async: true
 inheritGlobalContext: false
