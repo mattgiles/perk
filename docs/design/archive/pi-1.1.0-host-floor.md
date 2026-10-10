@@ -176,6 +176,28 @@ update --sync\` exited 1` with a `conflict` for every skill in this worktree's g
 | `run_ci` subset `lint-py,lint-js,typecheck-py,typecheck-js,test-py-fast,test-js` | all ✓ |
 | `just docs-check` | green |
 
+**Final gate** at `d32b062c` (the complete change). This paragraph is the only later edit, and it
+is docs-only. Eight rows **executed** (`lint-py`, `lint-js`, `typecheck-py`, `typecheck-js`,
+`test-py-fast`, `test-py-slow` (which re-runs the live bridge smoke on the PATH `pi`), `test-js`
+(the fast node:test tier) and `docs-check`); two were **glob-skipped** and are not runs
+(`typecheck-prose-review`, `changelog-check`). The slow node:test tier, which carries
+`extension/worker/stageExecutionE2e.test.ts` and is outside the `test-js` row, ran explicitly
+above (`just test-js-slow`, 1001 / 1001).
+
+```text
+perk CI: all checks passed.
+✓ lint-py (2s)
+✓ lint-js (10s)
+✓ typecheck-py (8s)
+✓ typecheck-js (77s)
+⊘ typecheck-prose-review (skipped — no changed files match tools/prose-review/**,package.json,package-lock.json)
+✓ test-py-fast (320s)
+✓ test-py-slow (139s)
+✓ test-js (68s)
+✓ docs-check (352s)
+⊘ changelog-check (skipped — no changed files match CHANGELOG.md)
+```
+
 ## Live proofs on the real pins
 
 | Host | `tests/test_native_sdk_bridge_live.py` (`-n0 -v -rfEs`) |
