@@ -153,6 +153,7 @@ test("retained dispatch: one public request at the retained worktree; the offer 
     assert.equal(request.model, "offline/override");
     assert.match(String(request.task), /\nRETAINED-CONTINUATION SENTINEL:/);
     assert.equal(Object.hasOwn(request, "extensionBindings"), false);
+    assert.deepEqual(request.intercomBridge, { mode: "off" });
     assert.equal(w.injected.length, 1);
     assert.match(w.injected[0] ?? "", /NEW explicit human approval/);
     assert.match(w.injected[0] ?? "", /objective: 7, continue: true/);

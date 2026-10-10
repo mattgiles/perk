@@ -1,8 +1,8 @@
 // The one foreground-delegation transport both writer children ride: the sole carrier of the
 // public delegation event literals, one correlated request per dispatch, no restriction packet
-// (writers never get the read-only floor) and no fallback transport. Callers own authorization,
-// locks, task construction and classification; this module owns only the correlation lifecycle
-// and reports the native facts it observed.
+// (writers never get the read-only floor), the intercom bridge off, and no fallback transport.
+// Callers own authorization, locks, task construction and classification; this module owns only
+// the correlation lifecycle and reports the native facts it observed.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -32,6 +32,18 @@ export const REQUEST_TIMEOUT_MS = 1_800_000;
 export const START_ACK_MS = 5_000;
 export const CANCEL_GRACE_MS = 5_000;
 
+/**
+ * The intercom-bridge disable every foreground request carries. pi-subagents' global
+ * `intercomBridge.mode` defaults to `always`, which would activate the bridge for a fresh-context
+ * foreground writer: `contact_supervisor` appended to its explicit tool allowlist and the
+ * progress-update template appended to its system prompt — while the parent has discarded every
+ * child `progress_update` since 0.68.0. The writers never ask decisions either, so they are
+ * completion-only like the report waves: `{mode: "off"}` resolves to an inactive bridge for this
+ * launch only. An unconditional invariant of the transport (never a launch field or a settings
+ * key), byte-equal to the wave transport's `WAVE_INTERCOM_BRIDGE`.
+ */
+export const FOREGROUND_INTERCOM_BRIDGE = { mode: "off" } as const;
+
 export interface DelegationEvents {
   on(event: string, handler: (data: unknown) => void): () => void;
   emit(event: string, data: unknown): void;
@@ -44,7 +56,10 @@ export interface DelegationTuple {
   nodeId: string;
 }
 
-/** One foreground launch. The deadline is always `REQUEST_TIMEOUT_MS` — no per-launch knob. */
+/**
+ * One foreground launch. The deadline is always `REQUEST_TIMEOUT_MS` and the bridge is always off
+ * (`FOREGROUND_INTERCOM_BRIDGE`) — neither is a per-launch knob.
+ */
 export interface ForegroundLaunch {
   agent: string;
   task: string;
@@ -321,6 +336,7 @@ export function dispatchForeground(
           context: "fresh",
           timeoutMs: REQUEST_TIMEOUT_MS,
           result: { kind: "structured", schema: launch.schema },
+          intercomBridge: FOREGROUND_INTERCOM_BRIDGE,
           ...(launch.model !== undefined ? { model: launch.model } : {}),
         });
         emitting = false;

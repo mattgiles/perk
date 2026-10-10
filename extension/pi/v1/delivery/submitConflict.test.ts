@@ -98,6 +98,7 @@ test("single-use authorization: parameterless/sequential; bound to counter and i
     assert.equal(w.engine.requests[0]?.model, "offline/override");
     assert.equal(w.engine.requests[0]?.ownerRunId, "01RID");
     assert.equal(Object.hasOwn(w.engine.requests[0] ?? {}, "extensionBindings"), false);
+    assert.deepEqual(w.engine.requests[0]?.intercomBridge, { mode: "off" });
     await w.h.invokeTool("submit", {});
     w.h.session.sessionManager.appendCustomEntry("perk:workflow-state", {
       conflict_resolution_attempts: 0,
