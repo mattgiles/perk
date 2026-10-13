@@ -4,6 +4,7 @@ package: perk
 description: Fetches and classifies a perk PR's review feedback in isolation (read-only), returning an engine-validated structured classification so the verbose GitHub JSON never enters the parent session. Use as the first step of the /address review loop.
 model: anthropic/claude-haiku-4-5
 tools: read, grep, find, ls, bash
+allowedAgents:
 systemPromptMode: replace
 async: true
 inheritGlobalContext: false

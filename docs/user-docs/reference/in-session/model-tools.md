@@ -235,9 +235,12 @@ pi-subagents registers its engine tools — `structured_output` (schema-validate
 `contact_supervisor` (child-to-parent coordination) and `wait` — inside every spawned child through
 its prompt runtime, the `<inline:pi-subagents:prompt-runtime>` row above. They are allowed in every
 stage and under an inherited read-only gate, so a gated child can always complete its report.
-perk's own waves spawn with the pi-subagents intercom bridge off, so their children never have
-`contact_supervisor` (review waves are completion-only). perk's report children run with a tool
-allowlist (`read`, `grep`, `find`, `ls`, `bash`), so no perk tool exists in them at all.
+perk's own waves and both foreground writer dispatches (`resolve_submit_conflicts`,
+`run_librarian`) spawn with the pi-subagents intercom bridge off, so their children never have
+`contact_supervisor` (review waves and writers are completion-only). perk's report children run
+with a tool allowlist (`read`, `grep`, `find`, `ls`, `bash`), so no perk tool exists in them at
+all. Every perk definition also carries an empty descendant ceiling (a blank `allowedAgents:`),
+so even a child that somehow gained a `subagent` tool could launch no descendant.
 
 ## Gating and stage scoping
 

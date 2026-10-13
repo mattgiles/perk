@@ -3,8 +3,9 @@
 The defs ship inside the `@mgiles/perk` npm package (declared to pi-subagents via the manifest's
 `pi-subagents.agents`) and are discovered as package agents — there is no delivery step to test.
 What these pins hold is the def census (the directory ↔ `SubagentsTable`'s keys), each def's
-child profile (model, tools, context posture), the Ponytail-bound defs' two-layout
-`skillPath`, and the load-bearing prose clauses the fake-responder wave tests never exercise.
+child profile (model, tools, context posture, the blank `allowedAgents:` descendant ceiling), the
+Ponytail-bound defs' two-layout `skillPath`, and the load-bearing prose clauses the
+fake-responder wave tests never exercise.
 """
 
 import os
@@ -13,6 +14,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _agent_defs import assert_descendant_ceiling
 
 from perk import _resources
 from perk.substrate.config import SubagentsTable
@@ -55,7 +57,8 @@ def test_closed_shipped_profile_census():
 
 @pytest.mark.parametrize("name", _PROFILES)
 def test_native_child_profile(name):
-    fm = yaml.safe_load(_source_bytes(name).decode().split("---", 2)[1])
+    text = _source_bytes(name).decode()
+    fm = yaml.safe_load(text.split("---", 2)[1])
     writer = name in {"conflict-resolver", "librarian"}
     assert fm["name"] == name
     assert fm["package"] == "perk"
@@ -79,7 +82,20 @@ def test_native_child_profile(name):
     # The regression pin for the pi-subagents 0.68.0 break: a def carrying the removed field
     # is rejected wholesale at load (`uses removed frontmatter field 'fallbackModels'`).
     assert "fallbackModels" not in fm
-    for absent in ("extensions", "subagentOnlyExtensions", "skills", "acceptance", "mission"):
+    # The descendant ceiling: the engine reads the blank line as the empty list (deny every
+    # descendant launch); PyYAML reads the same line as None, so its view cannot pin the engine's
+    # and the raw layout is asserted instead. The ceiling narrows a nesting grant that must stay
+    # absent (the exact `tools` list above already excludes `subagent`).
+    assert_descendant_ceiling(text, name)
+    assert fm["allowedAgents"] is None
+    for absent in (
+        "extensions",
+        "subagentOnlyExtensions",
+        "skills",
+        "acceptance",
+        "mission",
+        "allowNestedSubagents",
+    ):
         assert absent not in fm
     if name not in {"pr-reviewer", "adversarial-reviewer", "draft-reviewer", "simplifier"}:
         assert "skillPath" not in fm
@@ -93,6 +109,39 @@ def test_native_child_profile(name):
 
 def _source_bytes(name):
     return (AGENTS_DIR / f"{name}.md").read_bytes()
+
+
+def _def_text(*ceiling_lines, before="tools: read, grep", after="systemPromptMode: replace"):
+    lines = ["---", "name: x", before, *ceiling_lines, after, "async: true", "---", "body"]
+    return "\n".join(lines)
+
+
+@pytest.mark.parametrize("text", [_def_text("allowedAgents:"), _def_text("allowedAgents: ")])
+def test_descendant_ceiling_assertion_accepts_the_mandated_layout(text):
+    assert_descendant_ceiling(text, "fixture")
+    assert_descendant_ceiling(text.replace("\n", "\r\n"), "fixture")
+
+
+@pytest.mark.parametrize(
+    ("text", "cause"),
+    [
+        (_def_text(), "absent"),
+        (_def_text("allowedAgents: []"), "nonblank"),
+        (_def_text("allowedAgents: perk.scout"), "nonblank"),
+        (_def_text("allowedAgents:", "allowedAgents:"), "duplicate"),
+        (_def_text("allowedAgents:", "  - perk.scout"), "before the systemPromptMode"),
+        (_def_text("allowedAgents:", before="model: x"), "after the tools"),
+        (_def_text("allowedAgents:", after="async: true"), "before the systemPromptMode"),
+        (
+            "\n".join(["---", "allowedAgents:", "tools: read", "systemPromptMode: replace", "---"]),
+            "after the tools",
+        ),
+        ("\n".join(["---", "tools: read", "allowedAgents:", "---"]), "before the systemPromptMode"),
+    ],
+)
+def test_descendant_ceiling_assertion_controls(text, cause):
+    with pytest.raises(AssertionError, match=cause):
+        assert_descendant_ceiling(text, "fixture")
 
 
 def test_scout_prose_invariants():

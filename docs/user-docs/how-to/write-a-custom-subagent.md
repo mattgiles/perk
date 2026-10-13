@@ -95,6 +95,30 @@ observation and fix (`false`/delete the key, quit and resume); perk never edits 
 continuation is offer-only; delivery-unconfirmed means stop for human direction. Reload never clears
 a retained lock ([recovery](recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock)).
 
+Both foreground writers — the conflict resolver (`resolve_submit_conflicts`) and the librarian
+(`run_librarian`) — are dispatched with the pi-subagents intercom bridge **off**, whatever your
+settings say: the writer child gets no `contact_supervisor` tool and no progress-update
+instructions, and finishes on its structured record alone, exactly like the report waves. A
+settings-scope `subagents.intercomBridge.mode` therefore changes neither writer.
+
+Every shipped definition (and the repo-local session auditor) also forbids launching further
+subagents in engine terms, not just in its prompt, with a blank `allowedAgents:` line —
+pi-subagents' empty descendant ceiling. A child launched from such a definition can never start a
+descendant, even if a tool grant or an override later gave it the `subagent` tool; launching the
+child itself is unaffected. To do the same in your own definition, write the key with an empty
+value, alone on its line and followed by another top-level key:
+
+```markdown
+tools: read, grep, find, ls, bash
+allowedAgents:
+systemPromptMode: replace
+```
+
+Do not write `allowedAgents: []` — pi-subagents reads it as a one-item list containing the
+name `[]`, rejects the definition at load, and the agent disappears from discovery. Widening a
+shipped definition's ceiling (a project `subagents.agentOverrides.<name>.allowedAgents`) is an
+operator decision perk never makes for you.
+
 Every code-owned report child receives the constant `perk.parent-restrictions/1 = {readOnly: true}`
 binding and `worktree: false`. A pi-subagents runner child carrying the packet has an in-memory
 read-only floor for its whole activation, even if mode persistence fails; a malformed or

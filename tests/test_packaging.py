@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _agent_defs import assert_descendant_ceiling
 
 from perk import __version__
 from perk.substrate.config import SubagentsTable
@@ -309,10 +310,12 @@ def test_packed_package_declares_discoverable_agent_census(tmp_path):
     contract, `docs/agents.md`): read the package's `package.json`, follow every
     `pi-subagents.agents` entry relative to the package root, parse each `*.md` def's frontmatter,
     and derive the runtime name `<package>.<name>`. That census must equal the source `agents/`
-    directory AND the `[models.subagents]` key set, and the Ponytail-bound defs' installed-layout
-    `skillPath` candidate must land on the exact Ponytail file beside the package. A `files` entry
-    dropped, the manifest key misspelled, a def missing `package: perk`, or a relocated def dir
-    fails here while the dry-run listing above would still pass. The engine's private tree is
+    directory AND the `[models.subagents]` key set, every packed def must carry the blank
+    `allowedAgents:` descendant ceiling in the one layout the engine reads as the empty list, and
+    the Ponytail-bound defs' installed-layout `skillPath` candidate must land on the exact Ponytail
+    file beside the package. A `files` entry dropped, the manifest key misspelled, a def missing
+    `package: perk`, a def shipped without its ceiling, or a relocated def dir fails here while the
+    dry-run listing above would still pass. The engine's private tree is
     deliberately not imported (`extension/installedPackageGuard.test.ts`,
     `docs/developers/pi-subagents-reverify.md`); the live engine leg is the reverify doc's.
     """
@@ -342,6 +345,7 @@ def test_packed_package_declares_discoverable_agent_census(tmp_path):
         assert agent_dir.is_dir(), agent_dir
         for path in sorted(agent_dir.glob("*.md")):
             frontmatter = _frontmatter(path)
+            assert_descendant_ceiling(path.read_text(encoding="utf-8"), path)
             runtime_defs[f"{frontmatter['package']}.{frontmatter['name']}"] = path
     source_defs = {f"perk.{p.stem}" for p in (REPO_ROOT / "agents").glob("*.md")}
     assert source_defs, "expected at least one shipped def"

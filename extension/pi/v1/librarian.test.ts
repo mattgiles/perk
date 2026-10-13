@@ -702,7 +702,7 @@ test("single flight: a second call while one is active is busy", async (t) => {
   assert.equal(w.engine.requests.length, 1);
 });
 
-test("request shape: perk.librarian, fresh, main cwd, the plain record schema, the prepared commands, no bindings; model only when configured", async (t) => {
+test("request shape: perk.librarian, fresh, main cwd, the plain record schema, the prepared commands, no bindings, bridge off; model only when configured", async (t) => {
   const w = await world(t);
   assert.ok(w.h.session.getActiveToolNames().includes("run_librarian"), "reachable while gated");
   const tool = w.h.registeredTool("run_librarian");
@@ -720,6 +720,7 @@ test("request shape: perk.librarian, fresh, main cwd, the plain record schema, t
   assert.equal(r.ownerRunId, RUN_ID);
   assert.deepEqual((r.result as { schema: unknown }).schema, LIBRARIAN_RECORD_SCHEMA);
   assert.equal(Object.hasOwn(r, "extensionBindings"), false);
+  assert.deepEqual(r.intercomBridge, { mode: "off" });
   assert.equal(Object.hasOwn(r, "model"), false, "no model unless configured");
   const task = String(r.task);
   assert.ok(task.startsWith(`Start by running cd '${w.main}'.`), task);

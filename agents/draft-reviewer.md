@@ -4,6 +4,7 @@ package: perk
 description: Reviews a perk plan or objective draft along ONE assigned angle (grounding, scope, decision-completeness, risk — or a user-defined custom angle) in a fresh, isolated session, treating the draft as unverified claims and checking it against the real repo read-only; returns severity/confidence-tagged, phrase-anchored findings for the human's browser triage — it never writes files, never saves the draft, and never touches the review surface. Used by the draft-review doors (/plan-review-browser, /objective-review-browser).
 model: openai/gpt-5.6-sol
 tools: read, grep, find, ls, bash
+allowedAgents:
 systemPromptMode: replace
 async: true
 inheritGlobalContext: false

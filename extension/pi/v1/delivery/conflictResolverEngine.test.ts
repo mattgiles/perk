@@ -129,7 +129,7 @@ for (const mode of ["pr-rebase", "retained-continuation"] as const) {
     return w.bus.sent.filter((e) => e.event === DELEGATION_EVENTS.cancel).map((e) => e.data);
   }
 
-  test(`[${mode}] request shape: one public delegation request carrying NO restriction packet; foreign/duplicate events are ignored; receipts carry no output`, async (t) => {
+  test(`[${mode}] request shape: one public delegation request carrying NO restriction packet and the bridge off; foreign/duplicate events are ignored; receipts carry no output`, async (t) => {
     const w = world(t);
     const { running, r } = launch(w);
     assert.deepEqual(
@@ -144,6 +144,7 @@ for (const mode of ["pr-rebase", "retained-continuation"] as const) {
         "context",
         "timeoutMs",
         "result",
+        "intercomBridge",
         "model",
       ].sort(),
     );
@@ -152,6 +153,7 @@ for (const mode of ["pr-rebase", "retained-continuation"] as const) {
       false,
       "no perk.parent-restrictions packet: the writer never gets the read-only floor",
     );
+    assert.deepEqual(r.intercomBridge, { mode: "off" }, "no contact_supervisor, no template");
     assert.equal(r.agent, RESOLVER_AGENT);
     assert.equal(r.context, "fresh");
     assert.equal(r.nodeId, mode === "pr-rebase" ? "submit-conflict" : "retained-conflict");

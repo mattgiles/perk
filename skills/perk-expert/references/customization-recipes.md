@@ -307,6 +307,13 @@ tools: read, grep, find, ls, bash
 The system prompt body — role, task framing, constraints.
 ```
 
+**Deny descendants (optional):** a blank `allowedAgents:` — the key alone on its line, followed by
+another top-level key — is pi-subagents' empty descendant ceiling: the child can launch no
+subagent of its own, even if it is later granted the `subagent` tool, while launching the child
+itself is unaffected. Never write `allowedAgents: []`: it parses as the one-item list `["[]"]`,
+fails ceiling name validation at load, and the def drops out of discovery. Every perk shipped def
+(and the repo-local session auditor) carries the blank line directly after `tools:`.
+
 ## Keep an offline reference of a dependency (`perk librarian`)
 
 The perk library is a per-repo, catalogued offline reference of external documentation mirrors

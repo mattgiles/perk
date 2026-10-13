@@ -3,13 +3,16 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { nativeWorktreeRefusal } from "../../delivery/conflictResolution.ts";
-import { FakeDelegationBus } from "../../testing/fakeConflictResolver.ts";
+import { FakeDelegationBus, fakeConflictResolver } from "../../testing/fakeConflictResolver.ts";
+import { WAVE_INTERCOM_BRIDGE } from "../../waves/transport.ts";
 import {
   CANCEL_GRACE_MS,
   DELEGATION_EVENTS,
   type DelegationTuple,
   dispatchForeground,
+  FOREGROUND_INTERCOM_BRIDGE,
   type ForegroundLaunch,
   nativeWorktreeFix,
   REQUEST_TIMEOUT_MS,
@@ -52,7 +55,7 @@ test("an already-aborted signal emits nothing and leaves no subscription", async
   assert.equal(bus.count(), 0, "no subscription was installed");
 });
 
-test("the emitted request shape: fresh context, the transport deadline, the schema by identity, model only when given", async () => {
+test("the emitted request shape: fresh context, the transport deadline, the schema by identity, the bridge off, model only when given", async () => {
   for (const model of [undefined, "offline/model"]) {
     const bus = new FakeDelegationBus();
     const running = dispatchForeground(
@@ -75,11 +78,13 @@ test("the emitted request shape: fresh context, the transport deadline, the sche
         "context",
         "timeoutMs",
         "result",
+        "intercomBridge",
         ...(model !== undefined ? ["model"] : []),
       ].sort(),
     );
     for (const absent of ["extensionBindings", "async", "worktree"])
       assert.equal(Object.hasOwn(r, absent), false, absent);
+    assert.deepEqual(r.intercomBridge, { mode: "off" });
     assert.equal(r.agent, "perk.writer");
     assert.equal(r.task, "do it");
     assert.equal(r.cwd, "/tmp/x");
@@ -98,6 +103,107 @@ test("the emitted request shape: fresh context, the transport deadline, the sche
     assert.equal(outcome.failure, undefined);
     assert.equal(bus.count(), 0, "every subscription is released");
   }
+});
+
+test("perk's two spawn surfaces carry the same bridge disable, byte for byte", () => {
+  assert.deepEqual(FOREGROUND_INTERCOM_BRIDGE, WAVE_INTERCOM_BRIDGE);
+  assert.equal(JSON.stringify(FOREGROUND_INTERCOM_BRIDGE), JSON.stringify(WAVE_INTERCOM_BRIDGE));
+});
+
+test("the bridge is not caller-selectable: a widened launch still emits it off and leaks nothing", async () => {
+  const bus = new FakeDelegationBus();
+  const widened = {
+    ...LAUNCH,
+    intercomBridge: { mode: "always" },
+    worktree: true,
+  } as unknown as ForegroundLaunch;
+  const running = dispatchForeground(bus, widened, TUPLE, new AbortController().signal);
+  const [r] = requests(bus);
+  assert.ok(r);
+  assert.deepEqual(r.intercomBridge, { mode: "off" });
+  assert.equal(Object.hasOwn(r, "worktree"), false, "no other launch-side key leaks");
+  assert.deepEqual(
+    Object.keys(r).sort(),
+    [
+      "requestId",
+      "ownerRunId",
+      "nodeId",
+      "agent",
+      "task",
+      "cwd",
+      "context",
+      "timeoutMs",
+      "result",
+      "intercomBridge",
+    ].sort(),
+  );
+  respond(bus, { status: "completed", result: { kind: "structured", value: { ok: true } } });
+  assert.equal((await running).termination, "confirmed");
+});
+
+test("the fake engine mirrors the engine's request validation: census and bridge rules are live", async () => {
+  const bus = new FakeDelegationBus();
+  const fake = fakeConflictResolver("/tmp/x");
+  fake.extension({ registerTool() {}, events: bus } as unknown as ExtensionAPI);
+  const responses: Record<string, unknown>[] = [];
+  bus.on(DELEGATION_EVENTS.response, (data) => responses.push(data as Record<string, unknown>));
+  function emitByHand(requestId: string, extra: Record<string, unknown>) {
+    bus.emit(DELEGATION_EVENTS.request, {
+      requestId,
+      ownerRunId: "run-1",
+      nodeId: "node-1",
+      agent: "perk.writer",
+      task: "do it",
+      cwd: "/tmp/x",
+      context: "fresh",
+      result: { kind: "structured", schema: SCHEMA },
+      ...extra,
+    });
+    const reply = responses.find((r) => r.requestId === requestId);
+    assert.ok(reply, `${requestId} was answered`);
+    return reply;
+  }
+  const rejected: [string, Record<string, unknown>, string][] = [
+    ["stray-key", { extensionBindings: [] }, "Unsupported delegation field: extensionBindings."],
+    [
+      "typed-field",
+      { intercomBridge: { mode: "off", resultDelivery: "false" } },
+      "intercomBridge.resultDelivery must be a boolean.",
+    ],
+    ["bridge-array", { intercomBridge: [] }, "intercomBridge must be an object."],
+    ["bridge-key", { intercomBridge: { off: true } }, "intercomBridge.off is not supported."],
+    ["bridge-mode", { intercomBridge: { mode: "never" } }, "intercomBridge.mode is invalid."],
+    [
+      "bridge-file-type",
+      { intercomBridge: { instructionFile: 7 } },
+      "intercomBridge.instructionFile must be a string.",
+    ],
+    [
+      "bridge-file-size",
+      { intercomBridge: { instructionFile: "\u00e9".repeat(513) } },
+      "intercomBridge.instructionFile exceeds 1 KiB when UTF-8 encoded.",
+    ],
+  ];
+  for (const [requestId, extra, error] of rejected) {
+    assert.deepEqual(emitByHand(requestId, extra), {
+      requestId,
+      ownerRunId: "run-1",
+      nodeId: "node-1",
+      status: "invalid_request",
+      error,
+    });
+  }
+  for (const [requestId, bridge] of [
+    ["empty-bridge", {}],
+    ["mode-omitted", { resultDelivery: true }],
+    ["file-at-cap", { instructionFile: "\u00e9".repeat(512) }],
+  ] as const) {
+    assert.equal(emitByHand(requestId, { intercomBridge: bridge }).status, "completed", requestId);
+  }
+  const outcome = await dispatchForeground(bus, LAUNCH, TUPLE, new AbortController().signal);
+  assert.equal(outcome.terminal?.status, "completed", "the real transport request is accepted");
+  assert.equal(outcome.termination, "confirmed");
+  assert.equal(fake.requests.length, rejected.length + 4);
 });
 
 test("a synchronous response delivered during emit is honored", async () => {

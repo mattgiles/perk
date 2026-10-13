@@ -76,6 +76,62 @@ export class FakeDelegationBus implements DelegationEvents {
     return [...this.handlers.values()].reduce((sum, s) => sum + s.size, 0);
   }
 }
+/**
+ * The engine's delegation-request field census and `intercomBridge` rules, as read at
+ * pi-subagents 0.76.1 (`parseSubagentDelegationRequest` + `validateIntercomBridgeConfig`): any
+ * top-level key outside these fifteen is rejected `invalid_request` ("Unsupported delegation
+ * field: <key>."); a present `intercomBridge` must be a non-array object whose keys are a subset
+ * of `mode|instructionFile|resultDelivery`, with `mode` OPTIONAL but one of `off|fork-only|always`
+ * when present, `instructionFile` a string of at most 1 KiB UTF-8 when present, and
+ * `resultDelivery` a boolean when present — so `{}` is valid. Mirrored so a transport field the
+ * engine would reject fails offline instead of completing; re-read on every pi-subagents bump.
+ */
+const DELEGATION_REQUEST_FIELDS = new Set([
+  "requestId",
+  "ownerRunId",
+  "nodeId",
+  "agent",
+  "task",
+  "context",
+  "cwd",
+  "model",
+  "thinking",
+  "timeoutMs",
+  "toolBudget",
+  "skill",
+  "artifacts",
+  "intercomBridge",
+  "result",
+]);
+const INTERCOM_BRIDGE_FIELDS = new Set(["mode", "instructionFile", "resultDelivery"]);
+const INTERCOM_BRIDGE_MODES = new Set(["off", "fork-only", "always"]);
+const INSTRUCTION_FILE_MAX_BYTES = 1024;
+
+/** The engine's rejection error for `r`, or `undefined` when the engine would accept it. */
+function delegationRequestRejection(r: Record<string, unknown>): string | undefined {
+  const unsupported = Object.keys(r).find((key) => !DELEGATION_REQUEST_FIELDS.has(key));
+  if (unsupported !== undefined) return `Unsupported delegation field: ${unsupported}.`;
+  if (r.intercomBridge === undefined) return undefined;
+  const bridge = r.intercomBridge;
+  if (typeof bridge !== "object" || bridge === null || Array.isArray(bridge))
+    return "intercomBridge must be an object.";
+  const fields = bridge as Record<string, unknown>;
+  const stray = Object.keys(fields).find((key) => !INTERCOM_BRIDGE_FIELDS.has(key));
+  if (stray !== undefined) return `intercomBridge.${stray} is not supported.`;
+  if (fields.mode !== undefined && !INTERCOM_BRIDGE_MODES.has(fields.mode as string))
+    return "intercomBridge.mode is invalid.";
+  if (fields.instructionFile !== undefined && typeof fields.instructionFile !== "string")
+    return "intercomBridge.instructionFile must be a string.";
+  if (fields.resultDelivery !== undefined && typeof fields.resultDelivery !== "boolean")
+    return "intercomBridge.resultDelivery must be a boolean.";
+  if (
+    typeof fields.instructionFile === "string" &&
+    Buffer.byteLength(fields.instructionFile, "utf8") > INSTRUCTION_FILE_MAX_BYTES
+  )
+    return "intercomBridge.instructionFile exceeds 1 KiB when UTF-8 encoded.";
+  return undefined;
+}
+
 export function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => {
@@ -86,7 +142,10 @@ export function deferred<T>() {
 /**
  * The fake engine: answers on the public delegation event bus and registers an inert `subagent`
  * tool so the production presence predicate (Pi's tool census) composes through every harness
- * session. The tool itself is never the transport.
+ * session. The tool itself is never the transport. Like the engine, it first validates each
+ * request against `DELEGATION_REQUEST_FIELDS` and the `intercomBridge` rules and answers a
+ * rejected one `invalid_request` (identity fields + `error`) — neither the script nor the
+ * default completion runs for it.
  */
 export function fakeConflictResolver(
   cwd: string,
@@ -110,7 +169,16 @@ export function fakeConflictResolver(
       pi.events.on(DELEGATION_EVENTS.request, (data) => {
         const r = data as Record<string, unknown>;
         requests.push(r);
-        if (script) script(pi.events, r);
+        const rejection = delegationRequestRejection(r);
+        if (rejection !== undefined)
+          pi.events.emit(DELEGATION_EVENTS.response, {
+            requestId: r.requestId,
+            ownerRunId: r.ownerRunId,
+            nodeId: r.nodeId,
+            status: "invalid_request",
+            error: rejection,
+          });
+        else if (script) script(pi.events, r);
         else
           pi.events.emit(DELEGATION_EVENTS.response, {
             requestId: r.requestId,

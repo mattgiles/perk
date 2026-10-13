@@ -4,6 +4,7 @@ package: perk
 description: "Crawls, curates and publishes a documentation mirror into the perk library (docs/library/ in the main checkout) as a fresh-context writer child dispatched by the run_librarian tool — add-docs (a new entry) or refresh-docs (a re-crawl published over the current revision). Writes only under the gitignored library."
 model: openai/gpt-6-sol
 tools: read, grep, find, ls, bash, edit, write
+allowedAgents:
 systemPromptMode: replace
 inheritGlobalContext: false
 inheritProjectContext: true
