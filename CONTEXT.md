@@ -260,6 +260,19 @@ The guarantee that a wave launched again — after `/reload` included — inspec
 children over current inputs, never the earlier wave's finished or still-running children.
 _Avoid_: re-attach, resume
 
+**Wake turn**:
+The parent run that pi-subagents (≥ 0.76.1) starts after it delivers a completion notice to an
+idle parent. The notice goes in with `triggerTurn: false`, followed by the steered user message
+`Subagent updates above.`. In print mode the wake turn runs while a command handler is still
+pending; if the handler returns first, the host's dispose aborts it.
+_Avoid_: wake message (the user text alone), completion turn
+
+**Pre-spawn lane failure**:
+A `runs.all` item that fails in the parent before any runner process exists — for example at
+model resolution or worktree admission. It leaves no child directory, or one holding only
+`recovery-descriptor.json` / `run-fanout-budget.json`. It still wakes the parent.
+_Avoid_: refused child, failed child (a runner that started and failed)
+
 ### Review
 
 **Approval guidance**:
