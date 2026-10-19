@@ -560,6 +560,11 @@ test("executeCollectReviewWave: no_wave without a launch; wave_running retains t
   assert.equal(none.details.ok, false);
   assert.equal((none.details as { error_type?: string }).error_type, "no_wave");
   assert.match(none.content[0]?.text ?? "", /start_review_wave/);
+  // The per-activation rule is named, distinguishing a same-session reload from a session switch.
+  assert.match(
+    none.content[0]?.text ?? "",
+    /running in this activation .*\(collection is per activation: a wave launched before a \/reload or a session switch is never collectable here; a same-session \/reload still delivers its completion notice, a session switch does not\)$/,
+  );
 
   // Launch a wave that never completes on its own; an early collect (a tiny env-driven grace —
   // the one grace seam) soft-fails wave_running and RETAINS the pending ref.
