@@ -71,6 +71,18 @@ loading a second SDK copy.
      0.74.0 a request carrying `workflowScript`/`workflowScriptPath` (an `Object.hasOwn` check, so
      an `undefined` value counts) is rejected `invalid_params`. A rename here is a wire break the
      fake responder (`extension/testing/fakeSubagents.ts`) must mirror;
+   - the **RPC `stop` and `status` shapes** perk reads after its own timeout/cancel
+     (`src/extension/rpc.ts::stopAsyncRun` — its own implementation, not the model-facing
+     `async-stop-action` — and `src/runs/background/run-status.ts` +
+     `workflow-terminal-proof.ts::readWorkflowTerminalProof`): a `stop` success is a `state:
+     "stopping"` request and a refusal a typed `not_found`/`invalid_state`/`execution_failed`;
+     `status {id}` carries the proof at `details.workflowTerminalProof` with states
+     `observed`/`pending`/`unknown`. `rpcAdapter.ts::narrowTerminalProof` and the fake's
+     `stopReply`/`terminalProof`/`statusReply` knobs mirror them;
+   - the **awaited-child event** (`subagent-executor.ts::emitWorkflowAwaitedChildComplete`): a
+     per-child `subagent:async-complete` payload carrying the CHILD's `id`/`asyncDir` on the
+     wave's channel. perk correlates by identity only and must never match it to the workflow
+     handle (`reportWaveRpc.test.ts`'s `awaitedChildEvent` builder pins the exact shape);
    - **project-trust forwarding** (`src/runs/foreground/subagent-executor.ts::sessionProjectTrust`
      → `src/runs/shared/child-session.ts` `SettingsManager.create(cwd, agentDir, {projectTrusted})`):
      perk's extension — the restriction packet's consumer — loads in a child only where the
