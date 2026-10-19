@@ -788,7 +788,8 @@ every wave spawns with the intercom bridge off — `WAVE_INTERCOM_BRIDGE`, below
 simply absent there; gate eligibility is inertness-safe, never a grant. An allowlisted report
 child — every perk report def's `tools:` list, forwarded as Pi's registry filter — registers NO
 perk tool and no loadout host: there is nothing to install or present, and the floor's backstop
-still applies); `run_audit_wave` (the gated audit-judge session's
+still applies — it also registers no MCP tool, and the backstop governs any that a session does
+register, §8.40 **MCP tools**); `run_audit_wave` (the gated audit-judge session's
 wave call: its one write is structurally bound to the cold door's handoff `audit_bundle_dir`,
 §8.50 — no caller-supplied path exists); `run_harvest_wave` (the gated learn-harvest session's
 wave call: its manifest read is structurally bound to the session's claimed run-scoped scratch
@@ -7300,6 +7301,11 @@ retained path the transport has already collapsed duplicates into one `ok: null`
 normalizer classifies `malformed-report` (its no-boolean-`ok` detail) — the two tiers agree on
 reason and withholding. Unknown keys are ignored by the normalizer.
 
+`ok` (the engine's `success`) is the sole per-lane status fact: the single-run partial markers
+(`outputPartial`, `timedOut` — set beside `exitCode: 1`, hence `success: false`) never reach the
+workflow projection and are never read, and a failed row that retains a schema-valid report stays
+`lane-failed`, never covered.
+
 Partial evidence reuses that normalizer, with the wave-level `run-failed` first (naming the
 native reason), then assignment failures in request order, then preflight failures as before.
 Both strict and best-effort remain `complete: false`, even if every report survived. Failed
@@ -7365,6 +7371,22 @@ collectable afterwards (pending records live in the activation's wave instance).
 `/reload` still delivers the engine's queued completion notice and its `Subagent updates above.`
 wake prompt to the new runtime (a session switch does not); the collect tools answer `no_wave`
 with a detail naming the rule.
+
+**Relaunch freshness (the launch token).** pi-subagents reuses a workflow's children when a
+launch matches a run the extension runtime replaced: `/reload`'s runtime `cleanup()` stops every
+live workflow controller with `stopCause: "runtime-replaced"`, and `findWorkflowReuseSource`
+matches the newest such run of the same session with the same script digest AND args digest,
+then returns its settled `ok` children (`reused: true`) and re-attaches its running ones. Perk's
+rendered scripts are byte-identical for the same inputs, so every wave spawn carries a per-launch
+token `args: {launch: <randomUUID()>}` (minted at `startWaveScript`'s one spawn site; no spec or
+caller field) and the reuse key never matches a perk wave: a relaunch after `/reload` is a fresh
+inspection over new children. The earlier wave's children finish unobserved (bounded by the
+engine deadline) and their reports are never read; `reused`/`reusedFrom`/`stopCause` are never
+read; the script never reads `args`; the token is never identity (that stays the spawn handle)
+and never a secret (the engine persists it in `status.json.workflow.args`). Measured on
+pi-subagents 0.76.1 with a control (the pre-token extension reused all three lanes of the
+replaced run) and a treatment (distinct tokens, no reuse evidence, all child runs new):
+`docs/design/archive/pi-1.1.0-collection-and-mcp-floor.md`.
 
 **RPC reply selection (the context-less hold) + the duplicate-load notice.** A pi-subagents
 RPC responder that holds no extension context answers every non-`ping` request with the
@@ -8110,6 +8132,22 @@ row is a gate posture: an adopted gated child keeps the engine-required `structu
 completion call (stripping it fails an `outputSchema` run with `structuredOutputFailed`). In a
 parent, `wait` comes from `npm:pi-subagents` and is `delegation`. A package with no row and an
 arbitrary `<inline:…>` extension are `unknown`; an uninstalled package's tools are simply absent.
+
+**MCP tools.** A tool Pi's own MCP builtin registers (`sourceInfo` `source: "builtin"`, `path:
+"builtin:mcp"`; a name outside the builtin rows — `mcp__<server>__<tool>` and the resource tools
+`list_mcp_resources`/`list_mcp_resource_templates`/`read_mcp_resource`) is `unknown`: hidden and
+blocked under the gate, direct and nested (the `tool_call` backstop never consults
+`parentToolCallId`). Pi ≥ 1.0.4 keeps MCP tools registered under a `tools` allowlist that names no
+`mcp__` entry, and leaves `codemode`/`deferred`-exposure ones callable through nested execution
+(`ctx.executeTool`), so a definition's `tools:` list is never an MCP exclusion — the backstop is
+the control, proven offline on real Pi 1.1.0 sessions that register an MCP tool
+(`extension/substrate/mcpReadOnlyFloor.test.ts`). A perk report child registers no MCP tool at
+all: pi-subagents attaches `builtin:mcp` only to a launch naming `mcp:` selectors, and perk's
+definitions and spawn items name none — measured on pi-subagents 0.76.1 with and without a
+trusted-project `mcp.json` (`docs/design/archive/pi-1.1.0-collection-and-mcp-floor.md`).
+`excludeTools: mcp__*` is deliberately absent from every definition — and would be inert anyway:
+pi-subagents applies a definition's `excludeTools` by exact-name set membership and forwards it to
+the SDK only when the definition has no explicit `tools:` allowlist.
 
 **The loadout host (`perk_stage`).** Presentation of the gate and the diet for every tool is the
 loadout host's job: `registerLoadoutHost(pi, prepareLoadout)` (`extension/pi/perkTool.ts` — the

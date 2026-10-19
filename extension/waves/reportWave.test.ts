@@ -227,6 +227,33 @@ test("partial normalization keeps absent, malformed and failed reports distinct"
   }
 });
 
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+test("startWaveScript: every launch mints a fresh token — two spawns of one spec differ, and the token never derives from the script/spec", async () => {
+  // The engine reuses a runtime-replaced run's children when session + script digest + args
+  // digest match; an identical relaunch must therefore never repeat its args.
+  const memory = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
+  const spec = { flow: "fresh", script: "return [];", outputSchema: { type: "object" } };
+  for (let i = 0; i < 2; i++) {
+    const start = await startWaveScript(memory, spec);
+    assert.ok(start.ok);
+    await start.result;
+  }
+  const tokens = memory.calls.spawn.map((params) => params.args.launch);
+  assert.equal(tokens.length, 2);
+  for (const token of tokens) {
+    assert.match(token, UUID_SHAPE);
+    assert.equal(spec.script.includes(token), false);
+    assert.equal(JSON.stringify(spec).includes(token), false);
+  }
+  assert.notEqual(tokens[0], tokens[1]);
+  assert.deepEqual(
+    memory.calls.spawn.map((params) => params.script),
+    [spec.script, spec.script],
+    "the script bytes are unchanged — only the token differs",
+  );
+});
+
 test("completion-before-reply retains the first match, discarding foreign and duplicate evidence", async () => {
   const memory = createMemoryWaveAdapter({ completion: false });
   const start = await startWaveScript(
@@ -442,6 +469,9 @@ for (const method of ["start", "run"] as const) {
     assert.equal(spawn.mission, false);
     assert.deepEqual(spawn.acceptance, WAVE_ACCEPTANCE);
     assert.deepEqual(spawn.intercomBridge, WAVE_INTERCOM_BRIDGE);
+    // The per-launch token: the only `args` field, a fresh UUID (never derived from the spec).
+    assert.deepEqual(Object.keys(spawn.args), ["launch"]);
+    assert.match(spawn.args.launch, UUID_SHAPE);
     assert.equal(spawn.model, spec.model);
     assert.deepEqual(spawn.outputSchema, spec.outputSchema);
     assert.equal("extensionBindings" in spawn, false);
@@ -699,11 +729,12 @@ test("wave.run: spawn params carry the fixed module contract + spec fields", asy
   assert.ok(spawned !== undefined);
   // pi-subagents ≥ 0.74.0 rejects any `workflowScript` key (even `undefined`-valued).
   assert.equal(Object.hasOwn(spawned, "workflowScript"), false);
-  const { script, ...params } = spawned;
+  const { script, args, ...params } = spawned;
   assert.deepEqual(
     waveScriptItems(script).map((item) => item.key),
     ["plan-fidelity", "custom-scope", "ponytail"],
   );
+  assert.match(args.launch, UUID_SHAPE);
   assert.deepEqual(params, {
     async: true,
     mission: false,

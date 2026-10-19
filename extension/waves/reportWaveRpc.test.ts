@@ -192,6 +192,7 @@ const VALID_SPAWN: WaveSpawnParams = {
   context: "fresh",
   acceptance: WAVE_ACCEPTANCE,
   intercomBridge: WAVE_INTERCOM_BRIDGE,
+  args: { launch: "rpc-fixture-launch" },
   outputSchema: { type: "object" },
   timeoutMs: 5_000,
 };
@@ -754,16 +755,26 @@ test("rpc integration: a ghost responder on the timeout arm — spawn, stop and 
   assert.equal(fake.statuses.length, 1);
 });
 
-test("source pin: the transport modules never read the awaited-child lineage or capacity fields; the terminal proof is narrowed in rpcAdapter.ts only", () => {
+test("source pin: the wave modules never read the awaited-child lineage, capacity, partial-marker or reuse fields; the terminal proof is narrowed in rpcAdapter.ts only; transport.ts alone mints the launch token", () => {
   const adapter = readFileSync(new URL("./rpcAdapter.ts", import.meta.url), "utf8");
   const transport = readFileSync(new URL("./transport.ts", import.meta.url), "utf8");
+  const logical = readFileSync(new URL("./reportWave.ts", import.meta.url), "utf8");
+  // `ok` (the engine's `success`) is the sole status fact; reuse evidence is never consulted
+  // because the launch token makes every launch fresh.
   const forbidden =
-    /\b(awaitedByWorkflow|parentWorkflowRunId|triggerTurn|capacity|abandonedSlot\w*|slotReleased)\b/;
+    /\b(awaitedByWorkflow|parentWorkflowRunId|triggerTurn|capacity|abandonedSlot\w*|slotReleased|outputPartial|timedOut|reused|reusedFrom|stopCause)\b/;
   assert.doesNotMatch(adapter, forbidden);
   assert.doesNotMatch(transport, forbidden);
+  assert.doesNotMatch(logical, forbidden);
   // The positive arm: the one field perk does read after a stop, at the adapter only.
   assert.match(adapter, /\.workflowTerminalProof\b/);
   assert.doesNotMatch(transport, /workflowTerminalProof/);
+  // The launch token is a transport invariant: minted at the one spawn site; the adapter
+  // forwards the params verbatim and the logical tier never builds or reads `args` (its
+  // `launch:` keys are the preflight manifest, a different thing).
+  assert.match(transport, /args: \{ launch: randomUUID\(\) \}/);
+  assert.doesNotMatch(adapter, /\bargs\b/);
+  assert.doesNotMatch(logical, /\bargs\b/);
 });
 
 test("rpc integration: a native partial delivered inside the settlement grace is retained through the real adapter", async (t) => {
@@ -872,7 +883,13 @@ test("rpc integration: without a ghost, onNotice is never called; without deps, 
 
 /** A native partial settlement: the durable aggregate failed without a `workflow.value`; the
  * completion event carries the explicit `terminalOutcome` plus one validated sibling report. */
-function partialFixture(): FakeSettlement {
+/**
+ * A native partial settlement retaining one valid sibling report. `timedOutLane` adds the
+ * second lane as the engine's single-run partial shape — `success: false` beside the
+ * `timedOut`/`outputPartial` markers, the partial-output text, a per-row `terminalOutcome`, AND a
+ * schema-valid `structuredOutput` — which perk must still count as a failed lane.
+ */
+function partialFixture(opts: { timedOutLane?: boolean } = {}): FakeSettlement {
   return {
     aggregate: { state: "failed", error: "native failure", value: undefined },
     completion: {
@@ -886,6 +903,21 @@ function partialFixture(): FakeSettlement {
           success: true,
           structuredOutput: { verdict: "clean" },
         },
+        ...(opts.timedOutLane === true
+          ? [
+              {
+                workflowKey: "correctness",
+                runId: "child-b",
+                success: false,
+                timedOut: true,
+                outputPartial: true,
+                error: "Subagent timed out.",
+                output: 'Subagent timed out.\n\nPartial output before timeout:\n{"verdict":',
+                structuredOutput: { verdict: "clean" },
+                terminalOutcome: { state: "partial", reason: "timeout" },
+              },
+            ]
+          : []),
       ],
     },
   };
@@ -912,6 +944,29 @@ test("rpc integration: native partial settlement retains the validated sibling r
   assert.equal(result.receipt.state, "failed");
   assert.doesNotMatch(JSON.stringify(result.receipt), /verdict|structuredOutput/);
   assert.equal(fake.stops.length, 0);
+});
+
+test("rpc integration: a partial-marked lane with a retained schema-valid report is lane-failed, never covered", async () => {
+  // `ok` (the engine's `success`) is the sole status fact: the `outputPartial`/`timedOut`
+  // markers are never read, and a retained report on a failed row is never promoted.
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([
+    { executeSettlement: async () => partialFixture({ timedOutLane: true }) },
+  ]);
+  fake.attach(bus);
+  const result = await createReportWave(bus).run(makeSpec());
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [{ key: "plan-fidelity", report: { verdict: "clean" } }]);
+  assert.deepEqual(
+    result.failures.map(({ key, reason, detail }) => [key, reason, detail]),
+    [
+      [null, "run-failed", result.failures[0]?.detail],
+      ["correctness", "lane-failed", "Subagent timed out."],
+    ],
+  );
+  assert.match(result.failures[0]?.detail ?? "", /native partial: timeout/);
+  assert.equal(result.receipt.state, "failed");
+  assert.doesNotMatch(JSON.stringify(result.receipt), /verdict|structuredOutput|Partial output/);
 });
 
 /** A native partial settlement whose `results` carry TWO rows for one workflowKey (distinct

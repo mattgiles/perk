@@ -104,6 +104,7 @@ function spawnParams(): WaveSpawnParams {
     context: "fresh",
     acceptance: WAVE_ACCEPTANCE,
     intercomBridge: WAVE_INTERCOM_BRIDGE,
+    args: { launch: "adapter-fixture-launch" },
     outputSchema: { type: "object" },
     timeoutMs: 60_000,
   };
@@ -207,6 +208,30 @@ test("partial projection withholds ambiguous keys/identities and never guesses k
       // The engine's projection of a child still working when the workflow deadline fired: no
       // `success`, `state: "running"` — an explicit lane failure, never a malformed report.
       { workflowKey: "late", state: "running", runId: "r" },
+      // The engine's single-run partial markers (`outputPartial` beside `exitCode: 1`, hence
+      // `success: false`) with a retained report: the report rides along as DATA, but the row
+      // stays `ok: false` — perk reads the engine's `success` alone.
+      {
+        workflowKey: "timed",
+        runId: "t",
+        success: false,
+        timedOut: true,
+        outputPartial: true,
+        error: "Subagent timed out.",
+        output: "Subagent timed out.\n\nSECRET recovery\n\nPartial output before timeout:\nSECRET",
+        structuredOutput: { answer: 3 },
+        terminalOutcome: { state: "partial", reason: "timeout" },
+      },
+      // A hostile pair the engine never emits (`outputPartial` implies `exitCode: 1`, so
+      // `success: false`; the workflow projection drops the field anyway): `success` still wins,
+      // because the partial markers are never read.
+      {
+        workflowKey: "hostile",
+        runId: "h",
+        success: true,
+        outputPartial: true,
+        structuredOutput: { answer: 4 },
+      },
     ],
   });
   unsubscribe();
@@ -222,6 +247,8 @@ test("partial projection withholds ambiguous keys/identities and never guesses k
       error: "lane still running at native partial settlement",
       report: null,
     },
+    { key: "timed", ok: false, error: "Subagent timed out.", report: { answer: 3 } },
+    { key: "hostile", ok: true, error: null, report: { answer: 4 } },
   ]);
   assert.doesNotMatch(JSON.stringify(received[0]?.retainedEntries), /SECRET/);
 });

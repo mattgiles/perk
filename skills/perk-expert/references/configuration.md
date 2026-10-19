@@ -393,6 +393,11 @@ MCP support, so `.pi/mcp.json` is inert there, nothing reads/writes pi's `mcp.js
 `mcp-auth.json` / `mcp.log`, and a project extension's `registerMcpServer` is reported on stderr
 (`perk worker: extension error — <path> (register_mcp_server): …`), never connected. A project
 extension that brings its own MCP support is the repo's choice and outside that guarantee.
+perk's **report children** (every wave lane) load no MCP support either: pi-subagents attaches
+pi's MCP builtin only to launches naming `mcp:` tools and perk's never do, so `.pi/mcp.json`
+adds nothing to them. In a session that does register MCP tools, the read-only gate hides and
+blocks them (direct or nested calls); a definition's `tools:` allowlist alone never excludes
+them.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |

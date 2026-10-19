@@ -95,6 +95,11 @@ def test_native_child_profile(name):
         "acceptance",
         "mission",
         "allowNestedSubagents",
+        # Supplier tool exclusion is not Pi's selector and is inert beside an explicit
+        # `tools:` allowlist (forwarded to the SDK only without one); the MCP floor is proven
+        # through the read-only gate on a session that registers an MCP tool.
+        "excludeTools",
+        "mcpDirectTools",
     ):
         assert absent not in fm
     if name not in {"pr-reviewer", "adversarial-reviewer", "draft-reviewer", "simplifier"}:

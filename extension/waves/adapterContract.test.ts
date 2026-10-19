@@ -75,6 +75,7 @@ function minimalSpawnParams(): WaveSpawnParams {
     context: "fresh",
     acceptance: WAVE_ACCEPTANCE,
     intercomBridge: WAVE_INTERCOM_BRIDGE,
+    args: { launch: "contract-fixture-launch" },
     outputSchema: { type: "object" },
     timeoutMs: 60_000,
   };
