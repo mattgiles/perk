@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -226,6 +227,15 @@ test("two sessions share no review-wave pending state (launch/collect isolate pe
  * collect grace sleep on `setTimeout`, so the mocked clock is advanced in small steps between
  * macrotask drains (`setImmediate` is never mocked). Bounded — a stuck promise fails, never hangs.
  */
+/** Every recorded spawn carries a string launch token, and no two spawns share one. */
+function assertDistinctLaunchTokens(fake: FakeSubagents): void {
+  const tokens = fake.spawns.map(
+    (spawn) => (spawn.args as { launch?: unknown } | undefined)?.launch,
+  );
+  for (const token of tokens) assert.equal(typeof token, "string");
+  assert.equal(new Set(tokens).size, tokens.length, "every launch mints its own token");
+}
+
 async function underMockedTimers<T>(t: TestContext, promise: Promise<T>): Promise<T> {
   let done = false;
   const tracked = promise.finally(() => {
@@ -299,6 +309,9 @@ test("same-version reload: pending waves are activation-local and a pre-reload w
     );
     assert.equal((startB.details as { ok: boolean }).ok, true);
     assert.equal(fake.spawns.length, 2);
+    // Relaunch freshness by construction: each spawn carries its own launch token, so the
+    // engine's runtime-replaced reuse key can never match the pre-reload wave.
+    assertDistinctLaunchTokens(fake);
 
     // Wave A's completion arrives late, on the new bus: it must not settle wave B.
     fake.complete(0);
@@ -480,6 +493,188 @@ test("two sessions share no draft-review context: each wave receives its own pri
     else process.env.PLANNOTATOR_PORT = priorPort;
     hB.dispose();
     hA.dispose();
+  }
+});
+
+/**
+ * A fake plannotator whose plan server answers like the real one: the door's readiness probe
+ * (`GET /api/plan`) succeeds on its first attempt and the annotation pushes land (`201` on POST,
+ * `200` on DELETE), so no readiness poll or push retry ever sleeps on a (mocked) timer. The server
+ * binds the port the door presets in `PLANNOTATOR_PORT` while it emits the request \u2014 exactly
+ * where real plannotator binds.
+ */
+function servingPlannotator(
+  sink: FakePlannotatorSink,
+  servers: Server[],
+): (pi: ExtensionAPI) => void {
+  return (pi) => {
+    sink.emitDecision = (decision) => pi.events.emit("plannotator:review-result", decision);
+    pi.registerCommand("plannotator-review", {
+      description: "fake plannotator (test)",
+      handler: async () => {},
+    });
+    pi.events.on("plannotator:request", (data) => {
+      const server = createServer((req, res) => {
+        if (req.method === "POST") {
+          res.writeHead(201, { "content-type": "application/json" });
+          res.end('{"ids":[]}');
+          return;
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
+      });
+      server.listen(Number(process.env.PLANNOTATOR_PORT), "127.0.0.1");
+      servers.push(server);
+      const envelope = data as { respond: (r: unknown) => void };
+      envelope.respond({ status: "handled", result: { status: "pending", reviewId: "r-1" } });
+    });
+  };
+}
+
+/** Drain macrotasks while advancing the mocked clock until `done()` (bounded \u2014 never hangs). */
+async function driveUntil(t: TestContext, done: () => boolean): Promise<void> {
+  for (let step = 0; step < 400 && !done(); step++) {
+    await new Promise((resolve) => setImmediate(resolve));
+    if (!done()) t.mock.timers.tick(50);
+  }
+  assert.ok(done(), "the driven condition held within the bounded mocked-clock budget");
+}
+
+test("same-version reload (draft pair): the primed context and the pending wave are activation-local; a relaunch after re-priming is a fresh wave", async (t) => {
+  const waveTimeoutMs = 1_000;
+  const priorTimeout = process.env.PERK_WAVE_TIMEOUT_MS;
+  process.env.PERK_WAVE_TIMEOUT_MS = String(waveTimeoutMs);
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  gitInit(cwd, { dirty: false });
+  installPonytailSkill(cwd, "ponytail");
+  const reportsMarked = (marker: string) => async (script: string) =>
+    waveScriptItems(script).map(({ key }) => ({
+      key,
+      ok: true,
+      error: null,
+      report: { angle: key, summary: marker, findings: [], fyi: [] },
+    }));
+  const fake = createFakeSubagents([
+    { delivery: "manual", executeScript: reportsMarked("draft wave A") },
+    { delivery: "manual", executeScript: reportsMarked("draft wave B") },
+  ]);
+  const sink: FakePlannotatorSink = { emitDecision: () => {} };
+  const servers: Server[] = [];
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    extraExtensions: [servingPlannotator(sink, servers), fake.extension],
+  });
+  const injected = spyInjections(h);
+  const priorPort = process.env.PLANNOTATOR_PORT;
+  const portRestored = (): boolean => process.env.PLANNOTATOR_PORT === priorPort;
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map(String).join(" "));
+  };
+  try {
+    await h.invokeTool("plan_draft", { plan: PLAN_DRAFT });
+    await h.runCommandHandler("plan-review-browser", "");
+    // The door's readiness poll ends (and restores the port) on its first probe, still on real
+    // timers \u2014 nothing of the door's is left sleeping on the mocked clock below.
+    const start = Date.now();
+    while (!portRestored() && Date.now() - start < 5_000) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(portRestored(), "the first door's readiness poll ended");
+
+    // Armed AFTER the door is ready: wave A's transport timer is a mocked one this test drains.
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const startA = await underMockedTimers(
+      t,
+      h.invokeTool("start_draft_review_wave", { angles: ["grounding", "risk"] }),
+    );
+    assert.equal((startA.details as { ok: boolean }).ok, true);
+    assert.equal(fake.spawns.length, 1);
+
+    await underMockedTimers(t, h.reload());
+
+    // The pre-reload wave is not collectable in the new activation, and the answer says why.
+    const orphan = await underMockedTimers(t, h.invokeTool("collect_draft_review_wave", {}));
+    assert.equal((orphan.details as { error_type?: string }).error_type, "no_wave");
+    assert.match(orphan.content[0]?.text ?? "", /collection is per activation/);
+
+    // Nothing stale survives: the primed draft context was the old activation's too.
+    const unprimed = await underMockedTimers(
+      t,
+      h.invokeTool("start_draft_review_wave", { angles: ["grounding", "risk"] }),
+    );
+    assert.equal((unprimed.details as { error_type?: string }).error_type, "no_draft_context");
+    assert.equal(fake.spawns.length, 1, "an unprimed start launches nothing");
+
+    // Re-prime through the door in the new activation, then relaunch the SAME angles.
+    await underMockedTimers(t, h.runCommandHandler("plan-review-browser", ""));
+    await driveUntil(t, portRestored);
+    const startB = await underMockedTimers(
+      t,
+      h.invokeTool("start_draft_review_wave", { angles: ["grounding", "risk"] }),
+    );
+    assert.equal((startB.details as { ok: boolean }).ok, true);
+    assert.equal(fake.spawns.length, 2);
+    assertDistinctLaunchTokens(fake);
+
+    // Wave A's completion arrives late, on the new bus: it must not settle wave B.
+    fake.complete(0);
+    process.env.PERK_WAVE_COLLECT_GRACE_MS = "30";
+    let running: Awaited<ReturnType<typeof h.invokeTool>>;
+    try {
+      running = await underMockedTimers(t, h.invokeTool("collect_draft_review_wave", {}));
+    } finally {
+      delete process.env.PERK_WAVE_COLLECT_GRACE_MS;
+    }
+    assert.equal((running.details as { error_type?: string }).error_type, "wave_running");
+
+    // The positive oracle: wave B's own completion settles it, with ITS reports.
+    fake.complete(1);
+    const collectedB = await underMockedTimers(t, h.invokeTool("collect_draft_review_wave", {}));
+    const detailsB = collectedB.details as {
+      ok: boolean;
+      covered?: string[];
+      reports?: { report: { summary?: string } }[];
+    };
+    assert.equal(detailsB.ok, true);
+    assert.deepEqual(detailsB.covered, ["grounding", "risk", "ponytail"]);
+    assert.deepEqual(
+      detailsB.reports?.map(({ report }) => report.summary),
+      ["draft wave B", "draft wave B", "draft wave B"],
+    );
+
+    // Drain-once: the collected wave is gone.
+    const again = await underMockedTimers(t, h.invokeTool("collect_draft_review_wave", {}));
+    assert.equal((again.details as { error_type?: string }).error_type, "no_wave");
+
+    // Drain wave A's orphan transport through the engine deadline AND the fixed grace: nothing
+    // reaches the live responder.
+    t.mock.timers.tick(waveTimeoutMs + WAVE_SETTLEMENT_GRACE_MS);
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(fake.stops, [], "the new activation issued no stop");
+    assert.deepEqual(fake.statuses, [], "the new activation issued no status query");
+    assert.deepEqual(
+      errors.filter((line) => /extension error/.test(line)),
+      [],
+      "no extension handler failed",
+    );
+
+    // Settle the live door (DENY on the current bus) so its decision task ends here.
+    sink.emitDecision({ reviewId: "r-1", approved: false, feedback: "settle" });
+    await driveUntil(t, () => injected.some((m) => m.includes("DENIED")));
+  } finally {
+    t.mock.timers.reset();
+    console.error = originalError;
+    if (priorTimeout === undefined) delete process.env.PERK_WAVE_TIMEOUT_MS;
+    else process.env.PERK_WAVE_TIMEOUT_MS = priorTimeout;
+    if (priorPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = priorPort;
+    await Promise.all(
+      servers.map((server) => new Promise((resolve) => server.close(() => resolve(undefined)))),
+    );
+    h.dispose();
   }
 });
 

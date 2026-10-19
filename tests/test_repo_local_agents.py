@@ -55,6 +55,11 @@ def test_auditor_is_a_background_report_outside_delivery():
         "acceptance",
         "mission",
         "allowNestedSubagents",
+        # Supplier tool exclusion is not Pi's selector and is inert beside an explicit
+        # `tools:` allowlist (forwarded to the SDK only without one); the MCP floor is proven
+        # through the read-only gate on a session that registers an MCP tool.
+        "excludeTools",
+        "mcpDirectTools",
     ):
         assert absent not in fm
 

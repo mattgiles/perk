@@ -55,6 +55,8 @@ const pkg = (source: string): Provenance => ({
   source,
 });
 const BUILTIN = (name: string): Provenance => ({ path: `builtin:${name}`, source: "builtin" });
+/** A tool Pi's MCP builtin registers (`mcp__<server>__<tool>`). */
+const MCP_TOOL = "mcp__docs__search";
 const ENGINE: Provenance = { path: "<inline:pi-subagents:prompt-runtime>", source: "inline" };
 const OTHER_INLINE: Provenance = { path: "<inline:other>", source: "inline" };
 const SUBAGENTS = pkg("npm:pi-subagents@0.73.1");
@@ -411,6 +413,12 @@ test("the formula: stage membership × mode posture, the mode-over-stage term, u
   assert.equal(normalizeStage("constructor"), null);
   assert.equal(normalizeStage(undefined), null);
   assert.equal(normalizeStage("plan"), "plan");
+  // Pi's MCP builtin tool (`builtin:mcp`, a name outside the builtin rows): blocked under the
+  // gate at every stage and unscoped, passed through read-write.
+  for (const stage of [...REGISTRY_STAGE_IDS, null]) {
+    assert.equal(isEligible(MCP_TOOL, BUILTIN("mcp"), stage, "read-only"), false, `${stage}`);
+    assert.equal(isEligible(MCP_TOOL, BUILTIN("mcp"), stage, "read-write"), true, `${stage}`);
+  }
 });
 
 test("normalizePackageSpec: npm specs lose their version or range, scoped-aware; other strings are returned unchanged", () => {
@@ -447,6 +455,10 @@ test("postureFor: catalog → exact synthetic path → builtin → package row (
     gated: "blocked",
   });
   assert.deepEqual(postureFor("mcp_query", BUILTIN("mcp")), { owner: "unknown" });
+  // Pi's own MCP builtin: a server tool and a resource tool are builtin-sourced names outside the
+  // builtin rows, and `builtin:mcp` is no synthetic-path row.
+  assert.deepEqual(postureFor(MCP_TOOL, BUILTIN("mcp")), { owner: "unknown" });
+  assert.deepEqual(postureFor("list_mcp_resources", BUILTIN("mcp")), { owner: "unknown" });
   assert.deepEqual(postureFor("read", SUBAGENTS), {
     owner: "foreign",
     posture: "delegation",
@@ -702,6 +714,12 @@ test("hiddenDeclarationsFor: the host always; a bare landing hides nothing else;
     "plannotator_submit_plan",
     "tt_allowed",
   ]);
+  // Pi's MCP builtin tool is hidden in every gated landing and declared in every open one.
+  const mcp = new Map<string, Provenance>([[MCP_TOOL, BUILTIN("mcp")]]);
+  for (const stage of [...REGISTRY_STAGE_IDS, null]) {
+    assert.ok(hiddenDeclarationsFor([MCP_TOOL], mcp, stage, "read-only").includes(MCP_TOOL));
+    assert.ok(!hiddenDeclarationsFor([MCP_TOOL], mcp, stage, "read-write").includes(MCP_TOOL));
+  }
 });
 
 test("carveOutWritersFor: the eligible carve-out writers in catalog order, with their prose", () => {

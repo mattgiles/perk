@@ -33,6 +33,21 @@
 //
 // Failure posture: LOUD DEGRADE. Every operational arm normalizes into a typed failure — the
 // runner never throws, and there is never a silent fallback to model-authored scripts.
+//
+// RELAUNCH FRESHNESS: pi-subagents reuses a workflow's children when a launch matches a run the
+// extension runtime replaced (`/reload`: the runtime `cleanup()` aborts every live workflow
+// controller with `runtimeReplacedAbortReason()`, recording the run's stop cause as
+// `"runtime-replaced"`).
+// The reuse key (`workflow-reuse.js::findWorkflowReuseSource`) is the session id + the script
+// digest + the args digest; `matchWorkflowReuse` then hands back the earlier run's settled `ok`
+// children and re-attaches its running ones. Perk's rendered scripts are byte-identical for the
+// same inputs, so an identical relaunch after `/reload` would silently present the earlier wave's
+// reports as a fresh inspection. Every spawn therefore carries a per-launch token in `args`
+// (minted here, never caller-selectable) so the reuse key never matches: a relaunch is a fresh
+// inspection over new children. The script never reads `args`, perk never reads the token back,
+// and identity stays the spawn handle.
+
+import { randomUUID } from "node:crypto";
 
 // -------------------------------------------------------------------- the attempt receipts
 
@@ -198,6 +213,15 @@ export interface WaveSpawnParams {
   /** The fixed intercom-bridge disable (`WAVE_INTERCOM_BRIDGE`) — rides the same workflow-defaults
    * spread onto every child, so no child ever sees `contact_supervisor` or the bridge template. */
   intercomBridge: { mode: "off" };
+  /**
+   * The per-launch token (a fresh `randomUUID()` per spawn) whose only job is to make the
+   * engine's workflow-reuse key (session id + script digest + args digest) unique per launch, so
+   * a relaunch after `/reload` never reuses or re-attaches the replaced run's children. The
+   * script never reads `args`; perk never reads the token back (identity stays
+   * `asyncDir`/`asyncId`). The engine persists it in `status.json.workflow.args` (plain JSON,
+   * deeply frozen) — never a secret.
+   */
+  args: { launch: string };
   outputSchema: object;
   model?: string;
   /**
@@ -436,6 +460,7 @@ export async function startWaveScript(
       context: "fresh",
       acceptance: WAVE_ACCEPTANCE,
       intercomBridge: WAVE_INTERCOM_BRIDGE,
+      args: { launch: randomUUID() },
       outputSchema: spec.outputSchema,
       ...(spec.model !== undefined ? { model: spec.model } : {}),
       timeoutMs,
