@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { PlanRef } from "../../substrate/cache.ts";
+import type { GateTransition } from "../../substrate/toolPolicy.ts";
 import {
   type MemoryWorkflowSession,
   openMemoryWorkflowSession,
@@ -58,12 +59,22 @@ function fakeBackend(result?: PlanBackendSaveResult): PlanBackend & {
   return backend;
 }
 
-function fakeGate(active: boolean): ApprovalGate & { exits: number } {
+const APPLIED_RELEASE: GateTransition = {
+  status: "applied",
+  requested: "read-write",
+  access: "read-write",
+};
+
+function fakeGate(
+  active: boolean,
+  release: GateTransition = APPLIED_RELEASE,
+): ApprovalGate & { exits: number } {
   const gate = {
     exits: 0,
     isActive: () => active,
-    exit() {
+    exit(): GateTransition {
       gate.exits += 1;
+      return release;
     },
   };
   return gate;
@@ -323,6 +334,7 @@ test("reviewPlanDraft: implementHere exits the gate WITHOUT saving; the draft su
     status: "implementHere",
     reviewId: "rev-ih",
     gateExited: true,
+    release: APPLIED_RELEASE,
     plan: PLAN,
     edited: false,
   });
@@ -330,6 +342,60 @@ test("reviewPlanDraft: implementHere exits the gate WITHOUT saving; the draft su
   assert.equal(backend.requests.length, 0, "nothing saved");
   assert.equal(resumePlanDraft(session), PLAN, "the draft artifact is left intact");
 });
+
+// A held release is carried, never assumed away: gateExited stays false while the reviewed
+// bytes and the edited bit still ride out for the adapter's held result.
+const HELD_RELEASES: readonly [string, GateTransition][] = [
+  ["restricted", { status: "restricted", requested: "read-write", access: "read-only" }],
+  [
+    "failed persist",
+    {
+      status: "failed",
+      requested: "read-write",
+      access: "read-only",
+      step: "persist",
+      error: "disk full",
+    },
+  ],
+  [
+    "failed install",
+    {
+      status: "failed",
+      requested: "read-write",
+      access: "read-only",
+      step: "install",
+      error: "toolset",
+    },
+  ],
+];
+
+for (const [label, release] of HELD_RELEASES) {
+  test(`reviewPlanDraft: implementHere with a held release (${label}) → gateExited false, release carried`, async () => {
+    const session = draftedSession();
+    const backend = fakeBackend();
+    const gate = fakeGate(true, release);
+    const result = await reviewPlanDraft(
+      depsFor(
+        session,
+        scriptedReviewer(
+          { status: "implementHere", reviewId: "rev-held" },
+          { plan: "# Edited\n", edited: true },
+        ),
+        { backend, gate },
+      ),
+    );
+    assert.deepEqual(result, {
+      status: "implementHere",
+      reviewId: "rev-held",
+      gateExited: false,
+      release,
+      plan: "# Edited\n",
+      edited: true,
+    });
+    assert.equal(gate.exits, 1, "exactly one release attempt");
+    assert.equal(backend.requests.length, 0, "nothing saved");
+  });
+}
 
 test("reviewPlanDraft: implementHere with the gate already off → gateExited false", async () => {
   const gate = fakeGate(false);
@@ -339,6 +405,7 @@ test("reviewPlanDraft: implementHere with the gate already off → gateExited fa
     }),
   );
   assert.equal(result.status === "implementHere" ? result.gateExited : null, false);
+  assert.equal(result.status === "implementHere" ? result.release : undefined, null);
   assert.equal(gate.exits, 0);
 });
 

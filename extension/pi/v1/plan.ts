@@ -81,6 +81,7 @@ import { type ActivityHandle, Key } from "../../surfaces/surfaces.ts";
 import { registerPerkTool } from "../perkTool.ts";
 import { installInjectedContext, isPlanGuidanceStage } from "./contextInjection.ts";
 import { type DraftReviewSlot, recordSaveOutcome } from "./draftReview.ts";
+import { approvalGateFor, reportGateTransition } from "./gateTransitions.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 import {
   type ApprovalSaveOutcome,
@@ -350,7 +351,7 @@ export function planSaveDepsFor(
   return {
     session,
     backend: coldDoorPlanBackend(pi, ctx),
-    gate: { isActive: () => gating.isActive(), exit: () => gating.exit(ctx) },
+    gate: approvalGateFor(gating, ctx),
     capturePlanningPointer: () => {
       // Capture the planning session pointer (contracts.md §8.35): this planning run self-keys
       // by its own run_id into the shared main checkout, so a later/other session can resolve
@@ -796,14 +797,12 @@ function installPlanMode(pi: ExtensionAPI, gating: ToolGating, runnerChild: () =
     report(ctx, "plan-mode", "info", message);
   }
 
+  // Announce what the transition left in force, never the toggle's intent: a held transition (the
+  // runner restriction floor, a failed persist/install) is reported with its cause instead.
   function toggle(ctx: ExtensionContext): void {
-    if (gating.isActive()) {
-      gating.exit(ctx);
-      announce(ctx, false);
-    } else {
-      gating.enter(ctx);
-      announce(ctx, true);
-    }
+    const t = gating.isActive() ? gating.exit(ctx) : gating.enter(ctx);
+    if (t.status === "applied") announce(ctx, t.access === "read-only");
+    else reportGateTransition(ctx, "plan-mode", t);
   }
 
   registerPerkCommand(pi, "plan", {
@@ -824,7 +823,7 @@ function installPlanMode(pi: ExtensionAPI, gating: ToolGating, runnerChild: () =
     // along with the flag itself (the flag no longer exists on perk's side).
     pi.on("session_start", async (_event, ctx) => {
       if (pi.getFlag("plan") === true && !gating.isActive()) {
-        gating.enter(ctx);
+        reportGateTransition(ctx, "plan-mode", gating.enter(ctx));
       }
     });
   }
@@ -839,13 +838,13 @@ function installPlanMode(pi: ExtensionAPI, gating: ToolGating, runnerChild: () =
   //
   // Plan guidance rides the PERSISTED read-only gate (`perk:workflow-state.mode`, the gate's state
   // twin — the selection signal every injected context and the binding delivery read; never the
-  // gate object). In the one divergence window — a read-write sync/restore that throws leaves the
-  // in-memory gate closed (fail-closed) while the persisted mode is already `read-write` —
-  // enforcement stays closed and the gate's own `[READ-ONLY MODE]` context stays retained (both
-  // follow the enforcement gate), while plan guidance follows the human's declared intent and is
-  // retired; the next rebuild point (`session_start`/`session_tree` — `resources_discover` only
-  // re-applies the in-memory gate) re-syncs the gate from the persisted mode. `gating` stays for
-  // the toggle/announce surface.
+  // gate object). The divergence window is two-sided (contracts.md §8.40): a release whose append
+  // or install fails keeps the in-memory gate closed (fail-closed) while the branch may already
+  // carry `read-write`, and a restriction whose append fails is in force in memory while the
+  // branch may not carry `read-only`. Enforcement and the gate's own `[READ-ONLY MODE]` context
+  // follow the in-memory gate; plan guidance follows the branch; the next rebuild point
+  // (`session_start`/`session_tree` — `resources_discover` only re-applies the in-memory gate)
+  // re-syncs the gate from the branch. `gating` stays for the toggle/announce surface.
   installInjectedContext(
     pi,
     {

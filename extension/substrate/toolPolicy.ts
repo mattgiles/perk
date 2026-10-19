@@ -47,6 +47,32 @@ export type GatePosture = "allowed" | "blocked" | { carveOut: string };
 export type Declared = "always" | "deferred";
 /** The session's gate mode (the workflow-state `mode` field). */
 export type Mode = "read-only" | "read-write";
+/**
+ * A gate transition's outcome (contracts.md §8.40): what was asked, what is in force. `requested`
+ * is the landing the caller asked for; `access` is the effective restriction the transition left
+ * (the runner restriction floor included).
+ *  - `applied`: the install succeeded and `access === requested`.
+ *  - `restricted`: a read-write request met the runner restriction floor — nothing persisted, the
+ *    restriction reapplied. The floor is the gate's only restriction source (stages scope tools,
+ *    never the mode); another source would be a new member of this union, not a flag.
+ *  - `failed`: the mode append (`persist`) or the install (`install`) threw; `error` is the raw
+ *    thrown message. Fail-closed in memory: a restriction request is in force from its latch, a
+ *    release never opens the gate. Only `enter` and a non-floored `exit` append a mode entry
+ *    (`syncFromState` and a floored `exit` append nothing): the branch may or may not carry it
+ *    after a `persist` failure (Pi's append is not transactional), and carries it after an
+ *    `install` failure that followed the append — the next rebuild point re-syncs the gate from
+ *    whatever the branch carries. An `applied` sync therefore says nothing about the branch.
+ */
+export type GateTransition =
+  | { status: "applied"; requested: Mode; access: Mode }
+  | { status: "restricted"; requested: "read-write"; access: "read-only" }
+  | {
+      status: "failed";
+      requested: Mode;
+      access: Mode;
+      step: "persist" | "install";
+      error: string;
+    };
 
 /**
  * A query tool's SUCCESS details beyond the `ok` discriminant, as plain JSON-Schema property

@@ -105,7 +105,9 @@ function gateFixture(
   const hooks = new Map<string, Hook>();
   let registry: FakeTool[] = [...(opts.registry ?? defaultRegistry())];
   let active: string[] = [...(opts.active ?? defaultActive(registry))];
-  let fail: "snapshot" | "census" | "toolset" | "append" | undefined;
+  // `append` throws before recording; `append-after` records THEN throws (Pi's non-transactional
+  // append: the entry reaches the branch before the persistence that fails).
+  let fail: "snapshot" | "census" | "toolset" | "append" | "append-after" | undefined;
   const appends: unknown[] = [];
   const installs: Install[] = [];
   const pi = {
@@ -133,6 +135,7 @@ function gateFixture(
     appendEntry: (_type: string, data: unknown) => {
       if (fail === "append") throw new Error("append");
       appends.push(data);
+      if (fail === "append-after") throw new Error("append-after");
     },
   } as unknown as ExtensionAPI;
   const gate = registerToolGating(pi, floor);
@@ -254,12 +257,23 @@ test("floor enforces all observations before sync, despite snapshot/census/tools
       // A foreign `setActiveTools` re-activated perk's gate-blocked tools, so the sync must install.
       h.setActive(defaultActive(defaultRegistry()));
       h.fail(failure);
-      assert.throws(() =>
+      assert.deepEqual(
         failure === "append" ? h.gate.enter() : h.gate.syncFromState(mode, undefined),
+        {
+          status: "failed",
+          requested: failure === "append" ? "read-only" : "read-write",
+          access: "read-only",
+          step: failure === "append" ? "persist" : "install",
+          error: failure,
+        },
       );
       await quietly(() => assertBackstop(h, { readable: failure !== "census" }));
       h.fail(undefined);
-      h.gate.exit();
+      assert.deepEqual(h.gate.exit(), {
+        status: "restricted",
+        requested: "read-write",
+        access: "read-only",
+      });
       assert.deepEqual(h.appends, [], "floor exit never appends read-write");
       h.gate.syncFromState("read-write", undefined);
       assert.deepEqual(activePerk(h), perkView(gatedToolsFor(null)));
@@ -274,7 +288,13 @@ test("false cannot clear inherited read-only; ordinary parents use the same back
   h.gate.syncFromState("read-only", undefined);
   await assertBackstop(h);
   h.fail("toolset");
-  assert.throws(() => h.gate.syncFromState("read-write", undefined));
+  assert.deepEqual(h.gate.syncFromState("read-write", undefined), {
+    status: "failed",
+    requested: "read-write",
+    access: "read-only",
+    step: "install",
+    error: "toolset",
+  });
   // Immediately after the failed release — before any later point could repair it — the host
   // still presents the gate: the writers stay hidden while enforcement holds.
   for (const name of ["edit", "write", "foreign_mutator"])
@@ -298,7 +318,13 @@ test("a census-read failure on a cold read-only sync stays closed, installs noth
   const h = gateFixture(() => false);
   const before = h.active();
   h.fail("census");
-  assert.throws(() => h.gate.syncFromState("read-only", undefined));
+  assert.deepEqual(h.gate.syncFromState("read-only", undefined), {
+    status: "failed",
+    requested: "read-only",
+    access: "read-only",
+    step: "install",
+    error: "census",
+  });
   await quietly(() => assertBackstop(h, { readable: false }));
   assert.deepEqual(h.installs, [], "a failed read installs nothing");
   // The `resources_discover` re-apply (Pi reports the throw) does not open the gate either.
@@ -315,6 +341,142 @@ test("a census-read failure on a cold read-only sync stays closed, installs noth
   assert.deepEqual([...h.active()].sort(), [...before].sort(), "the exit restores the bare set");
   assert.deepEqual(h.appends, [{ mode: "read-write" }]);
   assertForeignInvariance(h);
+});
+
+// --- the transition result (contracts.md §8.40) ------------------------------------------------
+
+const APPLIED_ON = { status: "applied", requested: "read-only", access: "read-only" } as const;
+const APPLIED_OFF = { status: "applied", requested: "read-write", access: "read-write" } as const;
+const RESTRICTED = { status: "restricted", requested: "read-write", access: "read-only" } as const;
+
+async function assertWritesClosed(h: Fixture): Promise<void> {
+  assert.equal(h.gate.isActive(), true);
+  for (const toolName of ["edit", "write"]) {
+    assert.equal((await blockOf(h, toolName))?.block, true, `${toolName} blocked`);
+  }
+}
+
+test("the transition result without a floor: every transition applies with matching requested/access", () => {
+  const h = gateFixture(() => false);
+  assert.deepEqual(h.gate.enter(), APPLIED_ON);
+  assert.deepEqual(h.gate.enter(), APPLIED_ON, "a repeated enter still applies");
+  assert.deepEqual(h.gate.exit(), APPLIED_OFF);
+  assert.deepEqual(h.appends, [
+    { mode: "read-only" },
+    { mode: "read-only" },
+    { mode: "read-write" },
+  ]);
+  assert.deepEqual(h.gate.syncFromState("read-only", undefined), APPLIED_ON);
+  assert.deepEqual(h.gate.syncFromState("read-write", undefined), APPLIED_OFF);
+  assert.deepEqual(h.gate.syncFromState("read-only", "plan"), APPLIED_ON);
+  assert.deepEqual(h.gate.syncFromState(undefined, undefined), APPLIED_OFF);
+  assert.equal(h.appends.length, 3, "a sync never appends");
+});
+
+test("the transition result under a floor: a release is restricted (no append), a restriction applies", () => {
+  const suppliers: (() => boolean)[] = [
+    () => true,
+    () => {
+      throw new Error("supplier");
+    },
+  ];
+  for (const floor of suppliers) {
+    const h = gateFixture(floor);
+    assert.deepEqual(h.gate.exit(), RESTRICTED);
+    assert.deepEqual(h.gate.syncFromState("read-write", undefined), RESTRICTED);
+    assert.deepEqual(h.gate.syncFromState(undefined, undefined), RESTRICTED);
+    assert.deepEqual(h.gate.enter(), APPLIED_ON);
+    assert.deepEqual(h.gate.syncFromState("read-only", undefined), APPLIED_ON);
+    assert.deepEqual(h.gate.exit(), RESTRICTED);
+    assert.deepEqual(h.appends, [{ mode: "read-only" }], "only the enter appended");
+  }
+});
+
+test("a persist-failed enter is latched closed whether or not the branch took the entry; no install", async () => {
+  for (const failure of ["append", "append-after"] as const) {
+    const h = gateFixture(() => false);
+    h.fail(failure);
+    assert.deepEqual(h.gate.enter(), {
+      status: "failed",
+      requested: "read-only",
+      access: "read-only",
+      step: "persist",
+      error: failure,
+    });
+    assert.deepEqual(h.appends, failure === "append" ? [] : [{ mode: "read-only" }], failure);
+    assert.deepEqual(h.installs, [], "no install after a failed persist");
+    await assertWritesClosed(h);
+  }
+});
+
+test("a persist-failed exit never opens the gate; the next rebuild follows what the branch carries", async () => {
+  for (const failure of ["append", "append-after"] as const) {
+    const h = gateFixture(() => false);
+    assert.deepEqual(h.gate.enter(), APPLIED_ON);
+    h.appends.splice(0);
+    h.fail(failure);
+    assert.deepEqual(h.gate.exit(), {
+      status: "failed",
+      requested: "read-write",
+      access: "read-only",
+      step: "persist",
+      error: failure,
+    });
+    assert.deepEqual(h.appends, failure === "append" ? [] : [{ mode: "read-write" }], failure);
+    await assertWritesClosed(h);
+    for (const name of ["edit", "write"])
+      assert.ok(h.hidden().includes(name), `${name} still hidden after the held release`);
+    if (failure === "append-after") {
+      // The rebuild point reads the branch, which took the read-write entry: the gate opens.
+      h.fail(undefined);
+      assert.deepEqual(h.gate.syncFromState("read-write", undefined), APPLIED_OFF);
+      assert.equal(h.gate.isActive(), false);
+      assert.equal(await blockOf(h, "write"), undefined);
+    }
+  }
+});
+
+test("an install-failed enter/exit is fail-closed with the mode entry appended; a clean exit then applies", async () => {
+  const h = gateFixture(() => false);
+  h.fail("toolset");
+  assert.deepEqual(h.gate.enter(), {
+    status: "failed",
+    requested: "read-only",
+    access: "read-only",
+    step: "install",
+    error: "toolset",
+  });
+  assert.deepEqual(h.appends, [{ mode: "read-only" }]);
+  await quietly(() => assertWritesClosed(h));
+  h.fail(undefined);
+  assert.deepEqual(h.gate.syncFromState("read-only", undefined), APPLIED_ON);
+  h.fail("toolset");
+  assert.deepEqual(h.gate.exit(), {
+    status: "failed",
+    requested: "read-write",
+    access: "read-only",
+    step: "install",
+    error: "toolset",
+  });
+  assert.deepEqual(h.appends.at(-1), { mode: "read-write" });
+  for (const name of ["edit", "write"])
+    assert.ok(h.hidden().includes(name), `${name} still hidden after the failed release`);
+  await quietly(() => assertWritesClosed(h));
+  h.fail(undefined);
+  assert.deepEqual(h.gate.exit(), APPLIED_OFF);
+  assert.equal(h.gate.isActive(), false);
+
+  // Under a floor a throwing reapply on exit is `failed` (something broke), never an append.
+  const f = gateFixture(() => true);
+  f.fail("toolset");
+  assert.deepEqual(f.gate.exit(), {
+    status: "failed",
+    requested: "read-write",
+    access: "read-only",
+    step: "install",
+    error: "toolset",
+  });
+  assert.deepEqual(f.appends, []);
 });
 
 test("a throwing supplier and malformed bash inputs never open the gate", async () => {
@@ -870,7 +1032,7 @@ test("codemode is suspended under the gate and restored at release; a never-acti
   assert.ok(!h.active().includes("codemode"), "switched off under the gate");
   // A failed release keeps it off and the memo intact.
   h.fail("toolset");
-  assert.throws(() => h.gate.exit());
+  assert.equal(h.gate.exit().status, "failed");
   h.fail(undefined);
   assert.ok(!h.active().includes("codemode"));
   h.gate.exit();
@@ -989,7 +1151,8 @@ test("a throwing install keeps the cohort deferral pending for the next point", 
   const h = gateFixture(() => false);
   h.gate.joinDiscoveryCohort(family);
   h.fail("toolset");
-  assert.throws(() => h.gate.syncFromState("read-write", "implement"), /toolset/);
+  const failed = h.gate.syncFromState("read-write", "implement");
+  assert.equal(failed.status === "failed" ? failed.error : failed.status, "toolset");
   for (const name of family.filter((n) => isEligible(n, undefined, "implement", "read-write")))
     assert.ok(h.active().includes(name), `${name} still active after the failed install`);
   h.fail(undefined);

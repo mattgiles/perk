@@ -20,6 +20,7 @@
 // never offered); this arm is the defensive backstop.
 
 import type { WorkflowSession } from "../../session/workflowSession.ts";
+import type { GateTransition } from "../../substrate/toolPolicy.ts";
 import { applyUnifiedDiff } from "../../substrate/unifiedDiff.ts";
 import type { ApprovalGate } from "../review/approvalGate.ts";
 import { PLAN_DRAFT_ARTIFACT, resumePlanDraft } from "./draft.ts";
@@ -122,7 +123,10 @@ export type ReviewPlanDraftResult =
   | {
       status: "implementHere";
       reviewId: string;
+      /** True only when `release` applied a read-write landing (earned, never assumed). */
       gateExited: boolean;
+      /** The one gate release this arm made; null when the gate was already off. */
+      release: GateTransition | null;
       plan: string;
       edited: boolean;
     }
@@ -242,13 +246,14 @@ export async function completePlanReview(
     case "implementHere": {
       if (!deps.allowImplementHere) return { status: "implementHereRefused" };
       // The sanctioned no-save exit (contracts §8.23): gate off WITHOUT saving; the draft
-      // artifact stays intact so /plan-save can still create the canonical issue later.
-      const wasActive = deps.gate.isActive();
-      if (wasActive) deps.gate.exit();
+      // artifact stays intact so /plan-save can still create the canonical issue later. The
+      // release result rides out so the adapter renders what is in force, never the intent.
+      const release = deps.gate.isActive() ? deps.gate.exit() : null;
       return {
         status: "implementHere",
         reviewId: outcome.reviewId,
-        gateExited: wasActive,
+        gateExited: release?.status === "applied" && release.access === "read-write",
+        release,
         plan: result.plan,
         edited: result.edited,
       };

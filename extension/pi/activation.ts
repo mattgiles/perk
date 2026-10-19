@@ -103,6 +103,7 @@ import { installSubmitConflictBindings } from "./v1/delivery/submitConflict.ts";
 import { installDraftCompactBindings } from "./v1/draftCompact.ts";
 import { createDraftReviewSlot } from "./v1/draftReview.ts";
 import { registerDraftReviewWaveTools } from "./v1/draftReviewWaveTools.ts";
+import { reportGateTransition } from "./v1/gateTransitions.ts";
 import { installGistBindings } from "./v1/gist.ts";
 import { installAuditBindings } from "./v1/learning/audit.ts";
 import { installDreamBindings } from "./v1/learning/dream.ts";
@@ -560,10 +561,11 @@ export function activatePerk(
     } catch (error) {
       console.error(`perk: discovery cohort join failed — ${error}`);
     }
-    try {
-      gating.syncFromState(toolScope.mode, toolScope.stage);
-    } catch (error) {
-      console.error(`perk: tool-gating sync failed on session_start — ${error}`);
+    // A failed sync is reported (the gate stays closed); `restricted` under a runner floor is
+    // expected here and stays silent — the floor's own reflection already reports it.
+    const synced = gating.syncFromState(toolScope.mode, toolScope.stage);
+    if (synced.status === "failed") {
+      reportGateTransition(ctx, "tool-gating", synced, " (on session_start)", { alsoLog: true });
     }
 
     // The refinement cold claim's ONE-TIME context import (contracts.md §8.67): only on the
@@ -732,11 +734,11 @@ export function activatePerk(
     const state = rebuildWorkflowState(branchOf(ctx));
     const facts = sessionTreeFacts(state);
     // Non-negotiable: re-sync the gate + stage scoping on tree navigation too (mode and stage are
-    // per-field LWW — the branch-rebuilt stage is the §8.40 key). Fail-closed on the gate.
-    try {
-      gating.syncFromState(facts.toolScope.mode, facts.toolScope.stage);
-    } catch (error) {
-      console.error(`perk: tool-gating sync failed on session_tree — ${error}`);
+    // per-field LWW — the branch-rebuilt stage is the §8.40 key). Fail-closed on the gate; a
+    // failed sync is reported, an expected floor `restricted` stays silent.
+    const synced = gating.syncFromState(facts.toolScope.mode, facts.toolScope.stage);
+    if (synced.status === "failed") {
+      reportGateTransition(ctx, "tool-gating", synced, " (on session_tree)", { alsoLog: true });
     }
     // Re-sync the feedback receiver from the LWW-rebuilt state (§8.58) — gate first, then
     // receiver; `adopted: false` is right here: an env-adopted child's fresh branch carries no

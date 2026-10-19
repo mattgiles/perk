@@ -46,7 +46,6 @@ import {
   type SaveObjectiveOutcome,
   saveObjective,
 } from "../../authoring/objective/save.ts";
-import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import { DREAM_REPORT_INPUT_SCHEMA } from "../../learning/dreamReport.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { deriveTitle } from "../../session/sessionName.ts";
@@ -71,6 +70,7 @@ import { report, type Severity } from "../../surfaces/report.ts";
 import { registerPerkTool } from "../perkTool.ts";
 import { installInjectedContext } from "./contextInjection.ts";
 import { type DraftReviewSlot, recordSaveOutcome } from "./draftReview.ts";
+import { approvalGateFor, reportGateTransition } from "./gateTransitions.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { productionDreamGateRecovery } from "./objectiveDreamGate.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
@@ -277,11 +277,6 @@ function openSession(pi: ExtensionAPI, ctx: ExtensionContext): WorkflowSession {
   return openBranchWorkflowSession(pi, ctx);
 }
 
-/** The narrow gate slice the feature releases (D1a: exit only after a verified save). */
-function gateFor(gating: ToolGating, ctx: ExtensionContext): ApprovalGate {
-  return { isActive: () => gating.isActive(), exit: () => gating.exit(ctx) };
-}
-
 /** The ctx-bound §8.63 gate resolver the feature ops consume — the resolver over the
  * runtime-minted production recovery capability (`pi/v1/objectiveDreamGate.ts`). */
 function dreamGateFor(
@@ -304,7 +299,7 @@ export function objectiveSaveDepsFor(
   return {
     session: openSession(pi, ctx),
     backend: coldDoorObjectiveBackend(pi, ctx),
-    gate: gateFor(gating, ctx),
+    gate: approvalGateFor(gating, ctx),
     resolveDreamGate: dreamGateFor(ctx),
     refreshSessionName: (title) => {
       // The §8.71(h) refresh the save feature invokes right after linking: the newest
@@ -682,7 +677,15 @@ export function installObjectiveAuthoringBindings(
         // Exit the read-only gate so the objective_save tool (gate-blocked)
         // becomes reachable on the driven turn, then drive the turn (mirrors /address and
         // /objective-plan).
-        if (gating.isActive()) gating.exit(ctx);
+        if (gating.isActive()) {
+          const held = reportGateTransition(
+            ctx,
+            "objective-save",
+            gating.exit(ctx),
+            " — the save turn was not started (the objective_save tool is gate-blocked)",
+          );
+          if (held !== null) return;
+        }
         report(ctx, "objective-save", "info", "handing the structured save to the session");
         // The perk-objective-author pointer rides the skill-binding suffix (D5) since a
         // warm /objective-save outside a stage:objective-author session gets none from Mechanism A.

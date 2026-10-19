@@ -57,6 +57,7 @@ import {
   toAttemptReceipt,
 } from "../../waves/reportWave.ts";
 import { registerPerkTool } from "../perkTool.ts";
+import { gateEntryNeeded, reportGateTransition } from "./gateTransitions.ts";
 import { fetchObjectiveUrl } from "./objective.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 
@@ -813,13 +814,20 @@ export function installObjectivePlanningBindings(
       }
       report(ctx, "objective-plan", "info", `#${objective}${node ? ` node ${node}` : ""}`);
       // Enter the read-only gate (parity with the cold door's `mode: read-only` handoff claim) —
-      // skip-if-active so an already-gated session (cold objective-plan, `/plan` on) gets no
+      // skip-if-gated so an already-gated session (cold objective-plan, `/plan` on) gets no
       // duplicate `mode` append or announce — then re-scope it to the claimed stage. Entering
       // BEFORE sendUserMessage means the seeded factory turn runs gated and picks up the
       // read-only + plan-authoring injections on its before_agent_start. Exit stays owned by the
-      // plan save (approval auto-save included) and `/plan` off.
-      if (!gating.isActive()) {
-        gating.enter(ctx);
+      // plan save (approval auto-save included) and `/plan` off. Fail-closed: a held transition
+      // stops the door before the factory turn (the stage claim landed and the gate is latched ON
+      // in memory); a re-run re-attempts whatever is missing — the mode write when the branch
+      // does not persist the gate (`gateEntryNeeded`), then the stage sync.
+      const rerun = " — the factory turn was not started; re-run /objective-plan";
+      if (gateEntryNeeded(gating, ctx)) {
+        const held = reportGateTransition(ctx, "objective-plan", gating.enter(ctx), rerun, {
+          alsoLog: true,
+        });
+        if (held !== null) return;
         report(
           ctx,
           "objective-plan",
@@ -827,7 +835,10 @@ export function installObjectivePlanningBindings(
           "read-only ON — structurally enforced exploration; plan_save exits (approval auto-saves), or /plan toggles off.",
         );
       }
-      gating.syncFromState("read-only", OBJECTIVE_PLAN_STAGE);
+      const scoped = gating.syncFromState("read-only", OBJECTIVE_PLAN_STAGE);
+      if (reportGateTransition(ctx, "objective-plan", scoped, rerun, { alsoLog: true }) !== null) {
+        return;
+      }
       // Inject the factory guidance as a user message so the model starts the loop (always a turn).
       // The seed turn self-delivers the perk-objective-plan pointer through the skill-binding
       // suffix; later turns resolve `stage:objective-plan` from the claimed stage.

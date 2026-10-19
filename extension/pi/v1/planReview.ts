@@ -96,6 +96,11 @@ import {
   supersededReviewResult,
   withDraftChangedNote,
 } from "./draftReview.ts";
+import {
+  gateTransitionNotice,
+  type HeldTransition,
+  reportGateTransition,
+} from "./gateTransitions.ts";
 import { runGistReviewV1 } from "./gist.ts";
 import {
   isRefinementSession,
@@ -218,27 +223,67 @@ const IMPLEMENT_HERE_EXIT_NOTICE =
  * suffix for `command:implement-here` (a `[[bindings]]` hook; delivers nothing by default).
  */
 export function implementHereGuidance(cwd: string, opts: { editedPlan?: string }): string {
-  const edited =
-    opts.editedPlan === undefined
-      ? ""
-      : `\n\nThe human edited the plan during review; implement THESE final bytes:\n\n${opts.editedPlan}`;
+  const edited = opts.editedPlan === undefined ? "" : editedPlanSuffix(opts.editedPlan);
   return `${IMPLEMENT_HERE_GUIDANCE}${edited}${bindingSuffix(cwd, "command:implement-here")}`;
+}
+
+/** The final reviewed bytes, inlined when the human edited the plan during review. */
+function editedPlanSuffix(plan: string): string {
+  return `\n\nThe human edited the plan during review; implement THESE final bytes:\n\n${plan}`;
 }
 
 /**
  * The gate-exit-WITHOUT-save seam — the no-save sibling of `planApprovalSave`'s D1a arm. If the
- * gate is active, exit it and report one info line; otherwise a no-op. Keeps Invariant 1:
- * callers (the review arm's implement-here verdict, the `/implement-here` command) compose the
- * gate through this seam, never own it.
+ * gate is active, exit it and report what the release left in force: the one info line when it
+ * applied, the held-transition notice otherwise (`gateExited: false` — nothing may be driven);
+ * a no-op when the gate is off. Keeps Invariant 1: callers (the review arm's implement-here
+ * verdict, the `/implement-here` command) compose the gate through this seam, never own it.
  */
 export function implementHereExit(
   ctx: ExtensionContext,
   gating: ToolGating,
 ): { gateExited: boolean } {
   if (!gating.isActive()) return { gateExited: false };
-  gating.exit(ctx);
+  const t = gating.exit(ctx);
+  if (t.status !== "applied") {
+    reportGateTransition(ctx, "implement-here", t, " — nothing saved; the draft is intact");
+    return { gateExited: false };
+  }
   report(ctx, "implement-here", "info", IMPLEMENT_HERE_EXIT_NOTICE);
   return { gateExited: true };
+}
+
+/**
+ * The implement-here verdict whose gate release was held (the runner restriction floor, a failed
+ * persist/install): NON-terminating, nothing saved, and no implement-now guidance — the session
+ * is still read-only. When the human edited the plan during review, the final reviewed bytes are
+ * still inlined so they reach the model now (the draft artifact already holds them, so a later
+ * `/implement-here` retry implements them too). The held notice itself was already reported by
+ * the gate slice.
+ */
+export function implementHereHeldResult(
+  release: HeldTransition,
+  opts: { plan: string; edited: boolean; reviewId: string },
+): ToolResult {
+  const error = gateTransitionNotice(release).message;
+  const text =
+    `IMPLEMENT HERE was chosen, but ${error}. Nothing was saved and the draft is intact; the ` +
+    "session stays read-only — fix the cause and retry /implement-here (it implements the " +
+    "draft, which already holds the reviewed bytes), or save with plan_review / /plan-save." +
+    (opts.edited ? editedPlanSuffix(opts.plan) : "");
+  return {
+    content: [{ type: "text", text }],
+    details: {
+      ok: false,
+      error,
+      error_type: "bad_state",
+      status: "implement-here",
+      saved: false,
+      gateExited: false,
+      reviewId: opts.reviewId,
+      ...(opts.edited ? { edited: true } : {}),
+    },
+  };
 }
 
 /**
@@ -280,7 +325,8 @@ export function implementHereResult(
  * planning session refuses — an implement-here would strand the node in `planning` (the claim
  * is only cleared by a node-linked save or a non-planning transition); gate untouched, nothing
  * injected. (2) Nothing to exit — the command's meaning is *exiting plan mode without saving*.
- * (3) Gate off → instruct the model. No inlined plan: the model authored the draft in its own
+ * (3) Gate off → instruct the model; a held release (reported by the seam) drives nothing and
+ * leaves the open review un-superseded. No inlined plan: the model authored the draft in its own
  * context (the review-path edited-bytes inlining is `implementHereResult`'s arm).
  */
 export async function runImplementHereCommand(
@@ -316,10 +362,12 @@ export async function runImplementHereCommand(
     );
     return;
   }
+  // Release the gate first: a held release (reported by the seam) leaves the open review as it
+  // was — the human may still decide it or retry — and drives nothing.
+  if (!implementHereExit(ctx, gating).gateExited) return;
   // Exiting plan mode without saving retires whatever review is open: a later browser decision
   // for it is ignored (loudly) rather than saving a plan the human chose not to save.
   slot.supersede();
-  implementHereExit(ctx, gating);
   const message = implementHereGuidance(ctx.cwd, {});
   if (ctx.isIdle()) {
     pi.sendUserMessage(message);
@@ -709,6 +757,15 @@ export function renderPlanReviewResult(
         },
       );
     case "implementHere": {
+      // A held release (already reported by the gate slice) gets the held result: no
+      // implement-now guidance while the session is still read-only.
+      if (result.release !== null && result.release.status !== "applied") {
+        return implementHereHeldResult(result.release, {
+          plan: result.plan,
+          edited: result.edited,
+          reviewId: result.reviewId,
+        });
+      }
       // The feature exited the gate through the seam; surface the one info line the manual
       // `/implement-here` exit always reported (byte-identical notice, same scope/severity).
       if (result.gateExited) report(ctx, "implement-here", "info", IMPLEMENT_HERE_EXIT_NOTICE);

@@ -31,6 +31,7 @@ import {
   type SessionDataCtx,
 } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
+import type { GateTransition } from "../../substrate/toolPolicy.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
 import {
@@ -543,14 +544,19 @@ interface CapturedToolSpec {
   ) => Promise<{ content: { text?: string }[]; details: Record<string, unknown> }>;
 }
 
-function installOffline(opts: { stdout: string; argvs: string[][]; sent: string[] }): {
+function installOffline(opts: {
+  stdout: string;
+  argvs: string[][];
+  sent: string[];
+  exit?: GateTransition;
+}): {
   tools: Map<string, CapturedToolSpec>;
   commands: Map<string, (args: string, ctx: unknown) => Promise<void>>;
   gating: ReturnType<typeof fakeGating>;
 } {
   const tools = new Map<string, CapturedToolSpec>();
   const commands = new Map<string, (args: string, ctx: unknown) => Promise<void>>();
-  const gating = fakeGating(true);
+  const gating = fakeGating(true, opts.exit ? { exit: opts.exit } : {});
   const pi = {
     on() {},
     registerTool(spec: CapturedToolSpec) {
@@ -627,6 +633,33 @@ test("absent identity: /gist-save falls to the drive fallback (openSession absen
   assert.equal(sent.length, 1, "exactly one drive injection");
   assert.match(String(sent[0]), /gist_save/);
   assert.match(String(sent[0]), /title: "Driven title"/, "the title override rides the drive");
+});
+
+test("draft-less /gist-save whose gate release is held reports it and drives no save turn", async () => {
+  const cwd = scaffoldRepo();
+  const argvs: string[][] = [];
+  const sent: string[] = [];
+  const notes: { message: string; severity?: string }[] = [];
+  const { commands, gating } = installOffline({
+    stdout: CREATE_JSON,
+    argvs,
+    sent,
+    exit: { status: "restricted", requested: "read-write", access: "read-only" },
+  });
+  const handler = commands.get("gist-save");
+  assert.ok(handler, "/gist-save captured");
+  const ctx = headfulCtx(cwd, [], {
+    notify: (message: string, severity?: string) => notes.push({ message, severity }),
+  });
+  await handler("Driven title", ctx);
+  assert.equal(gating.exits, 1, "one release attempt");
+  assert.deepEqual(sent, [], "no driven save turn");
+  assert.deepEqual(notes.at(-1), {
+    message:
+      "perk: gist-save — the read-only gate stays on — this session carries a runner restriction floor that no in-session gesture lifts — the save turn was not started (the gist_save tool is gate-blocked)",
+    severity: "warning",
+  });
+  assert.ok(!notes.some((n) => /handing the save/.test(n.message)), "no drive report");
 });
 
 // --- pure helpers -------------------------------------------------------------------------------
@@ -1190,6 +1223,48 @@ test("gist arm: default selection -> first-party VIEW-ONLY, 3 verdicts; approval
     String(result.content[0]?.text),
     /Consume with: perk plan from 7/,
     "the consumption hint rides the relayed save text",
+  );
+});
+
+test("gist arm: approved with a held gate release -> saved, gateExited false, one read-only notice", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry(GIST_STATE)];
+  const notes: string[] = [];
+  const ui = {
+    ...fakeUI({ editor: ["# whatever was shown"], select: [GIST_APPROVE] }),
+    notify: (message: string) => notes.push(message),
+  };
+  const ctx = headfulCtx(cwd, branch, ui);
+  plantGistDraft(ctx, branch);
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON, argvs });
+  const gating = fakeGating(true, {
+    exit: {
+      status: "failed",
+      requested: "read-write",
+      access: "read-only",
+      step: "install",
+      error: "toolset",
+    },
+  });
+  const result = await runGistReviewV1(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(APPROVED),
+  );
+  assert.equal(argvs.length, 1, "the save ran");
+  assert.equal(result.terminate, true, "the saved approval still terminates");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, true);
+  assert.equal(details.saved, true);
+  assert.equal(details.gateExited, false, "the held release is never reported as exited");
+  assert.match(String(result.content[0]?.text), /Saved gist 7/);
+  assert.deepEqual(
+    notes.filter((n) => n.startsWith("perk: read-only — ")),
+    [
+      "perk: read-only — could not release the read-only gate (tool reconciliation failed: toolset) — the session is read-only",
+    ],
   );
 });
 

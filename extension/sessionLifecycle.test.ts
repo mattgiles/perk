@@ -31,6 +31,7 @@ import { readOnlyContext } from "./substrate/toolGating.ts";
 import { gatedToolsFor, isPerkTool } from "./substrate/toolPolicy.ts";
 import { WORKFLOW_STATE_TYPE } from "./substrate/workflowState.ts";
 import {
+  failToolInstall,
   loadPerkSession,
   plantSession,
   registerFakeTool,
@@ -565,6 +566,54 @@ test("composition: navigation syncs the gate before the receiver from ONE rebuil
     });
     assert.equal(sync.pointer, null, "navigation never captures");
     assert.deepEqual(h.workflowState().active_plan_ref, planRef("41"));
+  } finally {
+    h.dispose();
+  }
+});
+
+// The startup/navigation sync reports a failed transition through the surfaces seam (contracts.md
+// §8.40) and the gate never opens; a runner floor's expected `restricted` stays silent.
+
+test("a session_start whose gate sync fails to install is reported and leaves the gate closed", async () => {
+  const cwd = scaffoldRepo();
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.inMemory(cwd) });
+  try {
+    await h.invokeCommand("plan");
+    assert.equal((await h.emitToolCall("write", {}))?.block, true);
+    // The branch now carries a release the in-memory gate has not yet applied.
+    h.session.sessionManager.appendCustomEntry(WORKFLOW_STATE_TYPE, { mode: "read-write" });
+    const install = failToolInstall(h, "toolset exploded");
+    await h.emitSessionStart();
+    install.restore();
+    assert.ok(
+      h.notifies.some((n) =>
+        /^perk: tool-gating — could not release the read-only gate \(tool reconciliation failed: toolset exploded\) — the session is read-only \(on session_start\)$/.test(
+          n,
+        ),
+      ),
+      `the failed-sync report (got ${JSON.stringify(h.notifies)})`,
+    );
+    assert.equal((await h.emitToolCall("write", {}))?.block, true, "the gate stays closed");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("a runner-floored startup's restricted sync stays silent", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [{ run_id: "RID", mode: "read-write" }]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: runnerPacket,
+  });
+  try {
+    assert.equal((await h.emitToolCall("write", {}))?.block, true);
+    await h.emitSessionStart();
+    assert.ok(
+      !h.notifies.some((n) => /tool-gating|the read-only gate stays on/.test(n)),
+      `no transition notice (got ${JSON.stringify(h.notifies)})`,
+    );
   } finally {
     h.dispose();
   }

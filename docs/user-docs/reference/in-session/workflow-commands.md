@@ -24,7 +24,11 @@ context is a refusal: the command reports the missing state and performs no muta
 
 ### `/plan`
 
-Toggle perk plan mode — a read-only exploration and plan-authoring session. Paired tools:
+Toggle perk plan mode — a read-only exploration and plan-authoring session. The toggle reports
+what is actually in force: under a runner restriction floor it says the read-only gate stays on;
+a transition that fails is reported with its cause, and the gate never opens on a failure — a
+failed mode write says the persisted mode is unverified (the next session start re-syncs from the
+session; `/plan` re-enters). Paired tools:
 
 - **`plan_draft`** — write or overwrite the working plan draft in the session data directory. It
   is the sanctioned artifact write while read-only, not a save. *Non-terminating.*
@@ -70,6 +74,10 @@ first). Paired tool:
 If none of those sources contains a plan, the tool refuses with `invalid_input`; the slash command
 warns and leaves the session in place. Write the working draft with `plan_draft` and retry.
 
+A save whose read-only gate cannot come off afterwards (a runner restriction floor, a failed mode
+write or tool reconciliation) is still saved: perk reports the held release and the session stays
+read-only.
+
 ### `/implement-here`
 
 Exit plan mode **without saving an issue** and implement the current draft in this session. The
@@ -83,6 +91,12 @@ refuses in an objective-node planning session because the node-linked plan must 
 review surface does not offer the no-save verdict there. It also
 warns and does nothing when plan mode is already off. There is no model-tool twin, so the agent
 cannot choose this no-save exit itself.
+
+If the gate cannot come off (a runner restriction floor, a failed mode write or tool
+reconciliation), the command reports why and drives nothing; an open review stays open. A review
+verdict to implement here whose release is held returns a non-terminating `bad_state` result
+instead of implement-now guidance — it still hands the model the final reviewed bytes when you
+edited the plan during review, so a later `/implement-here` implements them.
 
 ### `/implement`
 

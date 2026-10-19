@@ -174,7 +174,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   failsafe** (a post-rewrite failsafe save would bypass review of the replacement bytes).
   The two manual failsafes (`/objective-save`, `/gist-save`) STOP on a refused artifact with
   an error report — no gate exit, no driven turn (those fallbacks are for draft-LESS
-  sessions; every no-draft arm and message stays byte-stable). Title precedence: an explicit
+  sessions; every no-draft arm and message stays byte-stable). The draft-less fallback exits
+  the gate before driving the save turn; a held release (the §8.40 transition result is
+  `restricted` or `failed`) is reported — naming the gate-blocked save tool — and drives
+  nothing. Title precedence: an explicit
   title wins; else the draft's `title`; else the cold
   door derives from the prose heading.
 
@@ -749,8 +752,14 @@ change.
 — enforcement, not prompting. Every observation (including `isActive`, context, tool calls and toolset
 application) uses the effective restriction; a throwing optional composition-only floor supplier is
 restrictive for that observation. A floor works without a successful tool installation, branch
-read or persistence. With a floor, `exit()` skips the read-write append and reapplies restriction,
-leaving persisted mode unchanged after failed reflection. Without a floor, ordinary enter/exit and
+read or persistence. With a floor, `exit()` skips the read-write append, reapplies restriction
+and returns `restricted` (§8.40 transition result), leaving persisted mode unchanged after failed
+reflection. Every consumer announces the effective access from the result, never its intent —
+the plan-mode toggle never reports full access under a floor, `gateExited` is `true` only for an
+applied read-write release, the implement-here exit sends no implement-now guidance (the held
+result still inlines edited reviewed bytes) and the draft-less `/gist-save`/`/objective-save`
+fallbacks drive no save turn when the release is held; a held-release notice can never fail the
+caller (best-effort reporting through the surfaces seam, single-line by construction). Without a floor, ordinary enter/exit and
 stage semantics remain. `/btw`'s `gating.isActive()` supplier sees the same restriction. While effectively read-only the interior (`extension/substrate/toolGating.ts`): (1) installs
 perk's own tools for the stage's **gated view** `gatedToolsFor(stage)` (§8.40 own-names-only
 activation — every catalogued perk tool eligible in the stage whose gate posture is not `blocked`,
@@ -925,8 +934,9 @@ context: the reviewer/runner restriction guidance stays delivered after authorin
 removed). The allowlist is restored on both `session_start` and `session_tree` (re-sync
 from the rebuilt `mode`) and re-applied once at `resources_discover` from the in-memory
 mode/stage (§8.40). **Fail-closed:** a failed state-rebuild never opens the gate, and
-`tool_call` blocks on any internal error. The `enter(ctx?)`/`exit(ctx?)` surface is the API the
-interior consumers compose — the gate-**entry** consumers are plan mode (`/plan`, `--plan`,
+`tool_call` blocks on any internal error. The `enter(ctx?)`/`exit(ctx?)` surface (each
+returning the §8.40 transition result, as does `syncFromState`) is the API the interior consumers
+compose — the gate-**entry** consumers are plan mode (`/plan`, `--plan`,
 `Ctrl+Alt+P`), the warm `/objective-plan` factory (which first claims `stage: objective-plan`
 via `enter-objective-plan-stage` — refusing a worktree-stage session — and re-scopes the gate to
 it) and the warm `/objective-refine` entry; `exit`
@@ -958,12 +968,19 @@ which authors nothing. Admitted: a stage-less warm `/plan`, the cold `plan`/`obj
 claims, a worktree stage with `/plan` on. The objective/gist/refinement contexts key on (gate AND
 their exact stage). The selection signal is the **persisted** `mode` (`perk:workflow-state.mode`,
 the gate's state twin — never the gate object): every injected context and the binding delivery
-read it from the rebuilt branch. The two agree whenever a gate sync succeeds; in the one
-divergence window — a read-write sync/restore that throws keeps the in-memory gate closed
-(fail-closed) while the persisted mode is already `read-write` — enforcement and the
-`[READ-ONLY MODE]` context (which follow the enforcement gate) stay, plan guidance is retired
-(it follows the human's declared intent), and the next rebuild point (`session_start` /
-`session_tree`) re-syncs the gate from the persisted mode. The `stage:plan` skill bindings follow
+read it from the rebuilt branch. The two agree after an applied `enter` or non-floored `exit`
+(each writes the mode) and after a rebuild-point sync (it reads the mode from the branch); a
+door's stage sync (`syncFromState` with a mode the door supplies) only re-scopes tools and never
+writes the mode, so an `applied` sync proves nothing about the branch — the warm factories
+therefore enter unless the gate is active in memory AND the branch already persists
+`mode: read-only` (`gateEntryNeeded`), so a re-run after a held entry re-attempts the mode write.
+The divergence window is two-sided — a release whose append or install fails (`failed`) keeps the
+in-memory gate closed (fail-closed) while the branch may already carry `mode: read-write`, and a
+restriction whose append fails is in force in memory while the branch may not carry
+`mode: read-only` (Pi's append is not transactional, §8.40). Enforcement and the
+`[READ-ONLY MODE]` context follow the in-memory gate; plan guidance follows the branch (the
+human's declared intent); the next rebuild point (`session_start` / `session_tree`) re-syncs the
+gate from the branch either way. The `stage:plan` skill bindings follow
 the same stage-less rule (§8.9: a stage-less session in plan mode resolves to `stage:plan`). NO
 injected authoring or adapter context reaches a runner child: the fence is
 `installInjectedContext`'s third argument, fed the composition root's `runnerChild` closure (the
@@ -5316,7 +5333,9 @@ emitted remains unrecoverable — the human re-runs the door.
   other selection → the first-party `ctx.ui.editor` review. APPROVED (either backend) runs the
   shared approval→save orchestration — the feature op `planApprovalSave`
   (`extension/authoring/plan/save.ts`), adapter-composed as `approvalSave`
-  (`extension/pi/v1/plan.ts`): save → D1a gate exit on success (→ §8.3). The
+  (`extension/pi/v1/plan.ts`): save → D1a gate exit on success (→ §8.3). `gateExited` is `true`
+  only when that exit applied (§8.40 transition result); a held release is reported best-effort
+  (scope `read-only`) and the save stands. The
   `/plan-save` command is a manual invocation of the same seam, taking only an optional title
   argument — the deliberate human retry once the unconfirmed-save latch is set ("Draft-review
   guards" above). Every `plan_review` arm carries the universal `details.ok` discriminant
@@ -5454,11 +5473,16 @@ emitted remains unrecoverable — the human re-runs the door.
      gate-exit-WITHOUT-save sibling of `approvalSave`'s D1a arm) into a **non-terminating** tool
      result carrying the implement-now guidance — the model continues the turn and implements
      immediately. When the human edited the plan during review, the final reviewed bytes are
-     inlined in that guidance (the draft write-back already happened pre-verdict).
+     inlined in that guidance (the draft write-back already happened pre-verdict). A **held
+     release** (the §8.40 transition result is `restricted` or `failed`; the gate slice already
+     reported it) returns the non-terminating `bad_state` held result instead — `gateExited:
+     false`, nothing saved, no implement-now guidance, retry `/implement-here` or save — which
+     still inlines the edited reviewed bytes, so they reach the model now.
   2. the **`/implement-here` command** — the universal manual gesture: exits the gate through the
      same seam and injects the guidance (idle → an immediate turn; streaming → a followUp). With
      the gate already off it warns and does nothing (its meaning is *exiting plan mode without
-     saving*).
+     saving*). The release runs BEFORE the open review is superseded: a held release is reported
+     and the command drives nothing and leaves the open review as it was.
 
   Semantics: **no issue, no `cache.plan-ref`, no branch** — the PR-lifecycle doors
   (`/submit`/`/address`/`/land`) stay inapplicable; the plan-draft artifact is left intact, so
@@ -8029,7 +8053,22 @@ read-write diet has no call-time backstop). `apply(nextActive, nextStage)`
 latches the in-memory gate ON before any fallible read (fail-closed, §8.3), sets the stage and the
 **presented mode** (`read-only` iff the gate or the floor holds) BEFORE the install, installs, and
 releases the gate only after a successful install; a throwing install reverts the presented mode
-to the effective restriction and rethrows. When the presented mode flips but no perk name changes,
+to the effective restriction and rethrows. **The transition result:** the three public transitions
+(`syncFromState`, `enter`, `exit`) never throw — each returns a `GateTransition`
+(`extension/substrate/toolPolicy.ts`) carrying `requested` (the landing asked for) and `access`
+(the effective restriction it left, the floor included): `applied` (installed, `access ===
+requested`), `restricted` (a read-write request met the runner restriction floor — nothing
+persisted, restriction reapplied, `access: read-only`) or `failed` (`step: persist` — the mode
+append threw — or `step: install`, with the raw thrown `error`). The in-memory postconditions are
+fail-closed: `enter` latches the gate ON before its append, so a restriction is in force whatever
+persistence does; a release never opens the gate unless every step it takes succeeds (its
+append, when it has one, and its install). Only `enter` and a non-floored `exit` append a mode
+entry; `syncFromState` and a floored `exit` append nothing. Pi's append is not transactional (the
+entry reaches the in-memory branch before the write that can throw, and listeners run after it),
+so a `persist` failure never proves the branch lacks the entry, and an `install` failure after a
+successful append leaves the entry on the branch; the next rebuild point re-reads the branch. The event-driven re-applies keep their own
+postures (`resources_discover` rethrows to Pi; `before_agent_start`/`agent_start` log and
+continue). Consumers render the result through the surfaces seam, best-effort (§8.3). When the presented mode flips but no perk name changes,
 perk reinstalls the live set unchanged — only while the loadout host is active — so Pi rebuilds
 the prompt's snippet map for the new presentation. **The gate's one non-perk exception:** before
 reconciling, a builtin row marked `suspendedUnderGate` (only `codemode`, matched with
@@ -8381,7 +8420,8 @@ rewrite with `gist_draft`, then re-review; the gate untouched). A save-time refu
 review read and the save re-read) renders via the shared `approvedSubjectSaveResult`
 `refused-draft` arm — rewrite + a FRESH review, never `/gist-save` — and `/gist-save` itself
 STOPS on a refused artifact (error report; no gate exit, no driven turn — the drive fallback
-stays the draft-LESS arm, byte-stable). No session
+stays the draft-LESS arm, byte-stable). The draft-less fallback exits the gate before driving the
+save turn; a held release (§8.40 transition result) is reported and drives nothing. No session
 linkage after save — nothing consumes a gist in-session.
 
 ## §8.42 · Objective delivery policy (stacked delivery — the stored domain contract)

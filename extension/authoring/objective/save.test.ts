@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { deriveTitle } from "../../session/sessionName.ts";
+import type { GateTransition } from "../../substrate/toolPolicy.ts";
 import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import type { ApprovalGate } from "../review/approvalGate.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./draft.ts";
@@ -17,6 +18,12 @@ import {
   objectiveApprovalSave,
   saveObjective,
 } from "./save.ts";
+
+const APPLIED_RELEASE: GateTransition = {
+  status: "applied",
+  requested: "read-write",
+  access: "read-write",
+};
 
 const PROSE = "# Objective\n\nThe why.\n";
 const ROADMAP = [{ id: "1.1", description: "first" }];
@@ -66,9 +73,10 @@ function fakeGate(active = true): ApprovalGate & { exits: number } {
   const gate = {
     exits: 0,
     isActive: () => active,
-    exit: () => {
+    exit: (): GateTransition => {
       active = false;
       gate.exits += 1;
+      return APPLIED_RELEASE;
     },
   };
   return gate;
@@ -453,8 +461,9 @@ test("approvalSave: refused draft ⇒ refused-draft BEFORE the gate snapshot; no
       probed += 1;
       return true;
     },
-    exit() {
+    exit(): GateTransition {
       gate.exits += 1;
+      return APPLIED_RELEASE;
     },
   };
   const quiet = console.error;

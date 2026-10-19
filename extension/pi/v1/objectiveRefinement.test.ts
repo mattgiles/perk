@@ -31,7 +31,14 @@ import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type BranchEntry, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import { createPerkStatus } from "../../surfaces/surfaces.ts";
 import { scriptedDraftReviewBridge } from "../../testing/draftReview.ts";
-import { gitInit, loadPerkSession, scaffoldRepo, spyInjections } from "../../testing/harness.ts";
+import {
+  failModeAppend,
+  failToolInstall,
+  gitInit,
+  loadPerkSession,
+  scaffoldRepo,
+  spyInjections,
+} from "../../testing/harness.ts";
 import type { ReportWave } from "../../waves/reportWave.ts";
 import { createDraftReviewSlot, type OpenDraftReview } from "./draftReview.ts";
 import { installGistBindings } from "./gist.ts";
@@ -350,13 +357,17 @@ function fixture(
         customType: WORKFLOW_STATE_TYPE,
         data: { mode: "read-write" },
       });
+      return { status: "applied", requested: "read-write", access: "read-write" };
     },
     enter() {
       enters++;
       branch.push({ type: "custom", customType: WORKFLOW_STATE_TYPE, data: { mode: "read-only" } });
+      return { status: "applied", requested: "read-only", access: "read-only" };
     },
     syncFromState(mode: string | undefined, s: string | undefined) {
       synced.push([mode, s]);
+      const landing = mode === "read-only" ? "read-only" : "read-write";
+      return { status: "applied", requested: landing, access: landing };
     },
     prepareLoadout: () => ({ hiddenDeclarations: [] }),
     joinDiscoveryCohort() {},
@@ -1080,9 +1091,15 @@ function plannotatorArm(
     isActive: () => exits === 0,
     exit() {
       exits++;
+      return { status: "applied", requested: "read-write", access: "read-write" };
     },
-    enter() {},
-    syncFromState() {},
+    enter() {
+      return { status: "applied", requested: "read-only", access: "read-only" };
+    },
+    syncFromState(mode: string | undefined) {
+      const landing = mode === "read-only" ? "read-only" : "read-write";
+      return { status: "applied", requested: landing, access: landing };
+    },
     prepareLoadout: () => ({ hiddenDeclarations: [] }),
     joinDiscoveryCohort() {},
     primeDeferred: () => [],
@@ -1765,6 +1782,78 @@ test("warm /objective-refine (harness): an idle unbound session with an active o
     for (const other of ["[PLAN ADAPTER", "[OBJECTIVE ADAPTER", "[GIST ADAPTER"]) {
       assert.equal(String(bridge[0]?.content).includes(other), false, other);
     }
+  } finally {
+    h.dispose();
+  }
+});
+
+test("warm /objective-refine (harness): a gate entry whose mode append fails stops before the flow turn; a re-run proceeds", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: GOLDEN_RUN, mode: "read-write" } });
+  const { fakePerkRouter } = await import("../../testing/harness.ts");
+  const bin = fakePerkRouter(cwd, { "objective refine-context": { json: CONTEXT_JSON } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: GOLDEN_RUN, PERK_BIN: bin } });
+  const sent = spyInjections(h);
+  try {
+    const append = failModeAppend(h, { mode: "read-only", when: "before", message: "disk full" });
+    await h.invokeCommand("objective-refine", "proj-1 --node 2.3");
+    append.restore();
+    assert.ok(
+      h.notifyEvents.some(
+        (e) =>
+          e.severity === "error" &&
+          /could not enter read-only \(mode persistence failed: disk full\)/.test(e.message) &&
+          e.message.endsWith(" — the refinement turn was not started; re-run /objective-refine"),
+      ),
+      `the held-entry report (got ${JSON.stringify(h.notifyEvents)})`,
+    );
+    assert.equal(sent.length, 0, "no flow turn");
+    assert.ok(!h.notifies.some((n) => /context prepared/.test(n)), "no read-only ON info line");
+    assert.equal((await h.emitToolCall("write", { path: "x" }))?.block, true, "latched closed");
+    assert.notEqual(h.workflowState().mode, "read-only", "the branch never took the entry");
+    // The re-run re-attempts the missing mode write, re-syncs the stage scope, and drives the turn.
+    await h.invokeCommand("objective-refine", "proj-1 --node 2.3");
+    assert.equal(h.workflowState().mode, "read-only", "the re-run persisted the gate");
+    assert.equal(sent.length, 1, h.notifies.join("\n"));
+    assert.match(sent[0] ?? "", /perk objective refine flow/);
+    assert.equal(h.workflowState().stage, "objective-refine");
+    // A rebuild point follows the branch, which now carries the gate: still closed.
+    await h.emitSessionStart();
+    assert.equal((await h.emitToolCall("write", { path: "x" }))?.block, true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("warm /objective-refine (harness): an already-gated session whose stage sync fails to install stops before the flow turn; a clean re-run proceeds", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: GOLDEN_RUN, mode: "read-write" } });
+  const { fakePerkRouter } = await import("../../testing/harness.ts");
+  const bin = fakePerkRouter(cwd, { "objective refine-context": { json: CONTEXT_JSON } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: GOLDEN_RUN, PERK_BIN: bin } });
+  const sent = spyInjections(h);
+  try {
+    await h.invokeCommand("plan", "");
+    assert.equal(h.workflowState().mode, "read-only", "already gated (and persisted)");
+    const install = failToolInstall(h, "toolset exploded");
+    await h.invokeCommand("objective-refine", "proj-1 --node 2.3");
+    install.restore();
+    assert.ok(
+      h.notifyEvents.some(
+        (e) =>
+          e.severity === "error" &&
+          /could not enter read-only \(tool reconciliation failed: toolset exploded\)/.test(
+            e.message,
+          ) &&
+          e.message.endsWith(" — the refinement turn was not started; re-run /objective-refine"),
+      ),
+      `the held-sync report (got ${JSON.stringify(h.notifyEvents)})`,
+    );
+    assert.equal(sent.length, 0, "no flow turn");
+    assert.ok(!h.notifies.some((n) => /context prepared/.test(n)), "no read-only ON info line");
+    assert.equal((await h.emitToolCall("write", { path: "x" }))?.block, true, "still closed");
+    await h.invokeCommand("objective-refine", "proj-1 --node 2.3");
+    assert.equal(sent.length, 1, h.notifies.join("\n"));
+    assert.match(sent[0] ?? "", /perk objective refine flow/);
+    assert.equal(h.workflowState().stage, "objective-refine");
   } finally {
     h.dispose();
   }

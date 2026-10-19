@@ -39,7 +39,10 @@ import { gatedToolsFor, toolMatrix } from "../../substrate/toolPolicy.ts";
 import type { BranchEntry, EntrySink } from "../../substrate/workflowState.ts";
 import { rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
+import { REPORT_DETAIL_TYPE } from "../../surfaces/surfaces.ts";
 import {
+  failModeAppend,
+  failToolInstall,
   fakeGating,
   fakePerk,
   gitInit,
@@ -249,6 +252,172 @@ test("plan guidance follows the persisted mode: a stuck gate (failed read-write 
     // A rebuild point re-syncs the gate from the persisted mode.
     await h.emitSessionStart();
     assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, undefined);
+  } finally {
+    h.dispose();
+  }
+});
+
+// The toggle announces what the transition left in force, never its intent (contracts.md §8.3).
+
+const RUNNER_PACKET = {
+  PI_SUBAGENT_CHILD: "1",
+  PI_SUBAGENT_EXTENSION_BINDINGS: '{"perk.parent-restrictions/1":{"readOnly":true}}',
+};
+
+async function writeBlocked(h: Awaited<ReturnType<typeof loadPerkSession>>): Promise<boolean> {
+  return (await h.emitToolCall("write", { path: "x", content: "y" }))?.block === true;
+}
+
+test("/plan under a runner restriction floor reports the floor, never full access, and appends no release", async () => {
+  const cwd = scaffoldRepo();
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.inMemory(cwd),
+    env: RUNNER_PACKET,
+  });
+  try {
+    await h.invokeCommand("plan");
+    assert.ok(
+      h.notifies.some((n) =>
+        /^perk: plan-mode — the read-only gate stays on — .*runner restriction floor/.test(n),
+      ),
+      `the restricted notice: ${JSON.stringify(h.notifies)}`,
+    );
+    assert.ok(!h.notifies.some((n) => /full tool access/.test(n)), "never claims full access");
+    const released = h.session.sessionManager
+      .getBranch()
+      .some(
+        (e) =>
+          e.type === "custom" &&
+          e.customType === WORKFLOW_STATE_TYPE &&
+          (e.data as { mode?: unknown } | undefined)?.mode === "read-write",
+      );
+    assert.equal(released, false, "no read-write append under the floor");
+    assert.equal(await writeBlocked(h), true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/plan off with a failing tool install reports the cause and stays closed; a clean retry releases", async () => {
+  const cwd = scaffoldRepo();
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.inMemory(cwd) });
+  try {
+    await h.invokeCommand("plan");
+    const install = failToolInstall(h, "toolset exploded");
+    await h.invokeCommand("plan");
+    install.restore();
+    assert.ok(
+      h.notifies.some((n) =>
+        /could not release the read-only gate \(tool reconciliation failed: toolset exploded\) — the session is read-only$/.test(
+          n,
+        ),
+      ),
+      `the failed-release notice: ${JSON.stringify(h.notifies)}`,
+    );
+    assert.ok(!h.notifies.some((n) => /full tool access/.test(n)));
+    assert.equal(await writeBlocked(h), true, "write still blocked");
+    await h.invokeCommand("plan");
+    assert.ok(h.notifies.some((n) => /plan mode OFF — full tool access restored\./.test(n)));
+    assert.equal(await writeBlocked(h), false);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/plan on whose mode append throws after the branch took it: latched closed, and a rebuild keeps it closed", async () => {
+  const cwd = scaffoldRepo();
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.inMemory(cwd) });
+  try {
+    const append = failModeAppend(h, { mode: "read-only", when: "after", message: "disk full" });
+    await h.invokeCommand("plan");
+    append.restore();
+    const notice = h.notifies.find((n) => /could not enter read-only/.test(n)) ?? "";
+    assert.match(notice, /could not enter read-only \(mode persistence failed: disk full\)/);
+    assert.match(notice, /persisted mode is unverified/);
+    assert.equal(await writeBlocked(h), true, "the request to restrict is latched");
+    assert.equal(h.workflowState().mode, "read-only", "the branch took the entry");
+    await h.emitSessionStart();
+    assert.equal(await writeBlocked(h), true, "the rebuild follows the branch: still closed");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/plan on whose mode append throws before recording: latched closed until the rebuild re-opens it", async () => {
+  const cwd = scaffoldRepo();
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.inMemory(cwd) });
+  try {
+    const append = failModeAppend(h, { mode: "read-only", when: "before", message: "disk full" });
+    await h.invokeCommand("plan");
+    append.restore();
+    assert.ok(
+      h.notifies.some((n) =>
+        /could not enter read-only \(mode persistence failed: disk full\)/.test(n),
+      ),
+    );
+    assert.equal(await writeBlocked(h), true, "the request to restrict is latched");
+    assert.notEqual(h.workflowState().mode, "read-only", "the branch never took the entry");
+    // The one documented re-open: the rebuild follows the branch.
+    await h.emitSessionStart();
+    assert.equal(await writeBlocked(h), false);
+    await h.invokeCommand("plan");
+    assert.ok(
+      h.notifies.some((n) => /plan mode ON/.test(n)),
+      "a re-entry applies",
+    );
+    assert.equal(await writeBlocked(h), true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/plan-save whose gate release fails after a landed save completes, reports once on one line, never via the detail sink", async () => {
+  const cwd = scaffoldRepo();
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON });
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-only" }], {
+    assistantText: "# Add retry\n\n## Summary\nRetry it.\n",
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    const append = failModeAppend(h, {
+      mode: "read-write",
+      when: "before",
+      message: "disk full\nretry later",
+    });
+    await h.invokeCommand("plan-save");
+    append.restore();
+    assert.equal(
+      (h.workflowState().active_plan_ref as { pr_id?: string } | null)?.pr_id,
+      "42",
+      "the save landed and linked",
+    );
+    // The save message is reported after the latch records the outcome — reaching it proves
+    // the held release never threw past the landed save.
+    assert.ok(
+      h.notifies.some((n) => /#42/.test(n)),
+      "the save message",
+    );
+    const held = h.notifies.filter((n) => /could not release the read-only gate/.test(n));
+    assert.equal(held.length, 1, `exactly one held-release notice: ${JSON.stringify(h.notifies)}`);
+    assert.match(
+      held[0] ?? "",
+      /^perk: read-only — could not release the read-only gate \(mode persistence failed: disk full retry later\)/,
+    );
+    assert.doesNotMatch(held[0] ?? "", /[\r\n]/);
+    assert.ok(
+      !append.attempted.some(
+        (a) =>
+          a.customType === REPORT_DETAIL_TYPE &&
+          JSON.stringify(a.data).includes("could not release"),
+      ),
+      "the held notice never reached the detail sink",
+    );
+    assert.equal(await writeBlocked(h), true, "the gate stays closed");
   } finally {
     h.dispose();
   }

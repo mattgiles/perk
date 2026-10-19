@@ -35,6 +35,7 @@ import {
 import type { ReportTarget } from "../../surfaces/report.ts";
 import { dreamRepoCommit, dreamReportInput, plantDreamFiles } from "../../testing/dreamFixtures.ts";
 import {
+  failModeAppend,
   fakeGating,
   fakePerk,
   loadPerkSession,
@@ -517,6 +518,32 @@ test("objectiveApprovalSaveV1: a successful save while already read-write never 
   assert.equal(gating.exits, 0, "no gating.exit call");
 });
 
+test("objectiveApprovalSaveV1: a held gate release → still saved, gateExited false, one read-only notice", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const notes: string[] = [];
+  const ctx = {
+    ...reportableCtx(cwd, branch),
+    hasUI: true,
+    ui: { notify: (message: string) => notes.push(message) },
+  };
+  plantDraft(ctx, branch);
+  const argvs: string[][] = [];
+  const pi = fakeApprovalPi(branch, { stdout: CREATE_JSON, argvs });
+  const gating = fakeGating(true, {
+    exit: { status: "restricted", requested: "read-write", access: "read-only" },
+  });
+  const outcome = await objectiveApprovalSaveV1(pi, ctx as unknown as ExtensionContext, gating);
+  assert.equal(outcome.status, "saved", "the save stands");
+  assert.equal(outcome.status === "saved" && outcome.gateExited, false);
+  assert.equal(gating.exits, 1, "exactly one release attempt");
+  assert.equal(argvs.length, 1);
+  assert.equal(outcome.status === "saved" ? outcome.result.terminate : null, true);
+  assert.deepEqual(notes, [
+    "perk: read-only — the read-only gate stays on — this session carries a runner restriction floor that no in-session gesture lifts",
+  ]);
+});
+
 // --- the artifact-first /objective-save command --------------------------------
 
 test("command: /objective-save with a draft → the seam saves; no drive injection", async () => {
@@ -573,6 +600,35 @@ test("command: /objective-save with a refused draft → error stop; NO gate exit
     );
     assert.equal(sent.length, 0, "no drive injection on a refused draft");
     assert.equal(h.workflowState().mode, "read-only", "the gate stays on");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("command: draft-less /objective-save whose gate release fails → reported, no driven save turn", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: "/nonexistent" } });
+  const sent = spyInjections(h);
+  try {
+    const append = failModeAppend(h, { mode: "read-write", when: "before", message: "disk full" });
+    await h.invokeCommand("objective-save", "Ship retries");
+    append.restore();
+    assert.ok(
+      h.notifyEvents.some(
+        (e) =>
+          e.severity === "error" &&
+          /^perk: objective-save — could not release the read-only gate \(mode persistence failed: disk full\)/.test(
+            e.message,
+          ) &&
+          e.message.endsWith(
+            " — the save turn was not started (the objective_save tool is gate-blocked)",
+          ),
+      ),
+      `the held-release report (got ${JSON.stringify(h.notifyEvents)})`,
+    );
+    assert.equal(sent.length, 0, "no driven save turn");
+    assert.ok(!h.notifies.some((n) => /handing the structured save/.test(n)));
+    assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, true);
   } finally {
     h.dispose();
   }

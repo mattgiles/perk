@@ -4,6 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { GateTransition } from "../../substrate/toolPolicy.ts";
 import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import type { ApprovalGate } from "../review/approvalGate.ts";
 import { GOLDEN_CONTEXT, GOLDEN_RUN } from "./context.test.ts";
@@ -24,6 +25,12 @@ import {
   refinementApprovalSave,
   reviewedPairOf,
 } from "./save.ts";
+
+const APPLIED_RELEASE: GateTransition = {
+  status: "applied",
+  requested: "read-write",
+  access: "read-write",
+};
 
 const SAVED: RefinementBackendSaveResult = {
   status: "saved",
@@ -61,9 +68,10 @@ function fakeGate(active: boolean) {
   const exits: number[] = [];
   const gate: ApprovalGate = {
     isActive: () => isActive,
-    exit() {
+    exit(): GateTransition {
       exits.push(1);
       isActive = false;
+      return APPLIED_RELEASE;
     },
   };
   return { gate, exits };
