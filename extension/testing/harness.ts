@@ -56,6 +56,7 @@ import {
   type BranchEntry,
   branchOf,
   rebuildWorkflowState,
+  WORKFLOW_STATE_TYPE,
   type WorkflowState,
 } from "../substrate/workflowState.ts";
 
@@ -1578,4 +1579,56 @@ export function fakeGating(
     discovery: () => ({ cohort: false, family: [] as readonly string[] }),
   };
   return g;
+}
+
+/**
+ * Inject a mode-persistence failure into a live session: the session manager's
+ * `appendCustomEntry` (what `pi.appendEntry` late-binds to) throws `message` for a
+ * `perk:workflow-state` entry carrying `mode` (or every such entry when `mode` is omitted).
+ * `when: "after"` records the entry first — Pi's own non-transactional shape (the entry reaches
+ * the branch before the persistence that fails); `"before"` throws without recording. Every
+ * attempted append is recorded; `restore` reinstates the original.
+ */
+export function failModeAppend(
+  h: PerkSession,
+  opts: { mode?: "read-only" | "read-write"; when: "before" | "after"; message: string },
+): { attempted: { customType: string; data: unknown }[]; restore(): void } {
+  const manager = h.session.sessionManager;
+  const original = manager.appendCustomEntry;
+  const attempted: { customType: string; data: unknown }[] = [];
+  manager.appendCustomEntry = (customType: string, data?: unknown): string => {
+    attempted.push({ customType, data });
+    const mode = (data as { mode?: unknown } | undefined)?.mode;
+    const hit =
+      customType === WORKFLOW_STATE_TYPE &&
+      mode !== undefined &&
+      (opts.mode === undefined || mode === opts.mode);
+    if (hit && opts.when === "before") throw new Error(opts.message);
+    const id = original.call(manager, customType, data);
+    if (hit) throw new Error(opts.message);
+    return id;
+  };
+  return {
+    attempted,
+    restore: () => {
+      manager.appendCustomEntry = original;
+    },
+  };
+}
+
+/**
+ * Inject a tool-install failure into a live session: `AgentSession.setActiveToolsByName` (what
+ * `pi.setActiveTools` late-binds to) throws `message` until `restore`.
+ */
+export function failToolInstall(h: PerkSession, message: string): { restore(): void } {
+  const session = h.session;
+  const original = session.setActiveToolsByName;
+  session.setActiveToolsByName = () => {
+    throw new Error(message);
+  };
+  return {
+    restore: () => {
+      session.setActiveToolsByName = original;
+    },
+  };
 }

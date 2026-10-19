@@ -20,6 +20,7 @@ import {
   waveScriptItems,
 } from "../../testing/fakeSubagents.ts";
 import {
+  failModeAppend,
   fakePerk,
   loadPerkSession,
   plantSession,
@@ -530,6 +531,41 @@ test("/objective-plan skip-if-active: an already read-only session gets no dupli
     // A second invocation is `unchanged`: no duplicate stage append.
     await h.invokeCommand("objective-plan", "7");
     assert.equal(stateEntries(), before + 1, "a repeat invocation appends nothing");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-plan whose gate entry fails to persist stops before the factory turn; a re-run proceeds", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  const sent = spyInjections(h);
+  try {
+    const append = failModeAppend(h, { mode: "read-only", when: "before", message: "disk full" });
+    await h.invokeCommand("objective-plan", "7");
+    append.restore();
+    assert.ok(
+      h.notifyEvents.some(
+        (e) =>
+          e.severity === "error" &&
+          /^perk: objective-plan — could not enter read-only \(mode persistence failed: disk full\)/.test(
+            e.message,
+          ) &&
+          e.message.endsWith(" — the factory turn was not started; re-run /objective-plan"),
+      ),
+      `the held-entry report (got ${JSON.stringify(h.notifyEvents)})`,
+    );
+    assert.equal(sent.length, 0, "no factory turn");
+    assert.ok(!h.notifies.some((m) => /read-only ON/.test(m)), "no read-only ON announce");
+    assert.equal(
+      (await h.emitToolCall("write", { path: "x", content: "y" }))?.block,
+      true,
+      "the latch holds the gate closed",
+    );
+    // The re-run takes skip-if-active, re-syncs the stage scope, and drives the turn.
+    await h.invokeCommand("objective-plan", "7");
+    assert.equal(sent.length, 1, "the factory turn was driven on the re-run");
+    assert.equal(h.workflowState().stage, "objective-plan");
   } finally {
     h.dispose();
   }

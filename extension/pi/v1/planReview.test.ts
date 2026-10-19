@@ -21,6 +21,7 @@ import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
+import type { GateTransition } from "../../substrate/toolPolicy.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
 import { createPerkStatus } from "../../surfaces/surfaces.ts";
@@ -1856,6 +1857,149 @@ test("/implement-here supersedes the open review: a browser decision arriving af
   assert.equal(gating.exits, 1, "plan mode exited without a save");
   assert.equal(sent.length, 1, "the implement-here guidance was injected");
   assert.equal(opened.review.isCurrent(), false, "the open review was retired");
+});
+
+// A held release (the runner floor, a failed persist/install) drives nothing: the session is
+// still read-only, so no implement-now guidance reaches the model (contracts.md §8.23).
+
+const RESTRICTED_RELEASE: GateTransition = {
+  status: "restricted",
+  requested: "read-write",
+  access: "read-only",
+};
+const PERSIST_FAILED_RELEASE: GateTransition = {
+  status: "failed",
+  requested: "read-write",
+  access: "read-only",
+  step: "persist",
+  error: "disk full",
+};
+
+test("/implement-here with a held release reports it, sends nothing, and leaves the open review current", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const sent: string[] = [];
+  const notes: string[] = [];
+  const pi = {
+    appendEntry(customType: string, data?: unknown) {
+      branch.push({ type: "custom", customType, data });
+    },
+    sendUserMessage(text: string) {
+      sent.push(text);
+    },
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    ...headfulCtx(cwd, branch, { notify: (message: string) => notes.push(message) }),
+    isIdle: () => true,
+  } as unknown as ExtensionContext;
+  const slot = scriptedRemotesSlot(pi);
+  const opened = slot.open(ctx, {
+    subject: "plan",
+    source: "artifact",
+    raw: "# The draft\n",
+    markdown: "# The draft\n",
+  });
+  assert.ok(opened.ok);
+  const gating = fakeGating(true, { exit: RESTRICTED_RELEASE });
+  await runImplementHereCommand(pi, ctx, gating, slot);
+  assert.equal(gating.exits, 1, "one release attempt");
+  assert.deepEqual(sent, [], "no implement-here guidance was sent");
+  assert.equal(opened.review.isCurrent(), true, "the open review still answers");
+  assert.deepEqual(notes, [
+    "perk: implement-here — the read-only gate stays on — this session carries a runner restriction floor that no in-session gesture lifts — nothing saved; the draft is intact",
+  ]);
+});
+
+test("first-party implement-here with a held release -> bad_state, non-terminating, no implement-now guidance", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const notes: string[] = [];
+  const ui = {
+    ...fakeUI({ editor: ["# The draft\n"], select: [IMPLEMENT_HERE] }),
+    notify: (message: string) => notes.push(message),
+  };
+  const ctx = headfulCtx(cwd, branch, ui);
+  assert.ok(writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"));
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const gating = fakeGating(true, { exit: RESTRICTED_RELEASE });
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(DENIED),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.equal(result.terminate, undefined, "never terminates");
+  assert.equal(gating.exits, 1);
+  assert.equal(argvs.length, 0, "nothing saved");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "bad_state");
+  assert.equal(details.status, "implement-here");
+  assert.equal(details.saved, false);
+  assert.equal(details.gateExited, false);
+  assert.ok(details.reviewId);
+  assert.equal(details.edited, undefined);
+  assert.match(String(details.error), /runner restriction floor/);
+  const text = String(result.content[0]?.text);
+  assert.match(text, /^IMPLEMENT HERE was chosen, but the read-only gate stays on/);
+  assert.match(text, /retry \/implement-here/);
+  assert.doesNotMatch(text, /The read-only gate is off/);
+  assert.doesNotMatch(text, /implement THESE final bytes/, "no inline without edits");
+  assert.equal(
+    notes.filter((n) => /^perk: read-only — the read-only gate stays on/.test(n)).length,
+    1,
+    "the slice reported the held release once",
+  );
+  assert.ok(!notes.some((n) => /plan mode off — implementing here/.test(n)));
+});
+
+test("first-party edited then implement-here with a held release -> the reviewed bytes still reach the model; a later /implement-here stays generic", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ui = fakeUI({ editor: ["# The draft, edited by the human\n"], select: [IMPLEMENT_HERE] });
+  const ctx = { ...headfulCtx(cwd, branch, ui), isIdle: () => true };
+  const drafted = writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n");
+  assert.ok(drafted, "the draft artifact landed");
+  const sent: string[] = [];
+  const pi = Object.assign(fakeColdDoorPi(branch, { stdout: PLAN_JSON }), {
+    sendUserMessage(text: string) {
+      sent.push(text);
+    },
+  });
+  const transitions: { exit?: GateTransition } = { exit: PERSIST_FAILED_RELEASE };
+  const gating = fakeGating(true, transitions);
+  const slot = scriptedRemotesSlot(pi);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(DENIED),
+    depsFor(pi, ctx, gating),
+    {},
+    undefined,
+    undefined,
+    slot,
+  );
+  assert.equal(readFileSync(drafted, "utf8"), "# The draft, edited by the human\n");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, false);
+  assert.equal(details.edited, true);
+  assert.match(String(details.error), /mode persistence failed: disk full/);
+  const text = String(result.content[0]?.text);
+  assert.match(text, /The human edited the plan during review; implement THESE final bytes:/);
+  assert.match(text, /# The draft, edited by the human/);
+  assert.doesNotMatch(text, /The read-only gate is off/);
+
+  // The retry: the release now applies and the command sends its generic guidance (the reviewed
+  // bytes already reached the model and the draft holds them).
+  delete transitions.exit;
+  await runImplementHereCommand(pi, ctx as unknown as ExtensionContext, gating, slot);
+  assert.equal(sent.length, 1, "the implement-here guidance was sent");
+  assert.match(sent[0] ?? "", /The human chose IMPLEMENT HERE/);
+  assert.doesNotMatch(sent[0] ?? "", /implement THESE final bytes/);
 });
 
 // ---------------------------------------------------------------------------------- wrappers
