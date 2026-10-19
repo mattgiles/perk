@@ -69,6 +69,14 @@ factory; a `mode`, never a recorded `stage`. A stage-less session in plan mode r
 counts.
 _Avoid_: plan stage (for the toggle), warm plan session, stage-less plan
 
+**Transition result**:
+The typed outcome of a gate `enter`/`exit`/`syncFromState` (`GateTransition`): *applied*,
+*restricted* (the runner restriction floor kept the gate on) or *failed* (the mode append or the
+tool install threw — fail-closed), each carrying the access it left in force. Callers render
+it, never their intent; `gateExited` is derived from it (true only for an applied read-write
+release).
+_Avoid_: gate outcome, exit flag, `gateExited` (as the transition itself)
+
 **Tool catalog**:
 The process-wide record of every perk tool and its policy descriptor, filled by the one registration
 seam `registerPerkTool`; every gate and stage view, each tool's Pi exposure metadata, the read-only

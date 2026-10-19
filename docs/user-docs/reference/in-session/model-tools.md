@@ -393,7 +393,9 @@ Perk-owned report waves deliver the constant `perk.parent-restrictions/1 = {read
 packet and `worktree: false` to every native runner child. The packet — or a malformed /
 unsupported-version one — establishes a read-only floor before lifecycle work that gate exit, later
 input or tree navigation cannot clear; failed mode persistence is loud and leaves the floor active.
-No packet is never a write grant. `structured_output` and `contact_supervisor` stay allowlisted;
+A gesture that tries to release the gate under the floor reports that the gate stays on, and a
+tool result's `gateExited` is true only when the gate actually released — a save whose release is
+held still saves and reports `gateExited: false`. No packet is never a write grant. `structured_output` and `contact_supervisor` stay allowlisted;
 `/btw` mirrors the gate. Manual launches and foreground children are outside this channel.
 
 ### Stage tool diet
