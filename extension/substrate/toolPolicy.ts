@@ -57,9 +57,11 @@ export type Mode = "read-only" | "read-write";
  *    never the mode); another source would be a new member of this union, not a flag.
  *  - `failed`: the mode append (`persist`) or the install (`install`) threw; `error` is the raw
  *    thrown message. Fail-closed in memory: a restriction request is in force from its latch, a
- *    release never opens the gate. The branch may or may not carry the appended mode entry after a
- *    `persist` failure (Pi's append is not transactional) and does after an `install` failure —
- *    the next rebuild point re-syncs the gate from whatever the branch carries.
+ *    release never opens the gate. Only `enter` and a non-floored `exit` append a mode entry
+ *    (`syncFromState` and a floored `exit` append nothing): the branch may or may not carry it
+ *    after a `persist` failure (Pi's append is not transactional), and carries it after an
+ *    `install` failure that followed the append — the next rebuild point re-syncs the gate from
+ *    whatever the branch carries. An `applied` sync therefore says nothing about the branch.
  */
 export type GateTransition =
   | { status: "applied"; requested: Mode; access: Mode }

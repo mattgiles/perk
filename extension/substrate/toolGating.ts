@@ -54,7 +54,8 @@
 // `restricted` (a release met the runner restriction floor — nothing persisted, restriction
 // reapplied) or `failed` (the mode append or the install threw), carrying the effective access.
 // The in-memory gate is fail-closed: `enter` latches it ON before its append, and a release
-// never opens it unless both its append and its install succeed. Pi's append is NOT
+// never opens it unless every step it takes succeeds (its append, when it has one — only `enter`
+// and a non-floored `exit` write the mode — and its install). Pi's append is NOT
 // transactional — the entry reaches the in-memory branch before the write that can throw, and
 // listeners run after it — so a `persist` failure never proves the branch lacks the entry; the
 // next rebuild point (session_start/session_tree) re-syncs from whatever the branch carries.

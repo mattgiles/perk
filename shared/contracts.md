@@ -968,8 +968,13 @@ which authors nothing. Admitted: a stage-less warm `/plan`, the cold `plan`/`obj
 claims, a worktree stage with `/plan` on. The objective/gist/refinement contexts key on (gate AND
 their exact stage). The selection signal is the **persisted** `mode` (`perk:workflow-state.mode`,
 the gate's state twin — never the gate object): every injected context and the binding delivery
-read it from the rebuilt branch. The two agree whenever a gate transition applies; the
-divergence window is two-sided — a release whose append or install fails (`failed`) keeps the
+read it from the rebuilt branch. The two agree after an applied `enter` or non-floored `exit`
+(each writes the mode) and after a rebuild-point sync (it reads the mode from the branch); a
+door's stage sync (`syncFromState` with a mode the door supplies) only re-scopes tools and never
+writes the mode, so an `applied` sync proves nothing about the branch — the warm factories
+therefore enter unless the gate is active in memory AND the branch already persists
+`mode: read-only` (`gateEntryNeeded`), so a re-run after a held entry re-attempts the mode write.
+The divergence window is two-sided — a release whose append or install fails (`failed`) keeps the
 in-memory gate closed (fail-closed) while the branch may already carry `mode: read-write`, and a
 restriction whose append fails is in force in memory while the branch may not carry
 `mode: read-only` (Pi's append is not transactional, §8.40). Enforcement and the
@@ -8056,10 +8061,12 @@ requested`), `restricted` (a read-write request met the runner restriction floor
 persisted, restriction reapplied, `access: read-only`) or `failed` (`step: persist` — the mode
 append threw — or `step: install`, with the raw thrown `error`). The in-memory postconditions are
 fail-closed: `enter` latches the gate ON before its append, so a restriction is in force whatever
-persistence does; a release never opens the gate unless its append and install both succeed. Pi's
-append is not transactional (the entry reaches the in-memory branch before the write that can
-throw, and listeners run after it), so a `persist` failure never proves the branch lacks the
-entry; the next rebuild point re-reads the branch. The event-driven re-applies keep their own
+persistence does; a release never opens the gate unless every step it takes succeeds (its
+append, when it has one, and its install). Only `enter` and a non-floored `exit` append a mode
+entry; `syncFromState` and a floored `exit` append nothing. Pi's append is not transactional (the
+entry reaches the in-memory branch before the write that can throw, and listeners run after it),
+so a `persist` failure never proves the branch lacks the entry, and an `install` failure after a
+successful append leaves the entry on the branch; the next rebuild point re-reads the branch. The event-driven re-applies keep their own
 postures (`resources_discover` rethrows to Pi; `before_agent_start`/`agent_start` log and
 continue). Consumers render the result through the surfaces seam, best-effort (§8.3). When the presented mode flips but no perk name changes,
 perk reinstalls the live set unchanged — only while the loadout host is active — so Pi rebuilds

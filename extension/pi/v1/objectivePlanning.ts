@@ -57,7 +57,7 @@ import {
   toAttemptReceipt,
 } from "../../waves/reportWave.ts";
 import { registerPerkTool } from "../perkTool.ts";
-import { reportGateTransition } from "./gateTransitions.ts";
+import { gateEntryNeeded, reportGateTransition } from "./gateTransitions.ts";
 import { fetchObjectiveUrl } from "./objective.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 
@@ -814,15 +814,16 @@ export function installObjectivePlanningBindings(
       }
       report(ctx, "objective-plan", "info", `#${objective}${node ? ` node ${node}` : ""}`);
       // Enter the read-only gate (parity with the cold door's `mode: read-only` handoff claim) —
-      // skip-if-active so an already-gated session (cold objective-plan, `/plan` on) gets no
+      // skip-if-gated so an already-gated session (cold objective-plan, `/plan` on) gets no
       // duplicate `mode` append or announce — then re-scope it to the claimed stage. Entering
       // BEFORE sendUserMessage means the seeded factory turn runs gated and picks up the
       // read-only + plan-authoring injections on its before_agent_start. Exit stays owned by the
       // plan save (approval auto-save included) and `/plan` off. Fail-closed: a held transition
       // stops the door before the factory turn (the stage claim landed and the gate is latched ON
-      // in memory; a re-run takes skip-if-active and re-syncs).
+      // in memory); a re-run re-attempts whatever is missing — the mode write when the branch
+      // does not persist the gate (`gateEntryNeeded`), then the stage sync.
       const rerun = " — the factory turn was not started; re-run /objective-plan";
-      if (!gating.isActive()) {
+      if (gateEntryNeeded(gating, ctx)) {
         const held = reportGateTransition(ctx, "objective-plan", gating.enter(ctx), rerun, {
           alsoLog: true,
         });

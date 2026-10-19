@@ -95,7 +95,7 @@ import {
   supersededReviewResult,
   withDraftChangedNote,
 } from "./draftReview.ts";
-import { approvalGateFor, reportGateTransition } from "./gateTransitions.ts";
+import { approvalGateFor, gateEntryNeeded, reportGateTransition } from "./gateTransitions.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
@@ -808,9 +808,10 @@ export function installObjectiveRefinementBindings(
       // Enter/re-scope the gate for the refinement stage (its own allowlist + mode flavor), then
       // drive the shared flow guidance. Failed setup above never reaches this point. Fail-closed:
       // a held transition stops the door before the guidance turn (the gate is latched ON in
-      // memory; a re-run takes skip-if-active and re-syncs).
+      // memory); a re-run re-attempts whatever is missing — the mode write when the branch does
+      // not persist the gate (`gateEntryNeeded`), then the stage sync.
       const rerun = " — the refinement turn was not started; re-run /objective-refine";
-      if (!gating.isActive()) {
+      if (gateEntryNeeded(gating, ctx)) {
         const held = reportGateTransition(ctx, SCOPE_REFINE, gating.enter(ctx), rerun, {
           alsoLog: true,
         });

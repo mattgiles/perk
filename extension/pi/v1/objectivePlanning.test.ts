@@ -21,6 +21,7 @@ import {
 } from "../../testing/fakeSubagents.ts";
 import {
   failModeAppend,
+  failToolInstall,
   fakePerk,
   loadPerkSession,
   plantSession,
@@ -562,10 +563,61 @@ test("/objective-plan whose gate entry fails to persist stops before the factory
       true,
       "the latch holds the gate closed",
     );
-    // The re-run takes skip-if-active, re-syncs the stage scope, and drives the turn.
+    assert.notEqual(h.workflowState().mode, "read-only", "the branch never took the entry");
+    // The re-run re-attempts the missing mode write (the in-memory latch alone is not the
+    // persisted gate), re-syncs the stage scope, and drives the turn.
     await h.invokeCommand("objective-plan", "7");
+    assert.equal(h.workflowState().mode, "read-only", "the re-run persisted the gate");
+    assert.ok(
+      h.notifies.some((m) => /read-only ON/.test(m)),
+      "the entry announce on the re-run",
+    );
     assert.equal(sent.length, 1, "the factory turn was driven on the re-run");
     assert.equal(h.workflowState().stage, "objective-plan");
+    assert.ok(
+      (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
+      "plan guidance rides the persisted gate",
+    );
+    // A rebuild point follows the branch, which now carries the gate: still closed.
+    await h.emitSessionStart();
+    assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-plan in an already-gated session whose stage sync fails to install stops before the factory turn; a clean re-run proceeds", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  const sent = spyInjections(h);
+  try {
+    assert.equal(h.workflowState().mode, "read-only", "already gated (and persisted)");
+    const install = failToolInstall(h, "toolset exploded");
+    await h.invokeCommand("objective-plan", "7");
+    install.restore();
+    assert.ok(
+      h.notifyEvents.some(
+        (e) =>
+          e.severity === "error" &&
+          /^perk: objective-plan — could not enter read-only \(tool reconciliation failed: toolset exploded\) — the session is read-only — the factory turn was not started; re-run \/objective-plan$/.test(
+            e.message,
+          ),
+      ),
+      `the held-sync report (got ${JSON.stringify(h.notifyEvents)})`,
+    );
+    assert.equal(sent.length, 0, "no factory turn");
+    assert.equal(
+      (await h.emitToolCall("write", { path: "x", content: "y" }))?.block,
+      true,
+      "the gate stays closed",
+    );
+    await h.invokeCommand("objective-plan", "7");
+    assert.equal(sent.length, 1, "the factory turn was driven on the clean re-run");
+    assert.equal(
+      h.notifies.filter((m) => /read-only ON/.test(m)).length,
+      0,
+      "the persisted gate is never re-entered",
+    );
   } finally {
     h.dispose();
   }

@@ -12,6 +12,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import type { GateTransition } from "../../substrate/toolPolicy.ts";
+import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 
 export type GateTransitionNotice = { severity: Severity; message: string };
@@ -82,4 +83,15 @@ export function approvalGateFor(gating: ToolGating, ctx: ExtensionContext): Appr
       return t;
     },
   };
+}
+
+/**
+ * Whether a warm door must enter the gate: unless the session is gated in memory AND the branch
+ * already persists `mode: read-only`. The in-memory latch alone is not enough — a held entry
+ * whose append failed latches the gate without persisting it, and a door's stage sync re-scopes
+ * tools without ever writing the mode, so a retry must re-attempt the mode write (an unpersisted
+ * gate loses plan guidance and re-opens at the next rebuild point).
+ */
+export function gateEntryNeeded(gating: ToolGating, ctx: ExtensionContext): boolean {
+  return !gating.isActive() || rebuildWorkflowState(branchOf(ctx)).mode !== "read-only";
 }
