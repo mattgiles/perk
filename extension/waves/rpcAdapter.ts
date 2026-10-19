@@ -15,6 +15,24 @@
 // drift tripwire, and every pi-subagents bump warrants an adapter re-verify. Re-verified at
 // 0.75.0: `spawn` takes the inline script text as `script` (0.74.0 removed `workflowScript`/
 // `workflowScriptPath`; 0.75.0 rejects them `invalid_params` with the message naming `script`).
+// Re-verified at 0.76.1 (`src/extension/rpc.js`): both spawn keys are still rejected
+// `invalid_params` (`workflowScriptPath` with its own message); the RPC `stop` (its own
+// `stopAsyncRun`, not the model-facing tool action) replies `{runId, asyncDir, previousState,
+// state: "stopping", message: "Stop requested for async run <id>."}` — a request, never exit proof
+// — or refuses with a typed `not_found` / `invalid_state` / `execution_failed` error (e.g.
+// `Workflow <id> has no live run controller available to stop.`: workflow controllers live
+// in-process, so a persisted run dir cannot restore them after a reload); `status {id}` replies
+// `{text, details, fleet, asyncSnapshot}` with the workflow terminal proof at
+// `details.workflowTerminalProof`.
+//
+// TERMINAL PROOF (source-read-derived, 0.76.1 `src/runs/background/run-status.js` +
+// `src/runs/background/workflow-terminal-proof.js::readWorkflowTerminalProof`): the proof is
+// `observed` only after dispatch closed AND every async child has resolved process evidence — an
+// observed runner exit, or a recorded never-started launch failure — otherwise `pending` or
+// `unknown` with a reason. perk reads it ONCE, after its own stop, for diagnostics only: it never
+// touches reports, receipt children, coverage or completeness, is never polled, and a stop
+// acknowledgement never upgrades it. The model-facing stop action (`async-stop-action.js`, which
+// seals a delivered paused run) is a different implementation perk never calls.
 //
 // REPLY SELECTION (the context-less hold): pi's two-phase trust load (pi 0.85.1,
 // `loadProjectTrustExtensions` → `loadFinalExtensionSet`) loads the USER-scope packages'
@@ -57,6 +75,8 @@ import type {
   WavePing,
   WaveRunHandle,
   WaveSpawnParams,
+  WaveStopOutcome,
+  WaveTerminationProof,
 } from "./transport.ts";
 
 /** The pinned v1 request channel (pi-subagents `SUBAGENT_RPC_REQUEST_EVENT`). */
@@ -99,6 +119,10 @@ function replyTimeoutMs(): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -334,6 +358,26 @@ function narrowRetainedEntries(results: unknown): unknown[] {
   );
 }
 
+/**
+ * Project a `status` reply onto the termination-proof vocabulary (module header, TERMINAL PROOF).
+ * Only the engine's own `observed` state reads as observed; `pending`/`unknown` keep the engine's
+ * reason; a reply without an object `details.workflowTerminalProof` carrying one of those three
+ * states is `unavailable`. Pure; never throws.
+ */
+export function narrowTerminalProof(data: unknown): WaveTerminationProof {
+  const details = isRecord(data) && isRecord(data.details) ? data.details : {};
+  const proof = details.workflowTerminalProof;
+  if (isRecord(proof)) {
+    if (proof.state === "observed") return { state: "observed" };
+    if (proof.state === "pending" || proof.state === "unknown") {
+      const reason =
+        typeof proof.reason === "string" && proof.reason !== "" ? proof.reason : "no reason given";
+      return { state: proof.state, reason };
+    }
+  }
+  return { state: "unavailable", reason: "status reply carried no workflow terminal proof" };
+}
+
 /** Narrow a ping reply to the advertised async-complete channel; any miss ⇒ null (unavailable). */
 function narrowPing(data: unknown): WavePing | null {
   if (!isRecord(data)) return null;
@@ -424,12 +468,27 @@ export function createRpcWaveAdapter(bus: WaveBus, options?: RpcWaveAdapterOptio
       });
     },
 
-    async stop(handle: WaveRunHandle): Promise<void> {
+    // The success reply's data shape is not inspected: `state: "stopping"` is a request either
+    // way. Every rejection — a typed refusal, a held-then-timed-out reply, silence — becomes the
+    // outcome's reason verbatim; the method never throws.
+    async stop(handle: WaveRunHandle): Promise<WaveStopOutcome> {
       try {
         await call("stop", { id: handle.asyncId }, replyTimeoutMs());
-      } catch {
-        // Best-effort by contract: the run may already be terminal, or the responder gone.
+        return { acknowledged: true };
+      } catch (error) {
+        return { acknowledged: false, reason: errorDetail(error) };
       }
+    },
+
+    // ONE status query; the context-less hold applies like any other method. Never throws.
+    async terminalProof(handle: WaveRunHandle): Promise<WaveTerminationProof> {
+      let data: unknown;
+      try {
+        data = await call("status", { id: handle.asyncId }, replyTimeoutMs());
+      } catch (error) {
+        return { state: "unavailable", reason: errorDetail(error) };
+      }
+      return narrowTerminalProof(data);
     },
 
     async readAggregate(handle: WaveRunHandle): Promise<WaveAggregate> {

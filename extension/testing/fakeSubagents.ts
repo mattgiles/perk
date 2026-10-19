@@ -2,11 +2,21 @@
 // corpus and the published tarball) — ONE implementation of the v1 request/reply envelope the
 // door/pi suites previously hand-rolled per file. It answers `ping` with the advertised
 // capabilities, answers `spawn` by materializing a durable `status.json` aggregate in a real
-// temp `asyncDir` and replying with the run handle, records `stop` requests, and delivers the
-// async-complete event per the spawn's `FakeSpawnPlan` delivery mode. The inline script text is
-// read from the `script` key; like pi-subagents ≥ 0.74.0's `spawnParams`, a spawn carrying a
-// `workflowScript` key (any value, `undefined` included — the check is `Object.hasOwn`) is
-// rejected `invalid_params` with the engine's exact message and prepares no run:
+// temp `asyncDir` and replying with the run handle, records `stop` and `status` requests, and
+// delivers the async-complete event per the spawn's `FakeSpawnPlan` delivery mode. The inline
+// script text is read from the `script` key; like pi-subagents ≥ 0.74.0's `spawnParams`, a spawn
+// carrying a `workflowScript` or `workflowScriptPath` key (any value, `undefined` included — the
+// check is `Object.hasOwn`) is rejected `invalid_params` with the engine's exact message and
+// prepares no run.
+//
+// Only the RPC surface perk touches is mirrored, with the shapes read from pi-subagents 0.76.1's
+// `src/extension/rpc.js`: `stop` answers the RPC's own `stopAsyncRun` data shape (`state:
+// "stopping"` — a request) or, with the plan's `stopReply`, a typed refusal; `status` answers the
+// plan's `terminalProof` at `details.workflowTerminalProof` (default: the engine's immediate
+// post-stop `pending` shape) or, with `statusReply: "error"`, the engine's unknown-run miss. The
+// model-facing stop action's paused-run seal is NOT mirrored — perk's RPC never reaches it.
+//
+// Delivery modes:
 //
 //   - `"auto"` (default): the completion is emitted on a post-reply macrotask — the ordinary
 //     "run finished after the spawn reply" shape every happy-path suite drives.
@@ -50,6 +60,15 @@ export interface FakeSettlement {
 export type FakeSpawnPlan = {
   /** Completion delivery mode; default `"auto"` (the post-reply macrotask). */
   delivery?: "auto" | "manual" | "never";
+  /**
+   * A typed refusal `stop` answers for this spawn's run (default: the success data shape). The
+   * function form receives the run id (e.g. `noLiveRunController`).
+   */
+  stopReply?: FakeRpcError | ((runId: string) => FakeRpcError);
+  /** The `details.workflowTerminalProof` `status` answers (default: `FAKE_DEFAULT_TERMINAL_PROOF`). */
+  terminalProof?: Record<string, unknown>;
+  /** `"error"` ⇒ `status` answers the engine's `execution_failed` unknown-run miss. */
+  statusReply?: "error";
 } & (
   | {
       /** Bare `workflow.value` on an ordinary complete run (default: `[]`). */
@@ -68,6 +87,23 @@ export type FakeSpawnPlan = {
     }
 );
 
+/** A typed engine refusal (`SubagentRpcError`'s `code` + `message`). */
+export interface FakeRpcError {
+  code: string;
+  message: string;
+}
+
+/**
+ * The canonical refused-stop fixture: the RPC `stop`'s answer for a workflow whose in-process run
+ * controller is gone (e.g. after a reload), with pi-subagents 0.76.1's exact text.
+ */
+export function noLiveRunController(runId: string): FakeRpcError {
+  return {
+    code: "invalid_state",
+    message: `Workflow ${runId} has no live run controller available to stop.`,
+  };
+}
+
 /** The minimal bus surface the fake binds to (pi's EventBus / the adapter's `WaveBus`). */
 interface FakeBus {
   emit(channel: string, data: unknown): void;
@@ -75,7 +111,11 @@ interface FakeBus {
 }
 
 export interface FakeSubagents {
-  /** Bind as a pi extension factory (the harness's `extraExtensions` slot). */
+  /**
+   * Bind as a pi extension factory (the harness's `extraExtensions` slot). A re-invocation (a
+   * `session.reload()` re-running the factory) REBINDS to the new `pi.events`: requests and
+   * completions then flow on the new bus only.
+   */
   extension: (pi: ExtensionAPI) => void;
   /** Bind to a bare fake bus (the runner-over-real-RPC-adapter suites). One bus per fake. */
   attach(bus: FakeBus): void;
@@ -83,6 +123,8 @@ export interface FakeSubagents {
   spawns: Array<Record<string, unknown>>;
   /** The recorded stop requests, in order. */
   stops: Array<{ id: string }>;
+  /** The recorded status requests, in order. */
+  statuses: Array<{ id: string }>;
   /** Deliver spawn `index`'s completion (the `"manual"` delivery mode). */
   complete(index: number): void;
   /** Emit an arbitrary payload on the advertised async-complete channel (e.g. FOREIGN runs). */
@@ -90,6 +132,24 @@ export interface FakeSubagents {
 }
 
 const ASYNC_COMPLETE_EVENT = "subagent:async-complete";
+
+/** The engine's immediate post-stop workflow terminal proof (dispatch still open). */
+export const FAKE_DEFAULT_TERMINAL_PROOF = {
+  version: 1,
+  kind: "workflow",
+  state: "pending",
+  dispatchClosed: false,
+  reason: "Workflow dispatch is still open.",
+} as const;
+
+/** The spawn rejections, keyed by the removed param, with pi-subagents 0.76.1's exact messages. */
+const REMOVED_SPAWN_KEYS: ReadonlyArray<readonly [string, string]> = [
+  ["workflowScript", "RPC spawn workflowScript was removed; pass inline script text as script."],
+  [
+    "workflowScriptPath",
+    'RPC spawn workflowScriptPath was removed; pass the file as workflow: "./path/to/script.js".',
+  ],
+];
 
 export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents {
   for (const plan of plans) {
@@ -102,8 +162,12 @@ export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents 
   }
   const spawns: Array<Record<string, unknown>> = [];
   const stops: Array<{ id: string }> = [];
+  const statuses: Array<{ id: string }> = [];
   let bound: FakeBus | null = null;
+  let unbind: (() => void) | null = null;
   const launched: (Record<string, unknown> | undefined)[] = [];
+  /** The plan that launched each run, keyed by its asyncId (stop/status answer per run). */
+  const runPlans = new Map<string, FakeSpawnPlan>();
 
   const emit = (payload: Record<string, unknown>): void => {
     bound?.emit(ASYNC_COMPLETE_EVENT, payload);
@@ -136,7 +200,7 @@ export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents 
         success: true,
         data: {
           version: WAVE_RPC_PROTOCOL_VERSION,
-          methods: ["ping", "spawn", "stop"],
+          methods: ["ping", "spawn", "stop", "status"],
           capabilities: { asyncSpawn: true },
           events: { asyncComplete: ASYNC_COMPLETE_EVENT },
           session: {},
@@ -149,14 +213,9 @@ export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents 
       const index = spawns.length;
       spawns.push(params);
       const plan = plans[Math.min(index, plans.length - 1)] ?? {};
-      if (Object.hasOwn(params, "workflowScript")) {
-        reply({
-          success: false,
-          error: {
-            code: "invalid_params",
-            message: "RPC spawn workflowScript was removed; pass inline script text as script.",
-          },
-        });
+      const removed = REMOVED_SPAWN_KEYS.find(([key]) => Object.hasOwn(params, key));
+      if (removed !== undefined) {
+        reply({ success: false, error: { code: "invalid_params", message: removed[1] } });
         return;
       }
       // Preparation owns a single rejection boundary. A failed assertion/evaluator is a
@@ -165,6 +224,7 @@ export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents 
         const asyncDir = mkdtempSync(join(tmpdir(), "perk-fake-subagents-"));
         const asyncId = basename(asyncDir);
         const handle = Object.freeze({ asyncId, asyncDir });
+        runPlans.set(asyncId, plan);
         const script = String(params.script ?? "");
         let aggregate: WaveAggregate;
         let completion: Record<string, unknown>;
@@ -219,9 +279,67 @@ export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents 
       return;
     }
     if (request.method === "stop") {
-      const id = request.params?.id;
-      stops.push({ id: typeof id === "string" ? id : String(id) });
-      reply({ success: true, data: {} });
+      const raw = request.params?.id;
+      const id = typeof raw === "string" ? raw : String(raw);
+      stops.push({ id });
+      const plan = runPlans.get(id);
+      if (plan === undefined) {
+        reply({
+          success: false,
+          error: {
+            code: "not_found",
+            message:
+              "Async run not found or already completed; stop requires a live async run directory.",
+          },
+        });
+        return;
+      }
+      const refusal = typeof plan.stopReply === "function" ? plan.stopReply(id) : plan.stopReply;
+      if (refusal !== undefined) {
+        reply({ success: false, error: { code: refusal.code, message: refusal.message } });
+        return;
+      }
+      const run = launched.find((entry) => entry?.id === id);
+      reply({
+        success: true,
+        data: {
+          runId: id,
+          asyncDir: typeof run?.asyncDir === "string" ? run.asyncDir : "",
+          previousState: "running",
+          state: "stopping",
+          message: `Stop requested for async run ${id}.`,
+        },
+      });
+      return;
+    }
+    if (request.method === "status") {
+      const raw = request.params?.id;
+      const id = typeof raw === "string" ? raw : String(raw);
+      statuses.push({ id });
+      const plan = runPlans.get(id);
+      if (plan === undefined || plan.statusReply === "error") {
+        reply({
+          success: false,
+          error: { code: "execution_failed", message: "Async run not found. Provide id or dir." },
+        });
+        return;
+      }
+      reply({
+        success: true,
+        data: {
+          text: `Run: ${id}`,
+          details: {
+            mode: "single",
+            results: [],
+            workflowTerminalProof: {
+              runId: id,
+              ...(plan.terminalProof ?? FAKE_DEFAULT_TERMINAL_PROOF),
+            },
+          },
+          fleet: {},
+          asyncSnapshot: {},
+        },
+      });
       return;
     }
     reply({
@@ -230,19 +348,27 @@ export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents 
     });
   };
 
+  const bind = (bus: FakeBus): void => {
+    bound = bus;
+    unbind = bus.on(WAVE_RPC_REQUEST_EVENT, (raw) => handleRequest(bus, raw));
+  };
+
   const attach = (bus: FakeBus): void => {
     if (bound !== null) throw new Error("fakeSubagents: already attached (one bus per fake)");
-    bound = bus;
-    bus.on(WAVE_RPC_REQUEST_EVENT, (raw) => handleRequest(bus, raw));
+    bind(bus);
   };
 
   return {
     extension: (pi) => {
-      attach(pi.events as FakeBus);
+      // A reload re-runs the factory with a fresh `pi.events`: drop the old subscription (the
+      // runtime invalidation clears it too) and rebind.
+      unbind?.();
+      bind(pi.events as FakeBus);
     },
     attach,
     spawns,
     stops,
+    statuses,
     complete,
     emit,
   };
@@ -271,7 +397,7 @@ export function attachGhostResponder(bus: FakeBus): void {
         success: true,
         data: {
           version: WAVE_RPC_PROTOCOL_VERSION,
-          methods: ["ping", "spawn", "stop"],
+          methods: ["ping", "spawn", "stop", "status"],
           capabilities: { asyncSpawn: true },
           events: { asyncComplete: ASYNC_COMPLETE_EVENT },
           session: {},

@@ -2,8 +2,11 @@
 // driven on a bare fake bus, answered by the shared `createFakeSubagents` responder — proving,
 // at the offline tier, the behaviors the memory adapter can only simulate: the real spawn (v1
 // envelope + the fixed spawn contract), completion CORRELATION (a foreign completion on the
-// advertised channel is ignored; the matching identity settles), best-effort STOP on timeout
-// (the recorded stop request names the spawned run), the durable AGGREGATE (a real temp
+// advertised channel is ignored; the matching identity settles — including pi-subagents 0.76.1's
+// per-child AWAITED-CHILD events on the same channel, before the spawn reply and while siblings
+// run), the STOP REQUEST on timeout/cancel (the recorded stop names the spawned run, the
+// engine's answer — acknowledged or refused — and ONE terminal-proof `status` read ride the
+// detail and the receipt), the durable AGGREGATE (a real temp
 // `status.json` read through the adapter), native PARTIAL settlement (the explicit
 // `terminalOutcome` carrier retains the engine-validated sibling report while the wave stays
 // incomplete), and PER-LAUNCH ADAPTER FRESHNESS (two overlapping waves each ping+subscribe
@@ -12,11 +15,13 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import {
   attachGhostResponder,
   createFakeSubagents,
   type FakeSettlement,
+  noLiveRunController,
   waveScriptItems,
 } from "../testing/fakeSubagents.ts";
 import { createReportWave, type ReportWaveRequest, type WaveNotice } from "./reportWave.ts";
@@ -26,6 +31,7 @@ import {
   WAVE_INTERCOM_BRIDGE,
   WAVE_SETTLEMENT_GRACE_MS,
   type WaveBus,
+  type WaveRunHandle,
   type WaveSpawnParams,
 } from "./transport.ts";
 
@@ -71,6 +77,48 @@ function makeSpec(overrides: Partial<ReportWaveRequest> = {}): ReportWaveRequest
  */
 async function drain(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * pi-subagents 0.76.1's awaited-child completion, exactly as
+ * `subagent-executor.js::emitWorkflowAwaitedChildComplete` emits it on the async-complete channel
+ * while the workflow is still running: the CHILD's own run id and run directory (a sibling of the
+ * workflow's under the async root — a path string only, never created; the transport compares
+ * identities and never reads it), plus the lineage fields perk never reads.
+ */
+function awaitedChildEvent(
+  handle: Readonly<WaveRunHandle>,
+  child: { key: string; state: "complete" | "failed" | "stopped"; agent?: string },
+): Record<string, unknown> {
+  const childId = `${handle.asyncId}-child-${child.key}`;
+  return {
+    id: childId,
+    runId: childId,
+    sessionId: "session-1",
+    completionOwnerId: "owner-1",
+    asyncDir: join(dirname(handle.asyncDir), childId),
+    agent: child.agent ?? "perk.pr-reviewer",
+    mode: "single",
+    state: child.state,
+    success: child.state === "complete",
+    timestamp: 1,
+    triggerTurn: false,
+    awaitedByWorkflow: true,
+    parentWorkflowRunId: handle.asyncId,
+  };
+}
+
+/** Collect under a tiny collect grace: `running` proves the ref is still pending. */
+async function collectRunning(
+  wave: ReturnType<typeof createReportWave>,
+  ref: Parameters<ReturnType<typeof createReportWave>["collect"]>[0],
+): Promise<void> {
+  process.env.PERK_WAVE_COLLECT_GRACE_MS = "30";
+  try {
+    assert.deepEqual(await wave.collect(ref), { kind: "running" });
+  } finally {
+    delete process.env.PERK_WAVE_COLLECT_GRACE_MS;
+  }
 }
 
 /** One ok report per lane key, derived from the actually-spawned script. */
@@ -150,35 +198,53 @@ const VALID_SPAWN: WaveSpawnParams = {
 
 const { script: _validScript, ...SPAWN_WITHOUT_SCRIPT } = VALID_SPAWN;
 
-for (const [label, legacy] of [
+const WORKFLOW_SCRIPT_REJECTION =
+  "invalid_params: RPC spawn workflowScript was removed; pass inline script text as script.";
+const WORKFLOW_SCRIPT_PATH_REJECTION =
+  'invalid_params: RPC spawn workflowScriptPath was removed; pass the file as workflow: "./path/to/script.js".';
+
+for (const [label, legacy, removedKey, expected] of [
   [
     "a workflowScript key in place of script",
     { ...SPAWN_WITHOUT_SCRIPT, workflowScript: "return [];" },
+    "workflowScript",
+    WORKFLOW_SCRIPT_REJECTION,
   ],
   [
     "an undefined-valued workflowScript key beside a valid script",
     { ...VALID_SPAWN, workflowScript: undefined },
+    "workflowScript",
+    WORKFLOW_SCRIPT_REJECTION,
+  ],
+  [
+    "a workflowScriptPath key beside a valid script",
+    { ...VALID_SPAWN, workflowScriptPath: "./wave.js" },
+    "workflowScriptPath",
+    WORKFLOW_SCRIPT_PATH_REJECTION,
+  ],
+  [
+    "an undefined-valued workflowScriptPath key beside a valid script",
+    { ...VALID_SPAWN, workflowScriptPath: undefined },
+    "workflowScriptPath",
+    WORKFLOW_SCRIPT_PATH_REJECTION,
   ],
 ] as const) {
   test(`rpc spawn: ${label} is rejected invalid_params and surfaced verbatim`, async () => {
-    // The shape a reverted producer hits offline: the fake mirrors pi-subagents ≥ 0.74.0's
-    // `Object.hasOwn` rejection and the real adapter surfaces `code: message` untouched.
+    // The shape a reverted producer hits offline: the fake mirrors pi-subagents 0.76.1's
+    // `Object.hasOwn` rejections and the real adapter surfaces `code: message` untouched.
     const bus = createFakeBus();
     const fake = createFakeSubagents();
     fake.attach(bus);
     const adapter = createRpcWaveAdapter(bus);
-    // Deliberately off-contract: `WaveSpawnParams` has no `workflowScript` field.
+    // Deliberately off-contract: `WaveSpawnParams` has neither removed field.
     const params = legacy as unknown as WaveSpawnParams;
     await assert.rejects(adapter.spawn(params), (error: unknown) => {
       assert.ok(error instanceof Error);
-      assert.equal(
-        error.message,
-        "invalid_params: RPC spawn workflowScript was removed; pass inline script text as script.",
-      );
+      assert.equal(error.message, expected);
       return true;
     });
     assert.equal(fake.spawns.length, 1);
-    assert.equal(Object.hasOwn(fake.spawns[0] ?? {}, "workflowScript"), true);
+    assert.equal(Object.hasOwn(fake.spawns[0] ?? {}, removedKey), true);
   });
 }
 
@@ -319,7 +385,7 @@ test("rpc integration: a FOREIGN completion is ignored; the matching manual deli
   assert.equal(result.receipt.runId, start.runId);
 });
 
-test("rpc integration: timeout stops the real run best-effort (the recorded stop names it)", async (t) => {
+test("rpc integration: timeout — stop acknowledged, then exactly ONE status query; both diagnoses render and ride the receipt", async (t) => {
   // `delivery: "never"` schedules no completion timer; the RPC reply timers are cleared on settle.
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const bus = createFakeBus();
@@ -335,14 +401,369 @@ test("rpc integration: timeout stops the real run best-effort (the recorded stop
     result.failures.map((f) => [f.key, f.reason]),
     [[null, "timeout"]],
   );
+  assert.match(
+    result.failures[0]?.detail ?? "",
+    /; stop requested; child termination unconfirmed \(pending: Workflow dispatch is still open\.\)$/,
+  );
   assert.equal(result.receipt.state, "timed-out");
+  assert.deepEqual(result.receipt.termination, {
+    stop: { acknowledged: true },
+    proof: { state: "pending", reason: "Workflow dispatch is still open." },
+  });
   assert.deepEqual(
     result.reports,
     [],
     "an undelivered native partial payload is not recovery authority",
   );
+  const runId = result.receipt.runId;
+  assert.deepEqual(fake.stops, [{ id: runId }], "the stop request names the spawned run");
+  assert.deepEqual(fake.statuses, [{ id: runId }], "exactly one status query, after the stop");
+});
+
+for (const [label, plan, expected] of [
+  [
+    "an observed proof renders as observed",
+    { terminalProof: { state: "observed", dispatchClosed: true, observedAt: 7, children: [] } },
+    "; stop requested; child termination observed (engine process-terminal proof)",
+  ],
+  [
+    "a status miss renders unavailable with the engine's text",
+    { statusReply: "error" },
+    "; stop requested; child termination unconfirmed (unavailable: execution_failed: Async run not found. Provide id or dir.)",
+  ],
+  [
+    "an unknown proof keeps the engine's reason",
+    {
+      terminalProof: {
+        state: "unknown",
+        dispatchClosed: true,
+        reason: "async workflow child correctness process-terminal proof is missing",
+      },
+    },
+    "; stop requested; child termination unconfirmed (unknown: async workflow child correctness process-terminal proof is missing)",
+  ],
+] as const) {
+  test(`rpc integration: timeout — ${label}`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const bus = createFakeBus();
+    const fake = createFakeSubagents([{ delivery: "never", ...plan }]);
+    fake.attach(bus);
+    const pending = createReportWave(bus).run(makeSpec({ timeoutMs: 30 }));
+    await drain();
+    t.mock.timers.tick(30 + WAVE_SETTLEMENT_GRACE_MS);
+    const result = await pending;
+    const detail = result.failures[0]?.detail ?? "";
+    assert.ok(detail.endsWith(expected), detail);
+    assert.equal(fake.stops.length, 1);
+    assert.equal(fake.statuses.length, 1);
+  });
+}
+
+test("rpc integration: timeout — a REFUSED stop (invalid_state) with a successful status keeps both diagnoses", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([{ delivery: "never", stopReply: noLiveRunController }]);
+  fake.attach(bus);
+  const pending = createReportWave(bus).run(makeSpec({ timeoutMs: 30 }));
+  await drain();
+  t.mock.timers.tick(30 + WAVE_SETTLEMENT_GRACE_MS);
+  const result = await pending;
+  const runId = result.receipt.runId ?? "";
+  assert.deepEqual(
+    result.failures.map((f) => [f.key, f.reason]),
+    [[null, "timeout"]],
+    "a refused stop never rejects the wave nor changes the reason literal",
+  );
+  assert.match(
+    result.failures[0]?.detail ?? "",
+    /; stop refused \(invalid_state: Workflow .* has no live run controller available to stop\.\); child termination unconfirmed \(pending: Workflow dispatch is still open\.\)$/,
+  );
+  assert.deepEqual(result.receipt.termination, {
+    stop: {
+      acknowledged: false,
+      reason: `invalid_state: Workflow ${runId} has no live run controller available to stop.`,
+    },
+    proof: { state: "pending", reason: "Workflow dispatch is still open." },
+  });
+  assert.deepEqual(fake.stops, [{ id: runId }]);
+  assert.deepEqual(fake.statuses, [{ id: runId }]);
+});
+
+test("rpc integration: cancel after launch — the same stop request + one-shot proof", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([{ delivery: "never" }]);
+  fake.attach(bus);
+  const controller = new AbortController();
+  const wave = createReportWave(bus);
+  const start = await wave.start(makeSpec(), { signal: controller.signal });
+  assert.ok(start.ok);
+  controller.abort();
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  const result = collected.result;
+  assert.deepEqual(
+    result.failures.map((f) => [f.key, f.reason, f.detail]),
+    [
+      [
+        null,
+        "cancelled",
+        "wave 'pr-review' was cancelled; stop requested; child termination unconfirmed (pending: Workflow dispatch is still open.)",
+      ],
+    ],
+  );
+  assert.equal(result.receipt.state, "cancelled");
+  assert.deepEqual(result.receipt.termination, {
+    stop: { acknowledged: true },
+    proof: { state: "pending", reason: "Workflow dispatch is still open." },
+  });
+  assert.deepEqual(fake.stops, [{ id: start.runId }]);
+  assert.deepEqual(fake.statuses, [{ id: start.runId }]);
+});
+
+test("rpc integration: the complete arm issues NO stop and NO status query", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS }]);
+  fake.attach(bus);
+  const result = await createReportWave(bus).run(makeSpec());
+  assert.equal(result.complete, true);
+  assert.equal("termination" in result.receipt, false);
+  assert.deepEqual(fake.stops, []);
+  assert.deepEqual(fake.statuses, []);
+});
+
+test("rpc integration: a stopped workflow completion (state stopped, no terminalOutcome) is run-failed with no retained reports and no perk stop/status", async () => {
+  // The engine settled (e.g. its RPC stop aborted the workflow controller): perk did not stop
+  // anything, so it requests no stop and reads no terminal proof.
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([
+    {
+      executeSettlement: async () => ({
+        aggregate: { state: "stopped", error: "Workflow stopped by RPC.", value: undefined },
+        completion: { state: "stopped", success: false },
+      }),
+    },
+  ]);
+  fake.attach(bus);
+  const result = await createReportWave(bus).run(makeSpec());
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, []);
+  assert.deepEqual(
+    result.failures.filter((f) => f.key === null).map((f) => [f.reason, f.detail]),
+    [["run-failed", "wave run ended 'stopped': Workflow stopped by RPC."]],
+  );
+  assert.equal(result.receipt.state, "failed");
+  assert.equal("termination" in result.receipt, false);
+  assert.deepEqual(fake.stops, []);
+  assert.deepEqual(fake.statuses, []);
+});
+
+// --- the awaited-child completion events (pi-subagents 0.76.1) ---------------------------------
+
+test("rpc integration: an awaited-child event BEFORE the spawn reply is buffered then discarded; the root completion settles", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([
+    {
+      delivery: "manual",
+      executeSettlement: async (script, handle) => {
+        // Emitted while the spawn reply is still unsent: the runner holds no handle yet.
+        fake.emit(awaitedChildEvent(handle, { key: "plan-fidelity", state: "complete" }));
+        return {
+          aggregate: { state: "complete", value: await DERIVE_REPORTS(script) },
+          completion: {
+            state: "complete",
+            success: true,
+            results: [
+              { runId: "root-child-a", success: true },
+              { runId: "root-child-b", success: true },
+            ],
+            workflowChildren: {
+              version: 1,
+              workflowRunId: handle.asyncId,
+              children: [
+                { childId: "plan-fidelity", runId: "root-child-a" },
+                { childId: "correctness", runId: "root-child-b" },
+              ],
+            },
+          },
+        };
+      },
+    },
+  ]);
+  fake.attach(bus);
+  const wave = createReportWave(bus);
+  const start = await wave.start(makeSpec());
+  assert.ok(start.ok);
+  if (!start.ok) return;
+  await collectRunning(wave, start.ref);
+
+  fake.complete(0);
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  assert.equal(collected.result.complete, true);
+  assert.deepEqual(
+    collected.result.reports.map((r) => r.key),
+    ["plan-fidelity", "correctness"],
+  );
+  // Receipt children come from the ROOT completion only — never the early child event.
+  assert.deepEqual(collected.result.receipt.children, [
+    { key: "plan-fidelity", runId: "root-child-a", success: true, agent: "perk.pr-reviewer" },
+    { key: "correctness", runId: "root-child-b", success: true, agent: "perk.pr-reviewer" },
+  ]);
+  assert.equal(collected.result.receipt.runId, start.runId);
+  assert.doesNotMatch(JSON.stringify(collected.result.receipt), /-child-plan-fidelity/);
+  assert.deepEqual(fake.stops, []);
+});
+
+test("rpc integration: awaited-child events WHILE siblings remain active never settle — completed, failed and stopped children are ignored until the root completion", async () => {
+  const bus = createFakeBus();
+  const failedError = "child exited with code 1";
+  const stoppedError = "Workflow child 'tests' stopped.";
+  const fake = createFakeSubagents([
+    {
+      delivery: "manual",
+      executeSettlement: async (_script, handle) => ({
+        aggregate: {
+          state: "complete",
+          value: [
+            { key: "plan-fidelity", ok: true, error: null, report: { verdict: "clean" } },
+            { key: "correctness", ok: false, error: failedError, report: null },
+            { key: "tests", ok: false, error: stoppedError, report: null },
+          ],
+        },
+        completion: {
+          state: "complete",
+          success: true,
+          results: [
+            { runId: "root-a", success: true },
+            { runId: "root-b", success: false },
+            { runId: "root-c", success: false },
+          ],
+          workflowChildren: {
+            version: 1,
+            workflowRunId: handle.asyncId,
+            children: [
+              { childId: "plan-fidelity", runId: "root-a" },
+              { childId: "correctness", runId: "root-b" },
+              { childId: "tests", runId: "root-c" },
+            ],
+          },
+        },
+      }),
+    },
+  ]);
+  fake.attach(bus);
+  const wave = createReportWave(bus);
+  const start = await wave.start(
+    makeSpec({
+      assignments: [
+        { key: "plan-fidelity", agent: "perk.pr-reviewer", task: "review plan fidelity" },
+        { key: "correctness", agent: "perk.pr-reviewer", task: "review correctness" },
+        { key: "tests", agent: "perk.pr-reviewer", task: "review tests" },
+      ],
+    }),
+  );
+  assert.ok(start.ok);
+  if (!start.ok) return;
+  const handle = { asyncId: start.runId, asyncDir: start.asyncDir };
+  for (const [key, state] of [
+    ["plan-fidelity", "complete"],
+    ["correctness", "failed"],
+    ["tests", "stopped"],
+  ] as const) {
+    fake.emit(awaitedChildEvent(handle, { key, state }));
+    await drain();
+    await collectRunning(wave, start.ref);
+  }
+
+  // The positive arm: the root completion alone settles, with the aggregate as authority.
+  fake.complete(0);
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  const result = collected.result;
+  assert.equal(result.complete, false, "strict completeness over two failed lanes");
+  assert.deepEqual(result.reports, [{ key: "plan-fidelity", report: { verdict: "clean" } }]);
+  assert.deepEqual(result.failures, [
+    { key: "correctness", reason: "lane-failed", detail: failedError },
+    { key: "tests", reason: "lane-failed", detail: stoppedError },
+  ]);
+  assert.deepEqual(
+    result.receipt.children.map((child) => [child.key, child.runId, child.success]),
+    [
+      ["plan-fidelity", "root-a", true],
+      ["correctness", "root-b", false],
+      ["tests", "root-c", false],
+    ],
+  );
+  assert.deepEqual(fake.stops, []);
+  assert.deepEqual(fake.statuses, []);
+});
+
+test("rpc integration: a hostile awaited-child event copying the workflow's id as runId/parentWorkflowRunId but carrying its own identity never matches", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS, delivery: "manual" }]);
+  fake.attach(bus);
+  const wave = createReportWave(bus);
+  const start = await wave.start(makeSpec());
+  assert.ok(start.ok);
+  if (!start.ok) return;
+  const handle = { asyncId: start.runId, asyncDir: start.asyncDir };
+  fake.emit({
+    ...awaitedChildEvent(handle, { key: "plan-fidelity", state: "failed" }),
+    runId: start.runId,
+    parentWorkflowRunId: start.runId,
+    results: [{ agent: "plan-fidelity", runId: "hostile", success: false }],
+  });
+  await collectRunning(wave, start.ref);
+
+  fake.complete(0);
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  assert.equal(collected.result.complete, true);
+  assert.equal(collected.result.reports.length, 2);
+  assert.deepEqual(collected.result.receipt.children, []);
+});
+
+test("rpc integration: a ghost responder on the timeout arm — spawn, stop and status each resolve past a held reply, one notice per held request", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const bus = createFakeBus();
+  attachGhostResponder(bus);
+  const fake = createFakeSubagents([{ delivery: "never" }]);
+  fake.attach(bus);
+  const notices: WaveNotice[] = [];
+  const pending = createReportWave(bus, { onNotice: (notice) => notices.push(notice) }).run(
+    makeSpec({ timeoutMs: 30 }),
+  );
+  await drain();
+  t.mock.timers.tick(30 + WAVE_SETTLEMENT_GRACE_MS);
+  const result = await pending;
+  assert.deepEqual(result.receipt.termination, {
+    stop: { acknowledged: true },
+    proof: { state: "pending", reason: "Workflow dispatch is still open." },
+  });
+  const superseded = "no_active_session: No active extension context for subagent RPC.";
+  assert.deepEqual(notices, [
+    { method: "spawn", superseded },
+    { method: "stop", superseded },
+    { method: "status", superseded },
+  ]);
   assert.equal(fake.stops.length, 1);
-  assert.equal(fake.stops[0]?.id, result.receipt.runId, "the stop request names the spawned run");
+  assert.equal(fake.statuses.length, 1);
+});
+
+test("source pin: the transport modules never read the awaited-child lineage or capacity fields; the terminal proof is narrowed in rpcAdapter.ts only", () => {
+  const adapter = readFileSync(new URL("./rpcAdapter.ts", import.meta.url), "utf8");
+  const transport = readFileSync(new URL("./transport.ts", import.meta.url), "utf8");
+  const forbidden =
+    /\b(awaitedByWorkflow|parentWorkflowRunId|triggerTurn|capacity|abandonedSlot\w*|slotReleased)\b/;
+  assert.doesNotMatch(adapter, forbidden);
+  assert.doesNotMatch(transport, forbidden);
+  // The positive arm: the one field perk does read after a stop, at the adapter only.
+  assert.match(adapter, /\.workflowTerminalProof\b/);
+  assert.doesNotMatch(transport, /workflowTerminalProof/);
 });
 
 test("rpc integration: a native partial delivered inside the settlement grace is retained through the real adapter", async (t) => {

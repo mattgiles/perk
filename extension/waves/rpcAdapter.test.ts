@@ -5,7 +5,9 @@
 // CONTEXT-LESS HOLD: a `no_active_session` reply (pi's pre-trust duplicate pi-subagents load) is
 // held until the live responder's reply — a later success wins and fires the fail-open
 // `onDuplicateResponder` once, a different error surfaces immediately, only the reply timeout
-// surfaces the held error (suffixed).
+// surfaces the held error (suffixed). The post-stop pair: `stop` turns every rejection into a
+// typed `acknowledged: false` outcome (never a throw), and `terminalProof` projects one `status`
+// reply's workflow terminal proof (`narrowTerminalProof`), `unavailable` when none survives.
 
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -16,6 +18,7 @@ import { attachGhostResponder } from "../testing/fakeSubagents.ts";
 import {
   createRpcWaveAdapter,
   type DuplicateResponderEvent,
+  narrowTerminalProof,
   WAVE_RPC_CONTEXTLESS_ERROR_CODE,
   WAVE_RPC_PING_TIMEOUT_MS,
   WAVE_RPC_PROTOCOL_VERSION,
@@ -353,18 +356,173 @@ test("the per-request reply listener is disposed once the reply settles", async 
   assert.equal(bus.handlerCount(replyChannel), 0);
 });
 
-test("stop swallows a rejecting responder (best-effort by contract)", async () => {
+test("stop never throws: a rejecting responder yields acknowledged:false carrying code: message", async () => {
   const bus = createFakeBus();
+  const message = "Workflow a1 has no live run controller available to stop.";
   const captured = respond(bus, (request) => {
     if (request.method === "ping") return { success: true, data: pingData() };
-    return { success: false, error: { code: "invalid_state", message: "already terminal" } };
+    return { success: false, error: { code: "invalid_state", message } };
   });
   const adapter = createRpcWaveAdapter(bus);
   await adapter.ping();
-  await adapter.stop({ asyncId: "a1", asyncDir: "/d1" });
+  assert.deepEqual(await adapter.stop({ asyncId: "a1", asyncDir: "/d1" }), {
+    acknowledged: false,
+    reason: `invalid_state: ${message}`,
+  });
   const stop = captured.at(-1);
   assert.equal(stop?.method, "stop");
   assert.deepEqual(stop?.params, { id: "a1" });
+});
+
+test("stop: a success reply is acknowledged:true (the RPC data shape is not inspected)", async () => {
+  for (const data of [
+    {
+      runId: "a1",
+      asyncDir: "/d1",
+      previousState: "running",
+      state: "stopping",
+      message: "Stop requested for async run a1.",
+    },
+    {},
+    undefined,
+  ]) {
+    const bus = createFakeBus();
+    respond(bus, (request) =>
+      request.method === "ping" ? { success: true, data: pingData() } : { success: true, data },
+    );
+    const adapter = createRpcWaveAdapter(bus);
+    await adapter.ping();
+    assert.deepEqual(await adapter.stop({ asyncId: "a1", asyncDir: "/d1" }), {
+      acknowledged: true,
+    });
+  }
+});
+
+// --- the terminal-proof projection --------------------------------------------------------------
+
+/** A 0.76.1 `status` reply's data wrapping one workflow terminal proof. */
+function statusData(proof: unknown): Record<string, unknown> {
+  return {
+    text: "Run: a1",
+    details: { mode: "single", results: [], workflowTerminalProof: proof },
+    fleet: {},
+    asyncSnapshot: {},
+  };
+}
+
+const NO_PROOF = {
+  state: "unavailable",
+  reason: "status reply carried no workflow terminal proof",
+} as const;
+
+test("narrowTerminalProof: observed, pending/unknown with the engine's reason, and every miss unavailable", () => {
+  const observed = {
+    version: 1,
+    kind: "workflow",
+    runId: "a1",
+    state: "observed",
+    dispatchClosed: true,
+    observedAt: 5,
+    children: [],
+  };
+  assert.deepEqual(narrowTerminalProof(statusData(observed)), { state: "observed" });
+  assert.deepEqual(
+    narrowTerminalProof(
+      statusData({
+        state: "pending",
+        dispatchClosed: false,
+        reason: "Workflow dispatch is still open.",
+      }),
+    ),
+    { state: "pending", reason: "Workflow dispatch is still open." },
+  );
+  assert.deepEqual(
+    narrowTerminalProof(
+      statusData({
+        state: "unknown",
+        dispatchClosed: true,
+        reason: "async workflow child a process-terminal proof is missing",
+      }),
+    ),
+    { state: "unknown", reason: "async workflow child a process-terminal proof is missing" },
+  );
+  assert.deepEqual(narrowTerminalProof(statusData({ state: "pending" })), {
+    state: "pending",
+    reason: "no reason given",
+  });
+  assert.deepEqual(narrowTerminalProof(statusData({ state: "unknown", reason: "" })), {
+    state: "unknown",
+    reason: "no reason given",
+  });
+  // Misses: no details, a proof-less details record, a non-object proof, a foreign state (a
+  // stop-shaped `stopping`, or an engine-internal `resolved`), and non-object replies.
+  for (const data of [
+    { text: "Run: a1" },
+    { details: { mode: "single" } },
+    statusData("observed"),
+    statusData({ state: "stopping", reason: "Stop requested for async run a1." }),
+    statusData({ state: "resolved" }),
+    statusData(null),
+    "observed",
+    null,
+    undefined,
+    [statusData(observed)],
+  ]) {
+    assert.deepEqual(narrowTerminalProof(data), NO_PROOF, JSON.stringify(data));
+  }
+});
+
+test("terminalProof: one status request {id} projects the reply's proof", async () => {
+  const bus = createFakeBus();
+  const captured = respond(bus, (request) =>
+    request.method === "ping"
+      ? { success: true, data: pingData() }
+      : { success: true, data: statusData({ state: "observed", dispatchClosed: true }) },
+  );
+  const adapter = createRpcWaveAdapter(bus);
+  await adapter.ping();
+  assert.deepEqual(await adapter.terminalProof({ asyncId: "a1", asyncDir: "/d1" }), {
+    state: "observed",
+  });
+  const statuses = captured.filter((request) => request.method === "status");
+  assert.equal(statuses.length, 1);
+  assert.deepEqual(statuses[0]?.params, { id: "a1" });
+});
+
+test("terminalProof: a success:false reply is unavailable carrying code: message", async () => {
+  const bus = createFakeBus();
+  respond(bus, (request) =>
+    request.method === "ping"
+      ? { success: true, data: pingData() }
+      : {
+          success: false,
+          error: { code: "execution_failed", message: "Async run not found. Provide id or dir." },
+        },
+  );
+  const adapter = createRpcWaveAdapter(bus);
+  await adapter.ping();
+  assert.deepEqual(await adapter.terminalProof({ asyncId: "a1", asyncDir: "/d1" }), {
+    state: "unavailable",
+    reason: "execution_failed: Async run not found. Provide id or dir.",
+  });
+});
+
+test("terminalProof: a silent responder is unavailable at the reply timeout", async () => {
+  process.env.PERK_WAVE_RPC_REPLY_MS = "20";
+  try {
+    const bus = createFakeBus();
+    respond(bus, (request) =>
+      request.method === "ping" ? { success: true, data: pingData() } : null,
+    );
+    const adapter = createRpcWaveAdapter(bus);
+    await adapter.ping();
+    assert.deepEqual(await adapter.terminalProof({ asyncId: "a1", asyncDir: "/d1" }), {
+      state: "unavailable",
+      reason: "subagent RPC status timed out after 20ms",
+    });
+  } finally {
+    delete process.env.PERK_WAVE_RPC_REPLY_MS;
+  }
 });
 
 // --- the context-less hold ----------------------------------------------------------------------
@@ -548,7 +706,7 @@ test("hold: a throwing callback is fail-open, and no callback resolves silently"
   }
 });
 
-test("hold: stop still swallows a held-then-timed-out reply (best-effort by contract)", async () => {
+test("hold: stop never throws — a held-then-timed-out reply yields acknowledged:false carrying the held reply's suffixed text", async () => {
   process.env.PERK_WAVE_RPC_REPLY_MS = "20";
   try {
     const bus = createFakeBus();
@@ -558,10 +716,47 @@ test("hold: stop still swallows a held-then-timed-out reply (best-effort by cont
     );
     const adapter = createRpcWaveAdapter(bus);
     await adapter.ping();
-    await adapter.stop({ asyncId: "a1", asyncDir: "/d1" });
+    assert.deepEqual(await adapter.stop({ asyncId: "a1", asyncDir: "/d1" }), {
+      acknowledged: false,
+      reason: `${CONTEXTLESS_TEXT} (held for a later reply that never arrived within 20ms)`,
+    });
+    assert.deepEqual(await adapter.terminalProof({ asyncId: "a1", asyncDir: "/d1" }), {
+      state: "unavailable",
+      reason: `${CONTEXTLESS_TEXT} (held for a later reply that never arrived within 20ms)`,
+    });
   } finally {
     delete process.env.PERK_WAVE_RPC_REPLY_MS;
   }
+});
+
+test("hold: a ghost no_active_session on stop and status then live successes — acknowledged + the proof, callback once per request", async () => {
+  const bus = createFakeBus();
+  attachGhostResponder(bus);
+  respondLater(bus, (request) => {
+    if (request.method === "ping") return { success: true, data: pingData() };
+    if (request.method === "stop") {
+      return {
+        success: true,
+        data: { state: "stopping", message: "Stop requested for async run a1." },
+      };
+    }
+    return {
+      success: true,
+      data: statusData({ state: "pending", reason: "Workflow dispatch is still open." }),
+    };
+  });
+  const events: DuplicateResponderEvent[] = [];
+  const adapter = createRpcWaveAdapter(bus, { onDuplicateResponder: (e) => events.push(e) });
+  await adapter.ping();
+  assert.deepEqual(await adapter.stop({ asyncId: "a1", asyncDir: "/d1" }), { acknowledged: true });
+  assert.deepEqual(await adapter.terminalProof({ asyncId: "a1", asyncDir: "/d1" }), {
+    state: "pending",
+    reason: "Workflow dispatch is still open.",
+  });
+  assert.deepEqual(events, [
+    { method: "stop", superseded: CONTEXTLESS_TEXT },
+    { method: "status", superseded: CONTEXTLESS_TEXT },
+  ]);
 });
 
 test("readAggregate throws on a missing or corrupt status.json (aggregate-unreadable upstream)", async () => {

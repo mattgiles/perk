@@ -48,7 +48,14 @@ interface WaveAdapterHarness {
   completeRunPartial(handle: WaveRunHandle): void;
   /** Arrange the durable aggregate `readAggregate(handle)` will see. */
   stageAggregate(handle: WaveRunHandle, aggregate: StagedAggregate): void;
+  /** How many status queries reached the flavor's engine seam so far. */
+  statusRequests(): number;
 }
+
+/** A handle no adapter ever spawned (the refused/bogus arm). */
+const BOGUS_HANDLE: WaveRunHandle = { asyncId: "no-such-run", asyncDir: "/no/such/dir" };
+
+const PROOF_STATES = ["observed", "pending", "unknown", "unavailable"];
 
 /** The normalized receipt children every flavor's detailed completion must deliver. */
 const RECEIPT_CHILDREN: WaveChildReceipt[] = [
@@ -204,12 +211,45 @@ export function assertWaveAdapterContract(
     assert.throws(() => adapter.onComplete(() => {}), /ping/);
   });
 
-  test(`${name}: stop never throws — live handle or bogus handle`, async () => {
+  test(`${name}: stop never throws and returns a typed outcome (acknowledged for a live handle; acknowledged:false with a reason for a refused/bogus one)`, async () => {
+    const { adapter } = makeHarness();
+    await adapter.ping();
+    const handle = await adapter.spawn(minimalSpawnParams());
+    assert.deepEqual(await adapter.stop(handle), { acknowledged: true });
+    const refused = await adapter.stop(BOGUS_HANDLE);
+    assert.equal(refused.acknowledged, false);
+    if (!refused.acknowledged) {
+      assert.match(refused.reason, /^not_found: Async run not found/);
+    }
+  });
+
+  test(`${name}: terminalProof never throws and yields one of the four states — live handle or bogus handle`, async () => {
     const { adapter } = makeHarness();
     await adapter.ping();
     const handle = await adapter.spawn(minimalSpawnParams());
     await adapter.stop(handle);
-    await adapter.stop({ asyncId: "no-such-run", asyncDir: "/no/such/dir" });
+    const live = await adapter.terminalProof(handle);
+    assert.ok(PROOF_STATES.includes(live.state), `unexpected proof state '${live.state}'`);
+    assert.deepEqual(live, { state: "pending", reason: "Workflow dispatch is still open." });
+    const bogus = await adapter.terminalProof(BOGUS_HANDLE);
+    assert.deepEqual(bogus, {
+      state: "unavailable",
+      reason: "execution_failed: Async run not found. Provide id or dir.",
+    });
+  });
+
+  test(`${name}: exactly one status request per terminalProof call`, async () => {
+    const harness = makeHarness();
+    const { adapter } = harness;
+    await adapter.ping();
+    const handle = await adapter.spawn(minimalSpawnParams());
+    assert.equal(harness.statusRequests(), 0, "spawn/ping issue no status query");
+    await adapter.stop(handle);
+    assert.equal(harness.statusRequests(), 0, "stop issues no status query");
+    await adapter.terminalProof(handle);
+    assert.equal(harness.statusRequests(), 1);
+    await adapter.terminalProof(BOGUS_HANDLE);
+    assert.equal(harness.statusRequests(), 2);
   });
 
   test(`${name}: readAggregate narrows the durable aggregate`, async () => {
@@ -278,6 +318,7 @@ function makeMemoryHarness(): WaveAdapterHarness {
     stageAggregate(_handle, aggregate) {
       adapter.setAggregate(aggregate);
     },
+    statusRequests: () => adapter.proofs.length,
   };
 }
 
@@ -305,13 +346,18 @@ function createFakeBus(): WaveBus {
 const FAKE_ASYNC_COMPLETE_EVENT = "subagent:async-complete";
 
 /**
- * A scripted fake pi-subagents responder: answers ping/spawn/stop on the v1 envelope. Each spawn
- * mints a real temp dir as the run's `asyncDir` (so `readAggregate` reads a real `status.json`);
- * stop replies `success: false` — proving the adapter's best-effort swallow at contract level.
+ * A scripted fake pi-subagents responder: answers ping/spawn/stop/status on the v1 envelope with
+ * pi-subagents 0.76.1's shapes. Each spawn mints a real temp dir as the run's `asyncDir` (so
+ * `readAggregate` reads a real `status.json`); `stop` acknowledges a spawned run (`state:
+ * "stopping"`) and refuses any other id `not_found`; `status` answers a spawned run's immediate
+ * post-stop proof and any other id with the engine's `execution_failed` miss — proving the
+ * adapter turns refusals into outcomes at contract level. Returns the status-request counter.
  */
-function installFakeResponder(bus: WaveBus): void {
+function installFakeResponder(bus: WaveBus): { statusRequests: () => number } {
+  const spawned = new Set<string>();
+  let statuses = 0;
   bus.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
-    const request = raw as { requestId: string; method: string };
+    const request = raw as { requestId: string; method: string; params?: { id?: unknown } };
     const reply = (payload: Record<string, unknown>): void => {
       bus.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
         version: WAVE_RPC_PROTOCOL_VERSION,
@@ -341,10 +387,65 @@ function installFakeResponder(bus: WaveBus): void {
     }
     if (request.method === "spawn") {
       const asyncDir = mkdtempSync(join(tmpdir(), "perk-wave-contract-"));
+      spawned.add(basename(asyncDir));
       reply({
         success: true,
         data: { text: "Started async run.", details: { asyncId: basename(asyncDir), asyncDir } },
       });
+      return;
+    }
+    const id = String(request.params?.id);
+    if (request.method === "stop") {
+      reply(
+        spawned.has(id)
+          ? {
+              success: true,
+              data: {
+                runId: id,
+                previousState: "running",
+                state: "stopping",
+                message: `Stop requested for async run ${id}.`,
+              },
+            }
+          : {
+              success: false,
+              error: {
+                code: "not_found",
+                message:
+                  "Async run not found or already completed; stop requires a live async run directory.",
+              },
+            },
+      );
+      return;
+    }
+    if (request.method === "status") {
+      statuses += 1;
+      reply(
+        spawned.has(id)
+          ? {
+              success: true,
+              data: {
+                text: `Run: ${id}`,
+                details: {
+                  workflowTerminalProof: {
+                    version: 1,
+                    kind: "workflow",
+                    runId: id,
+                    state: "pending",
+                    dispatchClosed: false,
+                    reason: "Workflow dispatch is still open.",
+                  },
+                },
+              },
+            }
+          : {
+              success: false,
+              error: {
+                code: "execution_failed",
+                message: "Async run not found. Provide id or dir.",
+              },
+            },
+      );
       return;
     }
     reply({
@@ -352,13 +453,15 @@ function installFakeResponder(bus: WaveBus): void {
       error: { code: "not_found", message: `fake responder rejects ${request.method}` },
     });
   });
+  return { statusRequests: () => statuses };
 }
 
 function makeRpcHarness(): WaveAdapterHarness {
   const bus = createFakeBus();
-  installFakeResponder(bus);
+  const responder = installFakeResponder(bus);
   return {
     adapter: createRpcWaveAdapter(bus),
+    statusRequests: responder.statusRequests,
     completeRun(handle) {
       // A minimal payload: the result-file data's identifiers only (no `results` array).
       bus.emit(FAKE_ASYNC_COMPLETE_EVENT, {

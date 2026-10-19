@@ -12,7 +12,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
-import { createMemoryWaveAdapter, type MemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import {
+  createMemoryWaveAdapter,
+  MEMORY_DEFAULT_TERMINAL_PROOF,
+  type MemoryWaveAdapter,
+} from "../testing/memoryAdapter.ts";
 import { PONYTAIL_CORE_SKILL } from "./ponytail.ts";
 import {
   type CollectWaveResult,
@@ -271,6 +275,7 @@ for (const outcome of ["timeout", "cancelled"] as const) {
         async stop() {
           notifyStopping();
           await stopped;
+          return { acknowledged: true } as const;
         },
         async readAggregate(handle) {
           reads++;
@@ -1140,11 +1145,10 @@ test("receipt: spawn-failed — no handle, no children", async () => {
   assert.deepEqual(result.receipt, { state: "spawn-failed", children: [] });
 });
 
-test("receipt: timed-out preserves the spawn handle (no completion, empty children)", async (t) => {
+test("receipt: timed-out preserves the spawn handle and carries the termination facts (no completion, empty children)", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const pending = reportWaveOver(createMemoryWaveAdapter({ completion: false })).run(
-    makeSpec({ timeoutMs: 20 }),
-  );
+  const adapter = createMemoryWaveAdapter({ completion: false });
+  const pending = reportWaveOver(adapter).run(makeSpec({ timeoutMs: 20 }));
   await drain();
   t.mock.timers.tick(20 + WAVE_SETTLEMENT_GRACE_MS);
   const result = await pending;
@@ -1153,10 +1157,12 @@ test("receipt: timed-out preserves the spawn handle (no completion, empty childr
     asyncDir: "/memory/wave-async-1",
     state: "timed-out",
     children: [],
+    termination: { stop: { acknowledged: true }, proof: MEMORY_DEFAULT_TERMINAL_PROOF },
   });
+  assert.equal(adapter.proofs.length, 1, "exactly one terminal-proof read after the stop");
 });
 
-test("receipt: post-spawn cancel preserves the spawn handle", async () => {
+test("receipt: post-spawn cancel preserves the spawn handle and carries the termination facts", async () => {
   const adapter = createMemoryWaveAdapter({ completion: false });
   const controller = new AbortController();
   setTimeout(() => controller.abort(), 10);
@@ -1166,7 +1172,36 @@ test("receipt: post-spawn cancel preserves the spawn handle", async () => {
     asyncDir: "/memory/wave-async-1",
     state: "cancelled",
     children: [],
+    termination: { stop: { acknowledged: true }, proof: MEMORY_DEFAULT_TERMINAL_PROOF },
   });
+  assert.equal(adapter.proofs.length, 1);
+});
+
+test("receipt: a refused stop and an observed proof both ride the receipt and the detail", async () => {
+  const reason =
+    "invalid_state: Workflow wave-async-1 has no live run controller available to stop.";
+  const adapter = createMemoryWaveAdapter({
+    completion: false,
+    stopOutcome: { acknowledged: false, reason },
+    terminalProof: { state: "observed" },
+  });
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 10);
+  const result = await reportWaveOver(adapter).run(makeSpec(), { signal: controller.signal });
+  assert.deepEqual(result.receipt.termination, {
+    stop: { acknowledged: false, reason },
+    proof: { state: "observed" },
+  });
+  assert.deepEqual(
+    result.failures.map((f) => [f.key, f.reason, f.detail]),
+    [
+      [
+        null,
+        "cancelled",
+        `wave 'pr-review' was cancelled; stop refused (${reason}); child termination observed (engine process-terminal proof)`,
+      ],
+    ],
+  );
 });
 
 test("receipt: pre-launch cancel yields a handle-less cancelled receipt", async () => {
@@ -1250,6 +1285,10 @@ test("receipt: complete run enriches child agents from the lane specs by key", a
     { key: "correctness", runId: "child-2", success: true, agent: "already-set" },
     { key: "mystery", runId: "child-3" },
   ]);
+  // The engine settled: perk requested no stop and read no terminal proof.
+  assert.equal("termination" in result.receipt, false);
+  assert.equal(adapter.calls.stop.length, 0);
+  assert.equal(adapter.proofs.length, 0);
 });
 
 test("receipt: an identity-only completion yields empty children on a complete run", async () => {
@@ -1398,7 +1437,7 @@ test("startWaveScript: pre-spawn failures take the ok:false arm with the blockin
   assert.equal(preAborted.calls.spawn.length, 0);
 });
 
-test("startWaveScript: timeout settles result with the best-effort stop recorded", async (t) => {
+test("startWaveScript: timeout settles result with the stop request and the one terminal proof recorded", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const adapter = createMemoryWaveAdapter({ completion: false });
   const start = await startWaveScript(adapter, makeScriptSpec({ timeoutMs: 20 }));
@@ -1411,11 +1450,69 @@ test("startWaveScript: timeout settles result with the best-effort stop recorded
   assert.equal(result.failure.reason, "timeout");
   assert.match(
     result.failure.detail,
-    /no completion within \d+ms \(engine deadline 20ms \+ 60000ms settlement grace\); run stopped best-effort/,
+    /no completion within \d+ms \(engine deadline 20ms \+ 60000ms settlement grace\); stop requested; child termination unconfirmed \(pending: Workflow dispatch is still open\.\)$/,
   );
   assert.equal(result.receipt.state, "timed-out");
   assert.equal(adapter.calls.stop.length, 1);
   assert.equal(adapter.calls.stop[0]?.asyncId, "wave-async-1");
+  assert.deepEqual(
+    adapter.proofs.map((handle) => handle.asyncId),
+    ["wave-async-1"],
+  );
+});
+
+test("startWaveScript: a stop acknowledgement never upgrades an unconfirmed proof", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const proof of [
+    { state: "unknown", reason: "async workflow child a process-terminal proof is missing" },
+    { state: "unavailable", reason: "status timed out" },
+  ] as const) {
+    const adapter = createMemoryWaveAdapter({ completion: false, terminalProof: proof });
+    const start = await startWaveScript(adapter, makeScriptSpec({ timeoutMs: 20 }));
+    assert.ok(start.ok);
+    t.mock.timers.tick(20 + WAVE_SETTLEMENT_GRACE_MS);
+    const result = await start.result;
+    assert.ok(!result.ok);
+    assert.ok(
+      result.failure.detail.endsWith(
+        `; stop requested; child termination unconfirmed (${proof.state}: ${proof.reason})`,
+      ),
+      result.failure.detail,
+    );
+    assert.doesNotMatch(result.failure.detail, /termination observed/);
+    assert.deepEqual(result.receipt.termination, { stop: { acknowledged: true }, proof });
+  }
+});
+
+test("startWaveScript: a contract-breaking adapter whose stop/terminalProof throw still settles", async () => {
+  const memory = createMemoryWaveAdapter({ completion: false });
+  const controller = new AbortController();
+  const start = await startWaveScript(
+    {
+      ...memory,
+      async stop() {
+        throw new Error("stop exploded");
+      },
+      async terminalProof() {
+        throw new Error("status exploded");
+      },
+    },
+    makeScriptSpec(),
+    controller.signal,
+  );
+  assert.ok(start.ok);
+  controller.abort();
+  const result = await start.result;
+  assert.ok(!result.ok);
+  assert.equal(result.failure.reason, "cancelled");
+  assert.equal(
+    result.failure.detail,
+    "wave 'adversarial-review' was cancelled; stop refused (stop exploded); child termination unconfirmed (unavailable: status exploded)",
+  );
+  assert.deepEqual(result.receipt.termination, {
+    stop: { acknowledged: false, reason: "stop exploded" },
+    proof: { state: "unavailable", reason: "status exploded" },
+  });
 });
 
 // The regression pin for the observed bug: every real-world wave "timeout" was the ENGINE's
@@ -1481,8 +1578,14 @@ test("startWaveScript: an abort after launch settles the cancelled arm with the 
     asyncDir: "/memory/wave-async-1",
     state: "cancelled",
     children: [],
+    termination: { stop: { acknowledged: true }, proof: MEMORY_DEFAULT_TERMINAL_PROOF },
   });
+  assert.equal(
+    result.failure.detail,
+    "wave 'adversarial-review' was cancelled; stop requested; child termination unconfirmed (pending: Workflow dispatch is still open.)",
+  );
   assert.equal(adapter.calls.stop.length, 1);
+  assert.equal(adapter.proofs.length, 1);
 });
 
 test("startWaveScript: a completion arriving before the spawn reply still settles complete", async () => {

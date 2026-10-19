@@ -7,8 +7,8 @@
 // `startWaveScript` performs the front half (abort pre-check → capability ping →
 // subscribe-before-spawn → async spawn) and returns the run handle plus a NEVER-REJECTING
 // `result` promise carrying the back half (completion wait under the engine deadline plus the
-// module's fixed settlement grace, best-effort stop on timeout/cancel, aggregate read, receipt
-// assembly, unsubscribe-on-settle); `runWaveScript` is that start + await.
+// module's fixed settlement grace, the stop request + one terminal-proof read on timeout/cancel,
+// aggregate read, receipt assembly, unsubscribe-on-settle); `runWaveScript` is that start + await.
 //
 // Deadline posture: the spawned `timeoutMs` is the ENGINE deadline — pi-subagents arms it when
 // the script starts, settles the run `partial/timeout` against it, and ships the finished lanes'
@@ -17,6 +17,13 @@
 // fires only after the engine has had its chance to settle and notify. Arming it for the bare
 // deadline would race the engine's timer (perk's is armed a few ms earlier, spawn reply →
 // workflow start), win, close acceptance, and discard every retained report as an empty timeout.
+//
+// Stop posture: when perk's own timer or the caller's AbortSignal ends the wait, perk REQUESTS a
+// stop and keeps the engine's answer (acknowledged — a persisted request, never termination — or
+// refused with the engine's reason), then reads ONE workflow terminal proof (`terminalProof`).
+// Both facts ride the failure detail and the receipt's `termination`; only an `observed` proof
+// reads as confirmed termination. Reports are never read after a stop, and neither a stop
+// acknowledgement nor a freed engine slot is ever taken as proof that children exited.
 //
 // The failure vocabulary here is the WAVE-LEVEL subset only (`WaveRunFailureReason`): the six
 // reasons a script run itself can produce, always `key: null`. The logical tier widens it with
@@ -66,6 +73,32 @@ export interface WaveAggregate {
   value: unknown;
 }
 
+/**
+ * The engine's answer to perk's own stop request. `acknowledged: true` is a persisted REQUEST
+ * (the RPC replies `state: "stopping"`), never termination; a refusal (a typed engine error such as
+ * `invalid_state` when no live run controller survives a reload, `not_found`, `execution_failed`,
+ * a timed-out or held reply) is DATA carrying the engine's `code: message`, never an exception.
+ */
+export type WaveStopOutcome = { acknowledged: true } | { acknowledged: false; reason: string };
+
+/**
+ * The engine's workflow terminal proof as perk projects it after its own stop. `observed` means the
+ * engine recorded dispatch closed AND resolved process evidence for every async child — an
+ * observed runner exit, or a recorded never-started launch failure — i.e. quiescence, not
+ * necessarily an exit per child. `pending`/`unknown` carry the engine's reason. `unavailable` is
+ * perk's own arm: the one status query yielded no proof (refused, timed out, or proof-less). A
+ * stop acknowledgement or a freed engine slot never upgrades any state to `observed`.
+ */
+export type WaveTerminationProof =
+  | { state: "observed" }
+  | { state: "pending" | "unknown" | "unavailable"; reason: string };
+
+/** The two termination facts a perk-initiated stop leaves behind (diagnostics only). */
+export interface WaveTermination {
+  stop: WaveStopOutcome;
+  proof: WaveTerminationProof;
+}
+
 /** One script launch's receipt: the run handle (where known) + the observed children. */
 export interface WaveScriptReceipt {
   /** The top-level async run id (the spawn handle's asyncId). */
@@ -73,6 +106,11 @@ export interface WaveScriptReceipt {
   asyncDir?: string;
   state: WaveReceiptState;
   children: WaveChildReceipt[];
+  /**
+   * Present exactly on `timed-out`/`cancelled` receipts — the arms where perk itself stopped the
+   * run. Write-only telemetry: nothing reads it back into the ok/failure decision.
+   */
+  termination?: WaveTermination;
 }
 
 // ------------------------------------------------------------------------- the adapter seam
@@ -177,8 +215,17 @@ export interface WaveAdapter {
   spawn(params: WaveSpawnParams): Promise<WaveRunHandle>;
   /** Subscribe to run completions (any run — the runner matches the handle); returns unsubscribe. */
   onComplete(handler: (completion: WaveCompletion) => void): () => void;
-  /** Best-effort stop of a live run (timeout/cancel path); never throws. */
-  stop(handle: WaveRunHandle): Promise<void>;
+  /**
+   * Request a stop of a live run (timeout/cancel path). Never throws: a refusal is DATA
+   * (`acknowledged: false` with the engine's reason), not an exception.
+   */
+  stop(handle: WaveRunHandle): Promise<WaveStopOutcome>;
+  /**
+   * ONE status query after perk's own stop, projecting the engine's workflow terminal proof.
+   * Never throws (no proof ⇒ `unavailable`); diagnostics only — never polled, never retried, and
+   * never consulted for reports, coverage or completeness.
+   */
+  terminalProof(handle: WaveRunHandle): Promise<WaveTerminationProof>;
   /** Read the run's durable aggregate; throws ⇒ aggregate-unreadable. */
   readAggregate(handle: WaveRunHandle): Promise<WaveAggregate>;
 }
@@ -193,8 +240,8 @@ export interface WaveAdapter {
 export type WaveRunFailureReason =
   | "unavailable" // ping failed / capabilities missing
   | "spawn-failed" // RPC spawn rejected or no run handle
-  | "timeout" // engine deadline + settlement grace expired with no matched completion (best-effort stop issued)
-  | "cancelled" // AbortSignal fired (best-effort stop issued)
+  | "timeout" // engine deadline + settlement grace expired with no matched completion (stop requested)
+  | "cancelled" // AbortSignal fired (stop requested)
   | "run-failed" // terminal status.json state ≠ "complete"
   | "aggregate-unreadable"; // status.json missing/corrupt/no workflow.value array
 
@@ -224,8 +271,8 @@ export const WAVE_TIMEOUT_MS = 30 * 60_000;
  * The fixed settlement grace perk waits BEYOND the engine deadline before its own `timeout`
  * fires: the engine's partial settlement lands ~1 s after its deadline, and the grace only has to
  * cover notifier delivery. Deliberately not an operator knob (no env override, no spec/request
- * field) — tests advance it with mocked timers. A bound, not a wait-forever: once it expires the
- * run is stopped best-effort and no reports are read.
+ * field) — tests advance it with mocked timers. A bound, not a wait-forever: once it expires perk
+ * requests a stop, reads one terminal proof, and reads no reports.
  */
 export const WAVE_SETTLEMENT_GRACE_MS = 60_000;
 
@@ -256,7 +303,7 @@ export type WaveScriptResult =
 /**
  * A launched (or launch-refused) script run. On `ok: true` the run is LIVE: `handle` is the
  * detached async run, and `result` settles when the back half finishes (completion wait under
- * the engine deadline + settlement grace, AbortSignal honor, best-effort stop on timeout/cancel, the durable
+ * the engine deadline + settlement grace, AbortSignal honor, stop request + terminal proof on timeout/cancel, the durable
  * aggregate read, receipt assembly, unsubscribe-on-settle). `result` NEVER rejects — every arm
  * normalizes into `WaveScriptResult`, so an uncollected wave can never become an unhandled
  * rejection. Pre-spawn failures (aborted-before-launch, ping fail/null, spawn throw) take the
@@ -271,11 +318,21 @@ function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function renderStop(stop: WaveStopOutcome): string {
+  return stop.acknowledged ? "stop requested" : `stop refused (${stop.reason})`;
+}
+
+function renderProof(proof: WaveTerminationProof): string {
+  return proof.state === "observed"
+    ? "child termination observed (engine process-terminal proof)"
+    : `child termination unconfirmed (${proof.state}: ${proof.reason})`;
+}
+
 /**
  * Start one module-rendered `script` run through the adapter — the non-blocking front half:
  * capability ping → subscribe-before-spawn (the completion-before-reply buffer) → async spawn.
  * On success the back half (block on the async-complete event under the engine deadline +
- * settlement grace, abortable → best-effort stop on timeout/cancel → read the durable aggregate → the
+ * settlement grace, abortable → stop request + one terminal-proof read on timeout/cancel → read the durable aggregate → the
  * `state !== "complete"` / unreadable arms) runs behind the returned `result` promise, which
  * never rejects. The shared operational core under every runner; per-flow value normalization
  * stays with the caller.
@@ -291,10 +348,12 @@ export async function startWaveScript(
     state: WaveReceiptState,
     spawned: WaveRunHandle | null,
     completion?: WaveCompletion,
+    termination?: WaveTermination,
   ): WaveScriptReceipt => ({
     ...(spawned !== null ? { runId: spawned.asyncId, asyncDir: spawned.asyncDir } : {}),
     state,
     children: completion?.children ?? [],
+    ...(termination !== undefined ? { termination } : {}),
   });
   const startFailure = (
     reason: WaveRunFailureReason,
@@ -435,24 +494,34 @@ export async function startWaveScript(
         if (signal?.aborted === true) settleOutcome("cancelled");
       });
       if (outcome !== "complete") {
-        // Best-effort stop — adapters never throw here by contract, but a broken adapter's error
-        // is still swallowed into the detail rather than re-thrown.
-        let stopNote = "";
+        // Request the stop and keep the engine's answer. Adapters never throw here by contract;
+        // the catch only guards a contract-breaking adapter, whose error becomes a refusal.
+        let stop: WaveStopOutcome;
         try {
-          await adapter.stop(spawned);
+          stop = await adapter.stop(spawned);
         } catch (error) {
-          stopNote = ` (stop failed: ${errorDetail(error)})`;
+          stop = { acknowledged: false, reason: errorDetail(error) };
         }
+        // ONE terminal-proof read — diagnostics only; reports are never read after a stop.
+        // The same guard keeps `result` never-rejecting over a contract-breaking adapter.
+        let proof: WaveTerminationProof;
+        try {
+          proof = await adapter.terminalProof(spawned);
+        } catch (error) {
+          proof = { state: "unavailable", reason: errorDetail(error) };
+        }
+        const termination: WaveTermination = { stop, proof };
+        const diagnosis = `${renderStop(stop)}; ${renderProof(proof)}`;
         return outcome === "timeout"
           ? scriptFailure(
               "timeout",
-              `wave '${spec.flow}' received no completion within ${waitMs}ms (engine deadline ${timeoutMs}ms + ${WAVE_SETTLEMENT_GRACE_MS}ms settlement grace); run stopped best-effort${stopNote}`,
-              receiptOf("timed-out", spawned),
+              `wave '${spec.flow}' received no completion within ${waitMs}ms (engine deadline ${timeoutMs}ms + ${WAVE_SETTLEMENT_GRACE_MS}ms settlement grace); ${diagnosis}`,
+              receiptOf("timed-out", spawned, undefined, termination),
             )
           : scriptFailure(
               "cancelled",
-              `wave '${spec.flow}' was cancelled${stopNote}`,
-              receiptOf("cancelled", spawned),
+              `wave '${spec.flow}' was cancelled; ${diagnosis}`,
+              receiptOf("cancelled", spawned, undefined, termination),
             );
       }
 

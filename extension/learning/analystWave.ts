@@ -251,8 +251,8 @@ export type LearnWaveOutcome =
  * the outcome for observability only. Assumes a validated selection (`parseAngleSelections`
  * runs at the tool boundary); the wave's programmer-error throws (empty/duplicate keys)
  * remain the backstop. Cancellation: the caller's `AbortSignal` threads into `wave.run`;
- * an abort settles the wave as `cancelled` with a best-effort stop of an already-launched run,
- * normalized into the outcome — never a throw; the wave does not outlive the abort.
+ * an abort settles the wave as `cancelled` after a stop request to an already-launched run,
+ * normalized into the outcome — never a throw; perk stops waiting at the abort.
  */
 export async function runLearnAnalystWave(
   wave: ReportWave,
