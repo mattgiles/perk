@@ -232,6 +232,21 @@ whose still-running lane(s) surface as `lane-failed` — a normal collected outc
 recover reports from `status.json` or child artifacts.
 _Avoid_: timeout (perk's own empty expiry), partial timeout
 
+**Termination proof**:
+The engine's workflow terminal proof as perk projects it after its own stop request — `observed` /
+`pending` / `unknown`, or `unavailable` when the one `status` query yields none. `observed` means
+the engine recorded dispatch closed and resolved process evidence for every async child (an
+observed runner exit, or a never-started launch failure) — quiescence, never inferred from a stop
+reply, a freed slot, a complete report or `endedAt`.
+_Avoid_: stopped (perk never confirms a stop), slot freed, exited (a never-started child has no exit)
+
+**Stop acknowledgement**:
+The engine's RPC `stop` success reply (`state: "stopping"`, `Stop requested for async run <id>.`):
+a persisted request, never termination. A typed refusal (`not_found` / `invalid_state` /
+`execution_failed`) is a **refused stop**, reported with the engine's reason.
+_Avoid_: best-effort stop (the old wording that read as a verdict), the model-facing stop action's
+seal (a different implementation perk never calls)
+
 ### Review
 
 **Approval guidance**:

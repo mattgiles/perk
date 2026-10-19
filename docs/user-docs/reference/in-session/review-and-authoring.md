@@ -115,6 +115,24 @@ completion does not wake the parent; a failed/paused/stopped child or the workfl
 does, and only the matching workflow-completion notice triggers collection. Only final typed
 reports authorize reconciliation, exactly once.
 
+When the session is idle, the completion notice is followed by the engine's own
+`Subagent updates above.` wake prompt (a plain user turn that starts the next agent turn) — perk
+leaves both untouched. Each per-child completion the engine reports while the wave is still
+running is ignored for collection; only the workflow's own completion counts.
+
+**`/reload` while a wave runs:** the completion notice (and its wake prompt) still arrives in the
+reloaded session, but the wave is **not collectable** there — collection is per activation, so
+`collect_review_wave` / `collect_draft_review_wave` answer `no_wave` naming that rule. Launch the
+wave again. A session switch delivers no notice at all.
+
+**When perk itself times out or cancels a wave**, it requests a stop and reports two facts in the
+failure detail (and on the attempt receipt): the engine's answer — `stop requested`, or
+`stop refused (<reason>)` (e.g. no live run controller after a reload) — and the engine's terminal
+proof: `child termination observed (engine process-terminal proof)`, or
+`child termination unconfirmed (pending|unknown|unavailable: <reason>)`. Only "observed" means the
+children are confirmed quiescent; a stop request, a freed slot or a later notice is not proof that
+they exited.
+
 On the browser surfaces a **code-owned marker** — an annotation under the reserved
 `perk:wave` source — says "Reviewer wave running … decide after they arrive" from launch until
 collection clears it (or rewrites it as "incomplete" naming the uncovered lanes). The

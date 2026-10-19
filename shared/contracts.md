@@ -1142,7 +1142,10 @@ Subscribe before emission. Start acknowledgment (started or terminal) has a five
 the request deadline is 30 minutes; abort/deadline/no-ack sends the exact cancellation tuple and
 waits five seconds of grace. Matching completion during grace may release but never promotes
 local cancellation to success. Unrelated/duplicate/late events are ignored. Updates contribute
-only observed run id, never output or tool arguments. Reload, counter reset and pending clear are
+only observed run id, never output or tool arguments. Engine capacity/slot state (a freed slot,
+`abandonedSlotReleaseAfterMs`), a stop acknowledgement or a sealed paused run is never termination
+evidence for a writer lock: `release` derives from the correlated terminal `status` alone
+(process/capacity fields decorating a terminal are ignored, fake-bus-pinned). Reload, counter reset and pending clear are
 not unlock gestures. This metadata coordinates participating resolvers in both modes, including
 PR-versus-retained contention at one canonical Git directory. It neither changes Python worktree
 ownership nor fences arbitrary manual Git or manual continuation. §8.51's retained-operation
@@ -7314,11 +7317,52 @@ foreign and duplicate events ignored before storage. Completion/timeout/cancella
 closes acceptance before any awaited stop. Spawn failure and final settlement unsubscribe and
 clear the buffer, matched slot and waiter callback. The instance-owned normalized result promise
 retains admitted reports until drain-once collection, not a later read of an engine artifact.
-No adapter/global report cache, new persisted report artifact, status/resume query or second
-collection channel exists. Generic failures, arbitrary partial strings, nonterminal/stopped
-states and invalid markers expose no reports; unreadable status remains `aggregate-unreadable`.
-Perk's own timeout/cancellation still stop best-effort without retained reports or post-stop
-reads. Timeout without completion, interrupted sessions and cross-reload recovery are unsupported.
+No adapter/global report cache exists, no persisted report artifact, no report-bearing
+status/resume query, and no second collection channel; the ONE post-stop `status` query (below)
+reads only `details.workflowTerminalProof` (diagnostics). Generic failures, arbitrary partial
+strings, nonterminal/stopped states and invalid markers expose no reports; unreadable status
+remains `aggregate-unreadable`.
+
+**Perk-initiated stops: the stop outcome and the terminal proof.** Perk's own
+timeout/cancellation request a stop over the RPC (`stop {id}`) and keep the engine's answer as
+`WaveStopOutcome` — acknowledged (`state: "stopping"`, `Stop requested for async run <id>.`: a
+persisted request, never termination) or refused with its typed reason (`not_found` /
+`invalid_state` / `execution_failed`, e.g. `invalid_state: Workflow <id> has no live run
+controller available to stop.` after a reload, or a held/timed-out reply's text). The adapter's
+`stop` never throws: every rejection is the outcome's `reason`. Perk then issues exactly ONE
+`status {id}` query whose `details.workflowTerminalProof` is projected as
+`WaveTerminationProof`: `observed`, `pending`/`unknown` with the engine's reason (`"no reason
+given"` when absent), or `unavailable` — perk's own arm when the query is refused, times out, or
+carries no object proof in one of those three states. Only `observed` reads as confirmed: the
+engine recorded dispatch closed and resolved process evidence for every async child (an observed
+runner exit, or a recorded never-started launch failure) — quiescence, not an exit per child.
+Both facts ride the failure detail (`…; stop requested` | `…; stop refused (<reason>)`, then
+`; child termination observed (engine process-terminal proof)` | `; child termination
+unconfirmed (<state>: <reason>)`) and the `timed-out`/`cancelled` receipt's `termination: {stop,
+proof}` (absent on every other receipt; write-only telemetry). The reason literals (`timeout`,
+`cancelled`) are unchanged, so retry policy never keys on the detail. No reports are read after a
+stop, the query is never polled or retried, a stop acknowledgement never upgrades the proof, and
+a freed capacity slot (a sealed paused run, `abandonedSlotReleaseAfterMs`) is never termination.
+The `complete`/`run-failed`/`aggregate-unreadable` arms (the engine settled) issue neither. The
+accepted cost: the stop and the query are each bounded by the 30 s reply timeout, so a silent
+responder can delay a timeout/cancel settlement by up to 60 s. The model-facing stop action
+(`async-stop-action.js`, which seals a delivered paused run against terminal proof) is a
+different implementation perk never calls.
+
+**Awaited-child events.** pi-subagents ≥ 0.76.1 emits one `subagent:async-complete` event per
+awaited workflow CHILD on the same advertised channel the wave listens to (`awaitedByWorkflow:
+true`, `parentWorkflowRunId`, `triggerTurn: false`, carrying the child's own `id`/`asyncDir` — a
+sibling of the workflow's run directory), before the spawn reply and while siblings still run.
+Correlation is by identity only (`asyncDir` or `asyncId` equals the spawn handle), so these
+events never match the workflow handle and never settle, collect or fail a wave early — the
+workflow's own completion alone settles it; the three lineage fields are never read.
+
+Timeout without completion, interrupted sessions and cross-reload recovery are unsupported.
+Collection is per activation: a wave launched before a `/reload` or a session switch is never
+collectable afterwards (pending records live in the activation's wave instance). A same-session
+`/reload` still delivers the engine's queued completion notice and its `Subagent updates above.`
+wake prompt to the new runtime (a session switch does not); the collect tools answer `no_wave`
+with a detail naming the rule.
 
 **RPC reply selection (the context-less hold) + the duplicate-load notice.** A pi-subagents
 RPC responder that holds no extension context answers every non-`ping` request with the
