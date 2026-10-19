@@ -885,9 +885,9 @@ test("rpc integration: without a ghost, onNotice is never called; without deps, 
  * completion event carries the explicit `terminalOutcome` plus one validated sibling report. */
 /**
  * A native partial settlement retaining one valid sibling report. `timedOutLane` adds the
- * second lane as the engine's single-run partial shape \u2014 `success: false` beside the
+ * second lane as the engine's single-run partial shape — `success: false` beside the
  * `timedOut`/`outputPartial` markers, the partial-output text, a per-row `terminalOutcome`, AND a
- * schema-valid `structuredOutput` \u2014 which perk must still count as a failed lane.
+ * schema-valid `structuredOutput` — which perk must still count as a failed lane.
  */
 function partialFixture(opts: { timedOutLane?: boolean } = {}): FakeSettlement {
   return {

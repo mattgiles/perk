@@ -210,7 +210,7 @@ test("partial projection withholds ambiguous keys/identities and never guesses k
       { workflowKey: "late", state: "running", runId: "r" },
       // The engine's single-run partial markers (`outputPartial` beside `exitCode: 1`, hence
       // `success: false`) with a retained report: the report rides along as DATA, but the row
-      // stays `ok: false` \u2014 perk reads the engine's `success` alone.
+      // stays `ok: false` — perk reads the engine's `success` alone.
       {
         workflowKey: "timed",
         runId: "t",

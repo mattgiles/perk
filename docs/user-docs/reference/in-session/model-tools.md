@@ -214,7 +214,10 @@ Python plane; `linear_configure_auth` writes your Pi auth file):
 **Unknown provenance.** A tool from any package or extension without a row — an MCP bridge, an
 ad-hoc extension, a package perk does not install — passes every stage diet but is hidden and
 blocked under the read-only gate. Only the exact paths in the table count: another
-`<inline:…>` extension is unknown.
+`<inline:…>` extension is unknown. Pi's own MCP builtin is treated the same way: its tools
+(`mcp__<server>__<tool>` and the MCP resource tools) are hidden and blocked under the gate,
+whether the model calls them directly or another tool calls them for it, and pass through
+unchanged in read-write.
 
 **perk never deactivates a foreign tool.** A package's own choices stand: the questionnaire
 removes `ask_user_question` in a headless session, pi-subagents hides `subagent` until the model
@@ -239,7 +242,11 @@ perk's own waves and both foreground writer dispatches (`resolve_submit_conflict
 `run_librarian`) spawn with the pi-subagents intercom bridge off, so their children never have
 `contact_supervisor` (review waves and writers are completion-only). perk's report children run
 with a tool allowlist (`read`, `grep`, `find`, `ls`, `bash`), so no perk tool exists in them at
-all. Every perk definition also carries an empty descendant ceiling (a blank `allowedAgents:`),
+all. They load no MCP support either: pi-subagents attaches Pi's MCP builtin only to launches that
+name `mcp:` tools, and perk's never do, so a project `.pi/mcp.json` adds nothing to a report
+child (measured with and without one). A tool allowlist alone would not exclude MCP tools —
+Pi keeps them registered beside it — so the read-only gate is what blocks them wherever they do
+exist. Every perk definition also carries an empty descendant ceiling (a blank `allowedAgents:`),
 so even a child that somehow gained a `subagent` tool could launch no descendant.
 
 ## Gating and stage scoping

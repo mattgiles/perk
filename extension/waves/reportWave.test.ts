@@ -229,7 +229,7 @@ test("partial normalization keeps absent, malformed and failed reports distinct"
 
 const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-test("startWaveScript: every launch mints a fresh token \u2014 two spawns of one spec differ, and the token never derives from the script/spec", async () => {
+test("startWaveScript: every launch mints a fresh token — two spawns of one spec differ, and the token never derives from the script/spec", async () => {
   // The engine reuses a runtime-replaced run's children when session + script digest + args
   // digest match; an identical relaunch must therefore never repeat its args.
   const memory = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
@@ -250,7 +250,7 @@ test("startWaveScript: every launch mints a fresh token \u2014 two spawns of one
   assert.deepEqual(
     memory.calls.spawn.map((params) => params.script),
     [spec.script, spec.script],
-    "the script bytes are unchanged \u2014 only the token differs",
+    "the script bytes are unchanged — only the token differs",
   );
 });
 

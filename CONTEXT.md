@@ -248,6 +248,18 @@ engine only aborts its in-memory run controller, writing no control request. A t
 _Avoid_: best-effort stop (the old wording that read as a verdict), the model-facing stop action's
 seal (a different implementation perk never calls)
 
+**Launch token**:
+The per-launch `args.launch` UUID every report-wave spawn carries (minted at the transport's one
+spawn site). Its only job is to keep pi-subagents' runtime-replaced workflow reuse (same session,
+script digest and args digest) from ever matching a perk wave; it is never identity (that stays
+the spawn handle) and never read back.
+_Avoid_: wave nonce, reuse key
+
+**Relaunch freshness**:
+The guarantee that a wave launched again — after `/reload` included — inspects anew: new
+children over current inputs, never the earlier wave's finished or still-running children.
+_Avoid_: re-attach, resume
+
 ### Review
 
 **Approval guidance**:

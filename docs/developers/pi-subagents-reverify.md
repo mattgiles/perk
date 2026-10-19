@@ -101,9 +101,25 @@ loading a second SDK copy.
    - **workflow reuse** (`src/workflows/workflow-reuse.ts::findWorkflowReuseSource`): a relaunch
      re-attaches only to the same session's newest terminal workflow with the same
      `scriptDigest`/`argsDigest` whose `stopCause` is `runtime-replaced` (after `/reload` or a
-     resume). perk's `ReportWave` pending map is per-activation, so a wave launched before
-     `/reload` stays uncollectable afterwards; an identical relaunch after `/reload` reuses the
-     replaced run's finished lanes;
+     resume), then returns its settled `ok` children (`reused: true`) and re-attaches the running
+     ones. perk's `ReportWave` pending map is per-activation, so a wave launched before
+     `/reload` stays uncollectable afterwards, and every wave spawn carries a per-launch token
+     (`transport.ts`: `args: { launch: randomUUID() }`) so the reuse key never matches a perk
+     wave — a relaunch is fresh. Re-read: the key is still session + script digest + args
+     digest, and RPC `spawn` still accepts a plain-JSON `args` with an inline `script`
+     (`src/extension/public-execution.ts` refuses `args` only without a workflow input);
+   - **`outputPartial` reach** (`src/runs/background/run-child-session.ts`,
+     `src/runs/foreground/subagent-executor.ts::workflowResultChildren`): the single-run partial
+     marker rides beside `exitCode: 1` (so `success: false`) and the workflow projection drops
+     it. perk reads `ok` alone (`reportWaveRpc.test.ts`'s source pin forbids the marker names in
+     the wave modules); a new projection that carried a report-bearing `success: true` partial
+     would need a decision, not a silent read;
+   - **MCP attachment** (`src/runs/shared/child-session.ts::createDefaultChildSessionFactory`):
+     a child gets `builtin:mcp` only when its launch names `mcp:` selectors (a nonempty
+     `builtinMcpTools`), and a definition's `excludeTools` reaches the SDK only without an
+     explicit `tools:` allowlist (`src/runs/shared/child-launch.ts`). perk's report children name
+     no `mcp:` selector, so they register no MCP tool; the read-only floor against a registered
+     one is `extension/substrate/mcpReadOnlyFloor.test.ts`;
    - the **`disabledFeatures` surfaces** (`src/shared/disabled-features.ts`): the features whose
      parameters perk sends (`workflow-scripts`, `missions`, `extension-bindings`) refuse every
      wave with the engine's own setting-naming message — surfaced verbatim, never mapped.

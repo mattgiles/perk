@@ -122,8 +122,10 @@ running is ignored for collection; only the workflow's own completion counts.
 
 **`/reload` while a wave runs:** the completion notice (and its wake prompt) still arrives in the
 reloaded session, but the wave is **not collectable** there — collection is per activation, so
-`collect_review_wave` / `collect_draft_review_wave` answer `no_wave` naming that rule. Launch the
-wave again. A session switch delivers no notice at all.
+`collect_review_wave` / `collect_draft_review_wave` answer `no_wave` naming that rule. Launching
+again starts a fresh wave over new children: perk never re-attaches to or reuses the earlier
+wave's children (they finish on their own, and their findings are never read). A session switch
+delivers no notice at all.
 
 **When perk itself times out or cancels a wave**, it requests a stop and reports two facts in the
 failure detail (and on the attempt receipt): the engine's answer — `stop requested`, or

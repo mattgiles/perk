@@ -500,7 +500,7 @@ test("two sessions share no draft-review context: each wave receives its own pri
  * A fake plannotator whose plan server answers like the real one: the door's readiness probe
  * (`GET /api/plan`) succeeds on its first attempt and the annotation pushes land (`201` on POST,
  * `200` on DELETE), so no readiness poll or push retry ever sleeps on a (mocked) timer. The server
- * binds the port the door presets in `PLANNOTATOR_PORT` while it emits the request \u2014 exactly
+ * binds the port the door presets in `PLANNOTATOR_PORT` while it emits the request — exactly
  * where real plannotator binds.
  */
 function servingPlannotator(
@@ -531,7 +531,7 @@ function servingPlannotator(
   };
 }
 
-/** Drain macrotasks while advancing the mocked clock until `done()` (bounded \u2014 never hangs). */
+/** Drain macrotasks while advancing the mocked clock until `done()` (bounded — never hangs). */
 async function driveUntil(t: TestContext, done: () => boolean): Promise<void> {
   for (let step = 0; step < 400 && !done(); step++) {
     await new Promise((resolve) => setImmediate(resolve));
@@ -577,7 +577,7 @@ test("same-version reload (draft pair): the primed context and the pending wave 
     await h.invokeTool("plan_draft", { plan: PLAN_DRAFT });
     await h.runCommandHandler("plan-review-browser", "");
     // The door's readiness poll ends (and restores the port) on its first probe, still on real
-    // timers \u2014 nothing of the door's is left sleeping on the mocked clock below.
+    // timers — nothing of the door's is left sleeping on the mocked clock below.
     const start = Date.now();
     while (!portRestored() && Date.now() - start < 5_000) {
       await new Promise((resolve) => setTimeout(resolve, 10));
