@@ -242,7 +242,8 @@ _Avoid_: stopped (perk never confirms a stop), slot freed, exited (a never-start
 
 **Stop acknowledgement**:
 The engine's RPC `stop` success reply (`state: "stopping"`, `Stop requested for async run <id>.`):
-a persisted request, never termination. A typed refusal (`not_found` / `invalid_state` /
+an acknowledged request, never termination and never durable — for a live in-process workflow the
+engine only aborts its in-memory run controller, writing no control request. A typed refusal (`not_found` / `invalid_state` /
 `execution_failed`) is a **refused stop**, reported with the engine's reason.
 _Avoid_: best-effort stop (the old wording that read as a verdict), the model-facing stop action's
 seal (a different implementation perk never calls)

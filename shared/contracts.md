@@ -7325,8 +7325,9 @@ remains `aggregate-unreadable`.
 
 **Perk-initiated stops: the stop outcome and the terminal proof.** Perk's own
 timeout/cancellation request a stop over the RPC (`stop {id}`) and keep the engine's answer as
-`WaveStopOutcome` — acknowledged (`state: "stopping"`, `Stop requested for async run <id>.`: a
-persisted request, never termination) or refused with its typed reason (`not_found` /
+`WaveStopOutcome` — acknowledged (`state: "stopping"`, `Stop requested for async run <id>.`: an
+acknowledged request, never termination and never durable — for a live in-process workflow the
+engine aborts its in-memory run controller and writes no control request) or refused with its typed reason (`not_found` /
 `invalid_state` / `execution_failed`, e.g. `invalid_state: Workflow <id> has no live run
 controller available to stop.` after a reload, or a held/timed-out reply's text). The adapter's
 `stop` never throws: every rejection is the outcome's `reason`. Perk then issues exactly ONE
@@ -7338,8 +7339,9 @@ engine recorded dispatch closed and resolved process evidence for every async ch
 runner exit, or a recorded never-started launch failure) — quiescence, not an exit per child.
 Both facts ride the failure detail (`…; stop requested` | `…; stop refused (<reason>)`, then
 `; child termination observed (engine process-terminal proof)` | `; child termination
-unconfirmed (<state>: <reason>)`) and the `timed-out`/`cancelled` receipt's `termination: {stop,
-proof}` (absent on every other receipt; write-only telemetry). The reason literals (`timeout`,
+unconfirmed (<state>: <reason>)`) and the `timed-out`/post-launch `cancelled` receipt's
+`termination: {stop, proof}` (absent on every other receipt, a pre-launch cancel included;
+write-only telemetry). The reason literals (`timeout`,
 `cancelled`) are unchanged, so retry policy never keys on the detail. No reports are read after a
 stop, the query is never polled or retried, a stop acknowledgement never upgrades the proof, and
 a freed capacity slot (a sealed paused run, `abandonedSlotReleaseAfterMs`) is never termination.

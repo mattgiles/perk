@@ -1,22 +1,17 @@
 // The shared `WaveAdapter` contract suite: one set of behavioral assertions registered against
 // BOTH adapters — the in-memory test double directly, and the production RPC adapter wired to a
-// fake in-memory bus plus a scripted fake pi-subagents responder (replies mirror the v1 envelope
-// in pi-subagents `src/extension/rpc.ts`; `readAggregate` reads a real `status.json` written to
-// a temp dir). Keeping the double and the production adapter behaviorally aligned is what makes
+// fake in-memory bus plus the shared fake pi-subagents responder (`createFakeSubagents` — the one
+// mirror of the v1 envelope in pi-subagents `src/extension/rpc.ts`; `readAggregate` reads a real
+// `status.json` written to a temp dir). Keeping the double and the production adapter behaviorally aligned is what makes
 // the runner's memory-adapter coverage trustworthy.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { createFakeSubagents } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
-import {
-  createRpcWaveAdapter,
-  WAVE_RPC_PROTOCOL_VERSION,
-  WAVE_RPC_REPLY_EVENT_PREFIX,
-  WAVE_RPC_REQUEST_EVENT,
-} from "./rpcAdapter.ts";
+import { createRpcWaveAdapter } from "./rpcAdapter.ts";
 import {
   WAVE_ACCEPTANCE,
   WAVE_INTERCOM_BRIDGE,
@@ -343,128 +338,23 @@ function createFakeBus(): WaveBus {
   };
 }
 
-const FAKE_ASYNC_COMPLETE_EVENT = "subagent:async-complete";
-
 /**
- * A scripted fake pi-subagents responder: answers ping/spawn/stop/status on the v1 envelope with
- * pi-subagents 0.76.1's shapes. Each spawn mints a real temp dir as the run's `asyncDir` (so
- * `readAggregate` reads a real `status.json`); `stop` acknowledges a spawned run (`state:
- * "stopping"`) and refuses any other id `not_found`; `status` answers a spawned run's immediate
- * post-stop proof and any other id with the engine's `execution_failed` miss — proving the
- * adapter turns refusals into outcomes at contract level. Returns the status-request counter.
+ * The production adapter over the shared fake engine (`createFakeSubagents`, mirroring
+ * pi-subagents 0.76.1's RPC: each spawn mints a real temp `asyncDir` with a `status.json`; `stop`
+ * acknowledges a spawned run and refuses any other id `not_found`; `status` answers a spawned
+ * run's immediate post-stop proof and any other id with the engine's `execution_failed` miss).
+ * `delivery: "manual"` leaves every completion to the harness's explicit emissions below.
  */
-function installFakeResponder(bus: WaveBus): { statusRequests: () => number } {
-  const spawned = new Set<string>();
-  let statuses = 0;
-  bus.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
-    const request = raw as { requestId: string; method: string; params?: { id?: unknown } };
-    const reply = (payload: Record<string, unknown>): void => {
-      bus.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
-        version: WAVE_RPC_PROTOCOL_VERSION,
-        requestId: request.requestId,
-        method: request.method,
-        ...payload,
-      });
-    };
-    if (request.method === "ping") {
-      reply({
-        success: true,
-        data: {
-          version: WAVE_RPC_PROTOCOL_VERSION,
-          methods: ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"],
-          capabilities: { asyncSpawn: true },
-          events: {
-            ready: "subagents:rpc:v1:ready",
-            request: WAVE_RPC_REQUEST_EVENT,
-            replyPrefix: WAVE_RPC_REPLY_EVENT_PREFIX,
-            asyncComplete: FAKE_ASYNC_COMPLETE_EVENT,
-            processTerminal: "subagent:process-terminal",
-          },
-          session: {},
-        },
-      });
-      return;
-    }
-    if (request.method === "spawn") {
-      const asyncDir = mkdtempSync(join(tmpdir(), "perk-wave-contract-"));
-      spawned.add(basename(asyncDir));
-      reply({
-        success: true,
-        data: { text: "Started async run.", details: { asyncId: basename(asyncDir), asyncDir } },
-      });
-      return;
-    }
-    const id = String(request.params?.id);
-    if (request.method === "stop") {
-      reply(
-        spawned.has(id)
-          ? {
-              success: true,
-              data: {
-                runId: id,
-                previousState: "running",
-                state: "stopping",
-                message: `Stop requested for async run ${id}.`,
-              },
-            }
-          : {
-              success: false,
-              error: {
-                code: "not_found",
-                message:
-                  "Async run not found or already completed; stop requires a live async run directory.",
-              },
-            },
-      );
-      return;
-    }
-    if (request.method === "status") {
-      statuses += 1;
-      reply(
-        spawned.has(id)
-          ? {
-              success: true,
-              data: {
-                text: `Run: ${id}`,
-                details: {
-                  workflowTerminalProof: {
-                    version: 1,
-                    kind: "workflow",
-                    runId: id,
-                    state: "pending",
-                    dispatchClosed: false,
-                    reason: "Workflow dispatch is still open.",
-                  },
-                },
-              },
-            }
-          : {
-              success: false,
-              error: {
-                code: "execution_failed",
-                message: "Async run not found. Provide id or dir.",
-              },
-            },
-      );
-      return;
-    }
-    reply({
-      success: false,
-      error: { code: "not_found", message: `fake responder rejects ${request.method}` },
-    });
-  });
-  return { statusRequests: () => statuses };
-}
-
 function makeRpcHarness(): WaveAdapterHarness {
   const bus = createFakeBus();
-  const responder = installFakeResponder(bus);
+  const fake = createFakeSubagents([{ delivery: "manual" }]);
+  fake.attach(bus);
   return {
     adapter: createRpcWaveAdapter(bus),
-    statusRequests: responder.statusRequests,
+    statusRequests: () => fake.statuses.length,
     completeRun(handle) {
       // A minimal payload: the result-file data's identifiers only (no `results` array).
-      bus.emit(FAKE_ASYNC_COMPLETE_EVENT, {
+      fake.emit({
         id: handle.asyncId,
         runId: handle.asyncId,
         asyncDir: handle.asyncDir,
@@ -475,7 +365,7 @@ function makeRpcHarness(): WaveAdapterHarness {
       // watcher-normalized `results` rows — each row's `agent` carries the lane KEY, and rows
       // carry output/summary/structuredOutput plus unknown fields the adapter must never copy;
       // malformed rows (non-record / no agent) must be dropped without failing the wave.
-      bus.emit(FAKE_ASYNC_COMPLETE_EVENT, {
+      fake.emit({
         id: handle.asyncId,
         runId: handle.asyncId,
         toolCallId: "tc-1",
@@ -522,7 +412,7 @@ function makeRpcHarness(): WaveAdapterHarness {
       });
     },
     completeRunPartial(handle) {
-      bus.emit(FAKE_ASYNC_COMPLETE_EVENT, {
+      fake.emit({
         id: handle.asyncId,
         asyncDir: handle.asyncDir,
         state: "failed",

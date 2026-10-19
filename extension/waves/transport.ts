@@ -19,8 +19,8 @@
 // workflow start), win, close acceptance, and discard every retained report as an empty timeout.
 //
 // Stop posture: when perk's own timer or the caller's AbortSignal ends the wait, perk REQUESTS a
-// stop and keeps the engine's answer (acknowledged — a persisted request, never termination — or
-// refused with the engine's reason), then reads ONE workflow terminal proof (`terminalProof`).
+// stop and keeps the engine's answer (acknowledged — an in-memory request, neither durable nor
+// termination — or refused with the engine's reason), then reads ONE workflow terminal proof (`terminalProof`).
 // Both facts ride the failure detail and the receipt's `termination`; only an `observed` proof
 // reads as confirmed termination. Reports are never read after a stop, and neither a stop
 // acknowledgement nor a freed engine slot is ever taken as proof that children exited.
@@ -74,8 +74,9 @@ export interface WaveAggregate {
 }
 
 /**
- * The engine's answer to perk's own stop request. `acknowledged: true` is a persisted REQUEST
- * (the RPC replies `state: "stopping"`), never termination; a refusal (a typed engine error such as
+ * The engine's answer to perk's own stop request. `acknowledged: true` is an acknowledged REQUEST
+ * (the RPC replies `state: "stopping"` after aborting the workflow's in-memory run controller; no
+ * durable control request is written), never termination; a refusal (a typed engine error such as
  * `invalid_state` when no live run controller survives a reload, `not_found`, `execution_failed`,
  * a timed-out or held reply) is DATA carrying the engine's `code: message`, never an exception.
  */
@@ -107,8 +108,8 @@ export interface WaveScriptReceipt {
   state: WaveReceiptState;
   children: WaveChildReceipt[];
   /**
-   * Present exactly on `timed-out`/`cancelled` receipts — the arms where perk itself stopped the
-   * run. Write-only telemetry: nothing reads it back into the ok/failure decision.
+   * Present exactly on `timed-out` and post-launch `cancelled` receipts — the arms where perk
+   * itself requested a stop (a cancel before launch has no run and no termination facts). Write-only telemetry: nothing reads it back into the ok/failure decision.
    */
   termination?: WaveTermination;
 }
