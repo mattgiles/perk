@@ -351,7 +351,10 @@ export async function executeCollectReviewWave(
   const collected =
     ref === null ? ({ kind: "none" } as const) : await collectAdversarialReviewWave(wave, ref);
   if (collected.kind === "none") {
-    return fail("no review wave is running — launch one with start_review_wave", "no_wave");
+    return fail(
+      "no review wave is running in this activation — launch one with start_review_wave (collection is per activation: a wave launched before a /reload or a session switch is never collectable here; a same-session /reload still delivers its completion notice, a session switch does not)",
+      "no_wave",
+    );
   }
   if (collected.kind === "running") {
     // Pending is RETAINED — the wave's bound is the module-owned timeout, and a later collect

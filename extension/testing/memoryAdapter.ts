@@ -4,7 +4,7 @@
 // (wrapped via `reportWaveOver`) with no event bus, no child processes, and no temp dirs. Every
 // operational failure arm is reachable through a config knob, and the recorded calls let tests
 // assert the spawn contract (`mission: false`, `context: "fresh"`, the rendered script) and the
-// stop-on-timeout/cancel behavior.
+// stop-on-timeout/cancel behavior (the stop request plus the one terminal-proof read).
 //
 // It honors the same sequencing contract as the production adapter: `onComplete()` before a
 // successful `ping()` throws (the async-complete channel is advertised by ping, not pinned).
@@ -16,9 +16,32 @@ import type {
   WavePing,
   WaveRunHandle,
   WaveSpawnParams,
+  WaveStopOutcome,
+  WaveTerminationProof,
 } from "../waves/transport.ts";
 
 type CompletionDetail = Omit<WaveCompletion, "asyncId" | "asyncDir">;
+
+/**
+ * The engine's immediate post-stop proof shape (dispatch still open) — the default `terminalProof`
+ * answer, mirroring what pi-subagents 0.76.1's `status` reports right after a stop request.
+ */
+export const MEMORY_DEFAULT_TERMINAL_PROOF: WaveTerminationProof = {
+  state: "pending",
+  reason: "Workflow dispatch is still open.",
+};
+
+// A handle this adapter never spawned answers like the RPC adapter over the real engine: the
+// engine's typed `stop` refusal, and the `status` miss projected as `unavailable`.
+const UNKNOWN_RUN_STOP: WaveStopOutcome = {
+  acknowledged: false,
+  reason:
+    "not_found: Async run not found or already completed; stop requires a live async run directory.",
+};
+const UNKNOWN_RUN_PROOF: WaveTerminationProof = {
+  state: "unavailable",
+  reason: "execution_failed: Async run not found. Provide id or dir.",
+};
 
 export interface MemoryWaveAdapterConfig {
   /** The ping outcome; null exercises the unavailable arm. Defaults to a valid ping. */
@@ -55,10 +78,16 @@ export interface MemoryWaveAdapterConfig {
    * absent), spawns fall back to the single `completionDetail` — purely additive.
    */
   completionDetails?: CompletionDetail[];
+  /** What `stop` answers for a spawned run. Defaults to an acknowledged request. */
+  stopOutcome?: WaveStopOutcome;
+  /** What `terminalProof` answers for a spawned run. Defaults to `MEMORY_DEFAULT_TERMINAL_PROOF`. */
+  terminalProof?: WaveTerminationProof;
 }
 
 export interface MemoryWaveAdapter extends WaveAdapter {
   calls: { spawn: WaveSpawnParams[]; stop: WaveRunHandle[] };
+  /** The handles `terminalProof` was asked about, in order. */
+  proofs: WaveRunHandle[];
   /** Deliver a completion to the subscribed handlers (contract-suite plumbing). */
   emitCompletion(completion: WaveCompletion): void;
   /** Replace the staged aggregate (contract-suite plumbing). */
@@ -72,10 +101,12 @@ export function createMemoryWaveAdapter(config: MemoryWaveAdapterConfig = {}): M
   const aggregateQueue = [...(config.aggregates ?? [])];
   const completionDetailQueue = [...(config.completionDetails ?? [])];
   const assignedAggregates = new Map<string, WaveAggregate>();
+  const spawnedIds = new Set<string>();
   let pinged = false;
   let spawnCount = 0;
   const handlers = new Set<(completion: WaveCompletion) => void>();
   const calls: MemoryWaveAdapter["calls"] = { spawn: [], stop: [] };
+  const proofs: WaveRunHandle[] = [];
 
   const deliver = (completion: WaveCompletion): void => {
     for (const handler of handlers) handler(completion);
@@ -83,6 +114,7 @@ export function createMemoryWaveAdapter(config: MemoryWaveAdapterConfig = {}): M
 
   return {
     calls,
+    proofs,
     emitCompletion: deliver,
     setAggregate(next): void {
       aggregate = next;
@@ -101,6 +133,7 @@ export function createMemoryWaveAdapter(config: MemoryWaveAdapterConfig = {}): M
         asyncId: `wave-async-${spawnCount}`,
         asyncDir: `/memory/wave-async-${spawnCount}`,
       };
+      spawnedIds.add(handle.asyncId);
       const queued = aggregateQueue.shift();
       if (queued !== undefined) assignedAggregates.set(handle.asyncDir, queued);
       if (config.completion !== false) {
@@ -128,8 +161,16 @@ export function createMemoryWaveAdapter(config: MemoryWaveAdapterConfig = {}): M
       return () => handlers.delete(handler);
     },
 
-    async stop(handle: WaveRunHandle): Promise<void> {
+    async stop(handle: WaveRunHandle): Promise<WaveStopOutcome> {
       calls.stop.push(handle);
+      if (!spawnedIds.has(handle.asyncId)) return UNKNOWN_RUN_STOP;
+      return config.stopOutcome ?? { acknowledged: true };
+    },
+
+    async terminalProof(handle: WaveRunHandle): Promise<WaveTerminationProof> {
+      proofs.push(handle);
+      if (!spawnedIds.has(handle.asyncId)) return UNKNOWN_RUN_PROOF;
+      return config.terminalProof ?? MEMORY_DEFAULT_TERMINAL_PROOF;
     },
 
     async readAggregate(handle: WaveRunHandle): Promise<WaveAggregate> {

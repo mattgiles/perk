@@ -436,7 +436,7 @@ export interface ReportWaveRef {
   readonly [REPORT_WAVE_REF]: true;
 }
 
-/** The optional per-call controls; `signal` cancels pre-launch and best-effort stops post-launch. */
+/** The optional per-call controls; `signal` cancels pre-launch and requests a stop post-launch. */
 export interface WaveControl {
   signal?: AbortSignal;
 }

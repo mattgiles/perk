@@ -1,22 +1,17 @@
 // The shared `WaveAdapter` contract suite: one set of behavioral assertions registered against
 // BOTH adapters — the in-memory test double directly, and the production RPC adapter wired to a
-// fake in-memory bus plus a scripted fake pi-subagents responder (replies mirror the v1 envelope
-// in pi-subagents `src/extension/rpc.ts`; `readAggregate` reads a real `status.json` written to
-// a temp dir). Keeping the double and the production adapter behaviorally aligned is what makes
+// fake in-memory bus plus the shared fake pi-subagents responder (`createFakeSubagents` — the one
+// mirror of the v1 envelope in pi-subagents `src/extension/rpc.ts`; `readAggregate` reads a real
+// `status.json` written to a temp dir). Keeping the double and the production adapter behaviorally aligned is what makes
 // the runner's memory-adapter coverage trustworthy.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { createFakeSubagents } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
-import {
-  createRpcWaveAdapter,
-  WAVE_RPC_PROTOCOL_VERSION,
-  WAVE_RPC_REPLY_EVENT_PREFIX,
-  WAVE_RPC_REQUEST_EVENT,
-} from "./rpcAdapter.ts";
+import { createRpcWaveAdapter } from "./rpcAdapter.ts";
 import {
   WAVE_ACCEPTANCE,
   WAVE_INTERCOM_BRIDGE,
@@ -48,7 +43,14 @@ interface WaveAdapterHarness {
   completeRunPartial(handle: WaveRunHandle): void;
   /** Arrange the durable aggregate `readAggregate(handle)` will see. */
   stageAggregate(handle: WaveRunHandle, aggregate: StagedAggregate): void;
+  /** How many status queries reached the flavor's engine seam so far. */
+  statusRequests(): number;
 }
+
+/** A handle no adapter ever spawned (the refused/bogus arm). */
+const BOGUS_HANDLE: WaveRunHandle = { asyncId: "no-such-run", asyncDir: "/no/such/dir" };
+
+const PROOF_STATES = ["observed", "pending", "unknown", "unavailable"];
 
 /** The normalized receipt children every flavor's detailed completion must deliver. */
 const RECEIPT_CHILDREN: WaveChildReceipt[] = [
@@ -204,12 +206,45 @@ export function assertWaveAdapterContract(
     assert.throws(() => adapter.onComplete(() => {}), /ping/);
   });
 
-  test(`${name}: stop never throws — live handle or bogus handle`, async () => {
+  test(`${name}: stop never throws and returns a typed outcome (acknowledged for a live handle; acknowledged:false with a reason for a refused/bogus one)`, async () => {
+    const { adapter } = makeHarness();
+    await adapter.ping();
+    const handle = await adapter.spawn(minimalSpawnParams());
+    assert.deepEqual(await adapter.stop(handle), { acknowledged: true });
+    const refused = await adapter.stop(BOGUS_HANDLE);
+    assert.equal(refused.acknowledged, false);
+    if (!refused.acknowledged) {
+      assert.match(refused.reason, /^not_found: Async run not found/);
+    }
+  });
+
+  test(`${name}: terminalProof never throws and yields one of the four states — live handle or bogus handle`, async () => {
     const { adapter } = makeHarness();
     await adapter.ping();
     const handle = await adapter.spawn(minimalSpawnParams());
     await adapter.stop(handle);
-    await adapter.stop({ asyncId: "no-such-run", asyncDir: "/no/such/dir" });
+    const live = await adapter.terminalProof(handle);
+    assert.ok(PROOF_STATES.includes(live.state), `unexpected proof state '${live.state}'`);
+    assert.deepEqual(live, { state: "pending", reason: "Workflow dispatch is still open." });
+    const bogus = await adapter.terminalProof(BOGUS_HANDLE);
+    assert.deepEqual(bogus, {
+      state: "unavailable",
+      reason: "execution_failed: Async run not found. Provide id or dir.",
+    });
+  });
+
+  test(`${name}: exactly one status request per terminalProof call`, async () => {
+    const harness = makeHarness();
+    const { adapter } = harness;
+    await adapter.ping();
+    const handle = await adapter.spawn(minimalSpawnParams());
+    assert.equal(harness.statusRequests(), 0, "spawn/ping issue no status query");
+    await adapter.stop(handle);
+    assert.equal(harness.statusRequests(), 0, "stop issues no status query");
+    await adapter.terminalProof(handle);
+    assert.equal(harness.statusRequests(), 1);
+    await adapter.terminalProof(BOGUS_HANDLE);
+    assert.equal(harness.statusRequests(), 2);
   });
 
   test(`${name}: readAggregate narrows the durable aggregate`, async () => {
@@ -278,6 +313,7 @@ function makeMemoryHarness(): WaveAdapterHarness {
     stageAggregate(_handle, aggregate) {
       adapter.setAggregate(aggregate);
     },
+    statusRequests: () => adapter.proofs.length,
   };
 }
 
@@ -302,66 +338,23 @@ function createFakeBus(): WaveBus {
   };
 }
 
-const FAKE_ASYNC_COMPLETE_EVENT = "subagent:async-complete";
-
 /**
- * A scripted fake pi-subagents responder: answers ping/spawn/stop on the v1 envelope. Each spawn
- * mints a real temp dir as the run's `asyncDir` (so `readAggregate` reads a real `status.json`);
- * stop replies `success: false` — proving the adapter's best-effort swallow at contract level.
+ * The production adapter over the shared fake engine (`createFakeSubagents`, mirroring
+ * pi-subagents 0.76.1's RPC: each spawn mints a real temp `asyncDir` with a `status.json`; `stop`
+ * acknowledges a spawned run and refuses any other id `not_found`; `status` answers a spawned
+ * run's immediate post-stop proof and any other id with the engine's `execution_failed` miss).
+ * `delivery: "manual"` leaves every completion to the harness's explicit emissions below.
  */
-function installFakeResponder(bus: WaveBus): void {
-  bus.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
-    const request = raw as { requestId: string; method: string };
-    const reply = (payload: Record<string, unknown>): void => {
-      bus.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${request.requestId}`, {
-        version: WAVE_RPC_PROTOCOL_VERSION,
-        requestId: request.requestId,
-        method: request.method,
-        ...payload,
-      });
-    };
-    if (request.method === "ping") {
-      reply({
-        success: true,
-        data: {
-          version: WAVE_RPC_PROTOCOL_VERSION,
-          methods: ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"],
-          capabilities: { asyncSpawn: true },
-          events: {
-            ready: "subagents:rpc:v1:ready",
-            request: WAVE_RPC_REQUEST_EVENT,
-            replyPrefix: WAVE_RPC_REPLY_EVENT_PREFIX,
-            asyncComplete: FAKE_ASYNC_COMPLETE_EVENT,
-            processTerminal: "subagent:process-terminal",
-          },
-          session: {},
-        },
-      });
-      return;
-    }
-    if (request.method === "spawn") {
-      const asyncDir = mkdtempSync(join(tmpdir(), "perk-wave-contract-"));
-      reply({
-        success: true,
-        data: { text: "Started async run.", details: { asyncId: basename(asyncDir), asyncDir } },
-      });
-      return;
-    }
-    reply({
-      success: false,
-      error: { code: "not_found", message: `fake responder rejects ${request.method}` },
-    });
-  });
-}
-
 function makeRpcHarness(): WaveAdapterHarness {
   const bus = createFakeBus();
-  installFakeResponder(bus);
+  const fake = createFakeSubagents([{ delivery: "manual" }]);
+  fake.attach(bus);
   return {
     adapter: createRpcWaveAdapter(bus),
+    statusRequests: () => fake.statuses.length,
     completeRun(handle) {
       // A minimal payload: the result-file data's identifiers only (no `results` array).
-      bus.emit(FAKE_ASYNC_COMPLETE_EVENT, {
+      fake.emit({
         id: handle.asyncId,
         runId: handle.asyncId,
         asyncDir: handle.asyncDir,
@@ -372,7 +365,7 @@ function makeRpcHarness(): WaveAdapterHarness {
       // watcher-normalized `results` rows — each row's `agent` carries the lane KEY, and rows
       // carry output/summary/structuredOutput plus unknown fields the adapter must never copy;
       // malformed rows (non-record / no agent) must be dropped without failing the wave.
-      bus.emit(FAKE_ASYNC_COMPLETE_EVENT, {
+      fake.emit({
         id: handle.asyncId,
         runId: handle.asyncId,
         toolCallId: "tc-1",
@@ -419,7 +412,7 @@ function makeRpcHarness(): WaveAdapterHarness {
       });
     },
     completeRunPartial(handle) {
-      bus.emit(FAKE_ASYNC_COMPLETE_EVENT, {
+      fake.emit({
         id: handle.asyncId,
         asyncDir: handle.asyncDir,
         state: "failed",
