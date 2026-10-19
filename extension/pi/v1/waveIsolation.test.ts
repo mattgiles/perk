@@ -5,12 +5,14 @@
 // must drain ITS OWN aggregate. The draft pair additionally proves CONTEXT isolation: session A
 // primed with a plan draft and session B with an objective draft each spawn a wave carrying
 // their own primed bytes. (Pre-fix, both pairs kept module-global slots — the second session's
-// launch refused or erased the first's.)
+// launch refused or erased the first's.) A same-version `/reload` is the one-session analogue:
+// pending waves are activation-local, so a pre-reload wave is never collectable afterwards and its
+// late completion can never settle a wave launched in the new activation.
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { handoffPath, runScratchDir } from "../../substrate/cache.ts";
 import {
@@ -28,6 +30,7 @@ import {
   spyInjections,
 } from "../../testing/harness.ts";
 import { PONYTAIL_PACKAGE_ROOT } from "../../waves/ponytail.ts";
+import { WAVE_SETTLEMENT_GRACE_MS } from "../../waves/transport.ts";
 import {
   createAnnotationState,
   executePushAnnotations,
@@ -213,6 +216,131 @@ test("two sessions share no review-wave pending state (launch/collect isolate pe
   } finally {
     b.h.dispose();
     a.h.dispose();
+  }
+});
+
+// --- a same-version reload: activation isolation + late-event isolation ------------------------
+
+/**
+ * Drive a promise to settlement while `setTimeout` is mocked: the harness's own ticks and the
+ * collect grace sleep on `setTimeout`, so the mocked clock is advanced in small steps between
+ * macrotask drains (`setImmediate` is never mocked). Bounded — a stuck promise fails, never hangs.
+ */
+async function underMockedTimers<T>(t: TestContext, promise: Promise<T>): Promise<T> {
+  let done = false;
+  const tracked = promise.finally(() => {
+    done = true;
+  });
+  for (let step = 0; step < 400 && !done; step++) {
+    await new Promise((resolve) => setImmediate(resolve));
+    if (!done) t.mock.timers.tick(50);
+  }
+  assert.ok(done, "the driven promise settled within the bounded mocked-clock budget");
+  return await tracked;
+}
+
+test("same-version reload: pending waves are activation-local and a pre-reload wave's late completion never settles a wave launched afterwards", async (t) => {
+  const waveTimeoutMs = 1_000;
+  const priorTimeout = process.env.PERK_WAVE_TIMEOUT_MS;
+  process.env.PERK_WAVE_TIMEOUT_MS = String(waveTimeoutMs);
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailSkill(cwd, "ponytail-review");
+  const reportsMarked = (marker: string) => async (script: string) =>
+    waveScriptItems(script).map(({ key }) => ({
+      key,
+      ok: true,
+      error: null,
+      report: { angle: key, summary: marker, findings: [], fyi: [] },
+    }));
+  const fake = createFakeSubagents([
+    { delivery: "manual", executeScript: reportsMarked("wave A") },
+    { delivery: "manual", executeScript: reportsMarked("wave B") },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    extraExtensions: [fake.extension],
+  });
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map(String).join(" "));
+  };
+  // Armed AFTER the session loaded: wave A's transport timer is then a mocked one this test can
+  // drain deterministically through the fixed settlement grace.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const startA = await underMockedTimers(
+      t,
+      h.invokeTool("start_review_wave", {
+        angles: ["claimed-intent", "tests"],
+        pr: 42,
+        worktree: "/abs/wt-a",
+      }),
+    );
+    assert.equal((startA.details as { ok: boolean }).ok, true);
+    assert.equal(fake.spawns.length, 1);
+
+    await underMockedTimers(t, h.reload());
+
+    // The pre-reload wave is not collectable in the new activation, and the answer says why.
+    const orphan = await underMockedTimers(t, h.invokeTool("collect_review_wave", {}));
+    assert.equal((orphan.details as { error_type?: string }).error_type, "no_wave");
+    assert.match(orphan.content[0]?.text ?? "", /collection is per activation/);
+
+    // A fresh wave launches in the new activation — the positive proof the responder rebound.
+    const startB = await underMockedTimers(
+      t,
+      h.invokeTool("start_review_wave", {
+        angles: ["claimed-intent", "quality"],
+        pr: 42,
+        worktree: "/abs/wt-b",
+      }),
+    );
+    assert.equal((startB.details as { ok: boolean }).ok, true);
+    assert.equal(fake.spawns.length, 2);
+
+    // Wave A's completion arrives late, on the new bus: it must not settle wave B.
+    fake.complete(0);
+    process.env.PERK_WAVE_COLLECT_GRACE_MS = "30";
+    let running: Awaited<ReturnType<typeof h.invokeTool>>;
+    try {
+      running = await underMockedTimers(t, h.invokeTool("collect_review_wave", {}));
+    } finally {
+      delete process.env.PERK_WAVE_COLLECT_GRACE_MS;
+    }
+    assert.equal((running.details as { error_type?: string }).error_type, "wave_running");
+
+    // The positive oracle: wave B's own completion settles it, with ITS reports.
+    fake.complete(1);
+    const collectedB = await underMockedTimers(t, h.invokeTool("collect_review_wave", {}));
+    const detailsB = collectedB.details as {
+      ok: boolean;
+      covered?: string[];
+      reports?: { report: { summary?: string } }[];
+    };
+    assert.equal(detailsB.ok, true);
+    assert.deepEqual(detailsB.covered, ["claimed-intent", "quality", "ponytail"]);
+    assert.equal(detailsB.reports?.[0]?.report.summary, "wave B");
+
+    // Drain wave A's orphan transport through the engine deadline AND the fixed grace: its settle
+    // runs against the stale bus, whose rejections become a refused stop and an unavailable
+    // proof — nothing throws, and nothing reaches the live responder.
+    t.mock.timers.tick(waveTimeoutMs + WAVE_SETTLEMENT_GRACE_MS);
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(fake.stops, [], "the new activation issued no stop");
+    assert.deepEqual(fake.statuses, [], "the new activation issued no status query");
+    assert.deepEqual(
+      errors.filter((line) => /extension error/.test(line)),
+      [],
+      "no extension handler failed",
+    );
+  } finally {
+    t.mock.timers.reset();
+    console.error = originalError;
+    if (priorTimeout === undefined) delete process.env.PERK_WAVE_TIMEOUT_MS;
+    else process.env.PERK_WAVE_TIMEOUT_MS = priorTimeout;
+    h.dispose();
   }
 });
 

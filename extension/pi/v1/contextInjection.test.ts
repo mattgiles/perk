@@ -3,9 +3,10 @@
 // tombell): the scan-before-construct content thunk, the two guarded reads' failure semantics,
 // the submitting-prompt check, the selection-driven retention filter shape (owned copies only —
 // user input is preserved byte-for-byte), the runner fence, the `isPlanGuidanceStage` registry
-// guard, and one registered-extension composition smoke. Drives the installer through a
-// `pi.on`-recorder fake over REAL `SessionManager` sources (no second reconstruction of Pi's
-// selection); the exhaustive carrier/compaction/branch matrix lives in
+// guard, one registered-extension composition smoke, and the supplier's completion notice + wake
+// prompt surviving the whole registered `context` chain in both gate states. Drives the installer
+// through a `pi.on`-recorder fake over REAL `SessionManager` sources (no second reconstruction of
+// Pi's selection); the exhaustive carrier/compaction/branch matrix lives in
 // `contextEvidence.test.ts`, and feature policy (flavor selection, content identity) stays
 // pinned in each feature's own suite.
 
@@ -634,3 +635,58 @@ test("composition: the bound extension injects, dedups on the live copy, re-inje
     h.dispose();
   }
 });
+
+// --- the supplier's wake prompt survives perk's whole `context` chain -----------------------------
+
+/**
+ * pi-subagents 0.76.1's completion notice (`notify.js`: `customType: "subagent-notify"`) and the
+ * idle-parent wake prompt it steers after it (`parent-wake.js::PARENT_WAKE_TEXT`, delivered through
+ * `sendUserMessage` — a plain user turn). perk's `context` hooks filter only their own customTypes;
+ * the gate-OFF arm additionally drops user turns carrying a `[READ-ONLY MODE]` marker — neither
+ * may touch these.
+ */
+const WAKE_TURNS = [
+  {
+    role: "custom",
+    customType: "subagent-notify",
+    content: "Background task completed: **perk.pr-reviewer**",
+    display: false,
+    timestamp: 1,
+  },
+  { role: "user", content: [{ type: "text", text: "Subagent updates above." }], timestamp: 2 },
+  { role: "user", content: "Subagent updates above.", timestamp: 3 },
+];
+
+for (const gate of ["on", "off"] as const) {
+  test(`composition: the parent wake prompt and the completion notice survive perk's context chain byte-for-byte (gate ${gate})`, async () => {
+    const cwd =
+      gate === "on"
+        ? scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } })
+        : scaffoldRepo();
+    const h = await loadPerkSession({
+      cwd,
+      sessionManager: SessionManager.inMemory(cwd),
+      env: { PERK_RUN_ID: gate === "on" ? "01RID" : undefined },
+    });
+    try {
+      assert.equal(h.workflowState().mode === "read-only", gate === "on", `the gate is ${gate}`);
+      // The control: a user turn carrying the mode marker — dropped only by the gate-OFF arm.
+      const markerTurn = {
+        role: "user",
+        content: "[READ-ONLY MODE] echoed by the human",
+        timestamp: 4,
+      };
+      const surviving = await h.emitContext([
+        ...structuredClone(WAKE_TURNS),
+        structuredClone(markerTurn),
+      ]);
+      assert.deepEqual(
+        surviving,
+        gate === "on" ? [...WAKE_TURNS, markerTurn] : WAKE_TURNS,
+        "the wake turns survive untouched; only the marker control differs by gate state",
+      );
+    } finally {
+      h.dispose();
+    }
+  });
+}

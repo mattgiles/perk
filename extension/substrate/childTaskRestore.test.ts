@@ -90,6 +90,29 @@ test("firstUserPrompt: no user message, or a malformed first user message, is nu
   );
 });
 
+test('firstUserPrompt: a later wake-shaped user message ("Subagent updates above.") never displaces the first prompt; the queued restore text is the first prompt\'s bytes', () => {
+  // pi-subagents 0.76.1 steers its parent-wake prompt as a plain user turn; a runner child that
+  // itself awaited children could see one after compaction. The task stays the FIRST prompt.
+  const task = "Task: review the diff\n<untrusted_draft>\n…\n</untrusted_draft>";
+  const branch = [
+    userEntry(task),
+    assistantEntry(),
+    compactionEntry("c1"),
+    userEntry([{ type: "text", text: "Subagent updates above." }], "u2"),
+  ];
+  assert.equal(firstUserPrompt(branch), task);
+  const verdict = restoreVerdict({
+    prompt: firstUserPrompt(branch),
+    taskLive: false,
+    delivered: restoreDelivered(branch),
+    compactionId: latestCompactionId(branch),
+    state: createRestoreState(),
+  });
+  assert.ok(verdict.kind === "queue");
+  assert.equal(verdict.text, `${TASK_RESTORE_PREAMBLE}\n\n${task}`);
+  assert.equal(verdict.text.includes("Subagent updates above."), false);
+});
+
 test("firstUserPrompt: inherited (prototype-carried) shapes never match", () => {
   const inheritedEntry = Object.create({
     type: "message",

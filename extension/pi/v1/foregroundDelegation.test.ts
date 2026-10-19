@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
@@ -258,6 +258,48 @@ test("release: completed and an unstarted pre-launch status release; a started p
     assert.equal(outcome.termination, row.termination, row.status);
     assert.equal(outcome.terminal?.status, row.status);
   }
+});
+
+// pi-subagents 0.76.1 can free a capacity slot (a sealed paused run, `abandonedSlotReleaseAfterMs`
+// after a dead runner PID) independently of the child's terminal — engine slot state is never
+// writer termination evidence; `release` derives from the correlated `status` alone.
+const SLOT_DECORATIONS = {
+  processTerminal: { state: "observed", observedAt: 7 },
+  slotReleased: true,
+  capacity: { active: 0, limit: 4, released: ["native-run"] },
+  lifecycleStatus: { processTerminal: { state: "observed" } },
+};
+
+test("a freed supplier slot is never writer termination: a failed terminal decorated with process/capacity fields still retains", async () => {
+  for (const started of [false, true]) {
+    const bus = new FakeDelegationBus();
+    const running = dispatchForeground(bus, LAUNCH, TUPLE, new AbortController().signal);
+    if (started) bus.emit(DELEGATION_EVENTS.started, TUPLE);
+    respond(bus, { status: "failed", runId: "native-run", ...SLOT_DECORATIONS });
+    const outcome = await running;
+    assert.equal(outcome.release, false, `started=${started}`);
+    assert.equal(outcome.termination, "unconfirmed", `started=${started}`);
+    // Only the whitelisted scalar facts survive; the decorations never reach the outcome.
+    assert.deepEqual(outcome.terminal, { status: "failed", runId: "native-run" });
+  }
+});
+
+test("a completed terminal decorated the same way still releases on status alone", async () => {
+  const bus = new FakeDelegationBus();
+  const running = dispatchForeground(bus, LAUNCH, TUPLE, new AbortController().signal);
+  bus.emit(DELEGATION_EVENTS.started, TUPLE);
+  respond(bus, { status: "completed", runId: "native-run", ...SLOT_DECORATIONS });
+  const outcome = await running;
+  assert.equal(outcome.release, true);
+  assert.equal(outcome.termination, "confirmed");
+  assert.deepEqual(outcome.terminal, { status: "completed", runId: "native-run" });
+});
+
+test("source pin: the writer transport never names engine capacity/slot state; release derives from the terminal status", () => {
+  const source = readFileSync(new URL("./foregroundDelegation.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /\b(capacity|abandonedSlot\w*|slotReleased)\b/);
+  // The positive arm: the release rule reads the correlated terminal's status.
+  assert.match(source, /const release = t\.status === "completed"/);
 });
 
 test("no start-ack cancels with the exact tuple and settles termination-unconfirmed after the grace", async (t: TestContext) => {

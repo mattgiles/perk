@@ -172,6 +172,23 @@ test("the gate re-delivers when nothing is in flight (a reload onto a compacted 
   }
 });
 
+test("a floored child restores its task, not a later wake-shaped user message, after compaction", async () => {
+  const { h, manager } = await session();
+  try {
+    plantCompacted(manager, PROMPT);
+    // pi-subagents 0.76.1's parent-wake prompt arrives as a plain user turn AFTER the compaction —
+    // live in the projection, yet never the task.
+    appendMessage(manager, user([{ type: "text", text: "Subagent updates above." }]));
+    assert.deepEqual(await report(h), { block: true, reason: HELD });
+    const restores = restoreEntries(manager);
+    assert.equal(restores.length, 1);
+    assert.deepEqual(restores[0]?.content, restored(PROMPT), "the FIRST prompt's bytes");
+    assert.equal(await report(h), undefined, "the restored task is live: the report is allowed");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("session_compact restores once per compaction; the gate then allows", async () => {
   const { h, manager } = await session();
   try {
