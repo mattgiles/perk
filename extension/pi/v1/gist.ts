@@ -45,7 +45,6 @@ import {
   type SaveGistOutcome,
   saveGist,
 } from "../../authoring/gist/save.ts";
-import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { deriveTitle } from "../../session/sessionName.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
@@ -81,6 +80,7 @@ import {
   supersededReviewResult,
   withDraftChangedNote,
 } from "./draftReview.ts";
+import { approvalGateFor, reportGateTransition } from "./gateTransitions.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
@@ -219,11 +219,6 @@ function gistSaveResultOf(ctx: ExtensionContext, save: SaveGistOutcome): GistSav
 /** Open the branch-backed session (always opens; `runId: null` is the identity-less arm). */
 function openSession(pi: ExtensionAPI, ctx: ExtensionContext): WorkflowSession {
   return openBranchWorkflowSession(pi, ctx);
-}
-
-/** The narrow gate slice the feature releases (D1a: exit only after a verified save). */
-function gateFor(gating: ToolGating, ctx: ExtensionContext): ApprovalGate {
-  return { isActive: () => gating.isActive(), exit: () => gating.exit(ctx) };
 }
 
 /**
@@ -455,7 +450,7 @@ export function installGistBindings(
       // draft `absent` → the no-draft fallback below, exactly the open-absent branch.
       const session = openSession(pi, ctx);
       const outcome = await gistApprovalSave(
-        { session, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
+        { session, backend: coldDoorGistBackend(pi, ctx), gate: approvalGateFor(gating, ctx) },
         { title },
       );
       recordGistSaveOutcome(reviews, outcome);
@@ -482,7 +477,15 @@ export function installGistBindings(
       }
       // Exit the read-only gate so the gist_save tool (gate-blocked) becomes
       // reachable on the driven turn, then drive the turn (mirrors /objective-save).
-      if (gating.isActive()) gating.exit(ctx);
+      if (gating.isActive()) {
+        const held = reportGateTransition(
+          ctx,
+          "gist-save",
+          gating.exit(ctx),
+          " — the save turn was not started (the gist_save tool is gate-blocked)",
+        );
+        if (held !== null) return;
+      }
       report(ctx, "gist-save", "info", "handing the save to the session");
       // The perk-gist-author pointer rides the skill-binding suffix (D5) since a warm
       // /gist-save outside a stage:gist-author session gets none from Mechanism A.
@@ -801,7 +804,7 @@ export async function completeGistReviewV1(
     gistApprovalSave({
       session: openSession(pi, ctx),
       backend: coldDoorGistBackend(pi, ctx),
-      gate: gateFor(gating, ctx),
+      gate: approvalGateFor(gating, ctx),
     }),
   );
   switch (result.status) {

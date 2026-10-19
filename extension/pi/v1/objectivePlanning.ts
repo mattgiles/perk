@@ -57,6 +57,7 @@ import {
   toAttemptReceipt,
 } from "../../waves/reportWave.ts";
 import { registerPerkTool } from "../perkTool.ts";
+import { reportGateTransition } from "./gateTransitions.ts";
 import { fetchObjectiveUrl } from "./objective.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 
@@ -817,9 +818,15 @@ export function installObjectivePlanningBindings(
       // duplicate `mode` append or announce — then re-scope it to the claimed stage. Entering
       // BEFORE sendUserMessage means the seeded factory turn runs gated and picks up the
       // read-only + plan-authoring injections on its before_agent_start. Exit stays owned by the
-      // plan save (approval auto-save included) and `/plan` off.
+      // plan save (approval auto-save included) and `/plan` off. Fail-closed: a held transition
+      // stops the door before the factory turn (the stage claim landed and the gate is latched ON
+      // in memory; a re-run takes skip-if-active and re-syncs).
+      const rerun = " — the factory turn was not started; re-run /objective-plan";
       if (!gating.isActive()) {
-        gating.enter(ctx);
+        const held = reportGateTransition(ctx, "objective-plan", gating.enter(ctx), rerun, {
+          alsoLog: true,
+        });
+        if (held !== null) return;
         report(
           ctx,
           "objective-plan",
@@ -827,7 +834,10 @@ export function installObjectivePlanningBindings(
           "read-only ON — structurally enforced exploration; plan_save exits (approval auto-saves), or /plan toggles off.",
         );
       }
-      gating.syncFromState("read-only", OBJECTIVE_PLAN_STAGE);
+      const scoped = gating.syncFromState("read-only", OBJECTIVE_PLAN_STAGE);
+      if (reportGateTransition(ctx, "objective-plan", scoped, rerun, { alsoLog: true }) !== null) {
+        return;
+      }
       // Inject the factory guidance as a user message so the model starts the loop (always a turn).
       // The seed turn self-delivers the perk-objective-plan pointer through the skill-binding
       // suffix; later turns resolve `stage:objective-plan` from the claimed stage.

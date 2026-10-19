@@ -350,13 +350,17 @@ function fixture(
         customType: WORKFLOW_STATE_TYPE,
         data: { mode: "read-write" },
       });
+      return { status: "applied", requested: "read-write", access: "read-write" };
     },
     enter() {
       enters++;
       branch.push({ type: "custom", customType: WORKFLOW_STATE_TYPE, data: { mode: "read-only" } });
+      return { status: "applied", requested: "read-only", access: "read-only" };
     },
     syncFromState(mode: string | undefined, s: string | undefined) {
       synced.push([mode, s]);
+      const landing = mode === "read-only" ? "read-only" : "read-write";
+      return { status: "applied", requested: landing, access: landing };
     },
     prepareLoadout: () => ({ hiddenDeclarations: [] }),
     joinDiscoveryCohort() {},
@@ -1080,9 +1084,15 @@ function plannotatorArm(
     isActive: () => exits === 0,
     exit() {
       exits++;
+      return { status: "applied", requested: "read-write", access: "read-write" };
     },
-    enter() {},
-    syncFromState() {},
+    enter() {
+      return { status: "applied", requested: "read-only", access: "read-only" };
+    },
+    syncFromState(mode: string | undefined) {
+      const landing = mode === "read-only" ? "read-only" : "read-write";
+      return { status: "applied", requested: landing, access: landing };
+    },
     prepareLoadout: () => ({ hiddenDeclarations: [] }),
     joinDiscoveryCohort() {},
     primeDeferred: () => [],

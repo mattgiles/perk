@@ -5,9 +5,19 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { GateTransition } from "../../substrate/toolPolicy.ts";
 import { type ApprovalGate, saveThroughApprovalGate } from "./approvalGate.ts";
 
-function fakeGate(active: boolean): ApprovalGate & { exits: number } {
+const APPLIED_RELEASE: GateTransition = {
+  status: "applied",
+  requested: "read-write",
+  access: "read-write",
+};
+
+function fakeGate(
+  active: boolean,
+  release: GateTransition = APPLIED_RELEASE,
+): ApprovalGate & { exits: number } {
   return {
     exits: 0,
     isActive() {
@@ -15,7 +25,8 @@ function fakeGate(active: boolean): ApprovalGate & { exits: number } {
     },
     exit() {
       this.exits += 1;
-      active = false;
+      active = release.access === "read-only";
+      return release;
     },
   };
 }
@@ -51,8 +62,9 @@ test("the snapshot governs: isActive flipping false DURING the save still exits"
   const gate = {
     exits: 0,
     isActive: () => active,
-    exit() {
+    exit(): GateTransition {
       this.exits += 1;
+      return APPLIED_RELEASE;
     },
   };
   const result = await saveThroughApprovalGate(gate, async () => {
@@ -73,3 +85,45 @@ test("a throwing save propagates with zero exit() calls", async () => {
   );
   assert.equal(gate.exits, 0, "a thrown save leaves the gate untouched");
 });
+
+// gateExited is earned: only an applied read-write release reports it; every held release leaves
+// it false while the saved outcome still returns, with exactly one exit() call either way.
+const HELD_RELEASES: readonly [string, GateTransition][] = [
+  [
+    "restricted (the runner floor)",
+    { status: "restricted", requested: "read-write", access: "read-only" },
+  ],
+  [
+    "failed persist",
+    {
+      status: "failed",
+      requested: "read-write",
+      access: "read-only",
+      step: "persist",
+      error: "disk full",
+    },
+  ],
+  [
+    "failed install",
+    {
+      status: "failed",
+      requested: "read-write",
+      access: "read-only",
+      step: "install",
+      error: "toolset",
+    },
+  ],
+  [
+    "a lying applied that left read-only",
+    { status: "applied", requested: "read-write", access: "read-only" },
+  ],
+];
+
+for (const [label, release] of HELD_RELEASES) {
+  test(`a successful save whose release is held (${label}) reports gateExited false`, async () => {
+    const gate = fakeGate(true, release);
+    const result = await saveThroughApprovalGate(gate, async () => SAVED);
+    assert.deepEqual(result, { outcome: SAVED, gateExited: false });
+    assert.equal(gate.exits, 1, "exactly one exit");
+  });
+}

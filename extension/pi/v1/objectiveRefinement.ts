@@ -51,7 +51,6 @@ import {
   refinementApprovalSave,
   reviewedPairOf,
 } from "../../authoring/refinement/save.ts";
-import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
@@ -96,6 +95,7 @@ import {
   supersededReviewResult,
   withDraftChangedNote,
 } from "./draftReview.ts";
+import { approvalGateFor, reportGateTransition } from "./gateTransitions.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
@@ -500,10 +500,6 @@ function openSession(pi: ExtensionAPI, ctx: ExtensionContext): WorkflowSession {
   return openBranchWorkflowSession(pi, ctx);
 }
 
-function gateFor(gating: ToolGating, ctx: ExtensionContext): ApprovalGate {
-  return { isActive: () => gating.isActive(), exit: () => gating.exit(ctx) };
-}
-
 /** Whether the branch is a refinement session (stage match; the gate is checked separately). */
 export function isRefinementSession(branch: readonly BranchEntry[]): boolean {
   return rebuildWorkflowState(branch).stage === REFINE_STAGE;
@@ -810,9 +806,19 @@ export function installObjectiveRefinementBindings(
         return;
       }
       // Enter/re-scope the gate for the refinement stage (its own allowlist + mode flavor), then
-      // drive the shared flow guidance. Failed setup above never reaches this point.
-      if (!gating.isActive()) gating.enter(ctx);
-      gating.syncFromState("read-only", REFINE_STAGE);
+      // drive the shared flow guidance. Failed setup above never reaches this point. Fail-closed:
+      // a held transition stops the door before the guidance turn (the gate is latched ON in
+      // memory; a re-run takes skip-if-active and re-syncs).
+      const rerun = " — the refinement turn was not started; re-run /objective-refine";
+      if (!gating.isActive()) {
+        const held = reportGateTransition(ctx, SCOPE_REFINE, gating.enter(ctx), rerun, {
+          alsoLog: true,
+        });
+        if (held !== null) return;
+      }
+      const scoped = gating.syncFromState("read-only", REFINE_STAGE);
+      if (reportGateTransition(ctx, SCOPE_REFINE, scoped, rerun, { alsoLog: true }) !== null)
+        return;
       const c = entered.read.context;
       report(
         ctx,
@@ -857,7 +863,7 @@ export function installObjectiveRefinementBindings(
       const outcome = await refinementApprovalSave({
         session: openSession(pi, ctx),
         backend: coldDoorRefinementBackend(pi, ctx),
-        gate: gateFor(gating, ctx),
+        gate: approvalGateFor(gating, ctx),
       });
       recordRefinementSaveOutcome(reviews, outcome);
       switch (outcome.status) {
@@ -1315,7 +1321,7 @@ export async function completeRefinementReviewV1(
     refinementApprovalSave({
       session: openSession(pi, ctx),
       backend: coldDoorRefinementBackend(pi, ctx),
-      gate: gateFor(gating, ctx),
+      gate: approvalGateFor(gating, ctx),
       reviewed,
     }),
   );

@@ -51,6 +51,7 @@ import {
 import perk from "../index.ts";
 import { type PlanRef, workflowDir, writePlanRef } from "../substrate/cache.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
+import type { GateTransition, Mode } from "../substrate/toolPolicy.ts";
 import {
   type BranchEntry,
   branchOf,
@@ -1542,18 +1543,30 @@ export function spyInjectionLoadouts(h: PerkSession): { injected: string[]; acti
 /**
  * A ToolGating fake recording exits and every `primeDeferred` call (the door tests assert a door
  * primes exactly its constant); `active` is the isActive snapshot. It reports a nonparticipant
- * session: priming activates nothing and the cohort join is a no-op.
+ * session: priming activates nothing and the cohort join is a no-op. `enter`/`exit` return the
+ * given transitions (default: applied); `syncFromState` reports an applied landing for its mode.
  */
 export function fakeGating(
   active: boolean,
+  transitions: { enter?: GateTransition; exit?: GateTransition } = {},
 ): ToolGating & { exits: number; primes: (readonly string[])[] } {
   const g = {
     exits: 0,
     primes: [] as (readonly string[])[],
-    syncFromState() {},
-    enter() {},
-    exit() {
+    syncFromState(mode: string | undefined): GateTransition {
+      const landing: Mode = mode === "read-only" ? "read-only" : "read-write";
+      return { status: "applied", requested: landing, access: landing };
+    },
+    enter(): GateTransition {
+      return (
+        transitions.enter ?? { status: "applied", requested: "read-only", access: "read-only" }
+      );
+    },
+    exit(): GateTransition {
       g.exits += 1;
+      return (
+        transitions.exit ?? { status: "applied", requested: "read-write", access: "read-write" }
+      );
     },
     isActive: () => active,
     prepareLoadout: () => ({ hiddenDeclarations: [] }),

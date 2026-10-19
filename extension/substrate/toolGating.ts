@@ -49,6 +49,19 @@
 // the install, and Pi rebuilds the prompt's snippet map from that run, so a gate exit restores
 // edit/write's snippets in the same install.
 //
+// THE TRANSITION RESULT (contracts.md §8.40): the three public transitions — `syncFromState`,
+// `enter`, `exit` — never throw; each returns a `GateTransition` (`toolPolicy.ts`): `applied`,
+// `restricted` (a release met the runner restriction floor — nothing persisted, restriction
+// reapplied) or `failed` (the mode append or the install threw), carrying the effective access.
+// The in-memory gate is fail-closed: `enter` latches it ON before its append, and a release
+// never opens it unless both its append and its install succeed. Pi's append is NOT
+// transactional — the entry reaches the in-memory branch before the write that can throw, and
+// listeners run after it — so a `persist` failure never proves the branch lacks the entry; the
+// next rebuild point (session_start/session_tree) re-syncs from whatever the branch carries.
+// Callers render the result, never their intent. The event-driven re-applies keep their own
+// postures: `resources_discover` rethrows to Pi, `before_agent_start`/`agent_start` log and
+// continue.
+//
 // THE RESTORATION WINDOW (contracts.md §8.40): Pi ≥ 1.0 keeps restored-but-unregistered tools
 // pending from `/reload` (it adds the whole active set) or a `/tree` restore until the next agent
 // run starts — an MCP server still reconnecting gets its saved tools back when it registers them.
@@ -81,6 +94,7 @@ import { readOnlyBashVerdict } from "./readOnlyBash.ts";
 import {
   carveOutWritersFor,
   discoveryFamily,
+  type GateTransition,
   hiddenDeclarationsFor,
   isEligible,
   LOADOUT_HOST_NAME,
@@ -163,12 +177,24 @@ export interface ToolGating {
   /**
    * Reapply the gate + stage scoping from a rebuilt `mode` + `stage` (called on session_start
    * AND session_tree). `stage` is the branch-LWW workflow-state stage id (undefined = unscoped).
+   * Never throws: `requested` is read-only iff `mode` is; a read-write sync under the floor is
+   * `restricted`; an install that throws is `failed` (step `install`) with the gate never opened.
    */
-  syncFromState(mode: string | undefined, stage: string | undefined): void;
-  /** Enter read-only mode: persist `mode=read-only` + reconcile perk's tools. (Called by plan mode — `/plan`, `--plan`, `Ctrl+Alt+P` — the warm objective-plan factory and the warm objective-refine entry; never the CI executor.) */
-  enter(ctx?: ExtensionContext): void;
-  /** Exit read-only mode: persist `mode=read-write` + reconcile perk's tools. (Called by the plan-mode toggle and the save/exit doors.) */
-  exit(ctx?: ExtensionContext): void;
+  syncFromState(mode: string | undefined, stage: string | undefined): GateTransition;
+  /**
+   * Enter read-only mode: latch the gate ON, persist `mode=read-only`, reconcile perk's tools.
+   * Never throws: a failed append (step `persist`, no install attempted) or install leaves the
+   * gate ON in memory. (Called by plan mode — `/plan`, `--plan`, `Ctrl+Alt+P` — the warm
+   * objective-plan factory and the warm objective-refine entry; never the CI executor.)
+   */
+  enter(ctx?: ExtensionContext): GateTransition;
+  /**
+   * Exit read-only mode: persist `mode=read-write` + reconcile perk's tools. Never throws: under
+   * the runner restriction floor nothing is persisted, restriction is reapplied and the result is
+   * `restricted`; a failed append or install leaves the gate as it was. (Called by the plan-mode
+   * toggle and the save/exit doors.)
+   */
+  exit(ctx?: ExtensionContext): GateTransition;
   /** Whether the gate is currently active (in-memory source of truth for `tool_call`). */
   isActive(): boolean;
   /**
@@ -292,6 +318,34 @@ export function registerToolGating(
       throw error;
     }
     active = nextActive;
+  }
+
+  /**
+   * Run one fallible transition step and report its outcome: `failed` (with the access in force
+   * after the throw) when it throws; otherwise `restricted` when a read-write request is still
+   * read-only (the floor), else `applied`.
+   */
+  function settle(requested: Mode, step: "persist" | "install", run: () => void): GateTransition {
+    try {
+      run();
+    } catch (error) {
+      return {
+        status: "failed",
+        requested,
+        access: accessNow(),
+        step,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    const access = accessNow();
+    if (requested === "read-write" && access === "read-only") {
+      return { status: "restricted", requested, access };
+    }
+    return { status: "applied", requested, access };
+  }
+
+  function accessNow(): Mode {
+    return isActive() ? "read-only" : "read-write";
   }
 
   // Pi fires `resources_discover` after EVERY extension's `session_start` has run — the point
@@ -460,20 +514,27 @@ export function registerToolGating(
   });
 
   return {
-    syncFromState(mode: string | undefined, stage: string | undefined): void {
-      apply(isReadOnlyMode(mode), stage ?? null);
+    syncFromState(mode: string | undefined, stage: string | undefined): GateTransition {
+      const requested: Mode = isReadOnlyMode(mode) ? "read-only" : "read-write";
+      return settle(requested, "install", () => apply(requested === "read-only", stage ?? null));
     },
-    enter(_ctx?: ExtensionContext): void {
-      pi.appendEntry(WORKFLOW_STATE_TYPE, { mode: "read-only" });
-      apply(true, stageId);
+    enter(_ctx?: ExtensionContext): GateTransition {
+      // The latch precedes the append: the request to restrict is in force whatever persistence
+      // does (the presentation reconciles at the next point when the append fails).
+      active = true;
+      const persisted = settle("read-only", "persist", () =>
+        pi.appendEntry(WORKFLOW_STATE_TYPE, { mode: "read-only" }),
+      );
+      if (persisted.status === "failed") return persisted;
+      return settle("read-only", "install", () => apply(true, stageId));
     },
-    exit(_ctx?: ExtensionContext): void {
-      if (hasFloor()) {
-        apply(true, stageId);
-        return;
-      }
-      pi.appendEntry(WORKFLOW_STATE_TYPE, { mode: "read-write" });
-      apply(false, stageId);
+    exit(_ctx?: ExtensionContext): GateTransition {
+      if (hasFloor()) return settle("read-write", "install", () => apply(true, stageId));
+      const persisted = settle("read-write", "persist", () =>
+        pi.appendEntry(WORKFLOW_STATE_TYPE, { mode: "read-write" }),
+      );
+      if (persisted.status === "failed") return persisted;
+      return settle("read-write", "install", () => apply(false, stageId));
     },
     isActive,
     joinDiscoveryCohort(family: readonly string[]): void {

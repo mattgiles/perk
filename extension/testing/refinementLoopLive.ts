@@ -33,6 +33,7 @@ import { completeRefinementReview } from "../authoring/refinement/review.ts";
 import { refinementApprovalSave, reviewedPairOf } from "../authoring/refinement/save.ts";
 import { coldDoorRefinementBackend } from "../pi/v1/objectiveRefinement.ts";
 import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
+import type { GateTransition } from "../substrate/toolPolicy.ts";
 import { type BranchEntry, WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
 
 interface Spec {
@@ -130,8 +131,9 @@ const rendered = renderRefinementDraft(resumed.pair);
 let gateActive = true;
 const gate = {
   isActive: () => gateActive,
-  exit: () => {
+  exit: (): GateTransition => {
     gateActive = false;
+    return { status: "applied", requested: "read-write", access: "read-write" };
   },
 };
 const result = await completeRefinementReview({ status: "approved", reviewId: "approve-1" }, () =>

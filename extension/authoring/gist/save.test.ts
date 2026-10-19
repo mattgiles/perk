@@ -3,11 +3,18 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { GateTransition } from "../../substrate/toolPolicy.ts";
 import type { MemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import type { ApprovalGate } from "../review/approvalGate.ts";
 import { GIST_DRAFT_ARTIFACT, reviseGistDraft } from "./draft.ts";
 import { type GistBackend, gistApprovalSave, saveGist } from "./save.ts";
+
+const APPLIED_RELEASE: GateTransition = {
+  status: "applied",
+  requested: "read-write",
+  access: "read-write",
+};
 
 const PROSE = "# Faster reviews\n\nWe would likely want review turnaround under a day.\n";
 
@@ -38,8 +45,9 @@ function fakeGate(active: boolean): ApprovalGate & { exits: number } {
   const gate = {
     exits: 0,
     isActive: () => active,
-    exit() {
+    exit(): GateTransition {
       gate.exits += 1;
+      return APPLIED_RELEASE;
     },
   };
   return gate;
@@ -131,8 +139,9 @@ test("gistApprovalSave: refused draft → refused-draft BEFORE the gate snapshot
       probed += 1;
       return true;
     },
-    exit() {
+    exit(): GateTransition {
       gate.exits += 1;
+      return APPLIED_RELEASE;
     },
   };
   const session = draftedSession();

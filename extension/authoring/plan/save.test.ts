@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { deriveTitle } from "../../session/sessionName.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
+import type { GateTransition } from "../../substrate/toolPolicy.ts";
 import {
   type MemoryWorkflowSession,
   openMemoryWorkflowSession,
@@ -22,6 +23,12 @@ import {
   planApprovalSave,
   savePlan,
 } from "./save.ts";
+
+const APPLIED_RELEASE: GateTransition = {
+  status: "applied",
+  requested: "read-write",
+  access: "read-write",
+};
 
 const PLAN = "# A plan\n\n## Steps\n\n1. Do the thing.\n";
 
@@ -57,8 +64,9 @@ function fakeGate(active: boolean): ApprovalGate & { exits: number } {
   const gate = {
     exits: 0,
     isActive: () => active,
-    exit() {
+    exit(): GateTransition {
       gate.exits += 1;
+      return APPLIED_RELEASE;
     },
   };
   return gate;
