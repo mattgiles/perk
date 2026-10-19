@@ -352,7 +352,9 @@ test("/plan on whose mode append throws before recording: latched closed until t
     await h.invokeCommand("plan");
     append.restore();
     assert.ok(
-      h.notifies.some((n) => /could not enter read-only \(mode persistence failed: disk full\)/.test(n)),
+      h.notifies.some((n) =>
+        /could not enter read-only \(mode persistence failed: disk full\)/.test(n),
+      ),
     );
     assert.equal(await writeBlocked(h), true, "the request to restrict is latched");
     assert.notEqual(h.workflowState().mode, "read-only", "the branch never took the entry");
@@ -360,7 +362,10 @@ test("/plan on whose mode append throws before recording: latched closed until t
     await h.emitSessionStart();
     assert.equal(await writeBlocked(h), false);
     await h.invokeCommand("plan");
-    assert.ok(h.notifies.some((n) => /plan mode ON/.test(n)), "a re-entry applies");
+    assert.ok(
+      h.notifies.some((n) => /plan mode ON/.test(n)),
+      "a re-entry applies",
+    );
     assert.equal(await writeBlocked(h), true);
   } finally {
     h.dispose();
@@ -393,7 +398,10 @@ test("/plan-save whose gate release fails after a landed save completes, reports
     );
     // The save message is reported after the latch records the outcome — reaching it proves
     // the held release never threw past the landed save.
-    assert.ok(h.notifies.some((n) => /#42/.test(n)), "the save message");
+    assert.ok(
+      h.notifies.some((n) => /#42/.test(n)),
+      "the save message",
+    );
     const held = h.notifies.filter((n) => /could not release the read-only gate/.test(n));
     assert.equal(held.length, 1, `exactly one held-release notice: ${JSON.stringify(h.notifies)}`);
     assert.match(
@@ -404,7 +412,8 @@ test("/plan-save whose gate release fails after a landed save completes, reports
     assert.ok(
       !append.attempted.some(
         (a) =>
-          a.customType === REPORT_DETAIL_TYPE && JSON.stringify(a.data).includes("could not release"),
+          a.customType === REPORT_DETAIL_TYPE &&
+          JSON.stringify(a.data).includes("could not release"),
       ),
       "the held notice never reached the detail sink",
     );
