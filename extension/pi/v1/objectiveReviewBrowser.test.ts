@@ -1,11 +1,12 @@
 // Tests for the warm `/objective-review-browser` door. The pure `objectiveReviewBrowserGuidance`
-// + `observeObjectiveReviewReadiness` are pinned directly (fake pi/ctx slices); the decision
-// routing is a COMPOSITION over the real draft-review slot in a real git repo (the
-// objectiveSave.test.ts fakeApprovalPi recipe for the approve→save path — the four guards are
-// exercised end to end, the git-config incident included); the background open runs over fake
-// `StartBrowserDeps` + a fake bus; the command's entry gates / draft resolve / injection run
-// against a REAL bound session via the T1 harness, OFFLINE (a fake plannotator extension
-// registers the presence-probe command + the plan-review handshake listener).
+// is pinned directly; the decision routing is a COMPOSITION over the real draft-review slot in a
+// real git repo (the objectiveSave.test.ts fakeApprovalPi recipe for the approve→save path — the
+// four guards are exercised end to end, the git-config incident included); the background open
+// runs through a real browser-operation owner over fake `StartBrowserDeps` + a fake bus (the
+// owner's own lifecycle matrix lives in `browserOperation.test.ts`); the command's entry gates /
+// draft resolve / injection run against a REAL bound session via the T1 harness, OFFLINE (a fake
+// plannotator extension registers the presence-probe command + the plan-review handshake
+// listener).
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -16,10 +17,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { OBJECTIVE_DRAFT_ARTIFACT, renderObjectiveDraft } from "../../authoring/objective/draft.ts";
 import {
-  clearDraftReviewContext,
   createDraftReviewWaveState,
   DRAFT_REVIEW_DOOR_PRIMES,
-  primeDraftReviewContext,
 } from "../../authoring/review/draftContext.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
@@ -41,6 +40,7 @@ import {
 } from "../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../testing/memoryAdapter.ts";
 import { reportWaveOver } from "../../waves/reportWave.ts";
+import { createBrowserOperationOwner } from "./browserOperation.ts";
 import {
   DRAFT_CHANGED_NOTE,
   type DraftReviewSlot,
@@ -49,21 +49,16 @@ import {
 } from "./draftReview.ts";
 import { executeStartDraftReviewWave } from "./draftReviewWaveTools.ts";
 import {
-  type ObjectiveReviewDoorSession,
   objectiveReviewBrowserGuidance,
-  observeObjectiveReviewReadiness,
   openObjectiveReviewAndGuide,
   openObjectiveReviewSurface,
   routeObjectiveReviewDecision,
 } from "./objectiveReviewBrowser.ts";
 import {
-  clearAnnotationSurface,
   createAnnotationState,
   executePushAnnotations,
   type FetchLike,
-  primeAnnotationSurface,
 } from "./providers/annotations.ts";
-import type { StartedSurface } from "./providers/plannotatorHandoff.ts";
 import type { ReviewOutcome } from "./review.ts";
 
 // ------------------------------------------------------------------ surface probes (shared)
@@ -201,225 +196,6 @@ test("guidance: no hardcoded perk-objective-review-browser skill pointer (the bi
   }
 });
 
-// ------------------------------------------------------- observeObjectiveReviewReadiness
-
-const COMPLETED: ReviewOutcome = { status: "completed", approved: true, reviewId: "r1" };
-
-function fakeStarted(
-  readiness: "ready" | "timeout" | "bridge_settled" | "aborted",
-  bridge: ReviewOutcome = COMPLETED,
-  remote = false,
-): StartedSurface<ReviewOutcome> {
-  return {
-    url: "http://127.0.0.1:45001",
-    port: 45001,
-    remote,
-    bridgePromise: Promise.resolve(bridge),
-    readiness: Promise.resolve(readiness),
-  };
-}
-
-/** The always-current door-session token (the default `observe()` session). */
-function currentSession(): ObjectiveReviewDoorSession {
-  return { degraded: false, current: () => true };
-}
-
-async function observe(
-  started: StartedSurface<ReviewOutcome>,
-  opts?: { idle?: boolean; session?: ObjectiveReviewDoorSession },
-): Promise<{
-  notifies: { message: string; severity?: string }[];
-  sent: { message: string; options?: { deliverAs?: string } }[];
-}> {
-  const notifies: { message: string; severity?: string }[] = [];
-  const sent: { message: string; options?: { deliverAs?: string } }[] = [];
-  await observeObjectiveReviewReadiness(
-    {
-      sendUserMessage: (message: string, options?: { deliverAs?: "steer" | "followUp" }) => {
-        sent.push(options === undefined ? { message } : { message, options });
-      },
-    },
-    {
-      hasUI: true,
-      ui: { notify: (message: string, severity?: string) => notifies.push({ message, severity }) },
-      isIdle: () => opts?.idle ?? true,
-    },
-    started,
-    draftReview,
-    annotations,
-    opts?.session ?? currentSession(),
-  );
-  return { notifies, sent };
-}
-
-/** Prime BOTH door surfaces (the pre-degrade state). */
-function primeBoth(): void {
-  primeAnnotationSurface(annotations, { mode: "plan", url: "http://127.0.0.1:45001" });
-  primeDraftReviewContext(draftReview, { draftType: "objective", draft: "# The objective\n" });
-}
-
-test("observer: ready in a remote session: the tunnel/tailnet notice, never 'browser opening'", async () => {
-  primeBoth();
-  const { notifies, sent } = await observe(fakeStarted("ready", COMPLETED, true));
-  assert.equal(sent.length, 0);
-  assert.equal(notifies.length, 1);
-  assert.equal(notifies[0]?.severity, "info");
-  assert.match(notifies[0]?.message ?? "", /plannotator is up at http:\/\/127\.0\.0\.1:45001/);
-  assert.match(notifies[0]?.message ?? "", /tunnel or tailnet/);
-  assert.doesNotMatch(notifies[0]?.message ?? "", /browser opening/);
-  clearAnnotationSurface(annotations);
-  clearDraftReviewContext(draftReview);
-});
-
-test("observer: ready without pending annotation work → info only, surfaces untouched", async () => {
-  primeBoth();
-  const { notifies, sent } = await observe(fakeStarted("ready"));
-  assert.equal(sent.length, 0);
-  assert.equal(notifies.length, 1);
-  assert.match(notifies[0]?.message ?? "", /plannotator is up at http:\/\/127\.0\.0\.1:45001/);
-  assert.equal(notifies[0]?.severity, "info");
-  assert.equal(await annotationMode(), "plan", "the ready arm never clears");
-  assert.equal(await draftContextPrimed(), true);
-  clearAnnotationSurface(annotations);
-  clearDraftReviewContext(draftReview);
-});
-
-test("observer: timeout → loud error + the degrade notice (idle → immediate) + BOTH surfaces cleared", async () => {
-  primeBoth();
-  const { notifies, sent } = await observe(fakeStarted("timeout"));
-  assert.equal(notifies.length, 1);
-  assert.equal(notifies[0]?.severity, "error");
-  assert.match(notifies[0]?.message ?? "", /did not become ready at http:\/\/127\.0\.0\.1:45001/);
-  assert.equal(sent.length, 1, "the degrade notice is injected");
-  assert.match(sent[0]?.message ?? "", /plan-review browser is unavailable/);
-  assert.match(sent[0]?.message ?? "", /surface the draft-review wave's findings/);
-  assert.match(sent[0]?.message ?? "", /push_annotations` now refuses \(`no_surface`\)/);
-  assert.match(sent[0]?.message ?? "", /\/objective-save/, "the objective failsafe is named");
-  assert.doesNotMatch(sent[0]?.message ?? "", /\/plan-save/, "never the plan failsafe");
-  assert.equal(sent[0]?.options, undefined, "idle ⇒ an immediate turn");
-  assert.equal(await annotationMode(), null, "the degrade arm clears the annotation surface");
-  assert.equal(await draftContextPrimed(), false, "…and the draft-review context");
-});
-
-test("observer: timeout while streaming → the degrade notice rides followUp", async () => {
-  const { sent } = await observe(fakeStarted("timeout"), { idle: false });
-  assert.equal(sent.length, 1);
-  assert.deepEqual(sent[0]?.options, { deliverAs: "followUp" });
-});
-
-test("observer: bridge settled unavailable → degrade + clear; completed/aborted → silent", async () => {
-  primeBoth();
-  const degraded = await observe(
-    fakeStarted("bridge_settled", { status: "unavailable", warning: "boom" }),
-  );
-  assert.equal(degraded.notifies.length, 1);
-  assert.equal(degraded.notifies[0]?.severity, "error");
-  assert.equal(degraded.sent.length, 1, "the degrade notice is injected");
-  assert.equal(await annotationMode(), null, "the unavailable settle clears both surfaces");
-  assert.equal(await draftContextPrimed(), false);
-
-  // The decision task owns the settled outcomes — the observer stays silent and never clears.
-  primeBoth();
-  const completed = await observe(fakeStarted("bridge_settled", COMPLETED));
-  assert.equal(completed.notifies.length, 0, "the decision task routes the completed arm");
-  assert.equal(completed.sent.length, 0);
-  assert.equal(await annotationMode(), "plan", "the completed arm never clears");
-  assert.equal(await draftContextPrimed(), true);
-
-  const aborted = await observe(fakeStarted("bridge_settled", { status: "aborted" }));
-  assert.equal(aborted.notifies.length, 0);
-  assert.equal(aborted.sent.length, 0);
-
-  const turnAborted = await observe(fakeStarted("aborted"));
-  assert.equal(turnAborted.notifies.length, 0, "an aborted turn stays silent");
-  assert.equal(turnAborted.sent.length, 0);
-  assert.equal(await annotationMode(), "plan", "aborted arms leave the surfaces primed");
-  clearAnnotationSurface(annotations);
-  clearDraftReviewContext(draftReview);
-});
-
-test("observer: a superseded review's observer is inert — timeout → no report, no notice, both surfaces untouched, session not degraded", async () => {
-  // Review A's observer times out AFTER review B opened (and re-primed the surfaces for ITS
-  // session): A must not inject the fallback, clear B's surfaces, or flip its own session.
-  primeBoth();
-  const session: ObjectiveReviewDoorSession = { degraded: false, current: () => false };
-  const { notifies, sent } = await observe(fakeStarted("timeout"), { session });
-  assert.equal(notifies.length, 0, "no error report");
-  assert.equal(sent.length, 0, "no degrade notice");
-  assert.equal(await annotationMode(), "plan", "the newer review's annotation surface survives");
-  assert.equal(await draftContextPrimed(), true, "…and its draft-review context");
-  assert.equal(session.degraded, false, "the superseded session is never flipped");
-  clearAnnotationSurface(annotations);
-  clearDraftReviewContext(draftReview);
-});
-
-test("observer: bridge settled unavailable for a superseded review → silent (no report, no notice, surfaces untouched)", async () => {
-  primeBoth();
-  const session: ObjectiveReviewDoorSession = { degraded: false, current: () => false };
-  const { notifies, sent } = await observe(
-    fakeStarted("bridge_settled", { status: "unavailable", warning: "boom" }),
-    { session },
-  );
-  assert.equal(notifies.length, 0);
-  assert.equal(sent.length, 0);
-  assert.equal(await annotationMode(), "plan");
-  assert.equal(await draftContextPrimed(), true);
-  assert.equal(session.degraded, false);
-  clearAnnotationSurface(annotations);
-  clearDraftReviewContext(draftReview);
-});
-
-test("observer: ready for a superseded review → no announce", async () => {
-  primeBoth();
-  const { notifies, sent } = await observe(fakeStarted("ready"), {
-    session: { degraded: false, current: () => false },
-  });
-  assert.equal(notifies.length, 0, "a superseded review never announces 'plannotator is up'");
-  assert.equal(sent.length, 0);
-  assert.equal(await annotationMode(), "plan", "the ready arm never clears either way");
-  clearAnnotationSurface(annotations);
-  clearDraftReviewContext(draftReview);
-});
-
-test("observer: superseded WHILE the bridge wait is pending → the post-await currency re-check stays silent (no report, no notice, surfaces untouched)", async () => {
-  // The review is still current when readiness settles `bridge_settled` (the first fence
-  // passes), a newer review opens while the observer awaits the bridge, then the bridge settles
-  // `unavailable`: the SECOND fence — after the await — must stop the degrade.
-  primeBoth();
-  let checks = 0;
-  const session: ObjectiveReviewDoorSession = {
-    degraded: false,
-    current: () => {
-      checks += 1;
-      return checks === 1; // current at the first fence, superseded by the second
-    },
-  };
-  let settleBridge: (out: ReviewOutcome) => void = () => {};
-  const started: StartedSurface<ReviewOutcome> = {
-    url: "http://127.0.0.1:45001",
-    port: 45001,
-    remote: false,
-    bridgePromise: new Promise<ReviewOutcome>((resolve) => {
-      settleBridge = resolve;
-    }),
-    readiness: Promise.resolve("bridge_settled"),
-  };
-  const observing = observe(started, { session });
-  // Let the observer pass the first fence and park on the bridge await before superseding.
-  await new Promise((r) => setImmediate(r));
-  assert.equal(checks, 1, "the observer passed the first fence while still current");
-  settleBridge({ status: "unavailable", warning: "boom" });
-  const { notifies, sent } = await observing;
-  assert.equal(checks, 2, "the post-await re-check ran");
-  assert.equal(notifies.length, 0, "no error report");
-  assert.equal(sent.length, 0, "no degrade notice");
-  assert.equal(await annotationMode(), "plan", "the newer review's annotation surface survives");
-  assert.equal(await draftContextPrimed(), true, "…and its draft-review context");
-  assert.equal(session.degraded, false, "the superseded session is never flipped");
-  clearAnnotationSurface(annotations);
-  clearDraftReviewContext(draftReview);
-});
-
 // --------------------------------------------------------------- routeObjectiveReviewDecision
 
 const PROSE = "# Ship retries\n\nThe gateway needs retries.\n";
@@ -466,7 +242,10 @@ function stateEntry(data: Record<string, unknown>): unknown {
 }
 
 const RENDERED = renderObjectiveDraft({ title: "Ship retries", prose: PROSE, roadmap: ROADMAP });
-const APPROVE_OUT: ReviewOutcome = { status: "completed", approved: true, reviewId: "rev-a" };
+/** The decided outcome the router consumes (the owner routes only `completed`). */
+type Decided = Extract<ReviewOutcome, { status: "completed" }>;
+
+const APPROVE_OUT: Decided = { status: "completed", approved: true, reviewId: "rev-a" };
 
 /**
  * The decision-routing scaffold: a fake pi (cold door + injections) over a live
@@ -490,7 +269,7 @@ function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: b
   open(): OpenDraftReview;
   rewrite(raw: string): void;
   git(...args: string[]): void;
-  route(out: ReviewOutcome, review: OpenDraftReview): Promise<void>;
+  route(out: Decided, review: OpenDraftReview): Promise<void>;
 } {
   const cwd = scaffoldRepo();
   const branch: unknown[] = [
@@ -569,7 +348,7 @@ function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: b
 
 test("decision: APPROVE happy path → objectiveApprovalSave (structured artifact saved, gate exited)", async () => {
   const s = decisionScaffold();
-  const out: ReviewOutcome = {
+  const out: Decided = {
     status: "completed",
     approved: true,
     reviewId: "rev-a",
@@ -674,7 +453,7 @@ test("decision: a superseded Direct-Edits APPROVE is ignored loudly — never ro
   const first = s.open();
   const second = s.open();
   assert.equal(first.isCurrent(), false);
-  const out: ReviewOutcome = {
+  const out: Decided = {
     status: "completed",
     approved: true,
     reviewId: "rev-de-late",
@@ -704,7 +483,7 @@ test("decision: APPROVE + Direct Edits heading → NO save, revise inject, gate 
   // goes to the model verbatim either way).
   for (const feedback of [DE_FEEDBACK, "# Direct Edits\n\nthe fence never arrived"]) {
     const s = decisionScaffold();
-    const out: ReviewOutcome = {
+    const out: Decided = {
       status: "completed",
       approved: true,
       reviewId: "rev-de",
@@ -746,7 +525,7 @@ test("decision: Direct Edits on a moved draft still route revise — no save, th
       2,
     )}\n`,
   );
-  const out: ReviewOutcome = {
+  const out: Decided = {
     status: "completed",
     approved: true,
     reviewId: "rev-de-stale",
@@ -840,7 +619,7 @@ test("decision: APPROVE with the artifact missing at decision time → stale-app
 
 test("decision: DENY → delimited feedback + objective_draft redirect (streaming ⇒ followUp), NO save", async () => {
   const s = decisionScaffold({ idle: false });
-  const out: ReviewOutcome = {
+  const out: Decided = {
     status: "completed",
     approved: false,
     reviewId: "rev-d",
@@ -865,25 +644,7 @@ test("decision: DENY → delimited feedback + objective_draft redirect (streamin
   assert.deepEqual(s.injected[0]?.options, { deliverAs: "followUp" }, "streaming ⇒ followUp");
 });
 
-test("decision: aborted → silent; unavailable → error report only (the observer owns the notice)", async () => {
-  const aborted = decisionScaffold();
-  await aborted.route({ status: "aborted" }, aborted.open());
-  assert.equal(aborted.injected.length, 0);
-  assert.equal(aborted.notified.length, 0);
-  assert.equal(aborted.argvs.length, 0);
-
-  const unavailable = decisionScaffold();
-  await unavailable.route(
-    { status: "unavailable", warning: "handshake timeout" },
-    unavailable.open(),
-  );
-  assert.equal(unavailable.injected.length, 0, "the degrade notice is the observer's job");
-  assert.ok(
-    unavailable.notified.some((n) => n.severity === "error" && n.message.includes("handshake")),
-  );
-});
-
-// ---------------------------------------------- openObjectiveReviewSurface (fake deps + bus)
+// ---------------------------------------- openObjectiveReviewSurface (owner + fake deps + bus)
 
 /** A minimal in-process event bus (the pi.events shape the bridge speaks). */
 function fakeBus(): {
@@ -943,23 +704,27 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
     signal: undefined,
   } as unknown as ExtensionContext;
 
-  // probe:false + a tiny budget → the readiness poll times out → the degrade arm fires.
+  // probe:false + a tiny budget → the readiness poll times out → the owner degrades.
+  const gating = fakeGating(true);
   await openObjectiveReviewAndGuide(
     pi,
     ctx,
-    fakeGating(true),
+    gating,
     { rendered: RENDERED, artifactRaw: DRAFT_PAYLOAD },
     draftReview,
-    annotations,
     seedBrowserReview(pi, ctx, "objective", DRAFT_PAYLOAD),
-    createPerkStatus(),
-    {
-      pickFreePort: async () => 45002,
-      probe: async () => false,
-      intervalMs: 1,
-      budgetMs: 3,
-      sleep: async () => {},
-    },
+    createBrowserOperationOwner(pi, {
+      annotations,
+      gating,
+      status: createPerkStatus(),
+      browserDeps: {
+        pickFreePort: async () => 45002,
+        probe: async () => false,
+        intervalMs: 1,
+        budgetMs: 3,
+        sleep: async () => {},
+      },
+    }),
   );
   const start = Date.now();
   while (
@@ -985,7 +750,8 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
     notified.some(
       (n) =>
         n.severity === "warning" &&
-        n.message.includes("a browser decision arrived after the review degraded — ignored"),
+        n.message.includes("a browser decision arrived after the review degraded — ignored") &&
+        n.message.includes("re-run /objective-review-browser"),
     ),
     "the late decision is ignored loudly",
   );
@@ -1041,16 +807,19 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
     gating,
     { rendered: RENDERED, artifactRaw: DRAFT_PAYLOAD, custom: "check the dependency story" },
     draftReview,
-    annotations,
     seedBrowserReview(pi, ctx, "objective", DRAFT_PAYLOAD),
-    createPerkStatus(),
-    {
-      pickFreePort: async () => 45001,
-      probe: async () => true,
-      intervalMs: 1,
-      budgetMs: 50,
-      sleep: async () => {},
-    },
+    createBrowserOperationOwner(pi, {
+      annotations,
+      gating,
+      status: createPerkStatus(),
+      browserDeps: {
+        pickFreePort: async () => 45001,
+        probe: async () => true,
+        intervalMs: 1,
+        budgetMs: 50,
+        sleep: async () => {},
+      },
+    }),
   );
   assert.equal(typeof guidance, "string");
   if (typeof guidance !== "string") throw new Error("expected launch guidance");
