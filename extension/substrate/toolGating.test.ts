@@ -1161,7 +1161,7 @@ test("a throwing install keeps the cohort deferral pending for the next point", 
   assert.equal(h.installs.length, 1);
 });
 
-test("a member whose deferred re-registration failed stays always-declared: dropped under the gate, restored at its exit", () => {
+test("a member whose deferred re-registration failed stays always-declared: kept under the gate when gate-allowed, else dropped and restored at its exit", () => {
   // deferDiscoveryFamily omits a member it could not re-register; it is still `direct`, so
   // tool_search cannot find it and only reconciliation can bring it back.
   const joined = discoveryFamily().filter((name) => name !== "objective_stack_status");
@@ -1170,11 +1170,25 @@ test("a member whose deferred re-registration failed stays always-declared: drop
   h.gate.syncFromState("read-write", "implement");
   assert.ok(h.active().includes("objective_stack_status"), "never deferred, so kept at the join");
   h.gate.enter();
-  assert.ok(!h.active().includes("objective_stack_status"), "gate-blocked under the gate");
+  assert.ok(h.active().includes("objective_stack_status"), "gate-allowed, so kept under the gate");
   h.gate.exit();
-  assert.ok(h.active().includes("objective_stack_status"), "restored at the gate exit");
+  assert.ok(h.active().includes("objective_stack_status"), "kept at the gate exit");
   assert.deepEqual(h.gate.discovery(), { cohort: true, family: joined }, "reports what deferred");
   assert.deepEqual(h.gate.primeDeferred(["objective_stack_status"]), [], "not a deferred member");
+
+  // A gate-BLOCKED member that failed its re-registration: dropped under the gate, restored at
+  // its exit.
+  const blockedJoined = discoveryFamily().filter((name) => name !== "collect_review_wave");
+  const b = gateFixture(() => false);
+  b.gate.joinDiscoveryCohort(blockedJoined);
+  b.gate.syncFromState("read-write", "implement");
+  assert.ok(b.active().includes("collect_review_wave"), "never deferred, so kept at the join");
+  b.gate.enter();
+  assert.ok(!b.active().includes("collect_review_wave"), "gate-blocked under the gate");
+  b.gate.exit();
+  assert.ok(b.active().includes("collect_review_wave"), "restored at the gate exit");
+  assert.deepEqual(b.gate.discovery(), { cohort: true, family: blockedJoined });
+  assert.deepEqual(b.gate.primeDeferred(["collect_review_wave"]), [], "not a deferred member");
 });
 
 // --- the restoration window (contracts.md §8.40) ---------------------------------------------------

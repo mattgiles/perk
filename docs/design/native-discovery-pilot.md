@@ -49,7 +49,7 @@ The candidate population is the catalog's `query`/`action` tools registered in a
 
 | Tool | Kind | Gated | Stages | Request B | Prompt B | Self-guarding refusal | Primer(s) / why not in the family |
 |---|---|---|---|---|---|---|---|
-| `objective_stack_status` | query | blocked | worktree | 422 | 244 | `no_objective` (a read) | `STACK_STATUS_PRIMES` (`/objective-sync`, `/objective-land`) |
+| `objective_stack_status` | query | allowed (since 2026-10) | worktree + planning/refinement | 422 | 244 | `no_objective` (a read) | `STACK_STATUS_PRIMES` (`/objective-sync`, `/objective-land`) |
 | `collect_review_wave` | action | blocked | worktree, stack-review | 436 | 1191 | `no_wave` (the pending-wave guard) | `REVIEW_BROWSER_PRIMES`, `REVIEW_TERMINAL_PRIMES`, `REVIEW_LAUNCH_PRIMES` |
 | `collect_draft_review_wave` | action | allowed (mode over stage) | plan family, objective | 430 | 1191 | `no_wave` (the pending-wave guard) | `DRAFT_REVIEW_DOOR_PRIMES`, `DRAFT_LAUNCH_PRIMES` |
 | `push_annotations` | action | allowed (mode over stage) | plan family, objective, worktree, stack-review | 1914 | 1850 | `no_surface` | `REVIEW_BROWSER_PRIMES`, `DRAFT_REVIEW_DOOR_PRIMES` |
@@ -80,7 +80,7 @@ Verbatim from the plan; the status column is filled from the evidence named.
 
 | Id | Criterion | Evidence | Status |
 |---|---|---|---|
-| S1 | `net(stage) ≥ 4,096` bytes per census request in every stage where a family member is eligible read-write (the five worktree stages, `plan`/`save`/`objective-plan`, `objective-author`/`objective-save`, `stack-review`) | case 8 | PASS (min 4,822 — `stack-review`) |
+| S1 | `net(stage) ≥ 4,096` bytes per census request in every stage where a family member is eligible read-write (the five worktree stages, `plan`/`save`/`objective-plan`, `objective-author`/`objective-save`, `stack-review`) | case 8 | PASS (min 4,822 — `stack-review`). **Amended 2026-10** (`objective_stack_status` became eligible read-write in `objective-refine`, whose only member it is): S1 applies where the stage's read-write-eligible members can supply it — with `footprint(stage)` = their summed request + prompt bytes, `footprint ≥ 4,096 + fixed cost` → `net ≥ 4,096` as adopted; `0 < footprint < 4,096 + fixed cost` → a wash, `−fixed cost ≤ net ≤ footprint` (today only `objective-refine`); no member → `net = −fixed cost` |
 | S2 | the cohort's fixed cost (`tool_search`'s declaration + snippet, measured as `−net` in a stage with no eligible member) `≤ 1,024` bytes | case 8 | PASS (693) |
 | D1 | each family member is `tool_search`'s top-1 hit for its pinned query where eligible — **scored on the four queries pinned in case 6 exactly as written**; a miss is NOT PASSED; a query may be changed only by an owner-approved amendment recorded in the design record (date, reason, old → new) BEFORE the amended run is scored, and any other reworded query is an exploratory observation, never D1's result | case 6 | PASS (4/4) |
 | D2 | an ineligible search is hidden on the next request, deactivated at the next prompt, blocked under the gate | case 5 | PASS |
@@ -164,7 +164,10 @@ Three statements, kept apart because they are different contracts:
 
 Today the gate-eligible query set is **empty** (`objective_stack_status` is `gated: blocked`), so
 no gated codemode path is built and the suspension stands. Un-suspension waits for a gate-allowed
-`kind: query` tool and is its own node, never a side effect of this one.
+`kind: query` tool and is its own node, never a side effect of this one. Since the Pi 1.1.0
+true-up (2026-10) the set holds `objective_stack_status` (gate-allowed in the worktree family and
+the read-only planning/refinement stages); the codemode suspension still stands —
+un-suspension is its own change (contracts §8.40).
 
 ## 7. Decision
 

@@ -530,6 +530,29 @@ def test_fetch_brings_origin_up_to_date(git_repo_with_remote):
     assert _sha(clone, "origin/main") == advanced
 
 
+def test_fetch_advances_only_the_remote_tracking_refs(git_repo_with_remote):
+    """fetch advances only the remote-tracking refs: local branches, the index and the working
+    tree are untouched, and the remote is only read. Its one acknowledged local write besides
+    `refs/remotes/origin/*` (and objects) is the shared `FETCH_HEAD` — the bound the gate-allowed
+    stack status read relies on (contracts §8.51)."""
+    clone, remote, advance = git_repo_with_remote
+    local_branches = _git(clone, "for-each-ref", "refs/heads")
+    main_before = _sha(clone, "refs/heads/main")
+    index_before = _git(clone, "ls-files", "--stage")
+    advanced = advance()
+    remote_refs = _git(remote, "for-each-ref")
+
+    git.fetch(clone)
+
+    assert _sha(clone, "origin/main") == advanced
+    assert _sha(clone, "refs/heads/main") == main_before != advanced
+    assert _git(clone, "for-each-ref", "refs/heads") == local_branches
+    assert _git(clone, "ls-files", "--stage") == index_before
+    assert _git(clone, "status", "--porcelain") == ""
+    assert _git(remote, "for-each-ref") == remote_refs
+    assert (clone / ".git" / "FETCH_HEAD").is_file()
+
+
 def test_worktree_add_with_base(git_repo_with_remote):
     clone, _remote, advance = git_repo_with_remote
     advanced = advance()

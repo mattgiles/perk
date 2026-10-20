@@ -182,7 +182,11 @@ objective):
   Mutations run only on explicit approval: `objective_stack_sync`'s modes are mutually
   exclusive (mirroring the CLI's flag matrix), and the mutating `objective_stack_adopt` /
   `objective_stack_land` calls — and `objective_stack_recover`'s `abandon` / `accept_prefix`
-  — **require `confirm: true`** (preview first).
+  — **require `confirm: true`** (preview first). `objective_stack_status` is the one read-only
+  tool of the five and is also callable from read-only planning and refinement sessions
+  (`plan`, `objective-plan`, `objective-refine`) — pass the objective explicitly
+  there; like `perk objective stack status`, a stacked read fetches `origin` once (no
+  working-tree, branch or remote change).
 
 ## Recovery routing
 

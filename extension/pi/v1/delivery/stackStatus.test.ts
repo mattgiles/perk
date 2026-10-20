@@ -1,7 +1,8 @@
 // Live warm-surface tests for the stacked-delivery status read (stackStatus.ts): the frozen
 // registration baselines (tool + command, the derived query `outputSchema` included), the
 // structured result and its conformance to that schema on both arms, the strict bad_input decode,
-// the objective-inference precedence through the registered tool, the lenient
+// the objective-inference precedence through the registered tool, the gate-allowed policy in the
+// read-only planning/refinement stages (nonparticipant and discovery cohort), the lenient
 // `renderStackStatus` render, and the two
 // `/objective-stack` command arms (gate-on multiline success + multiline failure). Fully offline
 // (fakePerk via PERK_BIN; a REAL bound AgentSession via the T1 harness). The mutating stack
@@ -15,7 +16,16 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 import { writePlanRef } from "../../../substrate/cache.ts";
 import { REPORT_DETAIL_TYPE } from "../../../surfaces/surfaces.ts";
-import { fakePerk, loadPerkSession, plantSession, scaffoldRepo } from "../../../testing/harness.ts";
+import {
+  COHORT_SETTINGS,
+  fakePerk,
+  loadPerkSession,
+  type PerkSession,
+  plantSession,
+  scaffoldRepo,
+  staged,
+  toolSearch,
+} from "../../../testing/harness.ts";
 import { OK_ENVELOPE, PLAN_REF } from "../../../testing/objectiveStackFixtures.ts";
 import { renderStackStatus } from "./stackStatus.ts";
 
@@ -212,6 +222,116 @@ test("inference: plan-ref tier resolves when nothing else does; else a soft no_o
     assert.equal(details.error_type, "no_objective");
   } finally {
     h2.dispose();
+  }
+});
+
+// --- the policy: a gate-allowed read in the planning/refinement stages ------------------------
+
+const BLOCKED_REASON =
+  "perk read-only mode: objective_stack_status is blocked (tool not allowlisted).";
+
+/** Active in the session and admitted by the read-only backstop. */
+async function assertAdmitted(h: PerkSession, landing: string): Promise<void> {
+  assert.ok(
+    h.session.getActiveToolNames().includes("objective_stack_status"),
+    `${landing}: active`,
+  );
+  assert.equal(
+    (await h.emitToolCall("objective_stack_status", { objective: "137" }))?.block,
+    undefined,
+    `${landing}: the backstop admits it`,
+  );
+}
+
+test("policy: gate-allowed read in the planning stages — annotations derived, the gated objective-plan session reads the train, no objective refuses legibly, objective-author never sees it", async () => {
+  // The fake's directory only hosts the script; `staged` scaffolds each session's own cwd (no
+  // plan-ref there).
+  const bin = fakePerk(scaffoldRepo(), { stdout: OK_ENVELOPE });
+
+  const h = await staged("objective-plan", "read-only", { env: { PERK_BIN: bin } });
+  try {
+    assert.deepEqual(h.toolInfo("objective_stack_status"), {
+      name: "objective_stack_status",
+      exposure: "direct",
+      annotations: { readOnlyHint: true },
+    });
+    await assertAdmitted(h, "objective-plan");
+    const read = await h.invokeTool("objective_stack_status", { objective: "137" });
+    assert.deepEqual(read.details, {
+      ok: true,
+      objective: "137",
+      status: JSON.parse(OK_ENVELOPE),
+    });
+    const missing = await h.invokeTool("objective_stack_status", {});
+    const details = missing.details as { ok: boolean; error_type?: string; error?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "no_objective");
+    assert.match(details.error ?? "", /pass the objective explicitly/);
+  } finally {
+    h.dispose();
+  }
+
+  for (const stage of ["plan", "objective-refine", "implement"]) {
+    const s = await staged(stage, "read-only", { env: { PERK_BIN: bin } });
+    try {
+      await assertAdmitted(s, stage);
+    } finally {
+      s.dispose();
+    }
+  }
+
+  const author = await staged("objective-author", "read-only", { env: { PERK_BIN: bin } });
+  try {
+    assert.ok(
+      !author.session.getActiveToolNames().includes("objective_stack_status"),
+      "objective-author: inactive",
+    );
+    assert.deepEqual(await author.emitToolCall("objective_stack_status", { objective: "137" }), {
+      block: true,
+      reason: BLOCKED_REASON,
+    });
+  } finally {
+    author.dispose();
+  }
+});
+
+test("policy: a cold-door failure in a gated planning session is a typed soft failure (the offline fetch)", async () => {
+  // Plumbing only: the Git bound itself is pinned on the Python plane (tests/test_git.py).
+  const message = "git fetch failed: could not resolve host";
+  const bin = fakePerk(scaffoldRepo(), {
+    stdout: JSON.stringify({ success: false, error_type: "git_error", message }),
+    code: 1,
+  });
+  const h = await staged("objective-plan", "read-only", { env: { PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_stack_status", { objective: "137" });
+    const details = result.details as { ok: boolean; error_type?: string; error?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "git_error");
+    assert.equal(details.error, message);
+    assert.equal(result.isError, true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("discovery cohort under the gate: the deferred query is found by tool_search, activated, admitted by the backstop and executed in a gated objective-plan session", async () => {
+  const bin = fakePerk(scaffoldRepo(), { stdout: OK_ENVELOPE });
+  const h = await staged("objective-plan", "read-only", {
+    extraExtensions: [toolSearch()],
+    settings: COHORT_SETTINGS,
+    env: { PERK_BIN: bin },
+  });
+  try {
+    assert.equal(h.toolInfo("objective_stack_status")?.exposure, "deferred");
+    assert.ok(!h.session.getActiveToolNames().includes("objective_stack_status"), "deferred");
+    const search = await h.invokeTool("tool_search", { query: "stacked delivery train status" });
+    assert.equal((search.details as { loaded: string[] }).loaded[0], "objective_stack_status");
+    await assertAdmitted(h, "cohort objective-plan");
+    const read = await h.invokeTool("objective_stack_status", { objective: "137" });
+    assert.equal((read.details as { ok: boolean }).ok, true);
+  } finally {
+    h.dispose();
   }
 });
 

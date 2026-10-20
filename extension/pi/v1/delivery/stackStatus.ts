@@ -1,10 +1,15 @@
 // The stacked-delivery status read (contracts.md §8.51): the `objective_stack_status` tool +
 // the `/objective-stack` command over the Python cold worker `perk objective stack status`
-// (read-only end to end — the command works in every session, including gate-on; the tool stays
-// gate-blocked by its policy descriptor). Pure decoding + rendering + delegation —
-// no feature operation backs this module (zero-policy passthrough); the mutating stack family
-// lives in the sibling adapters (stackSync.ts / stackRecover.ts / stackLand.ts over the
-// `delivery/` feature ops, with the shared drive helpers in stackDrive.ts).
+// (the command works in every session, including gate-on; the tool is gate-allowed in the
+// worktree family and the read-only planning/refinement stages by its policy descriptor). The
+// read mutates no working tree, index, local branch or remote: a stacked objective's read
+// performs one `git fetch origin` (remote-tracking refs, objects, `FETCH_HEAD`; offline it is the
+// typed `git_error` soft failure), and where no objective resolves the tool refuses
+// `no_objective` — a planning session passes the objective explicitly. Pure decoding +
+// rendering + delegation — no feature operation backs this module (zero-policy
+// passthrough); the mutating stack family lives in the sibling adapters (stackSync.ts /
+// stackRecover.ts / stackLand.ts over the `delivery/` feature ops, with the shared drive helpers
+// in stackDrive.ts).
 //
 // Objective inference: explicit param/argument → workflow `active_objective` → plan-ref
 // `objective_id` (`resolveStackObjective`); the warm layer always passes the resolved objective
@@ -30,7 +35,7 @@ import {
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { failFor, ok, type Result } from "../../../substrate/result.ts";
 import { idParam, paramsOf } from "../../../substrate/toolParams.ts";
-import { WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
+import { PLANNING_READ_STAGES, WORKTREE_STAGES } from "../../../substrate/toolPolicy.ts";
 import { resolveStackObjective } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
 import { registerPerkTool } from "../../perkTool.ts";
@@ -228,8 +233,8 @@ export function installStackStatusBindings(pi: ExtensionAPI): void {
       },
     },
     {
-      stages: [...WORKTREE_STAGES],
-      gated: "blocked",
+      stages: [...WORKTREE_STAGES, ...PLANNING_READ_STAGES],
+      gated: "allowed",
       kind: "query",
       declared: "deferred",
       result: {

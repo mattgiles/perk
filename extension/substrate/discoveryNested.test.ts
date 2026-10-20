@@ -21,7 +21,6 @@ import {
   plantSession,
   recordingRuntime,
   scaffoldRepo,
-  staged,
   toolSearch,
 } from "../testing/harness.ts";
 import { ensureToolCatalog } from "../testing/toolCatalog.ts";
@@ -188,7 +187,10 @@ test("nested execution in the cohort (A): a deferred inactive member is callable
   }
 });
 
-test("nested execution under the gate (A): a nested deferred member and a nested write meet the backstop with their parent call id", async () => {
+test("nested execution under the gate (A): a nested gate-allowed query is admitted and a nested write blocked, each with its parent call id", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [{ stage: "implement", mode: "read-only" }]);
+  const bin = fakePerkRouter(cwd, { "objective stack": { json: STATUS } });
   const rt = await recordingRuntime();
   const script: { calls: NestedCall[] } = {
     calls: [
@@ -197,12 +199,14 @@ test("nested execution under the gate (A): a nested deferred member and a nested
     ],
   };
   const observed: Observed[] = [];
-  const h = await staged("implement", "read-only", {
+  const h = await loadAt(cwd, {
     headful: false,
     model: rt.reg.getModel(),
     modelRuntime: rt.reg.modelRuntime,
+    env: { PERK_RUN_ID: undefined, PERK_BIN: bin },
     extraExtensions: [toolSearch(), nestedProbe(script, observed)],
     settings: COHORT_SETTINGS,
+    sessionManager: SessionManager.open(file),
   });
   const runner = h.session.extensionRunner;
   const seen: { toolName: string; parentToolCallId?: string; reason?: string }[] = [];
@@ -223,19 +227,22 @@ test("nested execution under the gate (A): a nested deferred member and a nested
     rt.callThenStop(PROBE, {});
     await h.session.prompt("probe under the gate");
     assert.equal(observed.length, 2, "the probe ran (it is gate-allowed)");
-    assert.ok(observed.every((o) => o.isError));
+    // The eligible query is admitted nested under the gate by the top-level rule.
+    assert.equal(observed[0]?.isError, false, observed[0]?.text);
+    assert.deepEqual(observed[0]?.structuredContent, { ok: true, objective: "7", status: STATUS });
+    assert.equal(observed[1]?.isError, true, observed[1]?.text);
     assert.deepEqual(seen, [
-      {
-        toolName: "objective_stack_status",
-        parentToolCallId: PARENT_ID,
-        reason: "perk read-only mode: objective_stack_status is blocked (tool not allowlisted).",
-      },
+      { toolName: "objective_stack_status", parentToolCallId: PARENT_ID, reason: undefined },
       {
         toolName: "write",
         parentToolCallId: PARENT_ID,
         reason: "perk read-only mode: write is blocked (file modifications disabled).",
       },
     ]);
+    assert.ok(
+      !h.session.getActiveToolNames().includes("objective_stack_status"),
+      "a nested call never activates the deferred tool",
+    );
   } finally {
     h.dispose();
   }

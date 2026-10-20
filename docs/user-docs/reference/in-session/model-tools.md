@@ -55,7 +55,7 @@ These tools are registered by perk itself. Command-specific semantics live in
 | Verification | `run_ci` | action | blocked |
 | PR lifecycle | `submit` | terminal | blocked |
 | PR lifecycle | `resolve_submit_conflicts` | orchestration | blocked |
-| Stacked delivery | `objective_stack_status` | query | blocked |
+| Stacked delivery | `objective_stack_status` | query | allowed |
 | Stacked delivery | `objective_stack_sync` | orchestration | blocked |
 | Stacked delivery | `objective_stack_adopt` | action | blocked |
 | Stacked delivery | `objective_stack_recover` | action | blocked |
@@ -138,6 +138,15 @@ to the session file and never sent to the model — it is for programmatic calle
 `kind: query` tools also declare an output schema. `objective_stack_status`'s is
 `{ ok: true, objective, status } | { ok: false, error, error_type }`, where `status` is the
 published `perk objective stack status --json` envelope.
+
+`objective_stack_status` is gate-allowed: a read-only planning or refinement session (`plan`,
+`objective-plan`, `objective-refine`) and a gated worktree session can read an objective's stacked
+delivery train. It infers the objective from the session's active objective or the worktree's
+plan-ref and otherwise refuses with `no_objective` — pass `objective` explicitly in a planning
+session. The read never touches the working tree, the index, a local branch or the remote, but a
+stacked objective's read performs one `git fetch origin` (remote-tracking refs, objects,
+`FETCH_HEAD`), so offline it fails with a typed `git_error`. In the discovery cohort it is still
+deferred: find it with `tool_search`; `/objective-sync` and `/objective-land` prime it.
 
 A codemode script calling a perk tool receives:
 
@@ -294,8 +303,8 @@ other ineligible declaration: `edit` and `write` stay active but are not declare
 back on when it turns off: its description would list the write tools' schemas, and in `only`
 mode it hides every direct tool itself, so a hidden-but-active codemode would leave the session
 without `read`, `bash` or perk's tools. Each stage therefore sees its own tools: an `objective-refine`
-session, for instance, gets read/research/question, `plan_review`, `objective_refinement_draft`
-and the mode-over-stage set — no node claim, no objective or gist draft, no save tool, no
+session, for instance, gets read/research/question, `plan_review`, `objective_refinement_draft`,
+the `objective_stack_status` read and the mode-over-stage set — no node claim, no objective or gist draft, no save tool, no
 delegation. Because the `/plan` flow's tools are mode-over-stage, `plan_draft` is reachable there
 too and can write a plan draft, but that draft can never be reviewed or saved from a refinement
 session (`plan_review` reviews only the refinement draft, and every save command refuses). The

@@ -101,6 +101,16 @@ flag). Programmatic callers — a nested `ctx.executeTool`, a codemode script �
 so only queries hand a script a structured value.
 _Avoid_: structured details, typed result, output schema (for the result itself)
 
+**Gate-eligible query**:
+A `kind: query` perk tool whose descriptor is `gated: "allowed"`, so the read-only gate admits it
+in every landing it is staged in — today exactly `objective_stack_status` (the worktree family
+plus the read-only planning/refinement stages `plan`, `objective-plan`, `objective-refine`).
+"Read-only" is the gate's guarantee — no working-tree, index, local-branch or remote mutation —
+not "no Git call": the stacked status read's single `git fetch origin` is inside it. The only perk
+tools a gated codemode script could ever reach (contracts §8.40 "The gated read path");
+eligibility never un-suspends codemode.
+_Avoid_: gated read tool, read-only query (ambiguous with `readOnlyHint`, a hint and never a grant)
+
 **Eligibility formula**:
 The one rule deciding whether a tool may be active in a (stage, mode) landing:
 `(stage ∈ stages ∧ (read-write ∨ not gate-blocked)) ∨ (read-only ∧ mode-over-stage)`, an unscoped or

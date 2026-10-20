@@ -28,6 +28,7 @@ import {
   OBJECTIVE_STAGES,
   PACKAGE_TOOL_POLICY,
   PLAN_FAMILY_STAGES,
+  PLANNING_READ_STAGES,
   POSTURE_ROWS,
   type Provenance,
   perkToolNames,
@@ -69,6 +70,7 @@ test("stage families: every member is a registry id; the worktree family is the 
     OBJECTIVE_STAGES,
     AUTHORING_STAGES,
     GIST_STAGES,
+    PLANNING_READ_STAGES,
   ]) {
     for (const id of family) assert.ok(REGISTRY_IDS.includes(id), `not a registry stage: ${id}`);
   }
@@ -79,6 +81,13 @@ test("stage families: every member is a registry id; the worktree family is the 
     "learn",
     "submit",
   ]);
+  // The read-only planning/refinement stages: registry read-only landings, disjoint from the
+  // worktree family, never the objective-authoring stage (no objective exists yet).
+  assert.deepEqual(PLANNING_READ_STAGES, ["plan", "objective-plan", "objective-refine"]);
+  const modes = new Map(loadRegistry().stages.map((s) => [s.id, s.mode]));
+  for (const id of PLANNING_READ_STAGES) assert.equal(modes.get(id), "read-only", id);
+  for (const id of PLANNING_READ_STAGES) assert.ok(!WORKTREE_STAGES.includes(id), id);
+  assert.ok(!PLANNING_READ_STAGES.includes("objective-author"));
 });
 
 test("derivePiMetadata: terminal/interactive/orchestration/host are model-only; readOnlyHint iff not blocked", () => {
@@ -151,6 +160,25 @@ test("derivePiMetadata: a query with declared success details gets the ok-discri
     outputSchema: envelope,
   });
   assert.deepEqual(deriveOutputSchema(result), envelope);
+  // A gate-allowed deferred query: readOnlyHint derived beside the schema; the cohort
+  // re-registration alone flips the exposure.
+  const allowedQuery = {
+    stages: PLANNING_READ_STAGES,
+    gated: "allowed",
+    kind: "query",
+    declared: "deferred",
+    result,
+  } as const;
+  assert.deepEqual(derivePiMetadata(allowedQuery), {
+    exposure: "direct",
+    annotations: { readOnlyHint: true },
+    outputSchema: envelope,
+  });
+  assert.deepEqual(derivePiMetadata(allowedQuery, { cohort: true }), {
+    exposure: "deferred",
+    annotations: { readOnlyHint: true },
+    outputSchema: envelope,
+  });
   // `required` defaults to just the discriminant.
   assert.deepEqual(
     (deriveOutputSchema({ properties: {} }) as { anyOf: { required: string[] }[] }).anyOf[0]
@@ -354,6 +382,12 @@ recordPerkTool("tt_deferred", {
   declared: "deferred",
 });
 recordPerkTool("tt_unscoped", { stages: [], gated: "blocked", kind: "action" });
+recordPerkTool("tt_allowed_wide", {
+  stages: [...WORKTREE_STAGES, ...PLANNING_READ_STAGES],
+  gated: "allowed",
+  kind: "query",
+  result: { properties: {} },
+});
 
 test("the formula: stage membership × mode posture, the mode-over-stage term, unscoped and unknown stages", () => {
   const rows: [string, Provenance | undefined, string | null, Mode, boolean][] = [
@@ -402,6 +436,15 @@ test("the formula: stage membership × mode posture, the mode-over-stage term, u
     ["some_foreign_tool", OTHER_INLINE, "implement", "read-only", false],
     // deferred tools are eligible (the backstop must not block a host-activated one)
     ["tt_deferred", undefined, "plan", "read-only", true],
+    // a gate-allowed query staged in the worktree family + the planning/refinement stages
+    ["tt_allowed_wide", undefined, "plan", "read-only", true],
+    ["tt_allowed_wide", undefined, "objective-plan", "read-only", true],
+    ["tt_allowed_wide", undefined, "objective-refine", "read-only", true],
+    ["tt_allowed_wide", undefined, "implement", "read-only", true],
+    ["tt_allowed_wide", undefined, "objective-author", "read-only", false],
+    ["tt_allowed_wide", undefined, "save", "read-only", false],
+    ["tt_allowed_wide", undefined, "stack-review", "read-only", false],
+    ["tt_allowed_wide", undefined, "objective-author", "read-write", false],
   ];
   for (const [name, provenance, stage, mode, expected] of rows) {
     assert.equal(
