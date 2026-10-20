@@ -2,11 +2,12 @@
 // the `/objective-stack` command over the Python cold worker `perk objective stack status`
 // (the command works in every session, including gate-on; the tool is gate-allowed in the
 // worktree family and the read-only planning/refinement stages by its policy descriptor). The
-// read mutates no working tree, index, local branch or remote: a stacked objective's read
-// performs one `git fetch origin` (remote-tracking refs, objects, `FETCH_HEAD`; offline it is the
-// typed `git_error` soft failure), and where no objective resolves the tool refuses
-// `no_objective` — a planning session passes the objective explicitly. Pure decoding +
-// rendering + delegation — no feature operation backs this module (zero-policy
+// read mutates no working tree, index, local branch, tag or remote: a stacked objective's read
+// performs one remote-tracking-only fetch of origin (`refs/remotes/origin/*`, objects,
+// `FETCH_HEAD`; a failed fetch is the typed `git_error` soft failure, while offline the GitHub
+// objective read usually fails first as `github_error`), and where no objective resolves the
+// tool refuses `no_objective` — a planning session passes the objective explicitly. Pure
+// decoding + rendering + delegation — no feature operation backs this module (zero-policy
 // passthrough); the mutating stack family lives in the sibling adapters (stackSync.ts /
 // stackRecover.ts / stackLand.ts over the `delivery/` feature ops, with the shared drive helpers
 // in stackDrive.ts).

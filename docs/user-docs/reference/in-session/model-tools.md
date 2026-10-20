@@ -143,9 +143,11 @@ published `perk objective stack status --json` envelope.
 `objective-plan`, `objective-refine`) and a gated worktree session can read an objective's stacked
 delivery train. It infers the objective from the session's active objective or the worktree's
 plan-ref and otherwise refuses with `no_objective` — pass `objective` explicitly in a planning
-session. The read never touches the working tree, the index, a local branch or the remote, but a
-stacked objective's read performs one `git fetch origin` (remote-tracking refs, objects,
-`FETCH_HEAD`), so offline it fails with a typed `git_error`. In the discovery cohort it is still
+session. The read never touches the working tree, the index, a local branch, a tag or the remote,
+but a stacked objective's read performs one fetch of `origin` into its remote-tracking refs only
+(`refs/remotes/origin/*`, objects, `FETCH_HEAD`; configured fetch mappings and tag
+auto-following are ignored). A failed fetch is a typed `git_error`; offline, the objective read
+from GitHub usually fails first, as `github_error`. In the discovery cohort it is still
 deferred: find it with `tool_search`; `/objective-sync` and `/objective-land` prime it.
 
 A codemode script calling a perk tool receives:

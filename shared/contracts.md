@@ -8453,11 +8453,11 @@ under the gate plus the gate-allowed builtin reads, every foreign tool by its po
 foreign `annotations.readOnlyHint` is never a grant. The gate-eligible query set is
 `objective_stack_status` (`gated: "allowed"`, staged in `WORKTREE_STAGES` ∪
 `PLANNING_READ_STAGES` = `plan`, `objective-plan`, `objective-refine`; `objective-author`
-excluded). Its cold door performs one `git fetch origin` for a stacked objective (the §8.44
-fetch — remote-tracking refs, objects and `FETCH_HEAD`; never the working tree, the index, a
-local branch or the remote), which the gate's guarantee admits as a read (§8.51 pins the
-bound). Eligibility alone builds no gated codemode path: the suspension stands and un-suspension
-is its own change, never a side effect.
+excluded). Its cold door performs one remote-tracking-only fetch of origin for a stacked
+objective (the §8.44 fetch — `refs/remotes/origin/*`, objects and `FETCH_HEAD`; never the
+working tree, the index, a local branch, a tag or the remote), which the gate's guarantee
+admits as a read (§8.51 pins the bound). Eligibility alone builds no gated codemode
+path: the suspension stands and un-suspension is its own change, never a side effect.
 
 **Native discovery (the converged default).** The **discovery cohort** is the sessions whose host
 has Pi's builtin `tool_search` registered and active at `session_start`
@@ -9268,7 +9268,10 @@ objective completion are the landing mutation's contract (§8.56).
 pipeline is: resolve + policy → lineage + ONE journal fold (before any contraction —
 unresolved facts, PUBLISH coverage, and cancellation evidence all read it; corruption folds
 ``None`` and every consumer fails its question closed) → the global duplicate-backlink scan →
-ONE `git fetch` → native-cancellation classification (§8.54's exact proof; unsafe nodes gain
+ONE `git fetch` (`git.fetch_remote_tracking`: the explicit
+`+refs/heads/*:refs/remotes/<remote>/*` refspec with an empty `--refmap` and `--no-tags`, so it
+writes only remote-tracking refs, objects and `FETCH_HEAD` whatever the remote's configured
+fetch mappings) → native-cancellation classification (§8.54's exact proof; unsafe nodes gain
 projection-only PENDING ordering surrogates, never returned/persisted) → roadmap validation +
 `delivery_order` over the effective nodes → the node↔plan join (idempotent per layer — a plan
 preloaded by the cancellation proof is never re-joined, so canonical findings emit once) →
@@ -10927,15 +10930,19 @@ catalogued with stages `WORKTREE_STAGES` (explicit repair from implement/address
 `WORKTREE_STAGES` ∪ `PLANNING_READ_STAGES` (`plan`, `objective-plan`, `objective-refine`),
 gate-allowed (§8.40 **The gated read path**): its three-tier inference is unchanged, so a
 planning session with no active objective and no plan-ref gets the soft `no_objective` naming
-the fix; the stacked read's one `git fetch origin` (§8.44 — remote-tracking refs, objects,
-`FETCH_HEAD`; offline the typed `git_error` soft failure) is its only local-Git effect, pinned by
-the façade's status git-call census
+the fix; the stacked read's one remote-tracking-only fetch of origin (§8.44 —
+`refs/remotes/origin/*`, objects, `FETCH_HEAD`; a failed fetch is the typed `git_error` soft
+failure, though offline the objective's GitHub read usually fails first as `github_error`) is
+its only local-Git effect, pinned by the façade's status git-call census
 (`tests/test_delivery_facade.py::test_status_returns_stacked_projection_through_aggregate_fakes`
 — exactly one `fetch` then reads; `::test_status_returns_incremental_without_git_or_github_observation`
 — no Git call) and the substrate fetch-bounds test
-(`tests/test_git.py::test_fetch_advances_only_the_remote_tracking_refs`); the gate admits the
-tool under the top-level `tool_call` rule, nested calls included until §8.40's nested policy says
-otherwise. The three drive rows join
+(`tests/test_git.py::test_fetch_remote_tracking_advances_only_the_remote_tracking_refs`, a
+configured `refs/heads/*` mapping and a remote tag included) and the delivery seam's
+local-branch regression
+(`tests/test_delivery_observe.py::TestRepoDeliveryGit::test_fetch_never_moves_a_local_branch`);
+the gate admits the tool under the top-level `tool_call` rule, nested calls included until
+§8.40's nested policy says otherwise. The three drive rows join
 the drive-coverage guard. No registry stage is added — the warm commands are
 globally-registered doors/drivers (the `ready` non-stage pattern).
 

@@ -1279,7 +1279,8 @@ class DeliveryGit(ABC):
 
     @abstractmethod
     def fetch(self) -> None:
-        """Fetch the delivery observation remote."""
+        """Fetch the delivery observation remote's branches into its remote-tracking refs only
+        (never a local branch or tag, whatever the configured fetch mappings)."""
         ...
 
     @abstractmethod

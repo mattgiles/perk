@@ -295,7 +295,7 @@ test("policy: gate-allowed read in the planning stages — annotations derived, 
   }
 });
 
-test("policy: a cold-door failure in a gated planning session is a typed soft failure (the offline fetch)", async () => {
+test("policy: a cold-door failure in a gated planning session is a typed soft failure (a failed fetch)", async () => {
   // Plumbing only: the Git bound itself is pinned on the Python plane (tests/test_git.py).
   const message = "git fetch failed: could not resolve host";
   const bin = fakePerk(scaffoldRepo(), {

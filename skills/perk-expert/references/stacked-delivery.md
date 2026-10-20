@@ -185,8 +185,8 @@ objective):
   — **require `confirm: true`** (preview first). `objective_stack_status` is the one read-only
   tool of the five and is also callable from read-only planning and refinement sessions
   (`plan`, `objective-plan`, `objective-refine`) — pass the objective explicitly
-  there; like `perk objective stack status`, a stacked read fetches `origin` once (no
-  working-tree, branch or remote change).
+  there; like `perk objective stack status`, a stacked read fetches `origin` once, into its
+  remote-tracking refs only (no working-tree, branch, tag or remote change).
 
 ## Recovery routing
 
