@@ -10,7 +10,17 @@ import assert from "node:assert/strict";
 import { createServer as createHttpServer } from "node:http";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { ACTIVITY_BROWSER_REVIEW, type ActivitySink } from "../../../surfaces/surfaces.ts";
+import {
+  ACTIVITY_BROWSER_REVIEW,
+  type ActivitySink,
+  createPerkStatus,
+} from "../../../surfaces/surfaces.ts";
+import {
+  type BrowserLaunch,
+  createBrowserOperationOwner,
+  settleReviewOutcome,
+} from "../browserOperation.ts";
+import { createAnnotationState } from "./annotations.ts";
 import type { PlannotatorBus } from "./plannotator.ts";
 import {
   CODE_REVIEW_READINESS_PROBE_PATH,
@@ -1495,5 +1505,110 @@ test("default probe wiring: each wrapper's default probe fetches its own flavor'
     globalThis.fetch = priorFetch;
     if (priorPort === undefined) delete process.env.PLANNOTATOR_PORT;
     else process.env.PLANNOTATOR_PORT = priorPort;
+  }
+});
+
+test("startPlannotatorPlanReview through the browser-operation owner: a replacement serializes the PLANNOTATOR_PORT windows — the predecessor's restore never lands under the successor", async () => {
+  const bus = fakeBus();
+  // The env value at every step that matters: each port pick, each bridge emit, the end.
+  const envLog: (string | undefined)[] = [];
+  let reviews = 0;
+  bus.on("plannotator:request", (data) => {
+    envLog.push(process.env.PLANNOTATOR_PORT);
+    reviews += 1;
+    (data as PlanReviewEnvelope).respond({
+      status: "handled",
+      result: { status: "pending", reviewId: `rev-w${reviews}` },
+    });
+  });
+  // Every poll parks on its own sleep until the test releases it (the non-abortable sleep).
+  const parked: (() => void)[] = [];
+  const dependencies = (port: number) => ({
+    pickFreePort: () => {
+      envLog.push(process.env.PLANNOTATOR_PORT);
+      return Promise.resolve(port);
+    },
+    probe: () => Promise.resolve(false),
+    intervalMs: 1,
+    budgetMs: 1_000,
+    sleep: () =>
+      new Promise<void>((resolve) => {
+        parked.push(resolve);
+      }),
+  });
+  const owner = createBrowserOperationOwner(
+    { sendUserMessage() {} },
+    {
+      annotations: createAnnotationState(),
+      gating: { primeDeferred: (names) => [...names] },
+      status: createPerkStatus(),
+      annotationDeps: {
+        fetchLike: async (_url, init) => ({
+          ok: true,
+          status: init.method === "POST" ? 201 : 200,
+          text: async () => "{}",
+        }),
+      },
+      // The owner's budgets never expire here: only the real poll's restore may quiesce A.
+      sleep: () => new Promise<void>(() => {}),
+    },
+  );
+  const ctx = {
+    hasUI: true,
+    ui: { notify() {}, setStatus() {} },
+    isIdle: () => true,
+    signal: undefined,
+  };
+  const spec = (port: number) => ({
+    scope: "plan-review-browser",
+    mode: "plan" as const,
+    primes: [],
+    degradeNotice: "unavailable",
+    settle: settleReviewOutcome,
+    onDecision: async () => {},
+    start: (launch: BrowserLaunch) =>
+      startPlannotatorPlanReview(
+        bus,
+        { plan: "# A plan", signal: launch.signal, activity: launch.activity },
+        dependencies(port),
+      ),
+  });
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 6; i++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  const prior = process.env.PLANNOTATOR_PORT;
+  process.env.PLANNOTATOR_PORT = "4242"; // the operator's value both polls must restore
+  try {
+    assert.deepEqual(await owner.open(ctx, spec(46101)), { url: "http://127.0.0.1:46101" });
+    await flush();
+    assert.equal(parked.length, 1, "A's poll is parked on its sleep");
+    assert.equal(process.env.PLANNOTATOR_PORT, "46101", "A's window is open");
+
+    const openB = owner.open(ctx, spec(46102));
+    await flush();
+    assert.equal(reviews, 1, "B has not started: A's window is still open");
+    assert.equal(process.env.PLANNOTATOR_PORT, "46101");
+    // A's poll wakes, sees the owner's abort, restores the ORIGINAL value and quiesces — only
+    // then does B pick and preset.
+    parked.shift()?.();
+    assert.deepEqual(await openB, { url: "http://127.0.0.1:46102" });
+    await flush();
+    assert.equal(reviews, 2);
+    assert.equal(
+      process.env.PLANNOTATOR_PORT,
+      "46102",
+      "B's window is open — A never restored under it",
+    );
+
+    const shutting = owner.shutdown(ctx, "quit");
+    await flush();
+    parked.shift()?.();
+    await shutting;
+    envLog.push(process.env.PLANNOTATOR_PORT);
+    assert.deepEqual(envLog, ["4242", "46101", "4242", "46102", "4242"]);
+  } finally {
+    for (const release of parked) release();
+    if (prior === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = prior;
   }
 });
