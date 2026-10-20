@@ -322,11 +322,25 @@ test("primed activation (A): /objective-sync primes objective_stack_status, decl
   }
 });
 
-test("primed activation (A): an ineligible prime and a nonparticipant prime install nothing", async (t) => {
+test("primed activation (A): an eligible planning prime installs once; an ineligible prime and a nonparticipant prime install nothing", async (t) => {
   const installs = recordPerkInstalls(t);
   {
-    // objective_stack_status rides only the worktree stages: a cohort plan session skips it.
+    // objective_stack_status rides the planning stages too: a cohort plan session primes it.
     const { h } = await pilotSession("plan", "read-write", true);
+    try {
+      spyInjections(h);
+      const before = installs.length;
+      await h.invokeCommand("objective-sync", "7");
+      assert.ok(isActive(h, "objective_stack_status"), "eligible in plan: primed");
+      assert.equal(installs.length, before + 1, "one install");
+    } finally {
+      h.dispose();
+    }
+  }
+  {
+    // …but never objective authoring (no objective exists yet): a cohort objective-author
+    // session skips it.
+    const { h } = await pilotSession("objective-author", "read-write", true);
     try {
       spyInjections(h);
       const before = installs.length;
@@ -562,12 +576,29 @@ test("priming resets (A): resume and fork from the primed leaf start without it 
     await h.navigateTo(planted);
     await h.navigateTo(toPlan);
     assert.equal(h.workflowState().stage, "plan");
+    // The planning stages admit the status read: the restored member is kept and declared.
+    assert.ok(isActive(h, "objective_stack_status"), "still active after the restore");
+    rt.census();
+    await h.session.prompt("census");
+    assert.ok(rt.last().tools.includes("objective_stack_status"), "declared in plan");
+    assert.ok(isActive(h, "objective_stack_status"), "kept where it is eligible");
+
+    await h.navigateTo(leaf);
+    const toAuthor = h.session.sessionManager.appendCustomEntry("perk:workflow-state", {
+      stage: "objective-author",
+    });
+    await h.navigateTo(planted);
+    await h.navigateTo(toAuthor);
+    assert.equal(h.workflowState().stage, "objective-author");
     // The restoration-window rule (contracts.md §8.40): a /tree restore only adds; the
     // ineligible member is hidden at once and dropped when the next run starts.
     assert.ok(isActive(h, "objective_stack_status"), "still active inside the window");
     rt.census();
     await h.session.prompt("census");
-    assert.ok(!rt.last().tools.includes("objective_stack_status"), "never declared in plan");
+    assert.ok(
+      !rt.last().tools.includes("objective_stack_status"),
+      "never declared in objective-author",
+    );
     assert.ok(!isActive(h, "objective_stack_status"), "dropped where it is ineligible");
   } finally {
     h.dispose();
@@ -705,6 +736,8 @@ test("census and savings (A): per-stage request bytes with and without the cohor
   let censusTools: string[] = [];
   let toolSearchOwn = -1;
   const toolRows: string[] = [];
+  /** Each census tool's request + prompt bytes: what deferring it can save at most. */
+  const footprint = new Map<string, number>();
 
   for (const stage of REGISTRY_STAGE_IDS) {
     const measured: Record<"baseline" | "cohort", RecordedRequest> = {} as never;
@@ -747,6 +780,7 @@ test("census and savings (A): per-stage request bytes with and without the cohor
               Buffer.byteLength(def.promptSnippet ?? "") +
               Buffer.byteLength((def.promptGuidelines ?? []).join("\n"));
             const gated = typeof policy.gated === "object" ? "carve-out" : policy.gated;
+            footprint.set(name, request + prompt);
             toolRows.push(
               `| \`${name}\` | ${policy.kind} | ${gated} | ${policy.stages.join(", ")} | ${request} | ${prompt} |`,
             );
@@ -805,11 +839,35 @@ test("census and savings (A): per-stage request bytes with and without the cohor
     return;
   }
   assert.ok(fixedCost <= 1024, `S2: the fixed cost ${fixedCost} ≤ 1024`);
+  // S1 (amended — docs/design/native-discovery-pilot.md §4): the 4 KiB saving applies where the
+  // stage's read-write-eligible members can supply it; below that a stage must be a wash (the
+  // deferral saves at most the members' bytes and never costs more than tool_search's own).
+  const arms = { s1: [] as string[], wash: [] as string[], none: [] as string[] };
   for (const r of rows) {
-    const eligible = members.some((name) => isEligible(name, undefined, r.stage, "read-write"));
-    if (eligible) assert.ok(r.net >= 4096, `S1: ${r.stage} net ${r.net} ≥ 4096`);
-    else assert.equal(r.net, -fixedCost, `${r.stage}: no member eligible, net is -fixedCost`);
+    const stageFootprint = members
+      .filter((name) => isEligible(name, undefined, r.stage, "read-write"))
+      .reduce((sum, name) => sum + (footprint.get(name) ?? Number.NaN), 0);
+    if (stageFootprint >= 4096 + fixedCost) {
+      arms.s1.push(r.stage);
+      assert.ok(r.net >= 4096, `S1: ${r.stage} net ${r.net} ≥ 4096`);
+    } else if (stageFootprint > 0) {
+      arms.wash.push(r.stage);
+      assert.ok(
+        -fixedCost <= r.net && r.net <= stageFootprint,
+        `S1 (sub-threshold): ${r.stage} net ${r.net} is a wash, never a hidden cost ` +
+          `(−${fixedCost} ≤ net ≤ ${stageFootprint})`,
+      );
+    } else {
+      assert.ok(stageFootprint === 0, `${r.stage}: every eligible member was measured`);
+      arms.none.push(r.stage);
+      assert.equal(r.net, -fixedCost, `${r.stage}: no member eligible, net is -fixedCost`);
+    }
   }
+  // Non-vacuity: every arm is taken; the one wash stage is pinned by value (a later policy
+  // change that moves it updates this list — it never widens the rule).
+  assert.ok(arms.s1.includes("implement"), "the worktree stages take the S1 arm");
+  assert.deepEqual(arms.wash, ["objective-refine"], "the sub-threshold stages");
+  assert.ok(arms.none.includes(FIXED_COST_STAGE), "the fixed-cost stage takes the no-member arm");
 });
 
 // --- 9. the converged seed resolves additively on the real host -----------------------------------
