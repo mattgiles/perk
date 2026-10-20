@@ -2266,8 +2266,9 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   blocking readiness poll in the handler), and ends its turn. The readiness promise is observed
   in a background task: `ready` → an info note ("plannotator is up at <url> — browser opening")
   and, for the still-current surface with held or in-flight annotation work, one model
-  continuation (idle → immediate, streaming → `followUp`). This is shared by PR/stack and
-  plan/objective readiness observers. The continuation requests a pure `push_annotations`
+  continuation (idle → immediate, streaming → `followUp`). The PR/stack doors run
+  `observeBrowserReadiness` directly; the plan/objective doors run the same arm through the
+  browser-operation owner (§8.23). The continuation requests a pure `push_annotations`
   flush (`findings: []`, an existing angle, `replace` omitted), including held final replacements
   and zero-item clears after collection; it never authorizes a re-collect, replacement wave,
   or repeated reconciliation. Counting in-flight pushes closes the enqueue-after-readiness
@@ -5251,10 +5252,13 @@ the door.
    run id / subject diverged — is **superseded**: the door reports one TUI warning
    (`SUPERSEDED_DECISION_WARNING`, never injected), the tool returns `review_superseded`; nothing
    is saved even when the bytes are still current — once a newer review exists, its approval is
-   the only authority. The doors' readiness observers are fenced the same way — a superseded
-   review's observer neither announces readiness nor degrades (no fallback notice, no surface
-   clear, no door-session flip), so a review still starting when a newer one opens can never
-   disturb the newer one's surfaces. The `OpenDraftReview` token carries `reviewedDigest =
+   the only authority. The browser doors' readiness, decision and cleanup fencing belongs to the
+   browser-operation owner (below): a browser review replaced by a newer door open is DETACHED
+   (marked, drained, aborted, quiesced before the newer one starts), so only a blocking-review
+   supersession, `/implement-here` or a run-id/subject divergence reaches the ladder's
+   `superseded` arm from a browser decision — and those still revoke the browser's applicability
+   (its observer stops announcing/degrading) without opening another browser operation. The
+   `OpenDraftReview` token carries `reviewedDigest =
    digestSessionData(raw)` (the raw artifact bytes / parameter text / editor text — never the
    rendering), `contextDigest` (refinement only: the strict `REFINEMENT_CONTEXT_ARTIFACT`
    digest at open) and the open-time `destination`.
@@ -5335,9 +5339,68 @@ feedback only inside `<untrusted_reviewer_feedback>` delimiters with the `FEEDBA
 a door the non-`proceed` arms are one error report AND `injectDraftReviewResult` (text blocks
 joined with `\n`; `pi.sendUserMessage` immediately when idle, else `{deliverAs: "followUp"}`); a
 `proceed` APPROVE runs the shared subject completion → `recordSaveOutcome` → the note → the
-injection. The doors keep their `degraded` liveness token: a completed decision after the
-readiness degrade is ignored with a TUI warning; the `finally` clears the companion surfaces only
-while the review is still current (a superseding open re-primed them for ITS session).
+injection. A browser door's liveness (degrade, detach, the routing cutoff) and its surface
+cleanup are the browser-operation owner's (below), never the ladder's.
+
+### The browser-operation owner
+
+`extension/pi/v1/browserOperation.ts` — `createBrowserOperationOwner(pi, {annotations, gating,
+status, browserDeps})`, ONE per activation (the composition root), opened by the plan/objective
+browser doors (`/plan-review-browser`, `/objective-review-browser` and their `plan_review` wave
+arms; the PR/stack doors keep their own core until they adopt the same interface). A door opens
+the slot FIRST (a refusal launches nothing), then `owner.open(ctx, spec)`: the spec binds the
+handoff flavor (`start`), the annotation `mode`, the deferred-tool `primes`, the door's
+`companion` context, the `applicable` fence (the draft doors pass `review.isCurrent`), the
+`degradeNotice`, the bridge classifier (`settle` — `settleReviewOutcome`: `completed` →
+decided, `unavailable` → unavailable, everything else → aborted) and the subject router
+(`onDecision`, decided outcomes only). The owner owns the start (port pick + env preset), the
+companion priming (annotation surface, companion, `primeDeferred`), readiness observation,
+decision observation with the tracked in-flight routing, replacement, the background tasks
+(failures reported while the operation is open, one stderr line after), console interception
+and cleanup. Subjects keep save, Direct-Edits, destination and publication rules; the slot keeps
+decision authority.
+
+- **Two fences.** The RESOURCE fence is surface identity: an operation may clear the annotation
+  surface, clear its companion, announce readiness or degrade only while `annotations.surface` is
+  still the object it primed. The APPLICABILITY fence (`spec.applicable`) gates the observer's
+  emissions (announce, degrade) — a blocking `plan_review` or `/implement-here` revokes it
+  without any browser open; the tab stays open and its verdict meets the ladder's `superseded`
+  arm. The ROUTING CUTOFF (`detached`) is set synchronously when a detach begins: a decided
+  outcome arriving after it is never routed (one warning, `detachedDecisionWarning`).
+- **Ordering invariants.** `open` registers the operation as current synchronously at entry
+  (invocation order is the authority, matching the slot); the predecessor is detached — drain →
+  marker → abort → quiesce → close — BEFORE the successor starts, so `PLANNOTATOR_PORT` preset
+  windows never overlap (each readiness poll restores the value it captured); an operation a
+  newer open or a shutdown retires while it waits starts and primes nothing (`open` → `null`).
+- **One degrade owner per terminal.** The decision task degrades a settled-`unavailable` bridge
+  (one error line naming the bridge's warning, then the degrade); the observer degrades a
+  `timeout` and never acts on `bridge_settled`. The degrade is idempotent: one error line
+  ("the plannotator <plan-review|review> server did not become ready at <url> — the browser
+  review is unavailable"), the door's notice (idle → immediate, else `followUp`), both surfaces
+  cleared. A decided outcome after the degrade → one warning (`postDegradeDecisionWarning`);
+  an `unavailable` after a timeout-degrade → only its warning line.
+- **Detaching.** Perk's wait can end while the tab stays open — abort-a-wait ≠ stop-a-server
+  (Plannotator's server is never stopped; a fixed port it still holds keeps refusing a second
+  open, §8.4). Three causes, each replacing the code-owned `perk:wave` marker on the still-owned
+  surface with `reviewDetachedStatus(cause)` (`providers/waveStatus.ts`): `replaced` (a newer
+  door open; one info line names the replacement), `interrupted` (an external turn abort settled
+  the bridge `aborted` — silent in-session, the marker pushed before the clear), `session-ended`
+  (`session_shutdown` for `reload`/`new`/`resume`/`fork`; `quit` aborts without a push). Every
+  detach push reports through a muted target (silent in-session for every outcome), is bounded
+  (≤ 2 s), is attempted immediately (readiness only gates its retries) and persists nothing; a
+  degraded, closed or re-primed surface gets no push.
+- **The drain.** An admitted decision (`onDecision` in flight — a save) is drained before the
+  abort, at replacement and at `session_shutdown` (≤ 60 s; on expiry one warning naming the
+  run-id check, `decisionDrainExpiredWarning`, and the detach proceeds): the backend save is
+  non-abortable and its session reconciliation needs a live ctx, and `session_shutdown` is
+  awaited before Pi invalidates the old activation. After shutdown every late wake of the old
+  activation's tasks is silent.
+- **The plan door's APPROVED line.** `completePlanReviewV1` returns `PlanReviewCompletion
+  {result, saved}` from ONE render of the save (`saved` = the saved arm's typed `PlanSaveOk` +
+  its single-line message); the line is `info` "plan APPROVED in the browser — saved" unless
+  `planSaveNeedsRepair(saved.details)` (a failed node advance, a held session link or claim
+  clear), then `warning` "plan APPROVED in the browser — saved; <save message>"; a failed save
+  stays the `error` line.
 
 **The bridge** (`extension/pi/v1/providers/plannotator.ts`): `requestPlannotatorPlanReview(bus,
 plan, signal?)` → `Promise<ReviewOutcome>`; `createPlannotatorBridge(bus)` → `{review(plan,
@@ -5459,10 +5522,11 @@ emitted remains unrecoverable — the human re-runs the door.
   via `push_annotations` (plan mode) after collection, and the browser decision routed through the existing
   approval seams — the objective APPROVE arm applies the Direct-Edits carve-out above (a
   revise round, nothing saved). Both doors open the current-review slot before launching and
-  route the decision through the ladder ("Draft-review guards" above). Door mechanics — the
-  launch chooser, port/readiness handling, wave lifecycle, abort ordering, prime/clear
-  lifecycle, and the accepted concurrency behavior — live in the owning modules:
-  `extension/pi/v1/planReviewBrowser.ts` + `extension/pi/v1/objectiveReviewBrowser.ts` (over
+  route the decision through the ladder ("Draft-review guards" above). The browser lifecycle —
+  port/readiness handling, abort, the prime/clear lifecycle, replacement (detach) and shutdown —
+  is the browser-operation owner's ("The browser-operation owner" above); the launch chooser and
+  the subject hooks live in the door modules: `extension/pi/v1/planReviewBrowser.ts` +
+  `extension/pi/v1/objectiveReviewBrowser.ts` (over `pi/v1/browserOperation.ts`,
   `pi/v1/providers/plannotatorHandoff.ts` + `pi/v1/draftReviewWaveTools.ts`). Bindings:
   `command:plan-review-browser` → `perk-plan-review-browser`;
   `command:objective-review-browser` → `perk-objective-review-browser` (nudge, §8.9).
@@ -7426,7 +7490,9 @@ workflow's own completion alone settles it; the three lineage fields are never r
 
 Timeout without completion, interrupted sessions and cross-reload recovery are unsupported.
 Collection is per activation: a wave launched before a `/reload` or a session switch is never
-collectable afterwards (pending records live in the activation's wave instance). A same-session
+collectable afterwards (pending records live in the activation's wave instance); a draft door's
+browser is marked detached at that shutdown (§8.23 "The browser-operation owner") — a
+browser-side notice only, never collection, resume or reuse. A same-session
 `/reload` still delivers the engine's queued completion notice and its `Subagent updates above.`
 wake prompt to the new runtime (a session switch does not); the collect tools answer `no_wave`
 with a detail naming the rule.

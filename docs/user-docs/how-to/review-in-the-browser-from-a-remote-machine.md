@@ -85,14 +85,15 @@ In remote mode Plannotator binds `0.0.0.0`. Keep the review ports closed in the 
 
 Two perk sessions take two ports — from the range in Lane A, a fresh port each in Lane B — and
 both tabs stay live. Inside one session perk keeps one current review: a second
-`/plan-review-browser` supersedes the first, whose tab stays open but whose verdict is ignored with
-a warning.
+`/plan-review-browser` replaces the first, whose tab is marked detached (replaced) — its decision
+is no longer routed; decide in the newer tab.
 
 A single fixed port — an explicit `PLANNOTATOR_PORT=19432`, or the `19432` remote default when
 `PLANNOTATOR_PORT` is unset — allows one browser review at a time. While any review, in this
 session or another, still holds the port, perk's browser doors refuse with
 `Plannotator port 19432 is in use` instead of reaching into that review. Decide the open review
-first, or switch to a range or to `PLANNOTATOR_PORT=0`. (The plain `plan_review` browser review
+first — a second door open detaches it even when that open is then refused — or switch to a range
+or to `PLANNOTATOR_PORT=0`. (The plain `plan_review` browser review
 keeps Plannotator's own handling: it replaces an abandoned review from the same session.)
 
 ## Troubleshooting

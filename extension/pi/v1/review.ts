@@ -323,9 +323,10 @@ export function approvedSubjectSaveResult(
  * `planReviewBrowser.ts` value-imports the review arms). `present` is the plannotator
  * presence probe (`plannotatorPresent(pi)` at the call site); `plan`/`objective` are the
  * guidance-returning door open cores (`openPlanReviewSurface` / `openObjectiveReviewSurface`) —
- * one open path, byte-identical door semantics (contracts.md §8.23). `null` from an opener is
- * the synchronous port-pick failure (already loudly reported inside the core) — the caller
- * falls open to the plain blocking review.
+ * one open path, byte-identical door semantics (contracts.md §8.23). `null` from an opener means
+ * the browser-operation owner launched nothing — the port-pick failure (already loudly reported)
+ * or a newer open that retired this one first — and the caller falls open to the plain blocking
+ * review.
  */
 export interface WaveLaunch {
   present(): boolean;

@@ -310,6 +310,21 @@ shown while any begun wait is unended. Never a spinner, a working state, a liven
 per-interaction record.
 _Avoid_: status, working indicator, spinner, liveness
 
+**Browser-operation owner**:
+The one per-activation object, above the current-review slot and the Plannotator handoff, that
+owns a browser review's start, companion priming, readiness and decision observation,
+replacement, background tasks, console interception and cleanup for the browser doors (the
+plan/objective draft doors now; the PR/stack doors when they adopt it). Subjects keep save,
+Direct-Edits, destination and publication rules; the slot keeps decision authority.
+_Avoid_: door session, review controller
+
+**Detached review**:
+A browser review whose perk wait is over while its tab stays open — replaced by a newer door
+open, interrupted by a turn abort, or orphaned by a session reload/replacement. Perk marks it so
+in the tab's `perk:wave` slot after draining any admitted decision; nothing is persisted, nothing
+resumed, and Plannotator's server is never stopped.
+_Avoid_: superseded review (that is the slot's term), stopped review, closed server
+
 ### Objective delivery
 
 **Incremental delivery**:
