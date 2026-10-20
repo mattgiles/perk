@@ -279,6 +279,12 @@ def test_match_rule_representative_cases() -> None:
     assert "objective_stack_status" in eligible("plan", "read-only")
     assert "objective_stack_status" in eligible("objective-refine", "read-only")
     assert "objective_stack_status" not in eligible("objective-author", "read-only")
+    # The nested view (contracts.md §8.40, the nested policy): the gate-eligible query runs
+    # through another tool; a bounded writer, an action and the extension builtin never do.
+    assert "objective_stack_status" in eligible("plan", "nested")
+    for name in ("plan_draft", "push_annotations", "tool_search"):
+        assert name not in eligible("plan", "nested"), name
+    assert "plan_draft" in eligible("plan", "read-only")
     assert referenced_tools("`land` and explore_objective_node") == [
         "explore_objective_node",
         "land",

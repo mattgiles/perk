@@ -9,6 +9,12 @@
 // is `unknown` (passes every diet, blocked under the gate). Nothing here enumerates a foreign tool
 // name save the one in-package exception row.
 //
+// Two gate arms, derived from the same classification: the GATE arm (`isEligible` under
+// `read-only`) governs every call under the gate; the NESTED arm (`nestedPostureFor`) further
+// narrows a call another tool makes through `ctx.executeTool` — only a gate-eligible perk query,
+// a core builtin read (`bash` by verdict) and a foreign tool by its gate posture run nested.
+// Hiding, deferral, discovery and `readOnlyHint` never grant a nested call.
+//
 // Activation is own-names-only: perk installs and removes ONLY catalogued names
 // (`reconcileTarget`); foreign eligibility is presented by hiding declarations
 // (`hiddenDeclarationsFor`, run by the `perk_stage` loadout host) and enforced by the read-only
@@ -293,6 +299,9 @@ export function validateToolPolicy(
   if (typeof policy.gated === "object" && policy.gated.carveOut.trim() === "") {
     fail("a carve-out must name its bounded write");
   }
+  if (policy.kind === "query" && typeof policy.gated === "object") {
+    fail("a query never writes — gated must be allowed or blocked");
+  }
   if (policy.declared === "deferred" && MODEL_ONLY_KINDS.has(policy.kind)) {
     fail(
       `declared: "deferred" requires kind query or action — a ${policy.kind} tool is model-only, and a model-only tool can never be script-callable (exposure is one enum)`,
@@ -359,7 +368,7 @@ export type BuiltinPosture = "allowed" | "blocked" | "verdict";
 export type Posture =
   | { owner: "perk"; policy: ToolPolicy }
   | { owner: "foreign"; posture: ForeignPosture; key: string }
-  | { owner: "builtin"; gated: BuiltinPosture }
+  | { owner: "builtin"; gated: BuiltinPosture; registrar: "core" | "extension" }
   | { owner: "unknown" };
 
 /** Each foreign posture's eligibility row: the stages it is eligible in and its gate posture. */
@@ -459,7 +468,9 @@ export type BuiltinRow = {
  * Pi's builtin tools (provenance `source: "builtin"`), never stage-scoped. `registrar: "core"`
  * are the core tools; `extension` the CLI's builtin extensions. `bash` runs under the gate only
  * through `readOnlyBashVerdict`. `tool_search` is a read (what it activates is governed by this
- * table and the reconciliation). `codemode` is blocked AND suspended under the gate — the one
+ * table and the reconciliation). Nested under the gate only the `core` rows keep their posture
+ * (`nestedPostureFor`); every `extension` row (`tool_search`, `codemode`) is blocked nested — the
+ * discriminator `/btw` uses too. `codemode` is blocked AND suspended under the gate — the one
  * non-perk tool the gate ever deactivates: its description embeds the callable direct tools'
  * schemas (`edit`/`write` included), and in mode `only` its own loadout hook hides every callable
  * direct tool, so a hidden-but-active codemode would leave a gated session without `read`, `bash`
@@ -494,7 +505,7 @@ export function postureFor(name: string, provenance: Provenance | undefined): Po
   }
   if (provenance.source === "builtin" && Object.hasOwn(BUILTIN_TOOL_POLICY, name)) {
     const row = BUILTIN_TOOL_POLICY[name];
-    if (row !== undefined) return { owner: "builtin", gated: row.gated };
+    if (row !== undefined) return { owner: "builtin", gated: row.gated, registrar: row.registrar };
   }
   const key = normalizePackageSpec(provenance.source);
   if (Object.hasOwn(PACKAGE_TOOL_POLICY, key)) {
@@ -505,6 +516,30 @@ export function postureFor(name: string, provenance: Provenance | undefined): Po
     }
   }
   return { owner: "unknown" };
+}
+
+/**
+ * A tool's posture for a NESTED call under the gate — one another tool makes through
+ * `ctx.executeTool` (contracts.md §8.40, the nested policy). It narrows, never widens, the gate
+ * arm: a perk tool runs nested only as a gate-allowed query (carve-out writers, actions and the
+ * model-only kinds are blocked); a builtin keeps its gate posture only when the core registered
+ * it (`bash` stays `verdict`; every extension builtin is blocked); a foreign tool keeps its
+ * existing gate posture; an unknown one is blocked. Reads the classification only — never a name
+ * or an annotation.
+ */
+export function nestedPostureFor(posture: Posture): BuiltinPosture {
+  switch (posture.owner) {
+    case "perk": {
+      const { policy } = posture;
+      return policy.kind === "query" && policy.gated === "allowed" ? "allowed" : "blocked";
+    }
+    case "builtin":
+      return posture.registrar === "core" ? posture.gated : "blocked";
+    case "foreign":
+      return POSTURE_ROWS[posture.posture].gated;
+    case "unknown":
+      return "blocked";
+  }
 }
 
 // --- the formula + the derived views ------------------------------------------------------------
@@ -736,18 +771,27 @@ export function sameNames(a: readonly string[], b: readonly string[]): boolean {
 
 // --- the golden matrix --------------------------------------------------------------------------
 
-/** One tool's row in the golden matrix (`shared/fixtures/tool-matrix.json`). */
+/**
+ * One tool's row in the golden matrix (`shared/fixtures/tool-matrix.json`). `gated` is the gate
+ * arm; `nested` the nested arm beside it (`nestedPostureFor`).
+ */
 export type ToolMatrixEntry =
   | {
       owner: "perk";
       kind: ToolKind;
       stages: string[];
       gated: "allowed" | "blocked" | "carve-out";
+      nested: BuiltinPosture;
       mode_over_stage: boolean;
       declared: Declared;
       exposure: PiToolMetadata["exposure"];
     }
-  | { owner: "builtin"; gated: BuiltinPosture; registrar: "core" | "extension" };
+  | {
+      owner: "builtin";
+      gated: BuiltinPosture;
+      nested: BuiltinPosture;
+      registrar: "core" | "extension";
+    };
 
 /** One foreign posture row as the matrix renders it. */
 export type PostureMatrixEntry = {
@@ -769,7 +813,11 @@ export type ToolMatrix = {
     paths: Record<string, PostureMatrixEntry>;
     unknown: { stages: "all"; gated: "blocked" };
   };
-  eligible: Record<string, { "read-only": string[]; "read-write": string[] }>;
+  /**
+   * Per landing: the gate-OFF and gate-ON eligible names, and `nested` — the `read-only` names a
+   * nested call may still reach under the gate (`bash` listed as the verdict row).
+   */
+  eligible: Record<string, { "read-only": string[]; "read-write": string[]; nested: string[] }>;
 };
 
 /** The matrix's key for the unscoped (`null`) landing. */
@@ -789,7 +837,12 @@ function postureEntry(posture: ForeignPosture): PostureMatrixEntry {
 export function toolMatrix(): ToolMatrix {
   const tools: Record<string, ToolMatrixEntry> = {};
   for (const [name, row] of Object.entries(BUILTIN_TOOL_POLICY)) {
-    tools[name] = { owner: "builtin", gated: row.gated, registrar: row.registrar };
+    tools[name] = {
+      owner: "builtin",
+      gated: row.gated,
+      nested: nestedPostureFor({ owner: "builtin", gated: row.gated, registrar: row.registrar }),
+      registrar: row.registrar,
+    };
   }
   for (const [name, policy] of CATALOG) {
     tools[name] = {
@@ -797,6 +850,7 @@ export function toolMatrix(): ToolMatrix {
       kind: policy.kind,
       stages: registryOrdered(policy.stages),
       gated: typeof policy.gated === "object" ? "carve-out" : policy.gated,
+      nested: nestedPostureFor({ owner: "perk", policy }),
       mode_over_stage: policy.modeOverStage === true,
       declared: policy.declared ?? "always",
       exposure: derivePiMetadata(policy).exposure,
@@ -822,9 +876,11 @@ export function toolMatrix(): ToolMatrix {
     );
   const eligible: ToolMatrix["eligible"] = {};
   for (const stage of [...REGISTRY_STAGE_IDS, null]) {
+    const readOnly = sorted([...perkToolsFor(stage, "read-only"), ...builtinsFor("read-only")]);
     eligible[stage ?? UNSCOPED_MATRIX_KEY] = {
-      "read-only": sorted([...perkToolsFor(stage, "read-only"), ...builtinsFor("read-only")]),
+      "read-only": readOnly,
       "read-write": sorted([...perkToolsFor(stage, "read-write"), ...builtinsFor("read-write")]),
+      nested: readOnly.filter((name) => tools[name]?.nested !== "blocked"),
     };
   }
   return {
