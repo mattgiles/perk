@@ -276,9 +276,9 @@ export function activatePerk(
   const draftReviewWave = createDraftReviewWaveState();
 
   // The annotation-push per-activation state: ONE instance serves the `push_annotations`
-  // installer and every priming door — the PR/stack review doors (review mode) and the
-  // plan/objective review doors (plan mode) — per activation, never per process (the
-  // `draftReviewWave` threading pattern).
+  // installer and the browser-operation owner that primes it for every browser door — the
+  // PR/stack review doors (review mode) and the plan/objective review doors (plan mode) — per
+  // activation, never per process (the `draftReviewWave` threading pattern).
   const annotations = createAnnotationState();
 
   // The composition root's ONE per-activation report-wave instance (the `draftReviewWave`
@@ -340,14 +340,14 @@ export function activatePerk(
   // `PLANNOTATOR_PORT` single or range, `19432` when remote, else ephemeral), resolved ONCE here,
   // BEFORE any door presets `PLANNOTATOR_PORT`: perk's own transient preset lives in the same
   // variable, so an open-time read could mistake a sibling door's preset for the operator's
-  // setting. Threaded into every browser door, never module state (the annotations /
-  // draftReviewWave pattern).
+  // setting. Threaded into the browser-operation owner every browser door opens through, never
+  // module state (the annotations / draftReviewWave pattern).
   const browserDeps: StartBrowserDeps = { ports: resolvePlannotatorPorts(process.env) };
 
-  // The ONE per-activation browser-operation owner (§8.23): every draft browser door opens
-  // through it — start, companion priming, readiness/decision observation, replacement
-  // (detach-before-start), console interception and cleanup — and `session_shutdown` detaches
-  // its live operation. Holds the activation's annotation state, gating primes, status handle
+  // The ONE per-activation browser-operation owner (§8.23): every browser door opens through it
+  // (the plan/objective draft doors and the PR/stack code-review doors) — start, companion
+  // priming, readiness/decision observation, replacement (detach-before-start, across doors),
+  // console interception and cleanup — and `session_shutdown` detaches its live operation. Holds the activation's annotation state, gating primes, status handle
   // and port selection (no hidden module state).
   const browserOwner = createBrowserOperationOwner(pi, {
     annotations,
@@ -827,9 +827,9 @@ export function activatePerk(
   // primed browser surface).
   registerDraftReviewWaveTools(pi, gating, draftReviewWave, reportWave, annotations);
 
-  // The door-primed browser annotation tool (`push_annotations`): the browser door primes the
-  // surface handle on open and clears it on settle/degrade — the tool refuses outside a
-  // door-opened flow.
+  // The door-primed browser annotation tool (`push_annotations`): the browser-operation owner
+  // primes the surface handle on a door's open and clears it on settle/degrade/detach — the tool
+  // refuses outside a door-opened flow.
   installAnnotationBindings(pi, annotations);
 
   // The warm `/pr-review-terminal` door: the terminal review entry — hunk always, no provider
@@ -837,15 +837,16 @@ export function activatePerk(
   installPrReviewTerminalBindings(pi, gating);
 
   // The warm `/pr-review-browser` door: the browser review entry — plannotator always, opened
-  // in the background (pre-PR it absorbs the since-base local browser review); posting is the
-  // human's own platform-post from the UI, with `submit_pr_review` for request-changes only.
-  installPrReviewBrowserBindings(pi, gating, annotations, perkStatus, browserDeps);
+  // in the background through the browser-operation owner (pre-PR it absorbs the since-base
+  // local browser review, outside the owner); posting is the human's own platform-post from the
+  // UI, with `submit_pr_review` for request-changes only.
+  installPrReviewBrowserBindings(pi, browserOwner);
 
   // The warm `/stack-review-browser` door + its cold-launch twin (`open_stack_review`): the
   // stacked-PR browser review over the pinned combined base→top patch — one reviewer wave with
   // `stack: true` bound to the same pins, then judgment-routed per-PR posting through
-  // `submit_pr_review`.
-  installStackReviewBindings(pi, gating, annotations, perkStatus, stackPin, browserDeps);
+  // `submit_pr_review`. Both openers go through the browser-operation owner.
+  installStackReviewBindings(pi, browserOwner, stackPin);
 
   // The warm `/plan-review-browser` door: the summonable streaming draft review — the
   // plannotator plan-review browser on the working plan draft, draft reviewers streaming

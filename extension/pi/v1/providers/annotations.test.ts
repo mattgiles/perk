@@ -674,6 +674,34 @@ test("execute: dedupe skips pushed anchors — same angle, cross-angle, and intr
   assert.equal(posted.annotations[0]?.filePath, "src/new.ts");
 });
 
+test("review dedupe: LEFT@n then RIGHT@n at one path collapse to one anchor (side is not identity — contracts §8.4)", async () => {
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  const left = await executePushAnnotations(
+    state,
+    target,
+    { angle: "correctness", findings: [reviewFinding({ side: "LEFT", body: "the removed line" })] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal((left.details as OkDetails).pushed, 1);
+  const posted = endpoint.calls[0]?.body as { annotations: { side?: string }[] };
+  assert.equal(posted.annotations[0]?.side, "old", "the first push lands on the old side");
+  // The same path + line on the other side — a distinct body under another angle — is the SAME
+  // anchor: skipped, never refused (the parent merges distinct concerns at one anchor first).
+  const right = await executePushAnnotations(
+    state,
+    target,
+    { angle: "tests", findings: [reviewFinding({ side: "RIGHT", body: "the added line" })] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal(right.details.ok, true);
+  const rightDetails = right.details as OkDetails;
+  assert.equal(rightDetails.pushed, 0);
+  assert.deepEqual(rightDetails.skipped, ["line:src/a.ts:3"]);
+  assert.equal(endpoint.calls.length, 1, "no second POST");
+});
+
 test("execute: a network failure holds the batch (ok, never a degrade); [] flushes FIFO", async () => {
   primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target, notified } = fakeTarget();

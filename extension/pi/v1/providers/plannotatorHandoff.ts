@@ -1,8 +1,11 @@
-// The plannotator browser-review substrate serving `/pr-review-browser` and
-// `/plan-review-browser`'s plan-review open: the presence probe, the pinned `code-review` event envelope + annotation
-// decode, the active-PR resolution ladder, the respond routing, and the composable browser-open
-// core (port preset + readiness poll) in BOTH flavors — code review
-// (`startPlannotatorBrowser`) and plan review (`startPlannotatorPlanReview`).
+// The plannotator browser-review substrate serving the browser doors: the presence probe, the
+// pinned `code-review` event envelope + annotation decode, the active-PR resolution ladder, the
+// respond routing, and the composable browser-open core (port preset + readiness poll) in BOTH
+// flavors — code review (`startPlannotatorBrowser`: `/pr-review-browser`'s PR modes,
+// `/stack-review-browser`, `open_stack_review`) and plan review (`startPlannotatorPlanReview`:
+// the draft doors). Every door starts its flavor through the activation's browser-operation
+// owner (`browserOperation.ts`), which owns the start, the priming, readiness, the decision and
+// replacement; only the pre-PR local review calls the bare bridge (`requestPlannotatorCodeReview`).
 //
 // pi exposes NO API for one extension to invoke another's slash command (`sendUserMessage` sends
 // text to the model; `steer`/`followUp` ERROR on slash commands). So perk cannot literally call
@@ -68,7 +71,15 @@
 // applies only to the plain `plan_review` arm, which presets nothing. Two perk processes on one
 // range are independent (each takes its own free port). Residual, loud: a port taken between the
 // probe and plannotator's bind fails `Port <n> in use` → an `error` respond → the bridge settles
-// error/unavailable → the door degrades.
+// error/unavailable → the door degrades. Residual, late bind: perk's abort settles only its own
+// wait — nothing cancels plannotator's in-flight `openCodeReview` (its PR path authenticates,
+// fetches and checks out BEFORE its server binds, reading `PLANNOTATOR_PORT` then). The owner
+// serializes the preset windows (a replaced review's poll restores the env before the successor
+// presets), so a replaced review's late bind normally takes plannotator's own resolution — but a
+// bind landing INSIDE the successor's preset window takes the successor's port: the successor's
+// `/api/diff` probe cannot tell the two servers apart, and the successor's own bind then fails
+// `Port <n> in use` (its bridge settles error → degrade). Unfixable without a cancellable
+// plannotator request; documented, not engineered around.
 
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -591,7 +602,7 @@ export interface StartedSurface<T> {
   readiness: Promise<BrowserReadiness>;
 }
 
-/** The code-review flavor of a started open (the original name — `/pr-review-browser` imports it). */
+/** The code-review flavor of a started open (the original name, kept for the code-review callers). */
 export type StartedBrowser = StartedSurface<CodeReviewOutcome>;
 
 /**
@@ -610,8 +621,9 @@ export type StartedBrowser = StartedSurface<CodeReviewOutcome>;
  *
  * The `activity` sink carries the one perk-owned wait an operator cannot otherwise see: begun
  * when readiness resolves `ready` while the bridge is still pending, ended when the bridge
- * settles (fulfilled OR rejected). The handle's counter arbitrates the doors' accepted
- * double-open (see the door headers) — this instance ends only ITS wait.
+ * settles (fulfilled OR rejected). The handle's counter stays the backstop for overlapping waits
+ * (the owner retires a replaced review before the next begins) — this instance ends only ITS
+ * wait.
  */
 async function startPlannotatorSurface<T>(
   launch: (signal?: AbortSignal) => Promise<T>,

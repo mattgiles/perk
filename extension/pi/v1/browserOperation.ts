@@ -1,14 +1,28 @@
 // The browser-operation owner: the ONE per-activation object every browser door opens its
-// plannotator review through (created in the composition root; the plan/objective doors today —
-// the PR/stack doors adopt the same interface). It sits above `DraftReviewSlot` and the
-// Plannotator handoff and owns, for each operation it opens: the start (port pick + env preset
-// through the door's handoff flavor), the companion-surface priming (the annotation surface, the
-// door's companion context, the deferred-tool primes), readiness observation, decision
-// observation with the tracked in-flight routing, replacement, the background tasks (their
-// failures observed, never unhandled), console interception and cleanup. Subjects keep save,
-// Direct-Edits, destination and publication rules (the door's `onDecision`); the slot keeps
-// decision authority (the door's ladder); all presentation stays `report()` +
-// `pi.sendUserMessage`.
+// plannotator review through (created in the composition root) — the draft doors
+// (`/plan-review-browser`, `/objective-review-browser`, the plan-review flavor) and the
+// code-review doors (`/pr-review-browser`'s PR modes, `/stack-review-browser` and
+// `open_stack_review`). It sits above `DraftReviewSlot` and the Plannotator handoff and owns, for
+// each operation it opens: the start (port pick + env preset through the door's handoff flavor),
+// the companion-surface priming (the annotation surface, the door's companion context, the
+// deferred-tool primes), readiness observation, decision observation with the tracked in-flight
+// routing, replacement, the background tasks (their failures observed, never unhandled), console
+// interception and cleanup. Subjects keep save, Direct-Edits, destination and publication rules
+// (the door's `onDecision`); the slot keeps decision authority (the draft door's ladder); all
+// presentation stays `report()` + `pi.sendUserMessage`. Because every door shares the one owner,
+// any door's open replaces any other door's live review (a PR open retires a draft review —
+// marker, companion clear, abort — and vice versa).
+//
+// THE TWO FLAVORS. The draft doors pass a companion (the draft-review wave context) and an
+// applicability fence (`review.isCurrent`); the code-review doors pass neither — they have no
+// companion context and no slot, so they are always applicable and their surfaces are the
+// annotation surface alone (`mode: "review"`, `settle: settleCodeReviewOutcome`).
+//
+// THE START REFUSAL. A door whose source must be re-checked at the moment of launch (the stack
+// door re-verifies its pinned patch digest — the start can wait on a predecessor's retirement)
+// throws `BrowserStartRefusal` from `spec.start` before emitting anything: the owner reports
+// its message verbatim and returns `failed {refused}`; any other start throw is the port-pick
+// failure line and a bare `failed`.
 //
 // THE BACKGROUND OPEN: the server URL is deterministic the moment the port is picked, so `open`
 // starts the handoff, primes, launches two background tasks and returns the URL — the door
@@ -55,15 +69,18 @@
 // ONE DEGRADE OWNER PER TERMINAL: the decision task degrades a settled-`unavailable` bridge (one
 // error line naming the bridge's warning, then the degrade); the observer degrades a `timeout`
 // and never races a settled bridge (`bridge_settled` is the decision task's). `degrade` is
-// idempotent and gated by BOTH fences; a degraded operation stays current (a later decision is answered with one warning;
-// a later open detaches it).
+// idempotent and gated by BOTH fences; a degraded operation stays current (a later open detaches
+// it). THE POST-DEGRADE RULE, one for every door: a decided outcome arriving after the degrade
+// is answered with one warning naming the re-run (`postDegradeDecisionWarning`) and never
+// reaches `onDecision` — the degrade notice already moved the flow in-session and cleared the
+// surface, so a late browser verdict carries nothing perk can route.
 //
 // Accepted edges: a network-failed marker push before readiness marks nothing (the unit dies
 // with the clear); a push, quiesce or drain outliving its budget is abandoned — only the drain
 // says so (a human-approved save is at stake); an early human decision mid-wave clears only the
 // companion CONTEXT (a still-pending wave stays collectable, the wave module's timeout is the
-// orphan insurance); a successor whose start fails after its predecessor was retired leaves no
-// browser review (the slot already moved at door entry).
+// orphan insurance); a successor whose start fails (or refuses) after its predecessor was
+// retired leaves no browser review (a draft door's slot already moved at door entry).
 
 import type { ExtensionContext, SessionShutdownEvent } from "@earendil-works/pi-coding-agent";
 import {
@@ -84,6 +101,7 @@ import {
   resumeAnnotationDelivery,
 } from "./providers/annotations.ts";
 import type {
+  CodeReviewOutcome,
   RespondSink,
   StartBrowserDeps,
   StartedSurface,
@@ -124,11 +142,11 @@ export function detachedDecisionWarning(cause: ReviewDetachCause): string {
   );
 }
 
-/** A decided outcome that arrived after the review degraded — never routed into a save. */
+/** A decided outcome that arrived after the review degraded — never routed (every door). */
 export function postDegradeDecisionWarning(scope: string): string {
   return (
-    "a browser decision arrived after the review degraded — ignored (nothing saved); " +
-    `re-run /${scope} to review the current draft`
+    "a browser decision arrived after the review degraded — ignored (nothing routed, nothing " +
+    `saved); re-run /${scope} to review again`
   );
 }
 
@@ -173,13 +191,16 @@ export interface BrowserLaunch {
 export interface BrowserOperationSpec<T> {
   /** The door's report scope — also its command name (`re-run /<scope>`). */
   scope: string;
-  /** The handoff flavor bound by the door. */
+  /**
+   * The handoff flavor bound by the door. A launch-time source check throws
+   * `BrowserStartRefusal` before anything is emitted.
+   */
   start(launch: BrowserLaunch): Promise<StartedSurface<T>>;
-  /** The annotation mode primed for this browser ("plan" for the draft doors). */
+  /** The primed annotation mode ("plan": the draft doors; "review": the code-review doors). */
   mode: AnnotationMode;
   /** The deferred tools the door's guidance names (`gating.primeDeferred` at prime time). */
   primes: readonly string[];
-  /** The door's companion context (the draft-review context for the draft doors). */
+  /** The door's companion context (the draft doors' draft-review context; code review: none). */
   companion?: { prime(): void; clear(): void };
   /**
    * The door-supplied applicability fence for observer EMISSIONS (announce/degrade): the draft
@@ -196,14 +217,27 @@ export interface BrowserOperationSpec<T> {
 
 /**
  * What `open` launched: `opened` (started and primed — the URL is deterministic); `failed`
- * (nothing launched — the start failed and was reported loudly); `retired` (nothing launched — a
- * newer open or the shutdown retired this one before it started; the newer open's guidance
- * stands, so a caller must never fall back to another review surface on this arm).
+ * (nothing launched — the start failed and was reported loudly; `refused` carries the message
+ * of a door's `BrowserStartRefusal`, absent for a port-pick failure); `retired` (nothing
+ * launched — a newer open or the shutdown retired this one before it started; the newer open's
+ * guidance stands, so a caller must never fall back to another review surface on this arm).
  */
 export type BrowserOpenResult =
   | { readonly kind: "opened"; readonly url: string }
-  | { readonly kind: "failed" }
+  | { readonly kind: "failed"; readonly refused?: string }
   | { readonly kind: "retired" };
+
+/**
+ * A door's launch-time refusal, thrown from `spec.start` BEFORE the handoff emits anything (the
+ * stack door's re-verified patch digest). The owner reports the message verbatim (no port-pick
+ * prefix) and returns `failed {refused: message}`.
+ */
+export class BrowserStartRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BrowserStartRefusal";
+  }
+}
 
 /** The ctx slice the owner needs (`ExtensionContext` satisfies it; tests fake it). */
 export type BrowserOperationContext = ReportTarget &
@@ -234,6 +268,23 @@ export function settleReviewOutcome(out: ReviewOutcome): BrowserSettlement {
     case "dismissed":
     case "implement-here":
       // dismissed/implement-here are first-party only — the bridge never produces them.
+      return { kind: "aborted" };
+  }
+}
+
+/**
+ * The `CodeReviewOutcome` classifier the code-review doors pass as `settle`. A `handled` reply is
+ * a decision whatever it carries — the `exit` (closed without feedback) arm included: the door's
+ * respond mapper renders it.
+ */
+export function settleCodeReviewOutcome(out: CodeReviewOutcome): BrowserSettlement {
+  switch (out.status) {
+    case "handled":
+      return { kind: "decided" };
+    case "unavailable":
+    case "error":
+      return { kind: "unavailable", warning: out.warning };
+    case "aborted":
       return { kind: "aborted" };
   }
 }
@@ -589,19 +640,23 @@ export function createBrowserOperationOwner(
         });
       } catch (error) {
         const retired = !live(op);
+        const refusal = error instanceof BrowserStartRefusal ? error : null;
         if (!retired) {
           report(
             ctx,
             spec.scope,
             "error",
-            `could not pick a free local port for the plannotator ${SERVER_NOUN[spec.mode]} ` +
-              `server: ${detailOf(error)}`,
+            refusal !== null
+              ? refusal.message
+              : `could not pick a free local port for the plannotator ${SERVER_NOUN[spec.mode]} ` +
+                  `server: ${detailOf(error)}`,
             { alsoLog: true },
           );
         }
         close(op);
         op.quiesced.resolve();
-        return retired ? { kind: "retired" } : { kind: "failed" };
+        if (retired) return { kind: "retired" };
+        return refusal !== null ? { kind: "failed", refused: refusal.message } : { kind: "failed" };
       }
       // Quiesced = the readiness poll ended (its `finally` restored the env var it captured).
       void started.readiness.then(

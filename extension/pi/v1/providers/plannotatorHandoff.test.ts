@@ -18,6 +18,7 @@ import {
 import {
   type BrowserLaunch,
   createBrowserOperationOwner,
+  settleCodeReviewOutcome,
   settleReviewOutcome,
 } from "../browserOperation.ts";
 import { createAnnotationState } from "./annotations.ts";
@@ -1509,10 +1510,12 @@ test("default probe wiring: each wrapper's default probe fetches its own flavor'
 });
 
 /**
- * The REAL plan-review handoff composed by a browser-operation owner: a fake bus answering each
- * handshake pending (`rev-w<n>`), every readiness poll parked on its own sleep until the test
- * releases it (the non-abortable sleep), and `envLog` — the env value at each port pick, each
- * bridge emit, and whenever the test records it.
+ * The REAL handoffs composed by a browser-operation owner: a fake bus answering each plan-review
+ * handshake pending (`rev-w<n>`; a code-review request is never answered — it responds once, at
+ * the end), every readiness poll parked on its own sleep until the test releases it (the
+ * non-abortable sleep), and `envLog` — the env value at each port pick, each bridge emit, and
+ * whenever the test records it. `spec` is the plan-review flavor, `codeSpec` the code-review one
+ * (the PR/stack doors' shape: mode `review`, no companion, no applicability fence).
  */
 function ownerOverRealHandoff() {
   const bus = fakeBus();
@@ -1521,7 +1524,9 @@ function ownerOverRealHandoff() {
   bus.on("plannotator:request", (data) => {
     envLog.push(process.env.PLANNOTATOR_PORT);
     state.reviews += 1;
-    (data as PlanReviewEnvelope).respond({
+    const envelope = data as PlanReviewEnvelope;
+    if (envelope.action !== "plan-review") return;
+    envelope.respond({
       status: "handled",
       result: { status: "pending", reviewId: `rev-w${state.reviews}` },
     });
@@ -1577,11 +1582,74 @@ function ownerOverRealHandoff() {
         dependencies(port),
       ),
   });
+  const codeSpec = (port: number) => ({
+    scope: "pr-review-browser",
+    mode: "review" as const,
+    primes: [],
+    degradeNotice: "unavailable",
+    settle: settleCodeReviewOutcome,
+    onDecision: async () => {},
+    start: (launch: BrowserLaunch) =>
+      startPlannotatorBrowser(
+        bus,
+        {
+          cwd: "/wt",
+          source: { mode: "pr", prUrl: "https://github.com/o/r/pull/7" },
+          signal: launch.signal,
+          activity: launch.activity,
+        },
+        dependencies(port),
+      ),
+  });
   const flush = async (): Promise<void> => {
     for (let i = 0; i < 6; i++) await new Promise((resolve) => setImmediate(resolve));
   };
-  return { bus, envLog, state, parked, owner, ctx, spec, flush };
+  return { bus, envLog, state, parked, owner, ctx, spec, codeSpec, flush };
 }
+
+test("startPlannotatorBrowser through the browser-operation owner: a replacement serializes the PLANNOTATOR_PORT windows — the predecessor's restore never lands under the successor", async () => {
+  // Perk's own window serialization only: a replaced review whose plannotator setup is still in
+  // flight may bind later (the documented late-bind residual) — not pinned here.
+  const { envLog, state, parked, owner, ctx, codeSpec, flush } = ownerOverRealHandoff();
+  const prior = process.env.PLANNOTATOR_PORT;
+  process.env.PLANNOTATOR_PORT = "4242"; // the operator's value both polls must restore
+  try {
+    assert.deepEqual(await owner.open(ctx, codeSpec(46121)), {
+      kind: "opened",
+      url: "http://127.0.0.1:46121",
+    });
+    await flush();
+    assert.equal(parked.length, 1, "A's poll is parked on its sleep");
+    assert.equal(process.env.PLANNOTATOR_PORT, "46121", "A's window is open");
+
+    const openB = owner.open(ctx, codeSpec(46122));
+    await flush();
+    assert.equal(state.reviews, 1, "B has not started: A's window is still open");
+    assert.equal(process.env.PLANNOTATOR_PORT, "46121");
+    // A's poll wakes, sees the owner's abort, restores the ORIGINAL value and quiesces — only
+    // then does B pick and preset.
+    parked.shift()?.();
+    assert.deepEqual(await openB, { kind: "opened", url: "http://127.0.0.1:46122" });
+    await flush();
+    assert.equal(state.reviews, 2);
+    assert.equal(
+      process.env.PLANNOTATOR_PORT,
+      "46122",
+      "B's window is open — A never restored under it",
+    );
+
+    const shutting = owner.shutdown(ctx, "quit");
+    await flush();
+    parked.shift()?.();
+    await shutting;
+    envLog.push(process.env.PLANNOTATOR_PORT);
+    assert.deepEqual(envLog, ["4242", "46121", "4242", "46122", "4242"]);
+  } finally {
+    for (const release of parked) release();
+    if (prior === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = prior;
+  }
+});
 
 test("startPlannotatorPlanReview through the browser-operation owner: a replacement serializes the PLANNOTATOR_PORT windows — the predecessor's restore never lands under the successor", async () => {
   const { envLog, state, parked, owner, ctx, spec, flush } = ownerOverRealHandoff();

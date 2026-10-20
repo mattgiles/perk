@@ -1,21 +1,26 @@
 // Tests for the warm `/stack-review-browser` door + the `open_stack_review` cold-launch tool.
 // The pure pieces (the explicit target grammar, the snapshot/binding decodes, the guidance
-// render, the degrade notice) are pinned directly; the command/tool flows run against a REAL
-// bound session via the T1 harness, OFFLINE (a fake `perk` stands in for the cold doors, and a
-// fake plannotator extension registers the presence-probe command + a bus listener standing in
-// for the browser).
+// render, the degrade notice) are pinned directly; the execute core runs over a fake open seam
+// and over `openStackBrowser` on a REAL browser-operation owner (the launch-time digest
+// re-check); the command/tool flows run against a REAL bound session via the T1 harness,
+// OFFLINE (a fake `perk` stands in for the cold doors, and a fake plannotator extension
+// registers the presence-probe command + a bus listener standing in for the browser).
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer, type Server } from "node:http";
 import { join } from "node:path";
 import { test } from "node:test";
-import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import { workflowDir } from "../../../substrate/cache.ts";
 import { createPerkStatus } from "../../../surfaces/surfaces.ts";
 import {
   COHORT_SETTINGS,
-  fakeGating,
   fakePerk,
   loadPerkSession,
   plantSession,
@@ -25,7 +30,9 @@ import {
   toolSearch,
 } from "../../../testing/harness.ts";
 import { pinnedReviewContextCommand } from "../../../waves/adversarialReviewWave.ts";
-import { createAnnotationState } from "../providers/annotations.ts";
+import { createBrowserOperationOwner } from "../browserOperation.ts";
+import { createAnnotationState, type FetchLike } from "../providers/annotations.ts";
+import { reviewDetachedStatus } from "../providers/waveStatus.ts";
 import { REVIEW_BROWSER_PRIMES } from "./browser.ts";
 import { createStackPinState } from "./reviewWave.ts";
 import {
@@ -34,11 +41,14 @@ import {
   decodeStackCheckout,
   decodeStackReviewBinding,
   executeOpenStackReview,
+  openStackBrowser,
   parseStackReviewArgs,
   patchPathFor,
   pinnedStackOf,
   pinSupersedeRefusal,
   STACK_DEGRADE_NOTICE,
+  type StackBrowserOpen,
+  type StackOpenResult,
   type StackSnapshotRow,
   stackReviewGuidance,
   verifyStackPatch,
@@ -624,6 +634,115 @@ test("/stack-review-browser 77: objective argv, ONE guidance injection, the stat
   }
 });
 
+/** Every request a serving fake review server received. */
+interface ServedRequest {
+  port: number;
+  method: string;
+  url: string;
+  body: string;
+}
+
+/**
+ * A fake plannotator whose code-review server binds the preset port while the request is
+ * emitted (where real plannotator binds), answers the readiness probe, accepts annotation pushes
+ * and records every request; each envelope is kept for an explicit `respond`.
+ */
+function servingPlannotator(
+  sink: FakeBrowser,
+  served: { servers: Server[]; requests: ServedRequest[] },
+): (pi: ExtensionAPI) => void {
+  return (pi) => {
+    pi.registerCommand("plannotator-review", {
+      description: "fake plannotator (test)",
+      handler: async () => {},
+    });
+    pi.events.on("plannotator:request", (data) => {
+      sink.envelopes.push(data as CodeReviewEnvelope);
+      const port = Number(process.env.PLANNOTATOR_PORT);
+      const server = createHttpServer((req, res) => {
+        let body = "";
+        req.on("data", (chunk) => {
+          body += String(chunk);
+        });
+        req.on("end", () => {
+          served.requests.push({ port, method: req.method ?? "", url: req.url ?? "", body });
+          res.writeHead(req.method === "POST" ? 201 : 200, { "content-type": "application/json" });
+          res.end(req.method === "POST" ? '{"ids":[]}' : "{}");
+        });
+      });
+      server.listen(port, "127.0.0.1");
+      served.servers.push(server);
+    });
+  };
+}
+
+test("/stack-review-browser twice on the SAME pin replaces the earlier review (marker `replaced`) and rebinds the pin", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const planted = plantStackCheckout(cwd);
+  const bin = fakePerk(cwd, { stdout: planted.json });
+  const sink: FakeBrowser = { envelopes: [] };
+  const served: { servers: Server[]; requests: ServedRequest[] } = { servers: [], requests: [] };
+  const priorPort = process.env.PLANNOTATOR_PORT;
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [servingPlannotator(sink, served)],
+  });
+  const injected = spyInjections(h);
+  const settled = async () => {
+    const start = Date.now();
+    while (process.env.PLANNOTATOR_PORT !== priorPort && Date.now() - start < 5000) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
+  try {
+    await h.runCommandHandler("stack-review-browser", "77");
+    await settled();
+    const firstPort = served.requests[0]?.port ?? 0;
+    assert.ok(firstPort > 0, "the first review answered its readiness probe");
+    // The SAME pin again (e.g. a reopen from a fresh turn): the pin guard lets it through, and
+    // the owner replaces the first review rather than priming beside it.
+    await h.runCommandHandler("stack-review-browser", "77");
+    await settled();
+    assert.equal(sink.envelopes.length, 2, "two requests, one per open");
+    assert.equal(injected.length, 2, "each launched open injected its guidance");
+    const firstTab = served.requests.filter(
+      (r) => r.port === firstPort && r.url.startsWith("/api/external-annotations"),
+    );
+    assert.deepEqual(
+      firstTab.map((r) => `${r.method} ${r.url}`),
+      ["DELETE /api/external-annotations?source=perk%3Awave", "POST /api/external-annotations"],
+      "the first tab got the detached marker",
+    );
+    assert.ok(firstTab[1]?.body.includes(reviewDetachedStatus("replaced")));
+    assert.ok(
+      h.notifies.some((n) =>
+        n.includes("the earlier browser review (stack-review-browser) was replaced"),
+      ),
+    );
+    // The first review's late settle never clears the second's surface.
+    sink.envelopes[0]?.respond({ status: "handled", result: { approved: true } });
+    for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 5));
+    assert.equal(await sessionSurfacePrimed(h), true, "the second review's surface survives");
+    // The pin is (re)bound: a stack wave for this stack is no binding refusal.
+    const bound = await h.invokeTool("start_review_wave", {
+      angles: ["claimed-intent", "tests"],
+      pr: 42,
+      worktree: planted.checkoutPath,
+      stack: true,
+    });
+    const boundType = (bound.details as { error_type?: string }).error_type;
+    assert.notEqual(boundType, "bad_state");
+    assert.notEqual(boundType, "bad_input");
+  } finally {
+    await settleBridges(sink);
+    await Promise.all(
+      served.servers.map((server) => new Promise((resolve) => server.close(() => resolve(null)))),
+    );
+    h.dispose();
+  }
+});
+
 test("/stack-review-browser 77 in a discovery-cohort session: REVIEW_BROWSER_PRIMES are active when the guidance is sent", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const planted = plantStackCheckout(cwd);
@@ -955,51 +1074,81 @@ test("open_stack_review: success returns the guidance as ok text; second call is
   }
 });
 
-test("executeOpenStackReview: a stack wave pending against a DIFFERENT pin refuses bad_state before any open; the same pin proceeds", async () => {
+/**
+ * The execute-core scaffold over a claimed launch: a fake pi (plannotator present, a fake bus
+ * recording each `code-review` request, injections) and a ctx whose branch carries the run id.
+ */
+function executeScaffold() {
   const { cwd, checkoutPath } = scaffoldStackLaunch();
   const branch = [{ type: "custom", customType: "perk:workflow-state", data: { run_id: RUN_ID } }];
+  const handlers = new Set<(data: unknown) => void>();
+  const envelopes: CodeReviewEnvelope[] = [];
+  const injected: string[] = [];
+  const notified: { message: string; severity?: string }[] = [];
+  const bus = {
+    emit(name: string, data?: unknown) {
+      if (name === "plannotator:request") envelopes.push(data as CodeReviewEnvelope);
+      for (const handler of [...handlers]) handler(data);
+    },
+    on(_name: string, handler: (data: unknown) => void) {
+      handlers.add(handler);
+      return () => handlers.delete(handler);
+    },
+  };
   const pi = {
+    events: bus,
     getCommands: () => [{ name: "plannotator-review" }],
+    sendUserMessage(message: string) {
+      injected.push(message);
+    },
   } as unknown as ExtensionAPI;
   const ctx = {
     cwd,
     hasUI: true,
     sessionManager: { getBranch: () => branch },
-    ui: { notify: () => {}, setStatus: () => {} },
-  } as unknown as Parameters<typeof executeOpenStackReview>[1];
-  const bound = pinnedStackOf(42, checkoutPath, "0".repeat(40), [ROW_A, ROW_B]);
-  const otherStack = pinnedStackOf(9, join(cwd, "review-9"), "1".repeat(40), [
+    ui: {
+      notify: (message: string, severity?: string) => notified.push({ message, severity }),
+      setStatus: () => {},
+    },
+    isIdle: () => true,
+    signal: undefined,
+  } as unknown as ExtensionContext;
+  return { cwd, checkoutPath, envelopes, injected, notified, pi, ctx };
+}
+
+/** A fake open seam returning `result` and recording what it was asked to open. */
+function fakeOpen(result: StackOpenResult): {
+  open: StackBrowserOpen;
+  opens: { checkoutPath: string; patchSha256: string }[];
+} {
+  const opens: { checkoutPath: string; patchSha256: string }[] = [];
+  return {
+    opens,
+    open: (_ctx, opts) => {
+      opens.push({ checkoutPath: opts.checkoutPath, patchSha256: opts.patchSha256 });
+      return Promise.resolve(
+        result.kind === "launched" ? { ...result, guidance: opts.guidance } : result,
+      );
+    },
+  };
+}
+
+const LAUNCHED: StackOpenResult = { kind: "launched", guidance: "" };
+
+test("executeOpenStackReview: a stack wave pending against a DIFFERENT pin refuses bad_state before any open; the same pin proceeds", async () => {
+  const s = executeScaffold();
+  const bound = pinnedStackOf(42, s.checkoutPath, "0".repeat(40), [ROW_A, ROW_B]);
+  const otherStack = pinnedStackOf(9, join(s.cwd, "review-9"), "1".repeat(40), [
     { ...ROW_A, pr: 8 },
     { ...ROW_B, pr: 9 },
   ]);
-  const opens: number[] = [];
-  const open: Parameters<typeof executeOpenStackReview>[7] = (
-    _pi,
-    _ctx,
-    _gating,
-    _annotations,
-    _status,
-    pin,
-    opts,
-  ) => {
-    opens.push(opts.pinned.topPr);
-    pin.pinned = opts.pinned;
-    return Promise.resolve(true);
-  };
+  const seam = fakeOpen(LAUNCHED);
 
-  // A wave still in flight against another stack: refused, nothing opened, latch untouched.
+  // A wave still in flight against another stack: refused, nothing opened (the owner is never
+  // reached), latch untouched.
   const latch = { opened: false };
   const busy = { pinned: otherStack, inFlight: otherStack };
-  const refused = await executeOpenStackReview(
-    pi,
-    ctx,
-    fakeGating(false),
-    latch,
-    createAnnotationState(),
-    createPerkStatus(),
-    busy,
-    open,
-  );
+  const refused = await executeOpenStackReview(s.pi, s.ctx, latch, busy, seam.open);
   const refusedDetails = refused.details as { ok: boolean; error_type?: string };
   assert.equal(refusedDetails.ok, false);
   assert.equal(refusedDetails.error_type, "bad_state");
@@ -1007,106 +1156,228 @@ test("executeOpenStackReview: a stack wave pending against a DIFFERENT pin refus
     refused.content[0]?.text ?? "",
     /still pending against the open stack review \(top PR #9/,
   );
-  assert.deepEqual(opens, [], "no open attempted");
+  assert.deepEqual(seam.opens, [], "no open attempted");
   assert.equal(latch.opened, false);
   assert.deepEqual(busy.pinned, otherStack, "the pending review's pin is untouched");
 
   // The SAME pin in flight (a stale-session reopen): proceeds.
   const same = { pinned: bound, inFlight: bound };
-  const ok = await executeOpenStackReview(
-    pi,
-    ctx,
-    fakeGating(false),
-    latch,
-    createAnnotationState(),
-    createPerkStatus(),
-    same,
-    open,
-  );
+  const ok = await executeOpenStackReview(s.pi, s.ctx, latch, same, seam.open);
   assert.equal((ok.details as { ok: boolean }).ok, true, ok.content[0]?.text);
-  assert.deepEqual(opens, [42]);
+  assert.deepEqual(seam.opens, [{ checkoutPath: s.checkoutPath, patchSha256: PATCH_SHA256 }]);
 });
 
-test("executeOpenStackReview: a browser-open failure is browser_failed and keeps the latch closed", async () => {
-  // The execute core over the injected open seam (the port-pick failure surfaces as a false
-  // return from the shared open) — the real registration wires the same core to the tool.
-  const { cwd, checkoutPath } = scaffoldStackLaunch();
-  const branch = [{ type: "custom", customType: "perk:workflow-state", data: { run_id: RUN_ID } }];
-  const pi = {
-    getCommands: () => [{ name: "plannotator-review" }],
-  } as unknown as ExtensionAPI;
-  const ctx = {
-    cwd,
-    hasUI: true,
-    sessionManager: { getBranch: () => branch },
-    ui: { notify: () => {}, setStatus: () => {} },
-  } as unknown as Parameters<typeof executeOpenStackReview>[1];
-
+test("executeOpenStackReview: a browser-open failure is browser_failed and keeps the latch closed; the same latch then accepts a launched open which BINDS the pin, and only then does single-use bite", async () => {
+  const s = executeScaffold();
   const latch = { opened: false };
   const stackPin = createStackPinState();
-  const opens: { checkoutPath: string; patchPath: string; pinnedTop: number }[] = [];
-  const failed = await executeOpenStackReview(
-    pi,
-    ctx,
-    fakeGating(false),
-    latch,
-    createAnnotationState(),
-    createPerkStatus(),
-    stackPin,
-    (_pi, _ctx, _gating, _annotations, _status, _pin, opts) => {
-      opens.push({
-        checkoutPath: opts.checkoutPath,
-        patchPath: opts.patchPath,
-        pinnedTop: opts.pinned.topPr,
-      });
-      return Promise.resolve(false);
-    },
-  );
+  const unlaunched = fakeOpen({ kind: "unlaunched" });
+  const failed = await executeOpenStackReview(s.pi, s.ctx, latch, stackPin, unlaunched.open);
   const failedDetails = failed.details as { ok: boolean; error_type?: string };
   assert.equal(failedDetails.ok, false);
   assert.equal(failedDetails.error_type, "browser_failed");
   assert.match(failed.content[0]?.text ?? "", /could not start the plannotator review server/);
   assert.deepEqual(
-    opens,
-    [{ checkoutPath, patchPath: patchPathFor(checkoutPath), pinnedTop: 42 }],
-    "the open was attempted with the bound checkout, its verified patch and the pins",
+    unlaunched.opens,
+    [{ checkoutPath: s.checkoutPath, patchSha256: PATCH_SHA256 }],
+    "the open was attempted with the bound checkout and the snapshot's patch digest",
   );
   assert.equal(latch.opened, false, "a failed open never consumes the single-use latch");
+  assert.equal(stackPin.pinned, null, "a failed open binds no pin");
 
-  // The failure is retryable: the SAME latch accepts a later successful open (the seam sets
-  // the pin the way the real open does)…
-  const succeeded = await executeOpenStackReview(
-    pi,
-    ctx,
-    fakeGating(false),
-    latch,
-    createAnnotationState(),
-    createPerkStatus(),
-    stackPin,
-    (_pi, _ctx, _gating, _annotations, _status, pin, opts) => {
-      pin.pinned = opts.pinned;
-      return Promise.resolve(true);
-    },
-  );
+  // The failure is retryable: the SAME latch accepts a later launched open — the execute core
+  // (not the seam) binds the verified snapshot's pins…
+  const launched = fakeOpen(LAUNCHED);
+  const succeeded = await executeOpenStackReview(s.pi, s.ctx, latch, stackPin, launched.open);
   assert.equal((succeeded.details as { ok: boolean }).ok, true);
+  assert.match(succeeded.content[0]?.text ?? "", /topped by PR #42/, "the guidance is the ok text");
   assert.equal(latch.opened, true);
   assert.deepEqual(
     stackPin.pinned,
-    pinnedStackOf(42, checkoutPath, "0".repeat(40), [ROW_A, ROW_B]),
-    "a successful open binds the verified snapshot's pins",
+    pinnedStackOf(42, s.checkoutPath, "0".repeat(40), [ROW_A, ROW_B]),
+    "a launched open binds the verified snapshot's pins",
   );
   // …and only then does single-use bite.
-  const third = await executeOpenStackReview(
-    pi,
-    ctx,
-    fakeGating(false),
-    latch,
-    createAnnotationState(),
-    createPerkStatus(),
-    stackPin,
-    () => Promise.resolve(true),
-  );
+  const third = await executeOpenStackReview(s.pi, s.ctx, latch, stackPin, launched.open);
   const thirdDetails = third.details as { ok: boolean; error_type?: string };
   assert.equal(thirdDetails.ok, false);
   assert.equal(thirdDetails.error_type, "bad_state");
+  assert.equal(launched.opens.length, 1, "the single-use refusal opens nothing");
 });
+
+test("executeOpenStackReview: a retired open consumes the latch and returns the non-terminating retired result (ok:true, details.status retired, no pin bound)", async () => {
+  const s = executeScaffold();
+  const latch = { opened: false };
+  const stackPin = createStackPinState();
+  const retired = fakeOpen({ kind: "retired" });
+  const result = await executeOpenStackReview(s.pi, s.ctx, latch, stackPin, retired.open);
+  assert.deepEqual(result.details, {
+    ok: true,
+    status: "retired",
+    top_pr: 42,
+    checkout_path: s.checkoutPath,
+    member_count: 2,
+  });
+  assert.equal(result.terminate, undefined, "non-terminating");
+  assert.equal(
+    result.content[0]?.text,
+    "a newer browser review replaced this open before it started — nothing was opened; follow " +
+      "that review's guidance and do not call open_stack_review again (single-use)",
+  );
+  assert.equal(latch.opened, true, "the latch is consumed — no retry can retire the newer review");
+  assert.equal(stackPin.pinned, null, "no pin bound");
+  const again = await executeOpenStackReview(s.pi, s.ctx, latch, stackPin, retired.open);
+  assert.equal((again.details as { error_type?: string }).error_type, "bad_state");
+  assert.equal(retired.opens.length, 1, "the second call opens nothing");
+});
+
+test("executeOpenStackReview: a refused open (launch-time digest drift) is bad_state naming the patch path, binds no pin and keeps the latch closed", async () => {
+  const s = executeScaffold();
+  const latch = { opened: false };
+  const stackPin = createStackPinState();
+  const detail = `mismatch: the stack's combined patch at '${patchPathFor(s.checkoutPath)}' does not match`;
+  const refused = fakeOpen({ kind: "refused", detail });
+  const result = await executeOpenStackReview(s.pi, s.ctx, latch, stackPin, refused.open);
+  const details = result.details as { ok: boolean; error_type?: string; error?: string };
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "bad_state");
+  assert.ok(details.error?.includes(patchPathFor(s.checkoutPath)), details.error);
+  assert.equal(latch.opened, false, "a refused open is retryable after a re-snapshot");
+  assert.equal(stackPin.pinned, null, "a refused open binds no pin");
+});
+
+// --- the stack open over the real browser-operation owner --------------------------------------------
+
+/** A readiness probe gated by the test: the FIRST probe waits for `release`, later ones answer. */
+function gatedProbe(): { probe: () => Promise<boolean>; release(): void } {
+  let release: (ready: boolean) => void = () => {};
+  const gate = new Promise<boolean>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  return {
+    probe: () => {
+      calls += 1;
+      return calls === 1 ? gate : Promise.resolve(true);
+    },
+    release: () => release(true),
+  };
+}
+
+/** Poll `done()` on real timers (bounded — a stuck condition fails the assertion, never hangs). */
+async function until(done: () => boolean | Promise<boolean>, ms = 2000): Promise<void> {
+  const start = Date.now();
+  while (!(await done()) && Date.now() - start < ms) {
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+for (const drift of [true, false]) {
+  test(
+    drift
+      ? "stack open: the patch is rewritten while the owner waits for a predecessor's retirement → the launch refuses on the digest, no request is emitted, nothing is primed, no pin is bound, the earlier review is already detached"
+      : "stack open (control): an unchanged patch across the same predecessor hold launches",
+    async () => {
+      const s = executeScaffold();
+      const annotations = createAnnotationState();
+      const pushes: { method: string; url: string; body?: string }[] = [];
+      const recording: FetchLike = async (url, init) => {
+        pushes.push({ method: init.method, url, body: init.body });
+        return {
+          ok: true,
+          status: init.method === "POST" ? 201 : 200,
+          text: async () => (init.method === "POST" ? '{"ids":[]}' : '{"removed":0}'),
+        };
+      };
+      const gated = gatedProbe();
+      const ports = [45051, 45052];
+      const owner = createBrowserOperationOwner(s.pi, {
+        annotations,
+        gating: { primeDeferred: (names) => [...names] },
+        status: createPerkStatus(),
+        browserDeps: {
+          pickFreePort: async () => ports.shift() ?? 45099,
+          probe: gated.probe,
+          intervalMs: 1,
+          budgetMs: 50,
+          sleep: async () => {},
+        },
+        annotationDeps: { fetchLike: recording },
+        consoleQuietMs: 10,
+        // The owner's budgets never expire here: the predecessor's quiesce truly holds the start.
+        sleep: () => new Promise<void>(() => {}),
+      });
+      const open: StackBrowserOpen = (ctx, opts) => openStackBrowser(s.pi, ctx, owner, opts);
+      const stackPin = createStackPinState();
+      try {
+        // The earlier review (A): a launched open whose readiness poll is still in its first probe.
+        const first = await open(s.ctx, {
+          checkoutPath: s.checkoutPath,
+          patchSha256: PATCH_SHA256,
+          guidance: "A",
+        });
+        assert.equal(first.kind, "launched");
+        assert.equal(s.envelopes.length, 1);
+        const surfaceA = annotations.surface;
+        assert.ok(surfaceA !== null, "A primed the surface");
+
+        // The tool's open (B) passes its pre-open digest gate, then waits on A's retirement.
+        const latch = { opened: false };
+        const pending = executeOpenStackReview(s.pi, s.ctx, latch, stackPin, open);
+        await until(() => pushes.length === 2);
+        assert.deepEqual(
+          pushes.map((push) => `${push.method} ${push.url}`),
+          [
+            "DELETE http://127.0.0.1:45051/api/external-annotations?source=perk%3Awave",
+            "POST http://127.0.0.1:45051/api/external-annotations",
+          ],
+          "A is already detached (marked replaced on A's tab) while B waits",
+        );
+        assert.match(pushes[1]?.body ?? "", /a newer browser review replaced it/);
+        if (drift) {
+          // A `perk pr review checkout --stack` refresh lands inside the hold.
+          writeFileSync(patchPathFor(s.checkoutPath), `${PATCH_TEXT}refreshed\n`, "utf8");
+        }
+        gated.release(); // A's poll ends → A quiesces → B's start proceeds.
+        const result = await pending;
+
+        if (drift) {
+          const details = result.details as { ok: boolean; error_type?: string; error?: string };
+          assert.equal(details.ok, false);
+          assert.equal(details.error_type, "bad_state");
+          assert.match(details.error ?? "", /^mismatch: .*refreshed since this snapshot was taken/);
+          assert.ok(details.error?.includes(patchPathFor(s.checkoutPath)));
+          assert.equal(s.envelopes.length, 1, "no request was emitted for B");
+          assert.equal(annotations.surface, null, "nothing primed (A's surface already closed)");
+          assert.equal(stackPin.pinned, null, "no pin bound");
+          assert.equal(latch.opened, false, "the latch stays closed");
+          assert.ok(
+            s.notified.some(
+              (n) =>
+                n.severity === "error" &&
+                n.message === `perk: stack-review-browser — ${details.error}`,
+            ),
+            "the owner reported the refusal verbatim",
+          );
+          assert.ok(
+            !s.notified.some((n) => n.message.includes("could not pick a free local port")),
+            "never the port-pick line",
+          );
+        } else {
+          assert.equal((result.details as { ok: boolean }).ok, true, result.content[0]?.text);
+          assert.equal(s.envelopes.length, 2, "B's request was emitted");
+          assert.notEqual(annotations.surface, null);
+          assert.notEqual(annotations.surface, surfaceA, "B re-primed a NEW surface");
+          assert.equal(annotations.surface?.url, "http://127.0.0.1:45052");
+          assert.notEqual(stackPin.pinned, null, "the launched open bound the pin");
+          assert.equal(latch.opened, true);
+        }
+      } finally {
+        for (const envelope of s.envelopes) {
+          envelope.respond({ status: "handled", result: { approved: true } });
+        }
+        await until(() => !("PLANNOTATOR_PORT" in process.env));
+      }
+    },
+  );
+}

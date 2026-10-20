@@ -15,15 +15,21 @@
 //             no guidance injection, no port dance (no wave, so no annotation endpoint needed);
 //             the door ends immediately and the single respond routes back later.
 //
-// THE BACKGROUND OPEN: the server URL is deterministic the moment the port is picked (picked by
-// mirroring Plannotator's own port selection; plannotator reads the preset `PLANNOTATOR_PORT` at
-// bind time — see plannotatorHandoff.ts), so in the PR
-// modes the handler starts `startPlannotatorBrowser`, injects the mode guidance IMMEDIATELY, and
-// ends its turn — no blocking readiness poll in the handler. The readiness promise is observed
-// in a background task: ready → an info note + a continuation for pending annotation work;
-// timeout / an error-or-unavailable bridge settle →
-// a loud error plus a degrade notice injected to the model (findings render in-session; posting
-// unchanged) AND the annotation surface cleared. `push_annotations` owns the
+// THE BACKGROUND OPEN THROUGH THE OWNER (`browserOperation.ts`, contracts §8.23): the PR modes
+// open through the activation's browser-operation owner with the code-review spec (mode
+// `review`, `REVIEW_BROWSER_PRIMES`, no companion, no applicability fence). The server URL is
+// deterministic the moment the owner picks the port (mirroring Plannotator's own port selection;
+// plannotator reads the preset `PLANNOTATOR_PORT` at bind time — see plannotatorHandoff.ts), so
+// the handler injects the mode guidance IMMEDIATELY and ends its turn — no blocking readiness
+// poll in the handler. The owner observes readiness in the background: ready → an info note + a
+// continuation for pending annotation work; timeout / an error-or-unavailable bridge settle → a
+// loud error plus a degrade notice injected to the model (findings render in-session; posting
+// unchanged) AND the annotation surface cleared. A decision made after that degrade is ignored
+// with one warning naming the re-run (the owner's one post-degrade rule). The owner clears the
+// surface only while this review still owns it, so an older review can never clear a
+// successor's; opening ANY browser door again REPLACES this review (its tab is marked detached
+// through the `perk:wave` slot, its wait aborted, its decision never routed), and a turn abort or
+// a session reload/replacement detaches it the same way. `push_annotations` owns the
 // hold-and-accumulate discipline: a batch held before readiness means "not up yet", never a
 // degrade (the readiness notice flushes it); a batch held AFTER readiness exhausted the tool's
 // bounded retries and is presented in-session.
@@ -35,13 +41,12 @@
 //
 // THE COMPANION TOOLS: the reviewer fan-out is the globally registered `start_review_wave` /
 // `collect_review_wave` pair, and the annotation delivery is the globally registered
-// `push_annotations` tool PRIMED BY THIS DOOR (`primeAnnotationSurface` over the threaded
-// per-activation annotation state on a PR-mode open, cleared on bridge settle and on the
-// readiness-degrade arm — the model never sees the URL).
-// The door still registers NO tools of its own; perk-side posting reuses `submit_pr_review`
-// (installed by `installCuratedSubmissionBindings`). The local (pre-PR) mode never primes.
-// In a discovery-cohort session the guidance names two deferred tools, so the same moment also
-// activates them (`REVIEW_BROWSER_PRIMES`) before the guidance reaches the model.
+// `push_annotations` tool, PRIMED through the owner on a PR-mode open (over the activation's
+// annotation state — the model never sees the URL) and cleared by it on settle, degrade or
+// detach. The door still registers NO tools of its own; perk-side posting reuses
+// `submit_pr_review` (installed by `installCuratedSubmissionBindings`). The local (pre-PR) mode
+// never primes. In a discovery-cohort session the guidance names two deferred tools, so the same
+// moment also activates them (`REVIEW_BROWSER_PRIMES`) before the guidance reaches the model.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
@@ -49,15 +54,12 @@ import { runColdDoor } from "../../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { interceptConsoleError } from "../../../substrate/consoleCapture.ts";
 import { render } from "../../../substrate/prompts.ts";
-import type { ToolGating } from "../../../substrate/toolGating.ts";
-import { type ReportTarget, report } from "../../../surfaces/report.ts";
-import type { ActivityHandle } from "../../../surfaces/surfaces.ts";
+import { report } from "../../../surfaces/report.ts";
 import {
-  type AnnotationState,
-  clearAnnotationSurface,
-  primeAnnotationSurface,
-  resumeAnnotationDelivery,
-} from "../providers/annotations.ts";
+  type BrowserOperationOwner,
+  type BrowserOperationSpec,
+  settleCodeReviewOutcome,
+} from "../browserOperation.ts";
 import {
   type CodeReviewOutcome,
   type CodeReviewSource,
@@ -65,17 +67,14 @@ import {
   type PrUrl,
   plannotatorPresent,
   planRefBaseOf,
-  type RespondSink,
   requestPlannotatorCodeReview,
   resolveReviewTarget,
   routeBrowserRespond,
   routePrReviewOutcome,
-  type StartBrowserDeps,
-  type StartedBrowser,
   startPlannotatorBrowser,
 } from "../providers/plannotatorHandoff.ts";
-import { browserUpNotice } from "../providers/plannotatorPort.ts";
 import { WAVE_ARRIVAL_NOTICE } from "../providers/waveStatus.ts";
+import type { DoorOpenResult } from "../review.ts";
 import { type CheckoutOk, decodeCheckout } from "./checkout.ts";
 import { parseReviewDoorArgs } from "./terminal.ts";
 
@@ -131,187 +130,107 @@ export const DEGRADE_NOTICE =
   "unchanged: perk composes nothing by default; `submit_pr_review` (dry-run first; gates " +
   "unchanged) only for a request-changes verdict or on the human's explicit request.";
 
-/**
- * Observe the readiness poll in the background (the handler has already injected the guidance
- * and ended): ready → an info note + an immediate/followUp annotation-delivery continuation
- * when the still-current surface has held or in-flight work; timeout / an error-or-unavailable
- * bridge settle → a loud error report PLUS the degrade notice injected to the model (idle → immediate,
- * streaming → followUp). A bridge that settled `handled` (the human finished before the poll saw
- * the server) or `aborted` routes via the respond routing alone — no degrade. Structural param
- * slices keep it offline-testable; exported for the door tests.
- */
-export async function observeBrowserReadiness(
-  pi: RespondSink,
-  ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
-  started: StartedBrowser,
-  annotations: AnnotationState,
-  opts?: { scope?: string; degradeNotice?: string },
-): Promise<void> {
-  const scope = opts?.scope ?? SCOPE;
-  const degradeNotice = opts?.degradeNotice ?? DEGRADE_NOTICE;
-  const surface = annotations.surface;
-  const state = await started.readiness;
-  if (state === "ready") {
-    report(ctx, scope, "info", browserUpNotice(started));
-    resumeAnnotationDelivery(annotations, surface, pi, ctx);
-    return;
-  }
-  if (state === "aborted") return; // the turn was interrupted — no-op
-  if (state === "bridge_settled") {
-    const out = await started.bridgePromise;
-    if (out.status === "handled" || out.status === "aborted") return;
-  }
-  report(
-    ctx,
-    scope,
-    "error",
-    `the plannotator review server did not become ready at ${started.url} — the browser ` +
-      "review is unavailable",
-    { alsoLog: true },
-  );
-  if (ctx.isIdle()) {
-    pi.sendUserMessage(degradeNotice);
-  } else {
-    pi.sendUserMessage(degradeNotice, { deliverAs: "followUp" });
-  }
-  // Consistent with "render findings in-session": a post-degrade push_annotations refuses
-  // loudly (`no_surface`). Idempotent beside the bridge-settle clear.
-  clearAnnotationSurface(annotations);
-}
+/** The code-review open's result: the door result, or a launch-time `beforeStart` refusal. */
+export type ReviewBrowserOpenResult = DoorOpenResult | { kind: "refused"; detail: string };
 
-/** The parameterized browser-lifecycle core's options (see `openReviewBrowserCore`). */
+/** The code-review spec's door-supplied options (see `openReviewBrowserCore`). */
 export interface ReviewBrowserCoreOpts {
   /** The invoking door's report scope. */
   scope: string;
-  /** The `startPlannotatorBrowser` opts minus `signal`/`activity` (both threaded by the core). */
+  /** The `startPlannotatorBrowser` opts minus `signal`/`activity` (both threaded by the owner). */
   browserOpts: { cwd: string; source: CodeReviewSource };
-  /** The fully composed guidance to inject (binding suffix included by the caller). */
+  /** The fully composed guidance a `launched` result carries (binding suffix included). */
   guidance: string;
   /** The degrade notice for the browser-never-ready arm (default: the PR-mode notice). */
   degradeNotice?: string;
   /** The respond → injection mapper (default: `respondMessage` — the single-PR contract). */
   respondMessageFor?: (outcome: CodeReviewOutcome) => string | null;
   /**
-   * Whether the core injects `guidance` as a user message at the end (default true — the warm
-   * doors). The `open_stack_review` tool passes false and returns the guidance as its ok text
-   * instead (the tool result is the seeded session's delivery channel).
+   * The launch-time gate, run inside the owner's start immediately before the request is
+   * emitted (after any predecessor's retirement): throw `BrowserStartRefusal` to refuse — the
+   * owner reports the message verbatim and nothing is emitted or primed.
    */
-  injectGuidance?: boolean;
-  /** The browser-open seams: the activation's port selection (default: the local selection). */
-  browserDeps?: StartBrowserDeps;
+  beforeStart?: () => void;
 }
 
 /**
- * The full browser-lifecycle core, extracted from the PR-mode arm and parameterized for the
- * stack door: start the browser open in the background, prime the annotation surface the
- * moment the port is picked (push_annotations now serves this browser session) together with
- * the deferred tools the guidance names (`REVIEW_BROWSER_PRIMES`), observe
- * readiness in the background (degrade notice on never-ready), route the bridge respond
- * through the injectable mapper, clear the surface on settle, and inject the guidance
- * immediately (the URL is deterministic once the port is picked). While plannotator sets up,
- * its in-process `console.error` chatter re-routes through the TUI-safe report() seam (the
- * debounce restores once setup goes quiet, with the `finally` as a backstop).
- *
- * Accepted stale-clear edge (unchanged from the pre-extraction arm): a second browser door
- * while this browser is still open re-primes (a new browser session supersedes everything),
- * and THIS bridge's later settle would clear the second session's surface — rare and loud
- * (a fixed port still held by the first review refuses the second open instead — contracts
- * §8.4), noted, not engineered around.
+ * The code-review browser open over the activation's browser-operation owner (both code-review
+ * doors): build the code-review spec — `startPlannotatorBrowser` as the handoff, mode `review`,
+ * `REVIEW_BROWSER_PRIMES`, no companion, no applicability fence, the door's degrade notice and
+ * respond mapper — and open it. The owner retires any earlier browser review first, starts the
+ * handoff, primes the annotation surface + the deferred tools the guidance names, observes
+ * readiness and the decision in the background, intercepts plannotator's setup chatter and
+ * clears the surface only while this operation still owns it. Delivery is the caller's:
+ * `launched` carries `opts.guidance`; `unlaunched` (the port-pick failure, already reported
+ * loudly) and `retired` (a newer open took over — its guidance stands) deliver nothing;
+ * `refused` (the caller's `beforeStart` refused, already reported) carries the refusal text.
  */
 export async function openReviewBrowserCore(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  gating: ToolGating,
-  annotations: AnnotationState,
-  status: ActivityHandle,
+  owner: BrowserOperationOwner,
   opts: ReviewBrowserCoreOpts,
-): Promise<boolean> {
-  let started: StartedBrowser;
-  try {
-    started = await startPlannotatorBrowser(
-      pi.events,
-      {
-        ...opts.browserOpts,
-        signal: ctx.signal,
-        activity: (text) => status.beginActivity(ctx, text),
-      },
-      opts.browserDeps ?? {},
-    );
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    report(
-      ctx,
-      opts.scope,
-      "error",
-      `could not pick a free local port for the plannotator review server: ${detail}`,
-      { alsoLog: true },
-    );
-    return false;
-  }
-
-  primeAnnotationSurface(annotations, { mode: "review", url: started.url });
-  gating.primeDeferred(REVIEW_BROWSER_PRIMES);
-
-  void observeBrowserReadiness(pi, ctx, started, annotations, {
+): Promise<ReviewBrowserOpenResult> {
+  const spec: BrowserOperationSpec<CodeReviewOutcome> = {
     scope: opts.scope,
-    ...(opts.degradeNotice !== undefined ? { degradeNotice: opts.degradeNotice } : {}),
-  });
-
-  void (async () => {
-    const interceptor = interceptConsoleError((line) => report(ctx, opts.scope, "info", line), {
-      // plannotator can pause up to ~4s between setup lines — keep the quiet window above that.
-      quietMs: 6000,
-    });
-    try {
-      const out = await started.bridgePromise;
+    start: async (launch) => {
+      opts.beforeStart?.();
+      return await startPlannotatorBrowser(
+        pi.events,
+        { ...opts.browserOpts, signal: launch.signal, activity: launch.activity },
+        launch.deps,
+      );
+    },
+    mode: "review",
+    primes: REVIEW_BROWSER_PRIMES,
+    degradeNotice: opts.degradeNotice ?? DEGRADE_NOTICE,
+    settle: settleCodeReviewOutcome,
+    // The owner hands over `handled` only; the router stays total over the outcome union.
+    onDecision: async (out) => {
       routeBrowserRespond(pi, ctx, out, opts.scope, opts.respondMessageFor);
-    } finally {
-      // The browser session is over — drop the surface so a later push refuses (`no_surface`).
-      clearAnnotationSurface(annotations);
-      interceptor.restore();
-    }
-  })();
-
-  if (opts.injectGuidance !== false) pi.sendUserMessage(opts.guidance);
-  return true;
+    },
+  };
+  const opened = await owner.open(ctx, spec);
+  if (opened.kind === "retired") return { kind: "retired" };
+  if (opened.kind === "failed") {
+    return opened.refused !== undefined
+      ? { kind: "refused", detail: opened.refused }
+      : { kind: "unlaunched" };
+  }
+  return { kind: "launched", guidance: opts.guidance };
 }
 
 /**
- * The shared PR-mode arm (foreign + active): the extracted core with this door's values —
+ * The shared PR-mode arm (foreign + active): the code-review open with this door's values —
  * PR-mode browser opts, the mode guidance + binding suffix, and the default degrade notice /
- * respond mapper (the byte-stability of the pre-extraction behavior is proven by this door's
- * untouched tests). `deps` carries the activation's port selection.
+ * respond mapper — injecting the guidance only when the browser launched (an unlaunched open
+ * was already reported; a retired one yields to the newer open's guidance).
  */
 async function openBrowserAndGuide(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  gating: ToolGating,
-  annotations: AnnotationState,
-  status: ActivityHandle,
+  owner: BrowserOperationOwner,
   opts: PrReviewBrowserGuidanceOpts,
-  deps: StartBrowserDeps = {},
 ): Promise<void> {
-  await openReviewBrowserCore(pi, ctx, gating, annotations, status, {
+  const opened = await openReviewBrowserCore(pi, ctx, owner, {
     scope: SCOPE,
     browserOpts: { cwd: ctx.cwd, source: { mode: "pr", prUrl: opts.prUrl } },
     guidance: prReviewBrowserGuidance(opts) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
-    browserDeps: deps,
   });
+  if (opened.kind === "launched") pi.sendUserMessage(opened.guidance);
 }
 
 // ------------------------------------------------------------------------ registration
 
 /**
  * Install the warm `/pr-review-browser` command (no tools — posting rides submit_pr_review).
- * `deps` carries the activation's port selection into both PR-mode opens (the pre-PR local arm
- * presets nothing — plannotator resolves the port by the same rule itself).
+ * `owner` is the activation's browser-operation owner (it carries the port selection):
+ * both PR-mode opens go through it; the pre-PR local arm stays outside it (plannotator resolves
+ * that port itself).
  */
 export function installPrReviewBrowserBindings(
   pi: ExtensionAPI,
-  gating: ToolGating,
-  annotations: AnnotationState,
-  status: ActivityHandle,
-  deps: StartBrowserDeps = {},
+  owner: BrowserOperationOwner,
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -375,21 +294,13 @@ export function installPrReviewBrowserBindings(
             : `PR #${parsed.pr} → adversarial reviewers → plannotator browser triage → you post from the browser`) +
             WAVE_ARRIVAL_NOTICE,
         );
-        await openBrowserAndGuide(
-          pi,
-          ctx,
-          gating,
-          annotations,
-          status,
-          {
-            mode: "foreign",
-            pr: parsed.pr,
-            prUrl: checkout.data.url,
-            worktree: checkout.data.path,
-            directive: parsed.directive,
-          },
-          deps,
-        );
+        await openBrowserAndGuide(pi, ctx, owner, {
+          mode: "foreign",
+          pr: parsed.pr,
+          prUrl: checkout.data.url,
+          worktree: checkout.data.path,
+          directive: parsed.directive,
+        });
         return;
       }
 
@@ -420,27 +331,23 @@ export function installPrReviewBrowserBindings(
             : `PR #${target.number} (active worktree) → adversarial reviewers → plannotator browser triage → you post from the browser`) +
             WAVE_ARRIVAL_NOTICE,
         );
-        await openBrowserAndGuide(
-          pi,
-          ctx,
-          gating,
-          annotations,
-          status,
-          {
-            mode: "active",
-            pr: target.number,
-            prUrl: target.prUrl,
-            worktree: ctx.cwd,
-            directive: parsed.directive,
-          },
-          deps,
-        );
+        await openBrowserAndGuide(pi, ctx, owner, {
+          mode: "active",
+          pr: target.number,
+          prUrl: target.prUrl,
+          worktree: ctx.cwd,
+          directive: parsed.directive,
+        });
         return;
       }
 
       // The local / pre-PR mode (the absorbed since-base browser review): no reviewers, no
-      // guidance, no port dance (no wave — no endpoint needed). The bridge runs in
-      // the background and the single respond routes back via routePrReviewOutcome.
+      // guidance, no port dance (no wave — no endpoint needed). The bridge runs in the
+      // background and the single respond routes back via routePrReviewOutcome. It stays OUTSIDE
+      // the browser-operation owner: plannotator picks its own port (no deterministic URL),
+      // nothing is primed and readiness is not observed — nothing to own or mark. The task holds
+      // this ctx (not reload-safe), so a respond reaching a stale ctx is contained to one stderr
+      // line — a discarded promise owns its failure path, never an unhandled rejection.
       report(
         ctx,
         SCOPE,
@@ -463,7 +370,10 @@ export function installPrReviewBrowserBindings(
         } finally {
           interceptor.restore();
         }
-      })();
+      })().catch((error: unknown) => {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.error(`perk: ${SCOPE} — the local browser review task failed: ${detail}`);
+      });
     },
   });
 }
