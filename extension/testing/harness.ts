@@ -381,20 +381,25 @@ export function gitInit(cwd: string, opts: { dirty: boolean }): void {
  * Write an executable fake `perk` (for PERK_BIN): prints `stdout` and exits `code`. Lets the
  * warm-door tests exercise the real `pi.exec` delegation path fully offline. When `argvFile` is
  * given, the fake first writes its argv (one arg per line) to that path so a test can assert the
- * exact delegated command (e.g. `--pr` present, `--status` absent).
+ * exact delegated command (e.g. `--pr` present, `--status` absent). When `waitForFile` is given,
+ * the fake blocks (polling) until that path exists before printing — a backend call a test
+ * releases by creating the file (e.g. a save still in flight across a reload).
  */
 export function fakePerk(
   cwd: string,
-  opts: { stdout: string; code?: number; argvFile?: string },
+  opts: { stdout: string; code?: number; argvFile?: string; waitForFile?: string },
 ): string {
   const path = join(cwd, "fake-perk.sh");
   const body = opts.stdout.replace(/'/g, "'\\''");
   const capture = opts.argvFile
     ? `printf '%s\\n' "$@" > '${opts.argvFile.replace(/'/g, "'\\''")}'\n`
     : "";
+  const wait = opts.waitForFile
+    ? `while [ ! -e '${opts.waitForFile.replace(/'/g, "'\\''")}' ]; do sleep 0.05; done\n`
+    : "";
   writeFileSync(
     path,
-    `#!/usr/bin/env bash\n${capture}printf '%s' '${body}'\nexit ${opts.code ?? 0}\n`,
+    `#!/usr/bin/env bash\n${capture}${wait}printf '%s' '${body}'\nexit ${opts.code ?? 0}\n`,
     "utf8",
   );
   chmodSync(path, 0o755);

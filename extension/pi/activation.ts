@@ -77,6 +77,7 @@ import { registerWhimsical } from "../vendor/whimsical/whimsical.ts";
 import { createReportWave } from "../waves/reportWave.ts";
 import { deferDiscoveryFamily, registerLoadoutHost } from "./perkTool.ts";
 import { registerBashScanTimeout } from "./v1/bashScanTimeout.ts";
+import { createBrowserOperationOwner } from "./v1/browserOperation.ts";
 import { registerChildTaskRestore } from "./v1/childTaskRestore.ts";
 import { installAutomatedReviewBindings } from "./v1/codeReview/automated.ts";
 import { installPrReviewBrowserBindings } from "./v1/codeReview/browser.ts";
@@ -343,20 +344,22 @@ export function activatePerk(
   // draftReviewWave pattern).
   const browserDeps: StartBrowserDeps = { ports: resolvePlannotatorPorts(process.env) };
 
+  // The ONE per-activation browser-operation owner (§8.23): every draft browser door opens
+  // through it — start, companion priming, readiness/decision observation, replacement
+  // (detach-before-start), console interception and cleanup — and `session_shutdown` detaches
+  // its live operation. Holds the activation's annotation state, gating primes, status handle
+  // and port selection (no hidden module state).
+  const browserOwner = createBrowserOperationOwner(pi, {
+    annotations,
+    gating,
+    status: perkStatus,
+    browserDeps,
+  });
+
   installPlanBindings(pi, gating, draftReviews, () => runnerChild, perkStatus, {
     present: () => plannotatorPresent(pi),
     plan: (ctx, opts) =>
-      openPlanReviewSurface(
-        pi,
-        ctx,
-        gating,
-        opts,
-        draftReviewWave,
-        annotations,
-        draftReviews,
-        perkStatus,
-        browserDeps,
-      ),
+      openPlanReviewSurface(pi, ctx, gating, opts, draftReviewWave, draftReviews, browserOwner),
     objective: (ctx, opts) =>
       openObjectiveReviewSurface(
         pi,
@@ -364,10 +367,8 @@ export function activatePerk(
         gating,
         opts,
         draftReviewWave,
-        annotations,
         draftReviews,
-        perkStatus,
-        browserDeps,
+        browserOwner,
       ),
   });
 
@@ -435,13 +436,19 @@ export function activatePerk(
   // consumer lease releases with the session. A stale /reload predecessor instance is retired
   // by the lease fencing (fresh token per same-identity reacquire + verify-before-inject).
   const feedbackReceiver = (options.feedbackReceiverFactory ?? createHunkFeedbackReceiver)(pi);
-  pi.on("session_shutdown", async (_event, ctx) => {
+  pi.on("session_shutdown", async (event, ctx) => {
     submitConflict.shutdown();
     stackConflict.shutdown();
     await conflictResolver.shutdown();
     await librarianEngine.shutdown();
     feedbackReceiver.close();
-    // A browser-wait activity cannot outlive the session.
+    // The one moment the old activation can still speak to its browser (Pi invalidates every
+    // captured ctx right after this awaited event) and the one place an admitted approval is
+    // drained before that invalidation: the live browser review is marked detached (no push on
+    // quit), its wait aborted, its readiness poll quiesced.
+    await browserOwner.shutdown(ctx, event.reason);
+    // A browser-wait activity cannot outlive the session (the aborted bridge already ended its
+    // own wait — this is the backstop).
     perkStatus.clearActivity(ctx);
   });
 
@@ -844,29 +851,13 @@ export function activatePerk(
   // plannotator plan-review browser on the working plan draft, draft reviewers streaming
   // phrase-anchored findings in; APPROVE auto-saves via the approvalSave seam, DENY returns a
   // model-mediated revision round.
-  registerPlanReviewBrowser(
-    pi,
-    gating,
-    draftReviewWave,
-    annotations,
-    draftReviews,
-    perkStatus,
-    browserDeps,
-  );
+  registerPlanReviewBrowser(pi, gating, draftReviewWave, draftReviews, browserOwner);
 
   // The warm `/objective-review-browser` door: the summonable streaming objective-draft review
   // — the plannotator plan-review browser on the RENDERED working objective draft, draft
   // reviewers streaming phrase-anchored findings in; APPROVE auto-saves via the
   // objectiveApprovalSave seam, Direct Edits = a model-mediated revise round (never auto-saved).
-  registerObjectiveReviewBrowser(
-    pi,
-    gating,
-    draftReviewWave,
-    annotations,
-    draftReviews,
-    perkStatus,
-    browserDeps,
-  );
+  registerObjectiveReviewBrowser(pi, gating, draftReviewWave, draftReviews, browserOwner);
 
   // The warm `/simplify-plan` / `/simplify-objective` doors: one fresh `perk.simplifier` lane
   // over the working draft, its report injected; the parent rewrites through its draft tool — no

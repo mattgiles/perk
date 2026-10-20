@@ -160,6 +160,17 @@ export interface PlanSaveOk {
 export type SaveResult = Result<PlanSaveOk>;
 
 /**
+ * A plan review's completion as the browser door consumes it: the model-facing tool result plus
+ * the typed save facts of the SAME render (`saved` — the saved arm's ok details and its
+ * single-line message; `null` on every other arm), so the door derives its report severity from
+ * typed facts instead of re-decoding the rendered `details.save`.
+ */
+export interface PlanReviewCompletion {
+  result: ToolResult;
+  saved: { details: PlanSaveOk; message: string } | null;
+}
+
+/**
  * The injected production dependency bag (built by `plan.ts`'s `planSaveDepsFor` — the ONE
  * composition point; declared HERE so `plan.ts` imports the port and the graph stays acyclic):
  * the feature approval-save deps plus the installer-owned save rendering (its message assembly
@@ -679,7 +690,7 @@ export async function runPlanReviewV1(
     );
     if (check.kind !== "proceed") return planGuardResult(check, review, outcome.feedback);
     return withDraftChangedNote(
-      await completePlanReviewV1(ctx, slot, deps, review.markdown, outcome, completion),
+      (await completePlanReviewV1(ctx, slot, deps, review.markdown, outcome, completion)).result,
       check.draftChanged,
     );
   }
@@ -723,37 +734,68 @@ export function renderPlanReviewResult(
   deps: PlanReviewV1Deps,
   result: ReviewPlanDraftResult,
 ): ToolResult {
+  return renderPlanReviewCompletion(ctx, deps, result).result;
+}
+
+/**
+ * The one render behind `renderPlanReviewResult` and the browser door's completion: the save is
+ * rendered ONCE per saved/save-failed arm (`deps.renderSave`), and the saved arm's typed facts
+ * ride beside the tool result (narrowed on `details.ok` — no assertion).
+ */
+function renderPlanReviewCompletion(
+  ctx: ExtensionContext,
+  deps: PlanReviewV1Deps,
+  result: ReviewPlanDraftResult,
+): PlanReviewCompletion {
+  switch (result.status) {
+    case "approvedSaved": {
+      const rendered = deps.renderSave(result.save.result);
+      return {
+        result: approvedSaveResult(
+          completedOutcome(true, result),
+          { status: "saved", result: rendered, gateExited: result.save.gateExited },
+          {
+            paramMismatch: result.paramMismatch,
+            edited: result.edited,
+            directEditsFailed: result.directEditsFailed,
+          },
+        ),
+        saved:
+          rendered.details.ok === true
+            ? { details: rendered.details, message: rendered.content[0]?.text ?? "" }
+            : null,
+      };
+    }
+    case "approvedSaveFailed":
+      return {
+        result: approvedSaveResult(
+          completedOutcome(true, result),
+          {
+            status: "save-failed",
+            result: deps.renderSave(result.save.result),
+            gateExited: false,
+          },
+          {
+            paramMismatch: result.paramMismatch,
+            edited: result.edited,
+            directEditsFailed: result.directEditsFailed,
+          },
+        ),
+        saved: null,
+      };
+    default:
+      return { result: renderUnsavedPlanReviewResult(ctx, result), saved: null };
+  }
+}
+
+/** The arms without a rendered save (byte-stable texts). */
+function renderUnsavedPlanReviewResult(
+  ctx: ExtensionContext,
+  result: Exclude<ReviewPlanDraftResult, { status: "approvedSaved" | "approvedSaveFailed" }>,
+): ToolResult {
   switch (result.status) {
     case "noPlan":
       return noPlanResult();
-    case "approvedSaved":
-      return approvedSaveResult(
-        completedOutcome(true, result),
-        {
-          status: "saved",
-          result: deps.renderSave(result.save.result),
-          gateExited: result.save.gateExited,
-        },
-        {
-          paramMismatch: result.paramMismatch,
-          edited: result.edited,
-          directEditsFailed: result.directEditsFailed,
-        },
-      );
-    case "approvedSaveFailed":
-      return approvedSaveResult(
-        completedOutcome(true, result),
-        {
-          status: "save-failed",
-          result: deps.renderSave(result.save.result),
-          gateExited: false,
-        },
-        {
-          paramMismatch: result.paramMismatch,
-          edited: result.edited,
-          directEditsFailed: result.directEditsFailed,
-        },
-      );
     case "approvedNoPlan":
       // Defensively unreachable (the reviewed source is always non-blank) — the save-failed
       // shape with the no-source error, never a throw.
@@ -864,7 +906,9 @@ export async function executePlanReview(
  * The plan completion shared by the Plannotator tool arm and the browser door: a completed
  * bridge outcome over the reviewed bytes → the feature completion (Direct-Edits apply ladder,
  * D1a approval save; implement-here never allowed here — the bridge cannot produce it) → the
- * latch record → the rendered tool result. The caller has already run the decision ladder.
+ * latch record → the rendered completion: the tool result plus the typed save facts of the same
+ * render (the browser door reports its severity from those, never re-decoding `details.save`).
+ * The caller has already run the decision ladder.
  */
 export async function completePlanReviewV1(
   ctx: ExtensionContext,
@@ -876,12 +920,12 @@ export async function completePlanReviewV1(
     source: "plan-draft",
     paramMismatch: false,
   },
-): Promise<ToolResult> {
+): Promise<PlanReviewCompletion> {
   const result = await completePlanReview(
     { ...deps, allowImplementHere: false },
     { outcome: planOutcomeOf(outcome), plan: markdown, edited: false },
     completion,
   );
   recordPlanSaveOutcome(slot, result);
-  return renderPlanReviewResult(ctx, deps, result);
+  return renderPlanReviewCompletion(ctx, deps, result);
 }
