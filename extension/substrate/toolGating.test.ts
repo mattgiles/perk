@@ -39,6 +39,7 @@ type Hook = (
   event: {
     toolName?: string;
     input?: Record<string, unknown>;
+    parentToolCallId?: string;
     messages?: unknown[];
     reason?: string;
   },
@@ -48,8 +49,16 @@ type Hook = (
   | undefined
 >;
 
-/** One registered tool as the fake host reports it (`ToolInfo.sourceInfo`'s two load-bearing fields). */
-type FakeTool = { name: string; source: string; path: string };
+/**
+ * One registered tool as the fake host reports it (`ToolInfo.sourceInfo`'s two load-bearing
+ * fields, plus the tool's own `annotations` when it declares any).
+ */
+type FakeTool = {
+  name: string;
+  source: string;
+  path: string;
+  annotations?: { readOnlyHint?: boolean };
+};
 
 const builtin = (name: string): FakeTool => ({ name, source: "builtin", path: `builtin:${name}` });
 const perkTool = (name: string): FakeTool => ({ name, source: "inline", path: "<inline:perk>" });
@@ -123,6 +132,7 @@ function gateFixture(
       return registry.map((t) => ({
         name: t.name,
         sourceInfo: { source: t.source, path: t.path },
+        ...(t.annotations !== undefined ? { annotations: t.annotations } : {}),
       }));
     },
     setActiveTools: (names: string[]) => {
@@ -209,8 +219,18 @@ function assertForeignInvariance(h: Fixture, exempt: readonly string[] = []): vo
   }
 }
 
-async function blockOf(h: Fixture, toolName: string, input: Record<string, unknown> = {}) {
-  return h.call("tool_call", { toolName, input });
+/** The backstop's verdict on one call; `parentToolCallId` marks it nested (another tool issued it). */
+async function blockOf(
+  h: Fixture,
+  toolName: string,
+  input: Record<string, unknown> = {},
+  parentToolCallId?: string,
+) {
+  return h.call("tool_call", {
+    toolName,
+    input,
+    ...(parentToolCallId !== undefined ? { parentToolCallId } : {}),
+  });
 }
 
 /**
@@ -1458,4 +1478,155 @@ test("a throwing closing install keeps the cohort deferral pending for the next 
   h.fail(undefined);
   await h.call("before_agent_start");
   for (const name of family) assert.ok(!h.active().includes(name), `${name} deactivated now`);
+});
+
+// --- the nested policy (contracts.md §8.40) --------------------------------------------------------
+//
+// A call carrying `parentToolCallId` (another tool issued it through `ctx.executeTool`) is narrowed
+// further under the gate: only a gate-eligible perk query, a core builtin read (`bash` by verdict)
+// and a foreign tool by its gate posture run. Every nested denial is pinned beside its admitted
+// direct twin, so each pin discriminates the nested branch.
+
+const PARENT_ID = "toolu_parent";
+
+/** The nested refusal, verbatim. */
+function nestedDenial(name: string, kind: string) {
+  return {
+    block: true,
+    reason: `perk read-only mode: ${name} is blocked (nested call — ${kind} is never a nested grant; only gate-eligible queries and builtin reads run through another tool).`,
+  };
+}
+
+/** A name admitted direct and refused nested with `kind` in the refusal. */
+async function assertNestedOnlyDenied(h: Fixture, name: string, kind: string, label = "") {
+  assert.equal(await blockOf(h, name), undefined, `${label}${name} direct`);
+  assert.deepEqual(
+    await blockOf(h, name, {}, PARENT_ID),
+    nestedDenial(name, kind),
+    `${label}${name} nested`,
+  );
+}
+
+/** A call admitted direct and nested alike. */
+async function assertAdmittedBothWays(
+  h: Fixture,
+  name: string,
+  input: Record<string, unknown> = {},
+  label = "",
+) {
+  assert.equal(await blockOf(h, name, input), undefined, `${label}${name} direct`);
+  assert.equal(await blockOf(h, name, input, PARENT_ID), undefined, `${label}${name} nested`);
+}
+
+test("the nested policy: under the gate a nested call reaches only a gate-eligible query, a core builtin read and a foreign tool by its posture", async () => {
+  const h = gateFixture(() => false, {
+    registry: [...defaultRegistry(), builtin("tool_search")],
+  });
+  h.gate.syncFromState("read-only", "plan");
+  await assertAdmittedBothWays(h, "objective_stack_status");
+  await assertAdmittedBothWays(h, "read");
+  await assertAdmittedBothWays(h, "bash", { command: "git status" });
+  await assertAdmittedBothWays(h, "structured_output");
+  for (const [name, kind] of [
+    ["plan_draft", "a bounded writer"],
+    ["push_annotations", "an action tool"],
+    ["plan_review", "a terminal tool"],
+    ["run_scout_wave", "an orchestration tool"],
+    [LOADOUT_HOST_NAME, "a host tool"],
+    ["tool_search", "an extension builtin"],
+  ] as const) {
+    await assertNestedOnlyDenied(h, name, kind);
+  }
+  // The earlier arms keep their wordings for a nested call.
+  assert.deepEqual(await blockOf(h, "edit", {}, PARENT_ID), {
+    block: true,
+    reason: "perk read-only mode: edit is blocked (file modifications disabled).",
+  });
+  for (const name of ["foreign_mutator", "subagent"]) {
+    assert.deepEqual(await blockOf(h, name, {}, PARENT_ID), {
+      block: true,
+      reason: `perk read-only mode: ${name} is blocked (tool not allowlisted).`,
+    });
+  }
+  assert.deepEqual(await blockOf(h, "never_known_tool", {}, PARENT_ID), {
+    block: true,
+    reason: "perk read-only mode: never_known_tool is blocked (tool not registered).",
+  });
+  const touch = await blockOf(h, "bash", { command: "touch x" });
+  assert.ok(
+    touch?.reason?.startsWith(
+      "perk read-only mode: command blocked (not allowlisted).\nCommand: touch x\nReason: ",
+    ),
+  );
+  assert.deepEqual(await blockOf(h, "bash", { command: "touch x" }, PARENT_ID), touch);
+  assertForeignInvariance(h);
+});
+
+test("the nested policy follows the landing: delegation by posture, the refinement writer, an unknown stage, the gate exit", async () => {
+  const h = gateFixture(() => false);
+  h.gate.syncFromState("read-only", "implement");
+  await assertAdmittedBothWays(h, "subagent", {}, "implement: ");
+  await assertNestedOnlyDenied(h, "plan_draft", "a bounded writer", "implement: ");
+
+  h.gate.syncFromState("read-only", "objective-refine");
+  await assertNestedOnlyDenied(h, "objective_refinement_draft", "a bounded writer", "refine: ");
+  await assertAdmittedBothWays(h, "objective_stack_status", {}, "refine: ");
+
+  // An unknown stage id is unscoped: the gate's eligibility, the nested narrowing on top.
+  h.gate.syncFromState("read-only", "bogus");
+  await assertAdmittedBothWays(h, "objective_stack_status", {}, "bogus: ");
+  await assertNestedOnlyDenied(h, "plan_draft", "a bounded writer", "bogus: ");
+
+  // Read-write: no call-time backstop, nested or not.
+  h.gate.exit();
+  for (const name of ["plan_draft", "write", "push_annotations", "foreign_mutator"])
+    assert.equal(await blockOf(h, name, {}, PARENT_ID), undefined, `released: ${name}`);
+  assert.equal(await blockOf(h, "bash", { command: "touch x" }, PARENT_ID), undefined);
+  assertForeignInvariance(h);
+});
+
+test("the nested policy holds under a child floor and inside the restoration window", async () => {
+  const pair = async (h: Fixture, label: string) => {
+    await assertAdmittedBothWays(h, "objective_stack_status", {}, `${label}: `);
+    await assertNestedOnlyDenied(h, "plan_draft", "a bounded writer", `${label}: `);
+  };
+  // A child floor (no sync yet — unscoped): the same narrowing.
+  const floor = gateFixture(() => true);
+  await pair(floor, "floor");
+
+  // A reload: enforcement never waits for agent_start.
+  const reload = reloaded();
+  await reload.call("session_start", { reason: "reload" });
+  reload.gate.syncFromState("read-only", "plan");
+  await pair(reload, "reload window");
+  await reload.call("agent_start");
+  await pair(reload, "reload closed");
+
+  // A /tree restore likewise.
+  const tree = reloaded();
+  tree.restore(tree.active());
+  await tree.call("session_tree");
+  tree.gate.syncFromState("read-only", "plan");
+  await pair(tree, "tree window");
+  await tree.call("agent_start");
+  await pair(tree, "tree closed");
+  for (const h of [floor, reload, tree]) assertForeignInvariance(h);
+});
+
+test("a tool's own readOnlyHint never authorizes: an unknown-provenance tool stays blocked direct and nested", async () => {
+  const hinted: FakeTool = {
+    name: "hinted_inline",
+    source: "inline",
+    path: "<inline:hinted>",
+    annotations: { readOnlyHint: true },
+  };
+  const h = gateFixture(() => false, { registry: [...defaultRegistry(), hinted] });
+  h.gate.syncFromState("read-only", "plan");
+  const refusal = {
+    block: true,
+    reason: "perk read-only mode: hinted_inline is blocked (tool not allowlisted).",
+  };
+  assert.deepEqual(await blockOf(h, "hinted_inline"), refusal);
+  assert.deepEqual(await blockOf(h, "hinted_inline", {}, PARENT_ID), refusal);
+  assertForeignInvariance(h);
 });

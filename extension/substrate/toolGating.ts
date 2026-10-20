@@ -24,7 +24,13 @@
 //    guidelines drop out of the request — Pi builds the tool list and the rules from the
 //    declared set minus the hidden names. Fail-open.
 //  - ENFORCEMENT is the read-only `tool_call` backstop: under the gate, edit/write, an
-//    unregistered name, an ineligible tool and an unsafe bash command are blocked. Fail-closed.
+//    unregistered name, an ineligible tool and an unsafe bash command are blocked. A NESTED call
+//    (one carrying `parentToolCallId` — another tool issued it through `ctx.executeTool`) is
+//    further narrowed by the nested policy (`nestedPostureFor`): only a gate-eligible perk query,
+//    a core builtin read (`bash` by verdict) and a foreign tool by its gate posture run; a bounded
+//    writer, every other perk kind and an extension builtin are blocked. Depth-blind (Pi passes
+//    the immediate caller's id), identical under a child floor and inside the restoration window;
+//    hiding, deferral, discovery and `readOnlyHint` never grant a nested call. Fail-closed.
 //  - THE DISCOVERY COHORT: a session whose host has Pi's builtin `tool_search` registered and
 //    active at `session_start` joins it (pi/activation.ts: `deferDiscoveryFamily` re-registers the pilot
 //    family deferred, then `joinDiscoveryCohort`). The next install deactivates the family once
@@ -101,8 +107,11 @@ import {
   LOADOUT_HOST_NAME,
   type LoadoutPresentation,
   type Mode,
+  nestedPostureFor,
   normalizeStage,
+  type Posture,
   type Provenance,
+  postureFor,
   reconcileTarget,
   sameNames,
   suspensionStep,
@@ -229,6 +238,23 @@ export interface ToolGating {
 
 function isReadOnlyMode(mode: string | undefined): boolean {
   return mode === "read-only";
+}
+
+/**
+ * The class a nested denial names. Only a perk tool or an extension builtin reaches the nested
+ * arm — edit/write, unregistered, unknown-provenance and gate-ineligible tools are refused before
+ * it — so the last line is defensive.
+ */
+function nestedDenialClass(posture: Posture): string {
+  if (posture.owner === "perk") {
+    const { gated, kind } = posture.policy;
+    if (typeof gated === "object") return "a bounded writer";
+    return `${/^[aeiou]/.test(kind) ? "an" : "a"} ${kind} tool`;
+  }
+  if (posture.owner === "builtin" && posture.registrar === "extension") {
+    return "an extension builtin";
+  }
+  return "a gate-blocked tool";
 }
 
 export function registerToolGating(
@@ -436,6 +462,17 @@ export function registerToolGating(
           block: true,
           reason: `perk read-only mode: ${event.toolName} is blocked (tool not allowlisted).`,
         };
+      }
+      // The nested policy (contracts.md §8.40): a call another tool issued reaches only a
+      // gate-eligible query, a core builtin read or a foreign tool by its gate posture.
+      if (event.parentToolCallId !== undefined) {
+        const posture = postureFor(event.toolName, provenance);
+        if (nestedPostureFor(posture) === "blocked") {
+          return {
+            block: true,
+            reason: `perk read-only mode: ${event.toolName} is blocked (nested call — ${nestedDenialClass(posture)} is never a nested grant; only gate-eligible queries and builtin reads run through another tool).`,
+          };
+        }
       }
       if (event.toolName === "bash") {
         const command = String((event.input as { command?: unknown }).command ?? "");

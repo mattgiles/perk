@@ -6,7 +6,7 @@
 // tool carries real package provenance — Mode B cases assert only through the live session.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { before, test } from "node:test";
 import {
@@ -681,11 +681,19 @@ test("codemode (A): the gate suspends it — its edit-bearing description never 
   }
 });
 
-/** A gate-allowed test perk tool that writes `target` through Pi's nested-execution API. */
-function nestedWriter(
-  target: string,
-  outcomes: { isError: boolean; text: string }[],
-): InlineExtension {
+/** One nested call's outcome as the probe observed it. */
+type NestedOutcome = { name: string; isError: boolean; text: string };
+
+/**
+ * A gate-allowed test perk tool that makes a fixed nested sequence through Pi's nested-execution
+ * API: write `target`, read `sibling`, draft a plan.
+ */
+function nestedWriter(target: string, sibling: string, outcomes: NestedOutcome[]): InlineExtension {
+  const sequence: [string, Record<string, unknown>][] = [
+    ["write", { path: target, content: "nested\n" }],
+    ["read", { path: sibling }],
+    ["plan_draft", { plan: "# nested" }],
+  ];
   return {
     name: "perk-nested-writer",
     factory: (pi) => {
@@ -697,10 +705,12 @@ function nestedWriter(
           description: "Write the fixture file through a nested call.",
           parameters: { type: "object", additionalProperties: false, properties: {} } as never,
           async execute(_id, _params, _signal, _onUpdate, ctx) {
-            const outcome = await ctx.executeTool("write", { path: target, content: "nested\n" });
-            const result = outcome.result as { content: { type: string; text?: string }[] };
-            const text = result.content.map((c) => c.text ?? "").join("");
-            outcomes.push({ isError: outcome.isError, text });
+            for (const [name, args] of sequence) {
+              const outcome = await ctx.executeTool(name, args);
+              const result = outcome.result as { content: { type: string; text?: string }[] };
+              const text = result.content.map((c) => c.text ?? "").join("");
+              outcomes.push({ name, isError: outcome.isError, text });
+            }
             return { content: [{ type: "text" as const, text: "probed" }], details: {} };
           },
         },
@@ -712,18 +722,20 @@ function nestedWriter(
 
 const NESTED_WRITER = "fixture_nested_writer";
 
-test("nested execution (A): a write reached through ctx.executeTool meets the read-only backstop with its parent call id; read-write, the same write lands", async () => {
+test("nested execution (A): under the gate a nested write and a nested bounded writer meet the backstop with their parent call id while a nested read runs; read-write, the same write lands", async () => {
   const rt = await recordingRuntime();
-  const outcomes: { isError: boolean; text: string }[] = [];
+  const outcomes: NestedOutcome[] = [];
   const runId = "01OWNNESTED";
   const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "implement" } });
   const target = join(cwd, "nested-target.txt");
+  const sibling = join(cwd, "sibling.txt");
+  writeFileSync(sibling, "sibling notes\n");
   const h = await loadAt(cwd, {
     headful: false,
     model: rt.reg.getModel(),
     modelRuntime: rt.reg.modelRuntime,
     env: { PERK_RUN_ID: runId },
-    extraExtensions: [nestedWriter(target, outcomes)],
+    extraExtensions: [nestedWriter(target, sibling, outcomes)],
   });
   const runner = h.session.extensionRunner;
   const seen: { toolName: string; parentToolCallId?: string; block?: boolean }[] = [];
@@ -732,7 +744,7 @@ test("nested execution (A): a write reached through ctx.executeTool meets the re
     const result = await emit(event);
     seen.push({
       toolName: event.toolName,
-      parentToolCallId: (event as { parentToolCallId?: string }).parentToolCallId,
+      parentToolCallId: event.parentToolCallId,
       block: (result as { block?: boolean } | undefined)?.block,
     });
     return result;
@@ -740,24 +752,42 @@ test("nested execution (A): a write reached through ctx.executeTool meets the re
   try {
     rt.callThenStop(NESTED_WRITER, {});
     await h.session.prompt("write through the probe");
-    assert.equal(outcomes.length, 1, "the probe ran (it is gate-allowed)");
-    assert.equal(outcomes[0]?.isError, true);
+    assert.equal(outcomes.length, 3, "the probe ran (it is gate-allowed)");
+    const [write, read, draft] = outcomes;
+    assert.equal(write?.isError, true);
     assert.match(
-      outcomes[0]?.text ?? "",
+      write?.text ?? "",
       /perk read-only mode: write is blocked \(file modifications disabled\)/,
     );
+    assert.equal(read?.isError, false, read?.text);
+    assert.match(read?.text ?? "", /sibling notes/, "the nested read saw the file");
+    assert.equal(draft?.isError, true);
+    assert.ok(
+      draft?.text.includes(
+        "perk read-only mode: plan_draft is blocked (nested call — a bounded writer is never a nested grant; only gate-eligible queries and builtin reads run through another tool).",
+      ),
+      draft?.text,
+    );
+    const parent = `call-${NESTED_WRITER}`;
     assert.deepEqual(
-      seen.filter((e) => e.toolName === "write"),
-      [{ toolName: "write", parentToolCallId: `call-${NESTED_WRITER}`, block: true }],
+      seen.filter((e) => e.parentToolCallId !== undefined),
+      [
+        { toolName: "write", parentToolCallId: parent, block: true },
+        { toolName: "read", parentToolCallId: parent, block: undefined },
+        { toolName: "plan_draft", parentToolCallId: parent, block: true },
+      ],
     );
     assert.equal(existsSync(target), false, "nothing written under the gate");
+    // The direct twin: plan_draft is a sanctioned bounded write when the model calls it.
+    assert.equal(await h.emitToolCall("plan_draft", { plan: "# x" }), undefined);
 
     // The read-write control: the same nested write executes once the gate is released.
     await h.invokeCommand("plan");
     assert.equal(h.workflowState().mode, "read-write");
     rt.callThenStop(NESTED_WRITER, {});
     await h.session.prompt("write through the probe again");
-    assert.equal(outcomes[1]?.isError, false, outcomes[1]?.text);
+    assert.equal(outcomes[3]?.name, "write");
+    assert.equal(outcomes[3]?.isError, false, outcomes[3]?.text);
     assert.equal(readFileSync(target, "utf8"), "nested\n");
   } finally {
     h.dispose();

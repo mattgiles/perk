@@ -1,14 +1,17 @@
 // The discovery pilot's nested-execution leg (contracts.md §8.40 "Native discovery"): in a
 // discovery-cohort session a deferred, INACTIVE family member stays callable through Pi's
 // nested-execution API (`ctx.executeTool`), its call is recorded on the parent tool result, and
-// the read-only backstop still governs it. Driven through REAL bound AgentSessions (Mode A, fully
-// offline). Its own file so the probe fixture's catalog registration never enters the census
-// process (`discoveryPilot.test.ts`).
+// the read-only backstop still governs it — under the gate through its nested policy (only a
+// gate-eligible query and the core builtin reads run through another tool). Driven through REAL
+// bound AgentSessions (Mode A, fully offline). Its own file so the probe fixture's catalog
+// registration never enters the census process (`discoveryPilot.test.ts`).
 //
 // `PERK_PRINT_DISCOVERY_CENSUS=1` prints the probe session's JSONL path to stderr for the
 // `perk learn evidence --render` live leg.
 
 import assert from "node:assert/strict";
+import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { before, test } from "node:test";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { type InlineExtension, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -24,6 +27,7 @@ import {
   toolSearch,
 } from "../testing/harness.ts";
 import { ensureToolCatalog } from "../testing/toolCatalog.ts";
+import { readOnlyBashVerdict } from "./readOnlyBash.ts";
 
 before(ensureToolCatalog);
 
@@ -187,15 +191,24 @@ test("nested execution in the cohort (A): a deferred inactive member is callable
   }
 });
 
-test("nested execution under the gate (A): a nested gate-allowed query is admitted and a nested write blocked, each with its parent call id", async () => {
+test("nested execution under the gate (A): the nested policy admits the query and the builtin reads and refuses every writer and action, each with its parent call id", async () => {
   const cwd = scaffoldRepo();
+  writeFileSync(join(cwd, "notes.txt"), "nested notes\n");
   const file = plantSession(cwd, [{ stage: "implement", mode: "read-only" }]);
   const bin = fakePerkRouter(cwd, { "objective stack": { json: STATUS } });
   const rt = await recordingRuntime();
   const script: { calls: NestedCall[] } = {
     calls: [
       { name: "objective_stack_status", args: { objective: "7" } },
+      { name: "read", args: { path: "notes.txt" } },
+      // The scaffold is not a git repo: `ls` is the allowlisted read here.
+      { name: "bash", args: { command: "ls" } },
+      { name: "bash", args: { command: "touch nested-x" } },
       { name: "write", args: { path: "nested-target.txt", content: "nested\n" } },
+      // Mode-over-stage: direct-eligible in the gated implement landing, never nested.
+      { name: "plan_draft", args: { plan: "# nested" } },
+      // The deferred INACTIVE action: nested-callable per Pi, refused by the nested policy.
+      { name: "push_annotations", args: { angle: "probe", findings: [] } },
     ],
   };
   const observed: Observed[] = [];
@@ -213,30 +226,58 @@ test("nested execution under the gate (A): a nested gate-allowed query is admitt
   const emit = runner.emitToolCall.bind(runner);
   runner.emitToolCall = async (event) => {
     const result = await emit(event);
-    if ((event as { parentToolCallId?: string }).parentToolCallId !== undefined) {
+    if (event.parentToolCallId !== undefined) {
       seen.push({
         toolName: event.toolName,
-        parentToolCallId: (event as { parentToolCallId?: string }).parentToolCallId,
+        parentToolCallId: event.parentToolCallId,
         reason: (result as { reason?: string } | undefined)?.reason,
       });
     }
     return result;
   };
+  const touchVeto = readOnlyBashVerdict("touch nested-x");
+  assert.ok(!touchVeto.allowed, "touch is vetoed");
+  const nested = (name: string, kind: string) =>
+    `perk read-only mode: ${name} is blocked (nested call — ${kind} is never a nested grant; only gate-eligible queries and builtin reads run through another tool).`;
   try {
     assert.equal(h.toolInfo("objective_stack_status")?.exposure, "deferred", "a cohort session");
+    assert.ok(!h.session.getActiveToolNames().includes("push_annotations"), "inactive");
     rt.callThenStop(PROBE, {});
     await h.session.prompt("probe under the gate");
-    assert.equal(observed.length, 2, "the probe ran (it is gate-allowed)");
-    // The eligible query is admitted nested under the gate by the top-level rule.
-    assert.equal(observed[0]?.isError, false, observed[0]?.text);
+    assert.equal(observed.length, script.calls.length, "the probe ran (it is gate-allowed)");
+    assert.deepEqual(
+      observed.map((o) => o.isError),
+      [false, false, false, true, true, true, true],
+      JSON.stringify(observed.map((o) => o.text)),
+    );
     assert.deepEqual(observed[0]?.structuredContent, { ok: true, objective: "7", status: STATUS });
-    assert.equal(observed[1]?.isError, true, observed[1]?.text);
+    assert.match(observed[1]?.text ?? "", /nested notes/, "the nested read saw the file");
+    assert.match(observed[2]?.text ?? "", /notes\.txt/, "the nested ls listed it");
+    assert.equal(existsSync(join(cwd, "nested-x")), false, "the vetoed touch never ran");
+    assert.equal(existsSync(join(cwd, "nested-target.txt")), false, "the write never landed");
     assert.deepEqual(seen, [
       { toolName: "objective_stack_status", parentToolCallId: PARENT_ID, reason: undefined },
+      { toolName: "read", parentToolCallId: PARENT_ID, reason: undefined },
+      { toolName: "bash", parentToolCallId: PARENT_ID, reason: undefined },
+      {
+        toolName: "bash",
+        parentToolCallId: PARENT_ID,
+        reason: `perk read-only mode: command blocked (not allowlisted).\nCommand: touch nested-x\nReason: ${touchVeto.reason}`,
+      },
       {
         toolName: "write",
         parentToolCallId: PARENT_ID,
         reason: "perk read-only mode: write is blocked (file modifications disabled).",
+      },
+      {
+        toolName: "plan_draft",
+        parentToolCallId: PARENT_ID,
+        reason: nested("plan_draft", "a bounded writer"),
+      },
+      {
+        toolName: "push_annotations",
+        parentToolCallId: PARENT_ID,
+        reason: nested("push_annotations", "an action tool"),
       },
     ]);
     assert.ok(
