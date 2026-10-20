@@ -10,6 +10,7 @@ import { createPerkStatus } from "../../surfaces/surfaces.ts";
 import {
   type BrowserLaunch,
   type BrowserOperationSpec,
+  BrowserStartRefusal,
   CONSOLE_QUIET_MS,
   createBrowserOperationOwner,
   DECISION_DRAIN_BUDGET_MS,
@@ -18,6 +19,7 @@ import {
   detachedDecisionWarning,
   postDegradeDecisionWarning,
   QUIESCE_BUDGET_MS,
+  settleCodeReviewOutcome,
   settleReviewOutcome,
 } from "./browserOperation.ts";
 import {
@@ -28,7 +30,11 @@ import {
   type FetchResponseLike,
   primeAnnotationSurface,
 } from "./providers/annotations.ts";
-import type { BrowserReadiness, StartedSurface } from "./providers/plannotatorHandoff.ts";
+import type {
+  BrowserReadiness,
+  CodeReviewOutcome,
+  StartedSurface,
+} from "./providers/plannotatorHandoff.ts";
 import { reviewDetachedStatus } from "./providers/waveStatus.ts";
 import type { ReviewOutcome } from "./reviewOutcome.ts";
 
@@ -277,6 +283,61 @@ function markerCalls<C extends { url: string }>(calls: C[], url: string): C[] {
 
 const PLAN_FINDING = { phrase: "the draft", severity: "major", confidence: "high", body: "x" };
 
+const CODE_SCOPE = "pr-review-browser";
+const CODE_DEGRADE_NOTICE = "CODE DEGRADE NOTICE (test)";
+const CODE_PRIMES = ["collect_review_wave", "push_annotations"] as const;
+const HANDLED: CodeReviewOutcome = {
+  status: "handled",
+  approved: true,
+  feedback: undefined,
+  annotationCount: 0,
+  annotations: [],
+  exit: false,
+};
+
+/** The code-review handoff twin of `fakeHandoff` (deferred readiness/bridge; honours an abort). */
+function fakeCodeHandoff(opts: { url?: string } = {}) {
+  const readiness = deferred<BrowserReadiness>();
+  const bridge = deferred<CodeReviewOutcome>();
+  const rec = { readiness, bridge, signal: null as AbortSignal | null, fail: null as Error | null };
+  const url = opts.url ?? URL_A;
+  const start = async (launch: BrowserLaunch): Promise<StartedSurface<CodeReviewOutcome>> => {
+    rec.signal = launch.signal;
+    if (rec.fail !== null) throw rec.fail;
+    const onAbort = (): void => {
+      if (!bridge.settled()) bridge.resolve({ status: "aborted" });
+      if (!readiness.settled()) readiness.resolve("aborted");
+    };
+    if (launch.signal.aborted) onAbort();
+    else launch.signal.addEventListener("abort", onAbort, { once: true });
+    return {
+      url,
+      port: Number(url.split(":").at(-1)),
+      remote: false,
+      readiness: readiness.promise,
+      bridgePromise: bridge.promise,
+    };
+  };
+  return Object.assign(rec, { start });
+}
+
+/** The code-review doors' spec shape: mode `review`, NO companion, NO applicability fence. */
+function makeCodeSpec(start: BrowserOperationSpec<CodeReviewOutcome>["start"]) {
+  const decisions: CodeReviewOutcome[] = [];
+  const spec: BrowserOperationSpec<CodeReviewOutcome> = {
+    scope: CODE_SCOPE,
+    start,
+    mode: "review",
+    primes: CODE_PRIMES,
+    degradeNotice: CODE_DEGRADE_NOTICE,
+    settle: settleCodeReviewOutcome,
+    onDecision: async (out) => {
+      decisions.push(out);
+    },
+  };
+  return { spec, decisions };
+}
+
 // ------------------------------------------------------------------ the marker texts
 
 test("reviewDetachedStatus: the three causes share the two facts; only the cause and the cue differ", () => {
@@ -315,6 +376,27 @@ test("settleReviewOutcome: completed → decided; unavailable → warning; abort
   });
 });
 
+test("settleCodeReviewOutcome: handled → decided (exit included), unavailable/error → unavailable with the warning, aborted → aborted", () => {
+  assert.deepEqual(settleCodeReviewOutcome(HANDLED), { kind: "decided" });
+  assert.deepEqual(
+    settleCodeReviewOutcome({ ...HANDLED, approved: false, exit: true }),
+    { kind: "decided" },
+    "the closed-without-feedback arm is a decision the respond mapper renders",
+  );
+  assert.deepEqual(
+    settleCodeReviewOutcome({ status: "unavailable", warning: "plannotator reported unavailable" }),
+    { kind: "unavailable", warning: "plannotator reported unavailable" },
+  );
+  assert.deepEqual(
+    settleCodeReviewOutcome({
+      status: "error",
+      warning: "plannotator reported error: Port in use",
+    }),
+    { kind: "unavailable", warning: "plannotator reported error: Port in use" },
+  );
+  assert.deepEqual(settleCodeReviewOutcome({ status: "aborted" }), { kind: "aborted" });
+});
+
 test("budgets: the documented constants", () => {
   assert.equal(CONSOLE_QUIET_MS, 6_000);
   assert.equal(DETACH_MARKER_BUDGET_MS, 2_000);
@@ -327,8 +409,8 @@ test("budgets: the documented constants", () => {
   );
   assert.equal(
     postDegradeDecisionWarning(SCOPE),
-    "a browser decision arrived after the review degraded — ignored (nothing saved); re-run " +
-      "/plan-review-browser to review the current draft",
+    "a browser decision arrived after the review degraded — ignored (nothing routed, nothing " +
+      "saved); re-run /plan-review-browser to review again",
   );
   assert.equal(
     detachedDecisionWarning("session-ended"),
@@ -379,6 +461,137 @@ test("open: a start failure reports the port-pick error, returns null, primes no
   assert.ok(
     !h.session.notifies.slice(before).some((n) => n.message.includes("earlier browser review")),
   );
+});
+
+test("open: a BrowserStartRefusal from the door's start is reported verbatim and returns failed {refused}; any other throw keeps the port-pick line and a bare failed", async () => {
+  for (const arm of ["refusal", "other"] as const) {
+    const h = harness();
+    const a = fakeHandoff();
+    const specA = makeSpec(a.start);
+    await h.owner.open(h.ctx, specA.spec);
+    a.readiness.resolve("ready");
+    await flush();
+
+    const b = fakeCodeHandoff({ url: URL_B });
+    b.fail =
+      arm === "refusal"
+        ? new BrowserStartRefusal("mismatch: the stack's combined patch moved")
+        : new Error("port 45002 is in use");
+    const specB = makeCodeSpec(b.start);
+    const result = await h.owner.open(h.ctx, specB.spec);
+    assert.deepEqual(
+      result,
+      arm === "refusal"
+        ? { kind: "failed", refused: "mismatch: the stack's combined patch moved" }
+        : { kind: "failed" },
+      arm,
+    );
+    assert.equal(a.signal?.aborted, true, `${arm}: the predecessor was already retired`);
+    assert.equal(h.annotations.surface, null, `${arm}: no browser review remains, nothing primed`);
+    assert.equal(specA.companion.clears, 1, `${arm}: the predecessor's companion was cleared`);
+    assert.equal(h.primes.length, 1, `${arm}: only the predecessor primed its deferred tools`);
+    const errors = h.session.notifies.filter((n) => n.severity === "error");
+    assert.deepEqual(
+      errors.map((n) => n.message),
+      [
+        arm === "refusal"
+          ? "perk: pr-review-browser — mismatch: the stack's combined patch moved"
+          : "perk: pr-review-browser — could not pick a free local port for the plannotator " +
+            "review server: port 45002 is in use",
+      ],
+      `${arm}: one error line`,
+    );
+  }
+});
+
+test("code-review spec (mode review, no companion, no applicability fence): ready → decided → closed, and timeout → degrade → post-degrade warning, all without a companion", async () => {
+  const h = harness();
+  const a = fakeCodeHandoff();
+  const specA = makeCodeSpec(a.start);
+  assert.deepEqual(await h.owner.open(h.ctx, specA.spec), { kind: "opened", url: URL_A });
+  assert.deepEqual(h.annotations.surface, { mode: "review", url: URL_A });
+  assert.deepEqual(h.primes, [[...CODE_PRIMES]]);
+  a.readiness.resolve("ready");
+  await flush();
+  assert.deepEqual(
+    h.session.notifies.map((n) => n.severity),
+    ["info"],
+    "the ready line (always applicable)",
+  );
+  assert.match(
+    h.session.notifies[0]?.message ?? "",
+    /plannotator is up at http:\/\/127\.0\.0\.1:45001/,
+  );
+  const exit = { ...HANDLED, approved: false, exit: true };
+  a.bridge.resolve(exit);
+  await flush();
+  assert.deepEqual(specA.decisions, [exit], "the decision routed once");
+  assert.equal(h.annotations.surface, null, "the close cleared the surface");
+
+  const d = harness();
+  const b = fakeCodeHandoff();
+  const specB = makeCodeSpec(b.start);
+  await d.owner.open(d.ctx, specB.spec);
+  b.readiness.resolve("timeout");
+  await flush();
+  assert.deepEqual(
+    d.session.notifies.map((n) => n.message),
+    [
+      "perk: pr-review-browser — the plannotator review server did not become ready at " +
+        "http://127.0.0.1:45001 — the browser review is unavailable",
+    ],
+    "the degrade line is byte-stable with the PR door's",
+  );
+  assert.deepEqual(d.session.sent, [{ message: CODE_DEGRADE_NOTICE }]);
+  assert.equal(d.annotations.surface, null);
+  b.bridge.resolve(HANDLED);
+  await flush();
+  assert.equal(d.session.notifies.length, 2);
+  assert.equal(d.session.notifies[1]?.severity, "warning");
+  assert.ok(d.session.notifies[1]?.message.endsWith(postDegradeDecisionWarning(CODE_SCOPE)));
+  assert.deepEqual(specB.decisions, [], "a decision after the degrade is never routed");
+  assert.equal(d.session.sent.length, 1, "nothing injected beyond the notice");
+});
+
+test("open: the door's onOpened delivery point runs after the prime and BEFORE any background emission — an already-settled unavailable bridge degrades after it; a throwing onOpened is reported and the operation proceeds", async () => {
+  for (const arm of ["deliver", "throw"] as const) {
+    const h = harness();
+    const a = fakeCodeHandoff();
+    // The bridge settled before the start even returned (an immediate error respond).
+    a.bridge.resolve({ status: "error", warning: "plannotator reported error: Port 1 in use" });
+    const specA = makeCodeSpec(a.start);
+    const seen: { surface: unknown; primes: number }[] = [];
+    specA.spec.onOpened = () => {
+      seen.push({ surface: h.annotations.surface, primes: h.primes.length });
+      if (arm === "throw") throw new Error("injection failed");
+      h.session.pi.sendUserMessage("GUIDANCE");
+    };
+    assert.deepEqual(await h.owner.open(h.ctx, specA.spec), { kind: "opened", url: URL_A });
+    assert.deepEqual(
+      seen,
+      [{ surface: { mode: "review", url: URL_A }, primes: 1 }],
+      `${arm}: once, after the prime`,
+    );
+    await flush();
+    const degrade = { message: CODE_DEGRADE_NOTICE };
+    assert.deepEqual(
+      h.session.sent,
+      arm === "deliver" ? [{ message: "GUIDANCE" }, degrade] : [degrade],
+      `${arm}: the degrade notice never overtakes the delivery`,
+    );
+    assert.equal(h.annotations.surface, null, `${arm}: the degrade still cleared the surface`);
+    if (arm === "throw") {
+      assert.ok(
+        h.session.notifies.some(
+          (n) =>
+            n.severity === "error" &&
+            n.message ===
+              "perk: pr-review-browser — the browser open delivery failed: injection failed",
+        ),
+        "the delivery failure is reported like a background-task failure",
+      );
+    }
+  }
 });
 
 // ------------------------------------------------------------------ 2. ordering

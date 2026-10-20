@@ -9,12 +9,13 @@
 // (`replaceWaveStatus`) the doors show while a wave is running.
 //
 // The surface handle is PER-ACTIVATION STATE (`createAnnotationState()` — created once in
-// `extension/pi/activation.ts` and threaded to this installer plus every priming door: the PR/stack
-// review doors in review mode, the plan/objective review doors in plan mode — the
-// `draftReviewWave` threading pattern), never a tool param: the door primes
-// `primeAnnotationSurface` the moment the browser open picks the port and clears it when the
-// bridge settles, so the model neither relays nor sees the URL (the result prose never echoes
-// it). The primed mode selects the finding shape the strict decode enforces.
+// `extension/pi/activation.ts` and threaded to this installer plus the browser-operation owner
+// every browser door opens through: the PR/stack review doors in review mode, the
+// plan/objective review doors in plan mode — the `draftReviewWave` threading pattern), never a
+// tool param: the owner primes `primeAnnotationSurface` the moment a door's browser open picks
+// the port and clears it on settle, degrade or detach — only while that operation still owns the
+// surface (identity) — so the model neither relays nor sees the URL (the result prose never
+// echoes it). The primed mode selects the finding shape the strict decode enforces.
 //
 // The authority rule is structural: the only DELETE this module can emit carries
 // `?source=perk:<angle>` composed from the validated slug — a bare DELETE (clear-all) and `?id=`
@@ -27,7 +28,7 @@
 // retry); AFTER readiness the same unit is retried in-call over the bounded
 // `HELD_RETRY_DELAYS_MS` schedule and held only on exhaustion — a held result then means the
 // server stayed unreachable and the findings belong in-session (no later wake is promised).
-// Degrading is the door's readiness observer's job, never this tool's. An HTTP rejection
+// Degrading is the owner's readiness observer's job, never this tool's. An HTTP rejection
 // (anything but the contract's 201 on POST) is the loud `push_rejected` soft-fail (the mapping
 // is code-owned and pre-validated, so a rejection means plannotator version drift — retrying
 // cannot succeed).
@@ -37,9 +38,10 @@
 // are already disjoint by the parent's reconciliation, so no cross-source promotion exists.
 //
 // Installed from `extension/pi/activation.ts`; FLOW-SCOPED via the door-primed surface handle — the
-// browser door primes it the moment the browser open picks the port and clears it on bridge
-// settle AND on the readiness-degrade arm, so `push_annotations` refuses loudly (`no_surface`)
-// outside a door-opened flow.
+// browser-operation owner primes it the moment a door's browser open picks the port and clears
+// it on bridge settle, on the readiness-degrade arm AND on detach (replacement, turn abort,
+// session shutdown), so `push_annotations` refuses loudly (`no_surface`) outside a door-opened
+// flow.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { failFor, ok, type Result } from "../../../substrate/result.ts";
@@ -94,7 +96,7 @@ export interface AnnotationState {
   surface: AnnotationSurface | null;
   ledger: Map<string, { source: string; id?: string }>;
   held: HeldBatch[];
-  /** True once the door's readiness observer saw the server up for the primed surface. */
+  /** True once the owner's readiness observer saw the server up for the primed surface. */
   ready: boolean;
   /** Resettable counter token: an old push cannot decrement a newly primed session's count. */
   inFlight: { count: number };
@@ -112,9 +114,11 @@ export function createAnnotationState(): AnnotationState {
 }
 
 /**
- * Prime the surface for a new browser session (door-owned; called when the browser open picks
- * the port). Resets the ledger, the held queue, the captured ids, and the readiness flag — a
- * new browser session supersedes everything.
+ * Prime the surface for a new browser session (owner-owned; the browser-operation owner calls it
+ * when a door's browser open picks the port). Allocates a NEW surface object — its identity IS
+ * the session (every send-side mutation and the owner's own clear check fence on it) — and resets
+ * the ledger, the held queue, the captured ids, and the readiness flag: a new browser session
+ * supersedes everything.
  */
 export function primeAnnotationSurface(state: AnnotationState, next: AnnotationSurface): void {
   state.surface = { mode: next.mode, url: next.url.replace(/\/+$/, "") };
@@ -124,7 +128,10 @@ export function primeAnnotationSurface(state: AnnotationState, next: AnnotationS
   state.ready = false;
 }
 
-/** Drop the surface (door-owned; called when the bridge settles). Resets all session state. */
+/**
+ * Drop the surface (owner-owned; the browser-operation owner calls it on settle, degrade or
+ * detach, only while the operation still owns the surface). Resets all session state.
+ */
 export function clearAnnotationSurface(state: AnnotationState): void {
   state.surface = null;
   state.inFlight = { count: 0 };

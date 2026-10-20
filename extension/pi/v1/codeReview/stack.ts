@@ -16,16 +16,19 @@
 // checkout of the TOP stack head AND writes `git diff <base_sha> <top head>` over the exact
 // fetched objects to `<checkout>.patch` beside it (`patchPathFor` — the TS half of the
 // two-plane derived-path convention; nothing carries the path), reporting its SHA-256. The door
-// verifies the digest against the file bytes immediately before the request (`verifyStackPatch`
-// — a refreshed checkout is a `mismatch`, a gone checkout a `missing`) and opens plannotator's
-// static-patch mode `{cwd: <checkout>, patchFile: <checkout>.patch}`: no repository context, no
-// merge-base fallback, no live refresh — moving refs cannot change the displayed diff. On a
-// successful open the verified `PinnedStack` (base commit + every member head) is bound into the
-// per-activation `StackPinState`, so the reviewer lanes (`start_review_wave` with `stack: true`)
-// and the guidance's routing step read the ONE pinned `perk pr review-context --stack --pin-base
-// … --pin-head …` command rendered from the same snapshot — browser, lanes and routing share one
-// commit identity by construction. The former live `since-base` vs `origin/<stack base>` mode
-// (and its merge-base→HEAD empty-review trap) is gone; exploration keeps the detached checkout.
+// verifies the digest against the file bytes at TWO points (`verifyStackPatch` — a refreshed
+// checkout is a `mismatch`, a gone checkout a `missing`): the pre-open refusal gate, and again
+// at the emission boundary inside the browser-operation owner's start, after the port pick, with
+// no await before the request (the owner may first wait out a predecessor's retirement, and the
+// port pick is asynchronous — a refresh in either window refuses at launch). It opens plannotator's static-patch mode `{cwd: <checkout>, patchFile:
+// <checkout>.patch}`: no repository context, no merge-base fallback, no live refresh — moving
+// refs cannot change the displayed diff. On a launched open the verified `PinnedStack` (base
+// commit + every member head) is bound into the per-activation `StackPinState`, so the reviewer
+// lanes (`start_review_wave` with `stack: true`) and the guidance's routing step read the ONE
+// pinned `perk pr review-context --stack --pin-base … --pin-head …` command rendered from the
+// same snapshot — browser, lanes and routing share one commit identity by construction. The
+// former live `since-base` vs `origin/<stack base>` mode (and its merge-base→HEAD empty-review
+// trap) is gone; exploration keeps the detached checkout.
 //
 // THE POSTING CONTRACT (the delta from /pr-review-browser): a local-diff session has NO attached
 // PR, so the browser has no platform-posting path — ALL GitHub posting is perk-side after the
@@ -36,8 +39,11 @@
 // `open_stack_review` is the cold-launch twin (the `run_audit_wave` posture): NO parameters —
 // the pinned stack snapshot comes ONLY from the `perk objective stack review` launch handoff
 // (`stack_review`, recovered via the rebuilt workflow-state run_id), so no model-relayed path
-// can aim the flow anywhere. Single-use per session; it runs the SAME extracted lifecycle core
-// and returns the rendered stack.md guidance as its ok text.
+// can aim the flow anywhere. Single-use per session; it runs the SAME code-review open over the
+// activation's browser-operation owner (`openReviewBrowserCore`, contracts §8.23) and returns the
+// rendered stack.md guidance as its ok text. Like every browser door, a later open of any browser
+// door replaces this review (its tab is marked detached); a turn abort or a session reload
+// detaches it the same way.
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -50,21 +56,15 @@ import { type ColdJson, runColdDoor } from "../../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { failFor, ok } from "../../../substrate/result.ts";
-import type { ToolGating } from "../../../substrate/toolGating.ts";
 import { report } from "../../../surfaces/report.ts";
-import type { ActivityHandle } from "../../../surfaces/surfaces.ts";
 import {
   type PinnedStack,
   pinnedReviewContextCommand,
 } from "../../../waves/adversarialReviewWave.ts";
 import { registerPerkTool } from "../../perkTool.ts";
-import type { AnnotationState } from "../providers/annotations.ts";
-import {
-  plannotatorPresent,
-  type StartBrowserDeps,
-  stackRespondMessage,
-} from "../providers/plannotatorHandoff.ts";
-import { openReviewBrowserCore } from "./browser.ts";
+import { type BrowserOperationOwner, BrowserStartRefusal } from "../browserOperation.ts";
+import { plannotatorPresent, stackRespondMessage } from "../providers/plannotatorHandoff.ts";
+import { openReviewBrowserCore, type ReviewBrowserOpenResult } from "./browser.ts";
 import { type CheckoutOk, decodeCheckout, PR_URL_RE } from "./checkout.ts";
 import { type StackPinState, samePinnedStack } from "./reviewWave.ts";
 
@@ -360,7 +360,8 @@ export const STACK_DEGRADE_NOTICE =
  * annotation surface for another stack while the lanes keep reviewing the old commits — their
  * findings could then be pushed/routed against the wrong patch. Returns the refusal text, or
  * null when the open may proceed (no pending stack wave, or the SAME pin — a stale-session
- * reopen of the open review).
+ * reopen of the open review). It runs before the browser-operation owner is reached, so a
+ * refusal registers nothing there and detaches no live review.
  */
 export function pinSupersedeRefusal(stackPin: StackPinState, next: PinnedStack): string | null {
   const inFlight = stackPin.inFlight;
@@ -372,45 +373,56 @@ export function pinSupersedeRefusal(stackPin: StackPinState, next: PinnedStack):
   );
 }
 
+/** The stack open's result: the door result, or the launch-time digest refusal. */
+export type StackOpenResult = ReviewBrowserOpenResult;
+
+/** The stack open's inputs — the snapshot slice both entry paths open from. */
+export interface StackOpenOpts {
+  checkoutPath: string;
+  /** The snapshot's digest of the derived `<checkout>.patch` (re-verified at launch). */
+  patchSha256: string;
+  guidance: string;
+  /** The warm door's delivery point (bind the pins, inject the guidance) — see the core. */
+  onLaunched?: () => void;
+}
+
 /**
- * Open the stack browser session through the extracted lifecycle core (both entry paths):
- * plannotator's static-patch mode over the digest-verified `patchPath` (the caller ran
- * `verifyStackPatch` and `pinSupersedeRefusal` first), and on success bind the verified
- * `pinned` stack into the per-activation `StackPinState` (a later open replaces it — the
- * accepted "second browser door supersedes" posture — unless a stack wave is in flight against
- * a different pin). The server port is picked by mirroring Plannotator's own port selection
- * (see plannotatorHandoff.ts) over `browserDeps`, the activation's port selection.
+ * Open the stack browser review through the activation's browser-operation owner (both entry
+ * paths): the code-review open over plannotator's static-patch mode on the derived
+ * `<checkout>.patch`, the stack degrade notice and the stack respond mapper. The patch digest is
+ * verified at TWO points: the caller's pre-open refusal gate (`verifyStackPatch`, then
+ * `pinSupersedeRefusal` — an early refusal reaches no owner and detaches nothing), and again
+ * at the emission boundary (`beforeEmit`: after the port pick and the env preset, with no await
+ * before the request is emitted): the owner may first wait for a predecessor's retirement and
+ * the port pick is itself asynchronous, and a `perk pr review checkout --stack` refresh in either
+ * window must refuse (`refused`, reported verbatim) rather than show a refreshed patch under the
+ * old pins — a launch-time refusal leaves no browser review (the predecessor was already
+ * retired). Binding the pins is the caller's, on `launched` only (the warm door at the owner's
+ * delivery point, `onLaunched`); a later open of any browser door replaces this review (the
+ * owner detaches it). The server port is picked by the
+ * owner (mirroring Plannotator's own port selection — see plannotatorHandoff.ts).
  */
-async function openStackBrowser(
+export async function openStackBrowser(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  gating: ToolGating,
-  annotations: AnnotationState,
-  status: ActivityHandle,
-  stackPin: StackPinState,
-  opts: {
-    checkoutPath: string;
-    patchPath: string;
-    pinned: PinnedStack;
-    guidance: string;
-    injectGuidance: boolean;
-    browserDeps?: StartBrowserDeps;
-  },
-): Promise<boolean> {
-  const started = await openReviewBrowserCore(pi, ctx, gating, annotations, status, {
+  owner: BrowserOperationOwner,
+  opts: StackOpenOpts,
+): Promise<StackOpenResult> {
+  return await openReviewBrowserCore(pi, ctx, owner, {
     scope: SCOPE,
     browserOpts: {
       cwd: opts.checkoutPath,
-      source: { mode: "patch", patchFile: opts.patchPath },
+      source: { mode: "patch", patchFile: patchPathFor(opts.checkoutPath) },
     },
     guidance: opts.guidance,
     degradeNotice: STACK_DEGRADE_NOTICE,
     respondMessageFor: stackRespondMessage,
-    injectGuidance: opts.injectGuidance,
-    ...(opts.browserDeps !== undefined ? { browserDeps: opts.browserDeps } : {}),
+    beforeEmit: () => {
+      const patch = verifyStackPatch(opts.checkoutPath, opts.patchSha256);
+      if (!patch.ok) throw new BrowserStartRefusal(`${patch.reason}: ${patch.detail}`);
+    },
+    ...(opts.onLaunched !== undefined ? { onLaunched: opts.onLaunched } : {}),
   });
-  if (started) stackPin.pinned = opts.pinned;
-  return started;
 }
 
 // ------------------------------------------------------------------------ the warm door
@@ -418,11 +430,8 @@ async function openStackBrowser(
 /** Register the warm `/stack-review-browser` command (posting rides submit_pr_review). */
 function registerStackReviewBrowser(
   pi: ExtensionAPI,
-  gating: ToolGating,
-  annotations: AnnotationState,
-  status: ActivityHandle,
+  owner: BrowserOperationOwner,
   stackPin: StackPinState,
-  deps: StartBrowserDeps = {},
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -506,8 +515,9 @@ function registerStackReviewBrowser(
       }
 
       const data = checkout.data;
-      // The digest check BEFORE the open: the browser must show exactly the patch the checkout
-      // envelope describes (a refresh between the two is a loud refusal, never a wrong diff).
+      // The pre-open digest check (the owner's start re-verifies at launch): the browser must
+      // show exactly the patch the checkout envelope describes (a refresh between the two is a
+      // loud refusal, never a wrong diff).
       const patch = verifyStackPatch(data.path, data.patch_sha256);
       if (!patch.ok) {
         report(ctx, SCOPE, "error", `${patch.reason}: ${patch.detail}`, { alsoLog: true });
@@ -529,22 +539,27 @@ function registerStackReviewBrowser(
             : " → adversarial reviewers") +
           " → plannotator browser triage → judgment-routed per-PR posting",
       );
-      await openStackBrowser(pi, ctx, gating, annotations, status, stackPin, {
+      const guidance =
+        stackReviewGuidance({
+          topPr: data.pr,
+          checkout: data.path,
+          stackBase: data.base_ref,
+          members: data.stack,
+          notes: data.stack_notes,
+          pinned,
+          ...(parsed.directive ? { directive: parsed.directive } : {}),
+        }) + bindingSuffix(ctx.cwd, `command:${SCOPE}`);
+      // `unlaunched` / `refused` are reported by the owner and bind nothing; `retired` yields to
+      // the newer open. On a launch the pins bind BEFORE the guidance reaches the model (its first
+      // step is the stack wave), both at the owner's delivery point — ahead of any degrade.
+      await openStackBrowser(pi, ctx, owner, {
         checkoutPath: data.path,
-        patchPath: patch.patchPath,
-        pinned,
-        guidance:
-          stackReviewGuidance({
-            topPr: data.pr,
-            checkout: data.path,
-            stackBase: data.base_ref,
-            members: data.stack,
-            notes: data.stack_notes,
-            pinned,
-            ...(parsed.directive ? { directive: parsed.directive } : {}),
-          }) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
-        injectGuidance: true,
-        browserDeps: deps,
+        patchSha256: data.patch_sha256,
+        guidance,
+        onLaunched: () => {
+          stackPin.pinned = pinned;
+          pi.sendUserMessage(guidance);
+        },
       });
     },
   });
@@ -630,24 +645,32 @@ export interface OpenLatch {
   opened: boolean;
 }
 
-/** The injectable browser-open seam (the execute-core tests force the failure arm). */
-type StackBrowserOpen = typeof openStackBrowser;
+/** The injectable browser-open seam (the registration binds `openStackBrowser` over the owner). */
+export type StackBrowserOpen = (
+  ctx: ExtensionContext,
+  opts: StackOpenOpts,
+) => Promise<StackOpenResult>;
+
+/** The `retired` arm's ok text: nothing opened, and the single-use latch is consumed. */
+const RETIRED_OPEN_TEXT =
+  "a newer browser review replaced this open before it started — nothing was opened; follow " +
+  "that review's guidance and do not call open_stack_review again (single-use)";
 
 /**
  * The `open_stack_review` execute core (exported for direct tests — the `executeStartReviewWave`
- * posture): every gate in registration order, then the shared browser open (`deps` is the
- * activation's port selection, forwarded as the open's `browserDeps`).
+ * posture): every gate in registration order, then the shared browser open through `open`. The
+ * result arms: `launched` consumes the latch, binds the pins and returns the guidance;
+ * `unlaunched` is `browser_failed` with the latch CLOSED (retryable); `refused` (the launch-time
+ * digest re-check) is `bad_state` with the latch CLOSED; `retired` consumes the latch and returns
+ * a non-terminating ok naming the newer review — never a fallback, never a retry path that
+ * could retire the human's newer review.
  */
 export async function executeOpenStackReview(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  gating: ToolGating,
   latch: OpenLatch,
-  annotations: AnnotationState,
-  status: ActivityHandle,
   stackPin: StackPinState,
-  open: StackBrowserOpen = openStackBrowser,
-  deps: StartBrowserDeps = {},
+  open: StackBrowserOpen,
 ): Promise<ReturnType<typeof ok> | ReturnType<ReturnType<typeof failFor>>> {
   const fail = failFor(ctx, "open_stack_review");
   if (!ctx.hasUI) {
@@ -682,8 +705,8 @@ export async function executeOpenStackReview(
       "bad_state",
     );
   }
-  // The digest check BEFORE the open (the warm door's twin): the browser shows exactly the
-  // patch the launch snapshot describes, or nothing.
+  // The pre-open digest check (the warm door's twin; the owner's start re-verifies at launch):
+  // the browser shows exactly the patch the launch snapshot describes, or nothing.
   const patch = verifyStackPatch(binding.checkout_path, binding.patch_sha256);
   if (!patch.ok) {
     return fail(patch.detail, "bad_state");
@@ -714,27 +737,33 @@ export async function executeOpenStackReview(
     pinned,
     ...(binding.focus !== null ? { directive: binding.focus } : {}),
   });
-  const started = await open(pi, ctx, gating, annotations, status, stackPin, {
+  const opened = await open(ctx, {
     checkoutPath: binding.checkout_path,
-    patchPath: patch.patchPath,
-    pinned,
+    patchSha256: binding.patch_sha256,
     guidance,
-    injectGuidance: false,
-    browserDeps: deps,
   });
-  if (!started) {
-    return fail(
-      "could not start the plannotator review server (no free local port) — see the " +
-        "error report",
-      "browser_failed",
-    );
-  }
-  latch.opened = true;
-  return ok(guidance, {
+  const snapshot = {
     top_pr: bindingTopPr(binding),
     checkout_path: binding.checkout_path,
     member_count: binding.stack.length,
-  });
+  };
+  switch (opened.kind) {
+    case "unlaunched":
+      return fail(
+        "could not start the plannotator review server (no free local port) — see the " +
+          "error report",
+        "browser_failed",
+      );
+    case "refused":
+      return fail(opened.detail, "bad_state");
+    case "retired":
+      latch.opened = true;
+      return ok(RETIRED_OPEN_TEXT, { status: "retired", ...snapshot });
+    case "launched":
+      latch.opened = true;
+      stackPin.pinned = pinned;
+      return ok(opened.guidance, snapshot);
+  }
 }
 
 /**
@@ -743,13 +772,11 @@ export async function executeOpenStackReview(
  */
 function registerOpenStackReview(
   pi: ExtensionAPI,
-  gating: ToolGating,
-  annotations: AnnotationState,
-  status: ActivityHandle,
+  owner: BrowserOperationOwner,
   stackPin: StackPinState,
-  deps: StartBrowserDeps = {},
 ): void {
   const latch: OpenLatch = { opened: false };
+  const open: StackBrowserOpen = (ctx, opts) => openStackBrowser(pi, ctx, owner, opts);
 
   registerPerkTool(
     pi,
@@ -771,17 +798,7 @@ function registerOpenStackReview(
         properties: {},
       },
       async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-        return await executeOpenStackReview(
-          pi,
-          ctx,
-          gating,
-          latch,
-          annotations,
-          status,
-          stackPin,
-          openStackBrowser,
-          deps,
-        );
+        return await executeOpenStackReview(pi, ctx, latch, stackPin, open);
       },
     },
     { stages: ["stack-review"], gated: "blocked", kind: "interactive" },
@@ -790,21 +807,17 @@ function registerOpenStackReview(
 
 /**
  * Install the Delivery-train review surface: the warm `/stack-review-browser` door + its
- * cold-launch twin (`open_stack_review`). Takes the threaded per-activation annotation state —
- * both openers prime it (and, through `gating`, the deferred tools the guidance names) via
- * `openReviewBrowserCore` — and the per-activation
- * `StackPinState` shared with `installReviewWaveBindings` (both openers bind the verified pins
- * on a successful open; `start_review_wave`'s stack mode reads them). `deps` carries the
- * activation's port selection into both openers.
+ * cold-launch twin (`open_stack_review`). Both open through the activation's browser-operation
+ * owner (`owner` — it primes the annotation surface and, through its gating, the deferred tools
+ * the guidance names, and carries the port selection) via `openReviewBrowserCore`, and share the
+ * per-activation `StackPinState` with `installReviewWaveBindings` (both openers bind the
+ * verified pins on a launched open; `start_review_wave`'s stack mode reads them).
  */
 export function installStackReviewBindings(
   pi: ExtensionAPI,
-  gating: ToolGating,
-  annotations: AnnotationState,
-  status: ActivityHandle,
+  owner: BrowserOperationOwner,
   stackPin: StackPinState,
-  deps: StartBrowserDeps = {},
 ): void {
-  registerStackReviewBrowser(pi, gating, annotations, status, stackPin, deps);
-  registerOpenStackReview(pi, gating, annotations, status, stackPin, deps);
+  registerStackReviewBrowser(pi, owner, stackPin);
+  registerOpenStackReview(pi, owner, stackPin);
 }

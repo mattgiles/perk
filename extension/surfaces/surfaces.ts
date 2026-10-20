@@ -148,8 +148,9 @@ export interface PerkStatusHandle {
  * Create the composed `perk` status handle (one per extension instance — created in pi/activation.ts
  * and passed to the objective publisher and the activity owners; no hidden module state).
  * Headless calls are full no-ops (never record text, so headless-era text can't resurrect in a
- * later headful render). The activity is a SET of live wait tokens, not a set/clear: the browser
- * doors accept a concurrent double-open, so an older wait's settle must not blank a newer one —
+ * later headful render). The activity is a SET of live wait tokens, not a set/clear: waits can
+ * overlap (the browser-operation owner retires a replaced review before the next begins, and the
+ * set stays the backstop), so an older wait's settle must not blank a newer one —
  * the text clears only when the LAST wait ends (the newest live wait's text shows meanwhile, so
  * ending one restores the remainder). An ended or reset token is simply absent, so its late `end`
  * finds nothing to remove and publishes nothing — a wait begun after a reset can never be
