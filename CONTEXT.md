@@ -313,9 +313,10 @@ _Avoid_: status, working indicator, spinner, liveness
 **Browser-operation owner**:
 The one per-activation object, above the current-review slot and the Plannotator handoff, that
 owns a browser review's start, companion priming, readiness and decision observation,
-replacement, background tasks, console interception and cleanup for the browser doors (the
-plan/objective draft doors now; the PR/stack doors when they adopt it). Subjects keep save,
-Direct-Edits, destination and publication rules; the slot keeps decision authority.
+replacement, background tasks, console interception and cleanup for all four browser doors
+(the plan/objective draft doors and the PR/stack code-review doors — one owner, so any door's
+open replaces any other's). Subjects keep save, Direct-Edits, destination and publication rules;
+the slot keeps decision authority.
 _Avoid_: door session, review controller
 
 **Detached review**:

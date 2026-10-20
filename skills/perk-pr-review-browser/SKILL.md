@@ -83,9 +83,11 @@ launch statement's rules:
 - **The reviewer model.** The configured `[models.subagents] adversarial-reviewer` model is
   resolved by `start_review_wave` at execute time — the door reads no config and the guidance
   carries no model plumbing.
-- **The door observes readiness itself.** There is no handshake poll for you to run: ready → an
+- **Perk observes readiness itself.** There is no handshake poll for you to run: ready → an
   info note; never-ready → a loud error plus a degrade notice injected to you (degraded mode
-  below).
+  below) — and a browser decision the human makes after that degrade is ignored (the human
+  re-runs the door). Opening another browser review, or a session reload, marks this review's
+  tab detached; its decision no longer reaches you.
 - **Reconcile judgment.** A finding worth keeping names a concrete risk the author should act
   on; drop restatements and style noise. Build disjoint final per-angle arrays from valid
   reports only — never re-send every lane's raw array as if that were reconciliation. Merge

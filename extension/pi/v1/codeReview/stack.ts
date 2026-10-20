@@ -26,8 +26,9 @@
 // commit + every member head) is bound into the per-activation `StackPinState`, so the reviewer
 // lanes (`start_review_wave` with `stack: true`) and the guidance's routing step read the ONE
 // pinned `perk pr review-context --stack --pin-base … --pin-head …` command rendered from the
-// same snapshot — browser, lanes and routing share one commit identity by construction. The former live `since-base` vs `origin/<stack base>` mode
-// (and its merge-base→HEAD empty-review trap) is gone; exploration keeps the detached checkout.
+// same snapshot — browser, lanes and routing share one commit identity by construction. The
+// former live `since-base` vs `origin/<stack base>` mode (and its merge-base→HEAD empty-review
+// trap) is gone; exploration keeps the detached checkout.
 //
 // THE POSTING CONTRACT (the delta from /pr-review-browser): a local-diff session has NO attached
 // PR, so the browser has no platform-posting path — ALL GitHub posting is perk-side after the

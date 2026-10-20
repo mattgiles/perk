@@ -111,11 +111,12 @@ A refused approval is never a skipped review, a denial, or permission for the mo
 save. Reviewer feedback reaches the model only inside `<untrusted_reviewer_feedback>` delimiters.
 The bridge subscribes to the browser's decision before emitting the review request (no status
 query, polling, startup discovery, replay or resume); if the browser never becomes ready, findings
-degrade loudly in-session and a later browser decision is ignored. On the draft browser doors a
-second door open detaches the earlier browser review (marked detached in its tab, its wait
-aborted), and a reload or session replacement marks an open browser review detached after
-draining an in-flight approval; the guards above stay the decision authority for everything that
-still arrives.
+degrade loudly in-session and a later browser decision is ignored. On every browser door
+(the plan/objective draft doors and `/pr-review-browser` / `/stack-review-browser`, all opened
+through one browser-operation owner) a second door open detaches the earlier browser review
+(marked detached in its tab, its wait aborted), and a reload or session replacement marks an open
+browser review detached (the draft doors first drain an in-flight approval); the guards above stay
+the decision authority for everything that still arrives.
 
 The warm `/pr-review-browser` door also uses plannotator when that package is installed. It can
 review a foreign PR, the active worktree's PR, or a local since-base diff before submission. That

@@ -142,7 +142,11 @@ The same review on plannotator's browser UI — with the posting direction **fli
    nothing.
 
 If the browser server never becomes ready (or a findings push fails), the flow degrades loudly
-to the same in-session findings table — triage and posting are unchanged.
+to the same in-session findings table — triage and posting are unchanged. A decision you make in
+that never-ready tab afterwards is ignored with a warning (re-run the door to review again).
+Opening another browser review — `/pr-review-browser` again, `/stack-review-browser`, or a draft
+browser door — or reloading the session marks this review's tab detached: its decision is no
+longer routed, so decide in the newer tab.
 
 ## Related
 

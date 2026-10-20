@@ -1246,7 +1246,7 @@ test("executeOpenStackReview: a refused open (launch-time digest drift) is bad_s
   assert.equal(stackPin.pinned, null, "a refused open binds no pin");
 });
 
-// --- the stack open over the real browser-operation owner --------------------------------------------
+// --- the stack open over the real browser-operation owner ----------------------------------------
 
 /** A readiness probe gated by the test: the FIRST probe waits for `release`, later ones answer. */
 function gatedProbe(): { probe: () => Promise<boolean>; release(): void } {

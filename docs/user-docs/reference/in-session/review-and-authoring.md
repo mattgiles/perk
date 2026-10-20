@@ -125,10 +125,11 @@ reloaded session, but the wave is **not collectable** there — collection is pe
 `collect_review_wave` / `collect_draft_review_wave` answer `no_wave` naming that rule. Launching
 again starts a fresh wave over new children: perk never re-attaches to or reuses the earlier
 wave's children (they finish on their own, and their findings are never read). A session switch
-delivers no notice at all. On the draft doors (`/plan-review-browser`, `/objective-review-browser`)
-the browser tab is marked detached at the reload — its `perk:wave` marker is replaced: findings
-will not arrive there and a decision made there is not routed — and the reload waits up to 60 s
-for an approval whose save was already in flight. If that save is still running at the deadline,
+delivers no notice at all. On every browser door (`/plan-review-browser`,
+`/objective-review-browser`, `/pr-review-browser`, `/stack-review-browser`) the open browser tab is
+marked detached at the reload — its `perk:wave` marker is replaced: findings will not arrive there
+and a decision made there is not routed. On the draft doors the reload also waits up to 60 s for an
+approval whose save was already in flight. If that save is still running at the deadline,
 perk warns (`… is still being saved after 60 s — proceeding`) and the reload continues while the
 save may still land: check the issue backend for an object carrying this run id before you save
 or review again. Otherwise re-run the door in the reloaded session.
@@ -256,7 +257,14 @@ arrive as badged `perk:<angle>` annotations, and the session remains usable whil
 Before submit, it is local-only and nothing posts; it uses the pinned plan base or repository
 default, with no change to pre-PR stacked-base inference. Malformed URL-shaped targets refuse
 rather than becoming focus text. If the local server never becomes ready, the flow degrades loudly
-to the in-session table.
+to the in-session table, and a decision you then make in that browser tab is ignored with a
+warning — re-run the door to review again (posting to GitHub from the tab still works).
+
+Opening another browser review — this door again, `/stack-review-browser`, or a draft door —
+replaces the earlier one: its tab is marked detached (replaced) and its decision is no longer
+routed; decide in the newer tab. A turn abort or a session reload/replacement detaches the open
+review the same way. The pre-submit local review is not tracked this way (perk has no handle on its
+tab), so a decision there after a reload is dropped.
 
 You normally post APPROVE or COMMENT, with inline comments, directly from the browser. Perk uses
 `submit_pr_review` only for REQUEST CHANGES (unsupported by the UI) or when you explicitly ask it
@@ -303,14 +311,19 @@ round trip, validates the commit topology fail-closed (a broken stack refuses be
 checkout), checks out the **top** head detached at `review-<top>`, writes the combined diff
 (pinned `base_sha` → top head, rendered from the exact fetched commits) to `review-<top>.patch`
 beside it, and opens plannotator on that **static patch** — verified against the checkout
-envelope's `patch_sha256` immediately before the browser request. The browser therefore shows a
+envelope's `patch_sha256` before the open and again immediately before the browser request (a
+patch refreshed while the open waited for an earlier review to close refuses at that point and
+leaves no browser review — re-run the door). The browser therefore shows a
 pinned diff: moving refs cannot change it, there is no live refresh, and the browser has no
 repository context of its own (exploration happens in the detached checkout, which stays the
 reviewers' surface). A checkout of the same top PR refreshed while a review is open invalidates
 that review — the next open refuses on the digest mismatch (re-run the door). While a stack wave is
 still pending (launched, uncollected), opening a *different* stack — or the same stack after a
 refresh — is refused until `collect_review_wave` settles it; re-opening the identical pinned
-review (a stale-session reopen) is allowed. One adversarial wave
+review (a stale-session reopen) is allowed and replaces the earlier tab. Like every browser door,
+opening another browser review replaces this one (its tab is marked detached, its decision is no
+longer routed), a turn abort or a session reload/replacement detaches it the same way, and a
+decision made after the never-ready degrade is ignored with a warning — re-run the door. One adversarial wave
 reviews the same pinned commits (`stack: true` requires this door's open review in the session and
 binds the wave to its top PR + checkout; reviewer children run the pinned
 `perk pr review-context --pr <top> --stack --pin-base <sha> --pin-head <pr>=<sha> …` command the
@@ -453,9 +466,10 @@ the save message and its `/plan-save` retry — the plan itself saved. **DENY** 
 and any Direct Edits for a `plan_draft` revision round, with the draft-moved note when the draft
 changed.
 
-Opening the door again replaces the earlier browser review: its tab is marked detached
-(replaced) and its decision is no longer routed — decide in the newer tab. A turn abort or a
-session reload/replacement detaches the open review the same way. A blocking `plan_review` or
+Opening the door again — or any other browser door (`/objective-review-browser`,
+`/pr-review-browser`, `/stack-review-browser`) — replaces the earlier browser review: its tab is
+marked detached (replaced) and its decision is no longer routed — decide in the newer tab. A turn
+abort or a session reload/replacement detaches the open review the same way. A blocking `plan_review` or
 `/implement-here` leaves the tab open but revokes its authority: its verdict is ignored with a
 warning, as above.
 

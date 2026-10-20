@@ -15,8 +15,9 @@ standing widget consumer remains). The composed `perk` status is now **single-va
 only — `createPerkStatus` kept its name, lost the segment map) — re-composed under Objective
 #2331 R8 as `<objective> · <activity>` (either half optional): the objective segment plus an
 **activity** facet — a ref-counted wait whose only publisher is the `waiting on browser review`
-wait of the two plannotator browser paths (overlapping waits, the doors' accepted double-open,
-keep the text until the last one ends). Implement progress is the borrowed
+wait of the two plannotator browser paths (a replacement retires the earlier wait before the
+next begins — every browser door opens through the one browser-operation owner; the ref-count
+stays the backstop for overlapping waits, keeping the text until the last one ends). Implement progress is the borrowed
 `@juicesharp/rpiv-todo` checklist.
 
 ## §1 Scope

@@ -347,8 +347,9 @@ export function activatePerk(
   // The ONE per-activation browser-operation owner (§8.23): every browser door opens through it
   // (the plan/objective draft doors and the PR/stack code-review doors) — start, companion
   // priming, readiness/decision observation, replacement (detach-before-start, across doors),
-  // console interception and cleanup — and `session_shutdown` detaches its live operation. Holds the activation's annotation state, gating primes, status handle
-  // and port selection (no hidden module state).
+  // console interception and cleanup — and `session_shutdown` detaches its live operation. Holds
+  // the activation's annotation state, gating primes, status handle and port selection (no hidden
+  // module state).
   const browserOwner = createBrowserOperationOwner(pi, {
     annotations,
     gating,

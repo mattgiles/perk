@@ -198,7 +198,7 @@ test("createPerkStatus: the ref-counted activity composes with the objective int
   assert.equal(status.get(), "🎯 251 · waiting on browser review");
   assert.equal(fired, 2, "a subscriber fires on begin");
 
-  // An overlapping wait (the doors' accepted double-open): unchanged, still one text.
+  // An overlapping wait (the ref-counted backstop): unchanged, still one text.
   const endB = status.beginActivity(target, ACTIVITY_BROWSER_REVIEW);
   assert.equal(last(), "🎯 251 · waiting on browser review");
 

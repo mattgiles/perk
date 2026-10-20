@@ -602,7 +602,7 @@ export interface StartedSurface<T> {
   readiness: Promise<BrowserReadiness>;
 }
 
-/** The code-review flavor of a started open (the original name, kept for the code-review callers). */
+/** The code-review flavor of a started open (its original name). */
 export type StartedBrowser = StartedSurface<CodeReviewOutcome>;
 
 /**

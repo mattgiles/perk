@@ -318,9 +318,10 @@ export function approvedSubjectSaveResult(
 // ------------------------------------------------------ the launch chooser (the wave arm)
 
 /**
- * A draft door open core's outcome (contracts.md §8.23): `launched` carries the composed
- * guidance; `unlaunched` = nothing launched and already reported loudly (a slot refusal or the
- * port-pick failure) — a wave-arm caller falls open to the plain blocking review; `retired` = a
+ * A browser door open core's outcome (contracts.md §8.23 — the draft doors' open cores and the
+ * code-review `openReviewBrowserCore`): `launched` carries the composed guidance; `unlaunched` =
+ * nothing launched and already reported loudly (a slot refusal or the port-pick failure) — a
+ * wave-arm caller falls open to the plain blocking review; `retired` = a
  * newer browser open (or the shutdown) retired this one before it started — nothing launched, and
  * the caller must NOT fall back (a fallback review would take decision authority back from the
  * newer browser review).
