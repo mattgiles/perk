@@ -389,7 +389,9 @@ detailed below; for the operational repair flow see
 ### `perk objective stack status [OBJECTIVE]`
 
 Report an objective's **stacked delivery-train status** (worker; read-only end to end — works
-from a fresh clone, no local worktree or branch is authoritative). Reconstructs the
+from a fresh clone, no local worktree or branch is authoritative; its one Git write is a fetch of
+`origin` into the remote-tracking refs only — `refs/remotes/origin/*`, objects, `FETCH_HEAD` —
+ignoring configured fetch mappings and tags). Reconstructs the
 `DeliveryTrain` projection from the durable authorities (objective store, plan issues, the
 operation journal, Git refs, GitHub PR + native-stack state) and reports one line per layer
 bottom→top plus classified **blockers** and **information** findings, each naming the exact

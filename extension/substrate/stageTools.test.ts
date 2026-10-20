@@ -213,6 +213,7 @@ test("gated stage: gate ON keeps exactly the registered subset of the stage's ga
       "plan_draft",
       "plan_review",
       "run_scout_wave",
+      "objective_stack_status",
     ]) {
       assert.ok(active.includes(name), `gated carve-out must stay active: ${name}`);
     }
@@ -221,6 +222,11 @@ test("gated stage: gate ON keeps exactly the registered subset of the stage's ga
       assert.ok(active.includes(name), `perk never deactivates a non-perk tool: ${name}`);
       assert.equal((await h.emitToolCall(name, {}))?.block, true, `${name} is blocked`);
     }
+    // The gate-allowed query: the backstop admits it (nothing executes through emitToolCall).
+    assert.equal(
+      (await h.emitToolCall("objective_stack_status", { objective: "7" }))?.block,
+      undefined,
+    );
   } finally {
     h.dispose();
   }
@@ -1028,6 +1034,15 @@ test("prompt guard: the match rule's representative cases", () => {
   assert.deepEqual(referencedScopedTools("when ready, submit the work"), []);
   assert.deepEqual(referencedScopedTools("fall back to plan_save"), ["plan_save"]);
   assert.equal(isEligible("plan_save", undefined, "objective-plan", "read-only"), false);
+  // The gate-allowed query is eligible in a gated planning landing, never in objective authoring.
+  assert.equal(
+    isEligible("objective_stack_status", undefined, "objective-plan", "read-only"),
+    true,
+  );
+  assert.equal(
+    isEligible("objective_stack_status", undefined, "objective-author", "read-only"),
+    false,
+  );
   // `_` is a word char: no partial-identifier match.
   assert.deepEqual(referencedScopedTools("explore_objective_node"), ["explore_objective_node"]);
   assert.deepEqual(referencedScopedTools("`land` and explore_objective_node").sort(), [

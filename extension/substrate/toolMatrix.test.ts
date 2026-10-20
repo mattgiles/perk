@@ -13,12 +13,14 @@ import {
   BUILTIN_TOOL_POLICY,
   gatedToolsFor,
   PACKAGE_TOOL_POLICY,
+  PLANNING_READ_STAGES,
   perkToolNames,
   REGISTRY_STAGE_IDS,
   SYNTHETIC_PATH_TOOL_POLICY,
   stageToolsFor,
   toolMatrix,
   UNSCOPED_MATRIX_KEY,
+  WORKTREE_STAGES,
 } from "./toolPolicy.ts";
 
 const FIXTURE = join(sharedDir(), "fixtures", "tool-matrix.json");
@@ -79,4 +81,49 @@ test("toolMatrix() is the derived views: perk + builtin rows, the posture table,
   const unscoped = matrix.eligible[UNSCOPED_MATRIX_KEY];
   assert.deepEqual(unscoped?.["read-only"], [...gatedToolsFor(null), ...gatedBuiltins].sort());
   assert.deepEqual(unscoped?.["read-write"], Object.keys(matrix.tools).sort());
+});
+
+test("the one query is gate-allowed in the worktree family and the planning/refinement stages", () => {
+  const matrix = toolMatrix();
+  const queries = Object.entries(matrix.tools)
+    .filter(([, row]) => row.owner === "perk" && row.kind === "query")
+    .map(([name]) => name);
+  assert.deepEqual(queries, ["objective_stack_status"]);
+  const row = matrix.tools.objective_stack_status;
+  assert.ok(row?.owner === "perk");
+  assert.deepEqual(
+    {
+      gated: row.gated,
+      declared: row.declared,
+      exposure: row.exposure,
+      stages: row.stages,
+    },
+    {
+      gated: "allowed",
+      declared: "deferred",
+      exposure: "direct",
+      stages: REGISTRY_STAGE_IDS.filter((id) =>
+        [...WORKTREE_STAGES, ...PLANNING_READ_STAGES].includes(id),
+      ),
+    },
+  );
+  for (const stage of ["plan", "objective-plan", "objective-refine", "implement"]) {
+    assert.ok(
+      matrix.eligible[stage]?.["read-only"].includes("objective_stack_status"),
+      `${stage} read-only admits it`,
+    );
+  }
+  for (const stage of [
+    "objective-author",
+    "gist-author",
+    "save",
+    "objective-save",
+    "audit",
+    "stack-review",
+  ]) {
+    assert.ok(
+      !matrix.eligible[stage]?.["read-only"].includes("objective_stack_status"),
+      `${stage} read-only excludes it`,
+    );
+  }
 });

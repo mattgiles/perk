@@ -128,6 +128,16 @@ export const OBJECTIVE_STAGES: readonly string[] = ["objective-author", "objecti
 export const AUTHORING_STAGES: readonly string[] = ["plan", "objective-plan", "objective-author"];
 /** The gist authoring pair. */
 export const GIST_STAGES: readonly string[] = ["gist-author", "gist-save"];
+/**
+ * The read-only planning/refinement stages: where a gate-allowed query composes with authoring
+ * (the objective-plan factory, plan authoring, node refinement). `objective-author` is excluded
+ * (no objective exists yet); `save`/`objective-save` are not landings a model reads a train in.
+ */
+export const PLANNING_READ_STAGES: readonly string[] = [
+  "plan",
+  "objective-plan",
+  "objective-refine",
+];
 
 // --- the catalog --------------------------------------------------------------------------------
 

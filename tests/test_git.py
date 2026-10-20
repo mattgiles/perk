@@ -530,6 +530,40 @@ def test_fetch_brings_origin_up_to_date(git_repo_with_remote):
     assert _sha(clone, "origin/main") == advanced
 
 
+def test_fetch_remote_tracking_advances_only_the_remote_tracking_refs(git_repo_with_remote):
+    """The bounded read-path fetch advances only the remote-tracking refs: local branches, tags,
+    the index and the working tree are untouched and the remote is only read — even when
+    origin's configured fetch refspec maps a branch into ``refs/heads/*`` and the remote carries
+    a tag on the fetched history. Its one acknowledged local write besides
+    ``refs/remotes/origin/*`` (and objects) is the shared ``FETCH_HEAD`` — the bound the
+    gate-allowed stack status read relies on (contracts §8.51)."""
+    clone, remote, advance = git_repo_with_remote
+    _git(clone, "config", "--add", "remote.origin.fetch", "+refs/heads/main:refs/heads/vendor-main")
+    local_branches = _git(clone, "for-each-ref", "refs/heads")
+    main_before = _sha(clone, "refs/heads/main")
+    index_before = _git(clone, "ls-files", "--stage")
+    advanced = advance()
+    _git(remote, "tag", "v-probe", advanced)
+    remote_refs = _git(remote, "for-each-ref")
+
+    git.fetch_remote_tracking(clone)
+
+    assert _sha(clone, "origin/main") == advanced
+    assert _sha(clone, "refs/heads/main") == main_before != advanced
+    assert _git(clone, "for-each-ref", "refs/heads") == local_branches
+    assert _git(clone, "for-each-ref", "refs/tags") == ""
+    assert _git(clone, "ls-files", "--stage") == index_before
+    assert _git(clone, "status", "--porcelain") == ""
+    assert _git(remote, "for-each-ref") == remote_refs
+    assert (clone / ".git" / "FETCH_HEAD").is_file()
+
+    # Non-vacuity: the configured mapping and tag auto-follow are live — a plain fetch honors
+    # both.
+    git.fetch(clone)
+    assert _sha(clone, "refs/heads/vendor-main") == advanced
+    assert _git(clone, "for-each-ref", "--format=%(refname)", "refs/tags") == "refs/tags/v-probe\n"
+
+
 def test_worktree_add_with_base(git_repo_with_remote):
     clone, _remote, advance = git_repo_with_remote
     advanced = advance()

@@ -273,6 +273,12 @@ def test_match_rule_representative_cases() -> None:
     assert referenced_tools("when ready, submit the work") == []
     assert referenced_tools("fall back to plan_save") == ["plan_save"]
     assert "plan_save" not in eligible("objective-plan", "read-only")
+    # The gate-allowed query: eligible in the gated planning/refinement landings, never in
+    # objective authoring (no objective exists yet).
+    assert "objective_stack_status" in eligible("objective-plan", "read-only")
+    assert "objective_stack_status" in eligible("plan", "read-only")
+    assert "objective_stack_status" in eligible("objective-refine", "read-only")
+    assert "objective_stack_status" not in eligible("objective-author", "read-only")
     assert referenced_tools("`land` and explore_objective_node") == [
         "explore_objective_node",
         "land",

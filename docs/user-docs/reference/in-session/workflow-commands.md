@@ -373,7 +373,8 @@ match it refuses and asks for an explicit objective.
 Paired tools are non-terminating and strictly decoded; malformed or mutually exclusive fields
 refuse before the cold worker runs:
 
-- **`objective_stack_status`** `{objective?}` — read stack status.
+- **`objective_stack_status`** `{objective?}` — read stack status (read-only; also callable in gated
+  planning/refinement sessions — pass `objective` explicitly there).
 - **`objective_stack_sync`** `{objective?, base?, dry_run?, continue?, abort?, resolve?}` —
   preview/cascade, resume a resolved retained conflict, discard it, or (on explicit request)
   dispatch the conflict-resolver subagent into the retained worktree. `continue`/`abort` are

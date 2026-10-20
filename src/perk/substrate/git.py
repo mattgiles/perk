@@ -516,6 +516,25 @@ def fetch(
     )
 
 
+def fetch_remote_tracking(repo: Path, *, remote: str = "origin") -> None:
+    """Fetch every branch of ``remote`` into ``refs/remotes/<remote>/*`` and nowhere else (a
+    **network** op; ``GitError`` on failure).
+
+    The bounded read-path fetch: the explicit ``+refs/heads/*:refs/remotes/<remote>/*`` refspec
+    with an empty ``--refmap`` ignores the configured ``remote.<remote>.fetch`` mappings (a
+    configured destination under ``refs/heads/*`` would otherwise create or force-update a local
+    branch), and ``--no-tags`` skips tag auto-following into ``refs/tags/*``. Its local writes are
+    the remote-tracking refs, objects and the shared ``FETCH_HEAD`` — never a local branch, a
+    tag, the index or the working tree. Unlike a configured-refspec fetch it never creates
+    ``refs/remotes/<remote>/HEAD``. Uses the generous network timeout like :func:`fetch`.
+    """
+    _run(
+        ["fetch", "--refmap=", "--no-tags", remote, f"+refs/heads/*:refs/remotes/{remote}/*"],
+        cwd=repo,
+        timeout=120,
+    )
+
+
 def clone_partial(
     url: str, dest: Path, *, pinned: Path | None = None, timeout: int = CLONE_TIMEOUT
 ) -> None:

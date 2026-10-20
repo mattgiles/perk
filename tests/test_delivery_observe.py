@@ -353,6 +353,23 @@ class TestRepoDeliveryGit:
         assert probe.remote_branch_sha("main") == advanced
         assert probe.remote_branch_sha("absent") is None
 
+    def test_fetch_never_moves_a_local_branch(self, git_repo_with_remote) -> None:
+        # A configured refspec into refs/heads/* is ignored: the status read's fetch writes only
+        # the remote-tracking refs (it runs under the read-only gate).
+        clone, _remote, advance = git_repo_with_remote
+        subprocess.run(
+            ["git", "config", "--add", "remote.origin.fetch", "+refs/heads/main:refs/heads/vendor"],
+            cwd=clone,
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+        probe = observe.RepoDeliveryGit(clone)
+        advanced = advance()
+        probe.fetch()
+        assert probe.resolve_commit("origin/main") == advanced
+        assert probe.resolve_commit("refs/heads/vendor") is None
+
     def test_trunk_failure_is_typed_git_error(self, git_repo_with_remote, monkeypatch) -> None:
         clone, _remote, _advance = git_repo_with_remote
 
@@ -370,7 +387,7 @@ class TestRepoDeliveryGit:
         def boom(*_args: object, **_kwargs: object) -> None:
             raise git_mod.GitError("network down")
 
-        monkeypatch.setattr(git_mod, "fetch", boom)
+        monkeypatch.setattr(git_mod, "fetch_remote_tracking", boom)
         with pytest.raises(TrainReconstructionError) as excinfo:
             observe.RepoDeliveryGit(clone).fetch()
         assert excinfo.value.error_type == "git_error"

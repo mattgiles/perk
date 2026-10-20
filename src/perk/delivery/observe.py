@@ -73,8 +73,10 @@ class RepoDeliveryGit(DeliveryGit):
             ) from exc
 
     def fetch(self) -> None:
+        # Remote-tracking refs only: the status read runs under the read-only gate, so a
+        # configured refspec into refs/heads/* or tag auto-following must never apply here.
         try:
-            git_mod.fetch(self._repo_root, remote=self._remote)
+            git_mod.fetch_remote_tracking(self._repo_root, remote=self._remote)
         except git_mod.GitError as exc:
             raise TrainReconstructionError(
                 f"git fetch failed: {exc}", error_type="git_error"
