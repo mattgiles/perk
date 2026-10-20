@@ -956,7 +956,7 @@ test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETU
     budgetMs: 50,
     sleep: async () => {},
   });
-  const guidance = await openPlanReviewSurface(
+  const opened = await openPlanReviewSurface(
     s.pi,
     s.ctx,
     s.gating,
@@ -965,8 +965,9 @@ test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETU
     s.slot,
     owner,
   );
-  assert.equal(typeof guidance, "string");
-  if (typeof guidance !== "string") throw new Error("expected launch guidance");
+  assert.equal(opened.kind, "launched");
+  if (opened.kind !== "launched") throw new Error("expected launch guidance");
+  const guidance = opened.guidance;
   // Both surfaces primed with the deterministic handle the moment the open returns.
   assert.equal(await annotationMode(), "plan", "the annotation surface is primed in plan mode");
   assert.equal(await draftContextPrimed(), true, "the draft-review context is primed");

@@ -43,7 +43,13 @@ import {
   runImplementHereCommand,
 } from "./planReview.ts";
 import { PLANNOTATOR_REVIEW_COMMAND } from "./providers/plannotatorHandoff.ts";
-import type { PlanReviewUI, ReviewLaunchUI, ReviewOutcome, WaveLaunch } from "./review.ts";
+import type {
+  DoorOpenResult,
+  PlanReviewUI,
+  ReviewLaunchUI,
+  ReviewOutcome,
+  WaveLaunch,
+} from "./review.ts";
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
@@ -1162,11 +1168,11 @@ test("plannotator deny + Direct Edits -> feedback passes through untouched (mode
 const LAUNCH_WAVE = "Browser review + reviewer wave";
 const LAUNCH_PLAIN = "Browser review only";
 
-/** A recording WaveLaunch fake: scripted presence + canned opener guidance (null = port fail). */
+/** A recording WaveLaunch fake: scripted presence + canned opener results (default: launched). */
 function fakeWave(opts: {
   present?: boolean;
-  planGuidance?: string | null;
-  objectiveGuidance?: string | null;
+  planOpen?: DoorOpenResult;
+  objectiveOpen?: DoorOpenResult;
 }): WaveLaunch & {
   planCalls: { draft: string; custom?: string }[];
   objectiveCalls: { rendered: string; artifactRaw: string; custom?: string }[];
@@ -1177,16 +1183,14 @@ function fakeWave(opts: {
     present: () => opts.present ?? true,
     async plan(_ctx: ExtensionContext, o: { draft: string; custom?: string }) {
       wave.planCalls.push(o);
-      return opts.planGuidance === undefined ? "PLAN WAVE GUIDANCE" : opts.planGuidance;
+      return opts.planOpen ?? { kind: "launched", guidance: "PLAN WAVE GUIDANCE" };
     },
     async objective(
       _ctx: ExtensionContext,
       o: { rendered: string; artifactRaw: string; custom?: string },
     ) {
       wave.objectiveCalls.push(o);
-      return opts.objectiveGuidance === undefined
-        ? "OBJECTIVE WAVE GUIDANCE"
-        : opts.objectiveGuidance;
+      return opts.objectiveOpen ?? { kind: "launched", guidance: "OBJECTIVE WAVE GUIDANCE" };
     },
   };
   return wave;
@@ -1270,9 +1274,9 @@ test("chooser: the wave choice -> opener runs (trimmed custom), non-terminating 
   assert.equal(s.gating.exits, 0, "the gate is untouched — the decision routes later");
 });
 
-test("chooser: a null opener return (port-pick failure) -> falls through to the plain review in the same call", async () => {
+test("chooser: an unlaunched opener result (port-pick failure) -> falls through to the plain review in the same call", async () => {
   const s = chooserScaffold({ select: [LAUNCH_WAVE], input: [undefined] });
-  const wave = fakeWave({ planGuidance: null });
+  const wave = fakeWave({ planOpen: { kind: "unlaunched" } });
   const bridge = cannedBridge(DENIED);
   const result = await executePlanReview(
     s.pi,
@@ -1288,6 +1292,27 @@ test("chooser: a null opener return (port-pick failure) -> falls through to the 
   assert.deepEqual(bridge.reviewed, [CHOOSER_DRAFT], "the plain blocking review ran as fallback");
   const details = result.details as { status?: string };
   assert.equal(details.status, "completed", "the fallback review's outcome is the result");
+});
+
+test("chooser: a retired opener result (a newer browser open took over) -> wave_retired, NEVER the fallback review", async () => {
+  const s = chooserScaffold({ select: [LAUNCH_WAVE], input: [undefined] });
+  const wave = fakeWave({ planOpen: { kind: "retired" } });
+  const bridge = cannedBridge(DENIED);
+  const result = await executePlanReview(
+    s.pi,
+    s.ctx as unknown as ExtensionContext,
+    s.gating,
+    bridge,
+    depsFor(s.pi, s.ctx, s.gating),
+    {},
+    undefined,
+    wave,
+  );
+  assert.equal(wave.planCalls.length, 1, "the opener was attempted");
+  assert.deepEqual(bridge.reviewed, [], "no blocking review supersedes the newer browser review");
+  assert.deepEqual(result.details, { ok: true, status: "wave_retired" });
+  assert.equal(result.terminate, undefined, "non-terminating");
+  assert.match(String(result.content[0]?.text), /A newer browser review replaced this/);
 });
 
 test("chooser: param-tier source -> no chooser, plain review (the drafts-only law)", async () => {
@@ -1344,7 +1369,8 @@ test("chooser: an abort landing during the awaited opener -> aborted, never wave
   wave.plan = async (_ctx: ExtensionContext, o: { draft: string; custom?: string }) => {
     wave.planCalls.push(o);
     controller.abort(); // the interruption lands mid-open
-    return "PLAN WAVE GUIDANCE"; // a resolved open the abort must outrank
+    // A resolved open the abort must outrank.
+    return { kind: "launched", guidance: "PLAN WAVE GUIDANCE" } as const;
   };
   const bridge = cannedBridge(DENIED);
   const result = await executePlanReview(
@@ -1462,7 +1488,7 @@ test("objective wave arm: the stale-guard baseline and the render derive from ON
   assert.equal(result.content[0]?.text, "OBJECTIVE WAVE GUIDANCE");
 });
 
-test("objective wave arm: a null opener return (port-pick failure) -> falls through to the plain review", async () => {
+test("objective wave arm: an unlaunched opener result (port-pick failure) -> falls through to the plain review", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
   const branch: unknown[] = [
@@ -1474,7 +1500,7 @@ test("objective wave arm: a null opener return (port-pick failure) -> falls thro
     writeSessionArtifact(fakeSink(branch), ctx, OBJECTIVE_DRAFT_ARTIFACT, OBJ_V1),
     "the objective draft landed",
   );
-  const wave = fakeWave({ objectiveGuidance: null });
+  const wave = fakeWave({ objectiveOpen: { kind: "unlaunched" } });
   const bridge = cannedBridge(DENIED);
   const result = await executeObjectiveReview(
     fakeColdDoorPi(branch, { stdout: PLAN_JSON }),
@@ -1491,6 +1517,37 @@ test("objective wave arm: a null opener return (port-pick failure) -> falls thro
   assert.equal(details.status, "completed", "the fallback review's outcome is the result");
   assert.equal(details.subject, "objective");
   assert.match(String(result.content[0]?.text), /DENIED/);
+});
+
+test("objective wave arm: a retired opener result -> wave_retired with the objective subject, NEVER the fallback review", async () => {
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [
+    stateEntry({ run_id: "RID", mode: "read-only", stage: "objective-author" }),
+  ];
+  const ui = fakeUI({ select: [LAUNCH_WAVE], input: [undefined] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, OBJECTIVE_DRAFT_ARTIFACT, OBJ_V1),
+    "the objective draft landed",
+  );
+  const wave = fakeWave({ objectiveOpen: { kind: "retired" } });
+  const bridge = cannedBridge(DENIED);
+  const result = await executeObjectiveReview(
+    fakeColdDoorPi(branch, { stdout: PLAN_JSON }),
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    bridge,
+    undefined,
+    wave,
+  );
+  assert.equal(wave.objectiveCalls.length, 1, "the opener was attempted");
+  assert.equal(bridge.reviewed.length, 0, "no blocking review supersedes the newer browser one");
+  const details = result.details as { ok?: boolean; status?: string; subject?: string };
+  assert.equal(details.ok, true);
+  assert.equal(details.status, "wave_retired");
+  assert.equal(details.subject, "objective");
+  assert.equal(result.terminate, undefined);
 });
 
 // ------------------------------------------------------------- the gist stage routing (direct)

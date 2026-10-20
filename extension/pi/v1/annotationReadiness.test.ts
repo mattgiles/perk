@@ -137,7 +137,7 @@ async function openThrough(
     settle: settleReviewOutcome,
     onDecision: async () => {},
   });
-  assert.deepEqual(opened, { url: f.surface.url });
+  assert.deepEqual(opened, { kind: "opened", url: f.surface.url });
 }
 
 /**

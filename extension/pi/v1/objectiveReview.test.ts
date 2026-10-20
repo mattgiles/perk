@@ -313,7 +313,7 @@ test("objective arm: wave present + a refused draft -> classification FIRST; no 
     },
     async objective(_ctx: ExtensionContext, o: unknown) {
       objectiveCalls.push(o);
-      return "OBJECTIVE WAVE GUIDANCE";
+      return { kind: "launched", guidance: "OBJECTIVE WAVE GUIDANCE" };
     },
   } as WaveLaunch;
   const result = await executePlanReview(

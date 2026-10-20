@@ -26,6 +26,7 @@ import {
   executePushAnnotations,
   type FetchLike,
   type FetchResponseLike,
+  primeAnnotationSurface,
 } from "./providers/annotations.ts";
 import type { BrowserReadiness, StartedSurface } from "./providers/plannotatorHandoff.ts";
 import { reviewDetachedStatus } from "./providers/waveStatus.ts";
@@ -342,14 +343,14 @@ test("open: a start failure reports the port-pick error, returns null, primes no
   const h = harness();
   const a = fakeHandoff();
   const specA = makeSpec(a.start);
-  assert.deepEqual(await h.owner.open(h.ctx, specA.spec), { url: URL_A });
+  assert.deepEqual(await h.owner.open(h.ctx, specA.spec), { kind: "opened", url: URL_A });
   a.readiness.resolve("ready");
   await flush();
 
   const b = fakeHandoff({ url: URL_B });
   b.rec.fail = new Error("port 45002 is in use");
   const specB = makeSpec(b.start);
-  assert.equal(await h.owner.open(h.ctx, specB.spec), null);
+  assert.deepEqual(await h.owner.open(h.ctx, specB.spec), { kind: "failed" });
 
   assert.equal(a.signal?.aborted, true, "detach-before-start: the predecessor was aborted");
   assert.ok(
@@ -371,7 +372,10 @@ test("open: a start failure reports the port-pick error, returns null, primes no
   // `current` was released: a later open replaces nothing.
   const c = fakeHandoff({ url: URL_C });
   const before = h.session.notifies.length;
-  assert.deepEqual(await h.owner.open(h.ctx, makeSpec(c.start).spec), { url: URL_C });
+  assert.deepEqual(await h.owner.open(h.ctx, makeSpec(c.start).spec), {
+    kind: "opened",
+    url: URL_C,
+  });
   assert.ok(
     !h.session.notifies.slice(before).some((n) => n.message.includes("earlier browser review")),
   );
@@ -398,7 +402,7 @@ test("open: the predecessor is fully detached BEFORE the successor starts; the s
   };
   const specB = makeSpec(b.start);
   const opened = await h.owner.open(h.ctx, specB.spec);
-  assert.deepEqual(opened, { url: URL_B });
+  assert.deepEqual(opened, { kind: "opened", url: URL_B });
   assert.deepEqual(atStart, { aAborted: true, aQuiesced: true, surface: null, aClears: 1 });
   assert.deepEqual(h.annotations.surface, { mode: "plan", url: URL_B });
   assert.equal(specB.companion.primes, 1);
@@ -441,8 +445,8 @@ test("open: overlapping opens — B retired before it ever starts, A detached on
   assert.equal(b.calls, 0, "B never starts while A's marker push hangs");
   assert.equal(c.calls, 0);
   h.clock.expire(DETACH_MARKER_BUDGET_MS);
-  assert.equal(await openB, null, "B was retired by C before it started");
-  assert.deepEqual(await openC, { url: URL_C });
+  assert.deepEqual(await openB, { kind: "retired" }, "B was retired by C before it started");
+  assert.deepEqual(await openC, { kind: "opened", url: URL_C });
   assert.equal(b.calls, 0, "B's start was never called");
   assert.equal(c.calls, 1);
   assert.equal(a.signal?.aborted, true);
@@ -453,6 +457,55 @@ test("open: overlapping opens — B retired before it ever starts, A detached on
   );
   assert.deepEqual(h.annotations.surface, { mode: "plan", url: URL_C });
   assert.equal(specC.companion.primes, 1);
+});
+
+test("open: a CLOSED operation whose readiness poll has not quiesced still holds the next start", async () => {
+  const h = harness();
+  const a = fakeHandoff({ honourAbort: false });
+  await h.owner.open(h.ctx, makeSpec(a.start).spec);
+  // An early decision closes A while its readiness poll is still running.
+  a.bridge.resolve(COMPLETED);
+  await flush();
+  assert.equal(h.annotations.surface, null, "A closed");
+  const b = fakeHandoff({ url: URL_B });
+  const openB = h.owner.open(h.ctx, makeSpec(b.start).spec);
+  await flush();
+  assert.equal(b.calls, 0, "B waits for A's poll to restore the env");
+  assert.ok(
+    !h.session.notifies.some((n) => n.message.includes("earlier browser review")),
+    "a closed operation is not 'replaced'",
+  );
+  a.readiness.resolve("bridge_settled");
+  assert.deepEqual(await openB, { kind: "opened", url: URL_B });
+  assert.equal(b.calls, 1);
+});
+
+test("open: three overlapping opens over an admitted save — C starts only after A's save settles; B never starts", async () => {
+  const h = harness();
+  const a = fakeHandoff();
+  const saving = deferred<void>();
+  await h.owner.open(h.ctx, makeSpec(a.start, { onDecision: () => saving.promise }).spec);
+  a.readiness.resolve("ready");
+  a.bridge.resolve(COMPLETED);
+  await flush();
+  const b = fakeHandoff({ url: URL_B });
+  const c = fakeHandoff({ url: URL_C });
+  const specC = makeSpec(c.start);
+  const openB = h.owner.open(h.ctx, makeSpec(b.start).spec);
+  await flush();
+  const openC = h.owner.open(h.ctx, specC.spec);
+  await flush();
+  // B's quiesce budget expires while it still waits on A's drain: C must keep waiting too.
+  h.clock.expire(QUIESCE_BUDGET_MS);
+  await flush();
+  assert.equal(c.calls, 0, "C has not started while A's save drains");
+  assert.equal(specC.companion.primes, 0, "C primed nothing");
+  saving.resolve();
+  assert.deepEqual(await openB, { kind: "retired" }, "B was retired before it started");
+  assert.deepEqual(await openC, { kind: "opened", url: URL_C });
+  assert.equal(b.calls, 0, "B never started");
+  assert.equal(c.calls, 1);
+  assert.deepEqual(h.annotations.surface, { mode: "plan", url: URL_C });
 });
 
 test("shutdown during a pending start: the start signal aborts, open resolves null once the start returns, nothing primed, nothing reported after stale", async () => {
@@ -467,7 +520,7 @@ test("shutdown during a pending start: the start signal aborts, open resolves nu
   await flush();
   assert.equal(a.signal?.aborted, true, "the shutdown aborted the pending start");
   a.rec.gate.resolve();
-  assert.equal(await opening, null);
+  assert.deepEqual(await opening, { kind: "retired" });
   await shutting;
   h.session.stale();
   await flush();
@@ -576,6 +629,28 @@ test("degrade (timeout): a non-applicable review's timeout is inert — no repor
   assert.equal(specA.companion.clears, 0);
 });
 
+test("degrade (timeout): a surface another browser door re-primed is not this operation's — no report, no notice, not degraded; a later decision still routes", async () => {
+  const h = harness();
+  const a = fakeHandoff();
+  const specA = makeSpec(a.start);
+  await h.owner.open(h.ctx, specA.spec);
+  // Another browser door (outside this owner) re-primes the shared annotation state.
+  primeAnnotationSurface(h.annotations, { mode: "review", url: "http://127.0.0.1:47000" });
+  const foreign = h.annotations.surface;
+  a.readiness.resolve("timeout");
+  await flush();
+  assert.deepEqual(h.session.notifies, [], "no error report");
+  assert.deepEqual(h.session.sent, [], "no fallback notice claiming the surfaces were cleared");
+  assert.equal(h.annotations.surface, foreign, "the foreign surface survives");
+  assert.equal(specA.companion.clears, 0);
+  // Never degraded: a later decision is routed (the ladder stays the authority), and the close
+  // leaves the foreign surface alone.
+  a.bridge.resolve(COMPLETED);
+  await flush();
+  assert.deepEqual(specA.decisions, [COMPLETED]);
+  assert.equal(h.annotations.surface, foreign);
+});
+
 // ------------------------------------------------------------------ 6. degrade — one owner
 
 test("degrade (unavailable first): the decision task owns the terminal — warning + the degrade once; a later bridge_settled adds nothing", async () => {
@@ -652,7 +727,7 @@ for (const mode of ["ok", "reject", "network"] as const) {
 
     const b = fakeHandoff({ url: URL_B });
     const specB = makeSpec(b.start);
-    assert.deepEqual(await h.owner.open(h.ctx, specB.spec), { url: URL_B });
+    assert.deepEqual(await h.owner.open(h.ctx, specB.spec), { kind: "opened", url: URL_B });
     h.fetch.state.mode = "ok";
     await flush();
 
@@ -721,7 +796,7 @@ test("replacement: a hanging marker push is abandoned at the budget — B's open
   assert.equal(b.calls, 0);
   assert.ok(h.clock.pending.some((t) => t.ms === DETACH_MARKER_BUDGET_MS));
   h.clock.expire(DETACH_MARKER_BUDGET_MS);
-  assert.deepEqual(await openB, { url: URL_B });
+  assert.deepEqual(await openB, { kind: "opened", url: URL_B });
 });
 
 test("replacement: a decision racing the cutoff (during A's marker await) is ignored with one warning, never routed", async () => {
@@ -744,7 +819,7 @@ test("replacement: a decision racing the cutoff (during A's marker await) is ign
   );
   assert.deepEqual(specA.decisions, [], "the cutoff held");
   h.clock.expire(DETACH_MARKER_BUDGET_MS);
-  assert.deepEqual(await openB, { url: URL_B });
+  assert.deepEqual(await openB, { kind: "opened", url: URL_B });
 });
 
 // ------------------------------------------------------------------ 8. external abort
@@ -932,7 +1007,7 @@ test("drain: shutdown during a replacement still drains the predecessor's admitt
   assert.equal(done, false, "shutdown still waits for A's admitted save");
   saving.resolve();
   await shutting;
-  assert.equal(await openB, null, "the successor never started");
+  assert.deepEqual(await openB, { kind: "retired" }, "the successor never started");
   assert.equal(b.calls, 0);
   assert.equal(h.annotations.surface, null);
 });

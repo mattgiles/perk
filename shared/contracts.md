@@ -5369,12 +5369,18 @@ decision authority.
   outcome arriving after it is never routed (one warning, `detachedDecisionWarning`).
 - **Ordering invariants.** `open` registers the operation as current synchronously at entry
   (invocation order is the authority, matching the slot); the predecessor is detached — drain →
-  marker → abort → quiesce → close — BEFORE the successor starts, so `PLANNOTATOR_PORT` preset
-  windows never overlap (each readiness poll restores the value it captured); an operation a
-  newer open or a shutdown retires while it waits starts and primes nothing (`open` → `null`).
+  marker → abort → quiesce → close — BEFORE the successor starts, and the start further waits for
+  every earlier retirement still in flight (an older admitted save a retired opener was still
+  draining included) and for the last started operation's readiness poll — retained after that
+  operation closes, since an early decision can close it while its poll still holds the preset —
+  so `PLANNOTATOR_PORT` preset windows never overlap (each readiness poll restores the value it
+  captured). `open` returns `opened {url}`, `failed` (the start failed, reported) or `retired` (a
+  newer open or a shutdown retired it while it waited — nothing started, nothing primed).
 - **One degrade owner per terminal.** The decision task degrades a settled-`unavailable` bridge
   (one error line naming the bridge's warning, then the degrade); the observer degrades a
-  `timeout` and never acts on `bridge_settled`. The degrade is idempotent: one error line
+  `timeout` and never acts on `bridge_settled`. Both fences gate it — a review that no longer
+  applies, or whose surface another browser re-primed, does not degrade (no report, no notice, no
+  `degraded` flip; a later decision still meets the ladder). The degrade is idempotent: one error line
   ("the plannotator <plan-review|review> server did not become ready at <url> — the browser
   review is unavailable"), the door's notice (idle → immediate, else `followUp`), both surfaces
   cleared. A decided outcome after the degrade → one warning (`postDegradeDecisionWarning`);
@@ -5392,7 +5398,8 @@ decision authority.
 - **The drain.** An admitted decision (`onDecision` in flight — a save) is drained before the
   abort, at replacement and at `session_shutdown` (≤ 60 s; on expiry one warning naming the
   run-id check, `decisionDrainExpiredWarning`, and the detach proceeds; `shutdown` also awaits a
-  predecessor a pending open is still retiring): the backend save is
+  predecessor a pending open is still retiring and the last start's readiness poll): the backend
+  save is
   non-abortable and its session reconciliation needs a live ctx, and `session_shutdown` is
   awaited before Pi invalidates the old activation. After shutdown every late wake of the old
   activation's tasks is silent.
@@ -5443,8 +5450,13 @@ emitted remains unrecoverable — the human re-runs the door.
   stale-approval / destination-changed stops and the sanctioned fail-open skips), so `tool_outcome`
   run events classify it via `details.ok` rather than the `!isError` fallback. On an eligible
   plannotator-arm round `plan_review` offers an in-TUI launch chooser ("Browser review + reviewer
-  wave" vs "Browser review only"); an ineligible round keeps the plain blocking review. The
-  chooser carries no stage check (a plan-draft source in any gated session), so the wave flow's
+  wave" vs "Browser review only"); an ineligible round keeps the plain blocking review. The wave
+  choice opens the matching draft door's browser (a `DoorOpenResult`): `launched` → the
+  non-terminating `wave_launched` guidance; `unlaunched` (a slot refusal or the port-pick failure,
+  already reported) → the plain blocking review in the same call; `retired` (a newer browser open
+  or the shutdown took over before it started) → the non-terminating `wave_retired` result
+  (`ok:true`), never the fallback — a fallback review would take decision authority back from the
+  newer browser review. The chooser carries no stage check (a plan-draft source in any gated session), so the wave flow's
   companions — `start_draft_review_wave`, `collect_draft_review_wave`, `push_annotations` — are
   **mode-over-stage** beside `plan_draft`/`plan_review` (§8.40): the flow is completable wherever
   the `/plan` toggle lands, including a gated worktree session.

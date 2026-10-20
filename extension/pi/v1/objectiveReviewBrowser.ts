@@ -84,7 +84,12 @@ import {
 } from "./objectiveReview.ts";
 import { plannotatorPresent, startPlannotatorPlanReview } from "./providers/plannotatorHandoff.ts";
 import { WAVE_ARRIVAL_NOTICE } from "./providers/waveStatus.ts";
-import { type ReviewOutcome, type ToolResult, untrustedReviewFeedback } from "./review.ts";
+import {
+  type DoorOpenResult,
+  type ReviewOutcome,
+  type ToolResult,
+  untrustedReviewFeedback,
+} from "./review.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "objective-review-browser";
@@ -246,10 +251,11 @@ export async function routeObjectiveReviewDecision(
  * human decision in the background), and RETURN the composed guidance string (template + the
  * `command:objective-review-browser` binding suffix) — the caller decides how to deliver it (the
  * door wrapper injects it via `sendUserMessage`; `plan_review`'s wave arm returns it as a
- * non-terminating tool result, contracts.md §8.23). Returns `null` when the owner launched
- * nothing (the port-pick failure, already reported loudly; or a newer open retired this one
- * first) — CALLER-handled: the door wrapper injects nothing, while `plan_review`'s wave arm falls
- * open to the plain blocking review. `rendered` is the reviewed markdown; `artifactRaw` is the
+ * non-terminating tool result, contracts.md §8.23) as `launched`. Nothing launched is
+ * CALLER-handled: `unlaunched` (a slot refusal or the port-pick failure, already reported
+ * loudly) → the door wrapper injects nothing, while `plan_review`'s wave arm falls open to the
+ * plain blocking review; `retired` (a newer open took over before this one started) → nothing
+ * injected and never a fallback. `rendered` is the reviewed markdown; `artifactRaw` is the
  * raw structured `objective-draft.json` bytes captured at open — the reviewed bytes the slot
  * digests and the ladder compares.
  */
@@ -261,7 +267,7 @@ export async function openObjectiveReviewSurface(
   draftReview: DraftReviewWaveState,
   slot: DraftReviewSlot,
   owner: BrowserOperationOwner,
-): Promise<string | null> {
+): Promise<DoorOpenResult> {
   const opened = slot.open(ctx, {
     subject: "objective",
     source: "artifact",
@@ -272,7 +278,7 @@ export async function openObjectiveReviewSurface(
     report(ctx, SCOPE, "error", `cannot open the browser review: ${opened.detail}`, {
       alsoLog: true,
     });
-    return null;
+    return { kind: "unlaunched" };
   }
   const review = opened.review;
 
@@ -310,7 +316,9 @@ export async function openObjectiveReviewSurface(
       }
     },
   };
-  if ((await owner.open(ctx, spec)) === null) return null;
+  const launched = await owner.open(ctx, spec);
+  if (launched.kind === "failed") return { kind: "unlaunched" };
+  if (launched.kind === "retired") return { kind: "retired" };
 
   report(
     ctx,
@@ -321,17 +329,20 @@ export async function openObjectiveReviewSurface(
       : "working objective draft → plannotator browser review + draft reviewers → APPROVE auto-saves / DENY returns feedback") +
       WAVE_ARRIVAL_NOTICE,
   );
-  return (
-    objectiveReviewBrowserGuidance({
-      ...(opts.custom !== undefined ? { custom: opts.custom } : {}),
-    }) + bindingSuffix(ctx.cwd, `command:${SCOPE}`)
-  );
+  return {
+    kind: "launched",
+    guidance:
+      objectiveReviewBrowserGuidance({
+        ...(opts.custom !== undefined ? { custom: opts.custom } : {}),
+      }) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
+  };
 }
 
 /**
  * The door-facing open: the thin `sendUserMessage` wrapper over `openObjectiveReviewSurface` —
- * the command handler's delivery is the guidance injection; a `null` core return (slot refusal,
- * port-pick failure, or a newer open — the first two already loudly reported) injects nothing.
+ * the command handler's delivery is the guidance injection; an unlaunched core result (slot
+ * refusal or port-pick failure, already loudly reported) or a retired one (a newer open took
+ * over) injects nothing.
  */
 export async function openObjectiveReviewAndGuide(
   pi: ExtensionAPI,
@@ -342,16 +353,8 @@ export async function openObjectiveReviewAndGuide(
   slot: DraftReviewSlot,
   owner: BrowserOperationOwner,
 ): Promise<void> {
-  const guidance = await openObjectiveReviewSurface(
-    pi,
-    ctx,
-    gating,
-    opts,
-    draftReview,
-    slot,
-    owner,
-  );
-  if (guidance !== null) pi.sendUserMessage(guidance);
+  const opened = await openObjectiveReviewSurface(pi, ctx, gating, opts, draftReview, slot, owner);
+  if (opened.kind === "launched") pi.sendUserMessage(opened.guidance);
 }
 
 // ------------------------------------------------------------------------ registration

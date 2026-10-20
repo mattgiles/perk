@@ -127,8 +127,11 @@ again starts a fresh wave over new children: perk never re-attaches to or reuses
 wave's children (they finish on their own, and their findings are never read). A session switch
 delivers no notice at all. On the draft doors (`/plan-review-browser`, `/objective-review-browser`)
 the browser tab is marked detached at the reload — its `perk:wave` marker is replaced: findings
-will not arrive there and a decision made there is not routed — and an approval whose save was
-already in flight finishes before the reload proceeds. Re-run the door in the reloaded session.
+will not arrive there and a decision made there is not routed — and the reload waits up to 60 s
+for an approval whose save was already in flight. If that save is still running at the deadline,
+perk warns (`… is still being saved after 60 s — proceeding`) and the reload continues while the
+save may still land: check the issue backend for an object carrying this run id before you save
+or review again. Otherwise re-run the door in the reloaded session.
 
 **When perk itself times out or cancels a wave**, it requests a stop and reports two facts in the
 failure detail (and on the attempt receipt): the engine's answer — `stop requested`, or

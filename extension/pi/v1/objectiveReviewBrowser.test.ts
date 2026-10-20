@@ -801,7 +801,7 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
   } as unknown as ExtensionContext;
 
   const gating = fakeGating(false);
-  const guidance = await openObjectiveReviewSurface(
+  const opened = await openObjectiveReviewSurface(
     pi,
     ctx,
     gating,
@@ -821,8 +821,9 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
       },
     }),
   );
-  assert.equal(typeof guidance, "string");
-  if (typeof guidance !== "string") throw new Error("expected launch guidance");
+  assert.equal(opened.kind, "launched");
+  if (opened.kind !== "launched") throw new Error("expected launch guidance");
+  const guidance = opened.guidance;
   // Both surfaces primed with the deterministic handle the moment the open returns.
   assert.equal(await annotationMode(), "plan", "the annotation surface is primed in plan mode");
   assert.equal(await draftContextPrimed(), true, "the draft-review context is primed");
@@ -860,14 +861,14 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
     0,
     "the caller owns seed guidance, and no pending annotations need a readiness continuation",
   );
-  assert.match(guidance ?? "", /start_draft_review_wave/, "the template launch line");
+  assert.match(guidance, /start_draft_review_wave/, "the template launch line");
   assert.match(
-    guidance ?? "",
+    guidance,
     /Follow the `perk-objective-review-browser` skill/,
     "the command:objective-review-browser binding suffix rides the returned guidance",
   );
-  assert.match(guidance ?? "", /check the dependency story/);
-  assert.doesNotMatch(guidance ?? "", /127\.0\.0\.1|localhost|45001/);
+  assert.match(guidance, /check the dependency story/);
+  assert.doesNotMatch(guidance, /127\.0\.0\.1|localhost|45001/);
   assert.ok(
     notified.some(
       (n) => n.severity === "info" && n.message.includes("custom lane: check the dependency story"),

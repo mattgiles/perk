@@ -1508,20 +1508,24 @@ test("default probe wiring: each wrapper's default probe fetches its own flavor'
   }
 });
 
-test("startPlannotatorPlanReview through the browser-operation owner: a replacement serializes the PLANNOTATOR_PORT windows — the predecessor's restore never lands under the successor", async () => {
+/**
+ * The REAL plan-review handoff composed by a browser-operation owner: a fake bus answering each
+ * handshake pending (`rev-w<n>`), every readiness poll parked on its own sleep until the test
+ * releases it (the non-abortable sleep), and `envLog` — the env value at each port pick, each
+ * bridge emit, and whenever the test records it.
+ */
+function ownerOverRealHandoff() {
   const bus = fakeBus();
-  // The env value at every step that matters: each port pick, each bridge emit, the end.
   const envLog: (string | undefined)[] = [];
-  let reviews = 0;
+  const state = { reviews: 0 };
   bus.on("plannotator:request", (data) => {
     envLog.push(process.env.PLANNOTATOR_PORT);
-    reviews += 1;
+    state.reviews += 1;
     (data as PlanReviewEnvelope).respond({
       status: "handled",
-      result: { status: "pending", reviewId: `rev-w${reviews}` },
+      result: { status: "pending", reviewId: `rev-w${state.reviews}` },
     });
   });
-  // Every poll parks on its own sleep until the test releases it (the non-abortable sleep).
   const parked: (() => void)[] = [];
   const dependencies = (port: number) => ({
     pickFreePort: () => {
@@ -1549,7 +1553,7 @@ test("startPlannotatorPlanReview through the browser-operation owner: a replacem
           text: async () => "{}",
         }),
       },
-      // The owner's budgets never expire here: only the real poll's restore may quiesce A.
+      // The owner's budgets never expire here: only a real poll's restore may quiesce it.
       sleep: () => new Promise<void>(() => {}),
     },
   );
@@ -1576,24 +1580,32 @@ test("startPlannotatorPlanReview through the browser-operation owner: a replacem
   const flush = async (): Promise<void> => {
     for (let i = 0; i < 6; i++) await new Promise((resolve) => setImmediate(resolve));
   };
+  return { bus, envLog, state, parked, owner, ctx, spec, flush };
+}
+
+test("startPlannotatorPlanReview through the browser-operation owner: a replacement serializes the PLANNOTATOR_PORT windows — the predecessor's restore never lands under the successor", async () => {
+  const { envLog, state, parked, owner, ctx, spec, flush } = ownerOverRealHandoff();
   const prior = process.env.PLANNOTATOR_PORT;
   process.env.PLANNOTATOR_PORT = "4242"; // the operator's value both polls must restore
   try {
-    assert.deepEqual(await owner.open(ctx, spec(46101)), { url: "http://127.0.0.1:46101" });
+    assert.deepEqual(await owner.open(ctx, spec(46101)), {
+      kind: "opened",
+      url: "http://127.0.0.1:46101",
+    });
     await flush();
     assert.equal(parked.length, 1, "A's poll is parked on its sleep");
     assert.equal(process.env.PLANNOTATOR_PORT, "46101", "A's window is open");
 
     const openB = owner.open(ctx, spec(46102));
     await flush();
-    assert.equal(reviews, 1, "B has not started: A's window is still open");
+    assert.equal(state.reviews, 1, "B has not started: A's window is still open");
     assert.equal(process.env.PLANNOTATOR_PORT, "46101");
     // A's poll wakes, sees the owner's abort, restores the ORIGINAL value and quiesces — only
     // then does B pick and preset.
     parked.shift()?.();
-    assert.deepEqual(await openB, { url: "http://127.0.0.1:46102" });
+    assert.deepEqual(await openB, { kind: "opened", url: "http://127.0.0.1:46102" });
     await flush();
-    assert.equal(reviews, 2);
+    assert.equal(state.reviews, 2);
     assert.equal(
       process.env.PLANNOTATOR_PORT,
       "46102",
@@ -1606,6 +1618,42 @@ test("startPlannotatorPlanReview through the browser-operation owner: a replacem
     await shutting;
     envLog.push(process.env.PLANNOTATOR_PORT);
     assert.deepEqual(envLog, ["4242", "46101", "4242", "46102", "4242"]);
+  } finally {
+    for (const release of parked) release();
+    if (prior === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = prior;
+  }
+});
+
+test("startPlannotatorPlanReview through the browser-operation owner: a decision that closes A while its poll is parked still holds B's start until A restores the env", async () => {
+  const { bus, envLog, state, parked, owner, ctx, spec, flush } = ownerOverRealHandoff();
+  const prior = process.env.PLANNOTATOR_PORT;
+  process.env.PLANNOTATOR_PORT = "4242";
+  try {
+    await owner.open(ctx, spec(46111));
+    await flush();
+    assert.equal(parked.length, 1, "A's poll is parked on its sleep");
+    // An early decision settles A's bridge and its routing finishes: A closes — its poll is
+    // still asleep, holding A's preset.
+    bus.emit("plannotator:review-result", { reviewId: "rev-w1", approved: false });
+    await flush();
+    assert.equal(process.env.PLANNOTATOR_PORT, "46111", "A's window is still open");
+
+    const openB = owner.open(ctx, spec(46112));
+    await flush();
+    assert.equal(state.reviews, 1, "B waits for the closed A's poll to quiesce");
+    assert.equal(process.env.PLANNOTATOR_PORT, "46111");
+    parked.shift()?.(); // A's poll wakes, sees the settled bridge, restores the original value
+    assert.deepEqual(await openB, { kind: "opened", url: "http://127.0.0.1:46112" });
+    await flush();
+    assert.equal(process.env.PLANNOTATOR_PORT, "46112", "A never restored under B");
+
+    const shutting = owner.shutdown(ctx, "quit");
+    await flush();
+    parked.shift()?.();
+    await shutting;
+    envLog.push(process.env.PLANNOTATOR_PORT);
+    assert.deepEqual(envLog, ["4242", "46111", "4242", "46112", "4242"]);
   } finally {
     for (const release of parked) release();
     if (prior === undefined) delete process.env.PLANNOTATOR_PORT;

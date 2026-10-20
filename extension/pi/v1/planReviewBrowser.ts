@@ -73,7 +73,12 @@ import { planSaveDepsFor, planSaveNeedsRepair } from "./plan.ts";
 import { completePlanReviewV1, planGuardResult } from "./planReview.ts";
 import { plannotatorPresent, startPlannotatorPlanReview } from "./providers/plannotatorHandoff.ts";
 import { WAVE_ARRIVAL_NOTICE } from "./providers/waveStatus.ts";
-import { type ReviewOutcome, type ToolResult, untrustedReviewFeedback } from "./review.ts";
+import {
+  type DoorOpenResult,
+  type ReviewOutcome,
+  type ToolResult,
+  untrustedReviewFeedback,
+} from "./review.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "plan-review-browser";
@@ -225,10 +230,11 @@ export async function routePlanReviewDecision(
  * and RETURN the composed guidance string (template + the `command:plan-review-browser` binding
  * suffix) — the caller decides how to deliver it (the door wrapper injects it via
  * `sendUserMessage`; `plan_review`'s wave arm returns it as a non-terminating tool result,
- * contracts.md §8.23). Returns `null` when the owner launched nothing (the port-pick failure,
- * already reported loudly; or a newer open retired this one first) — CALLER-handled: the door
- * wrapper injects nothing, while `plan_review`'s wave arm — the one fallback caller — falls open
- * to the plain blocking review.
+ * contracts.md §8.23) as `launched`. Nothing launched is CALLER-handled: `unlaunched` (a slot
+ * refusal or the port-pick failure, already reported loudly) → the door wrapper injects nothing,
+ * while `plan_review`'s wave arm — the one fallback caller — falls open to the plain blocking
+ * review; `retired` (a newer open took over before this one started) → nothing injected and
+ * never a fallback.
  */
 export async function openPlanReviewSurface(
   pi: ExtensionAPI,
@@ -238,7 +244,7 @@ export async function openPlanReviewSurface(
   draftReview: DraftReviewWaveState,
   slot: DraftReviewSlot,
   owner: BrowserOperationOwner,
-): Promise<string | null> {
+): Promise<DoorOpenResult> {
   // The slot open FIRST: no browser launches for a review that could never be routed (no run
   // identity, the wrong subject, an unverifiable destination).
   const opened = slot.open(ctx, {
@@ -251,7 +257,7 @@ export async function openPlanReviewSurface(
     report(ctx, SCOPE, "error", `cannot open the browser review: ${opened.detail}`, {
       alsoLog: true,
     });
-    return null;
+    return { kind: "unlaunched" };
   }
   const review = opened.review;
 
@@ -286,7 +292,9 @@ export async function openPlanReviewSurface(
       }
     },
   };
-  if ((await owner.open(ctx, spec)) === null) return null;
+  const launched = await owner.open(ctx, spec);
+  if (launched.kind === "failed") return { kind: "unlaunched" };
+  if (launched.kind === "retired") return { kind: "retired" };
 
   report(
     ctx,
@@ -297,16 +305,19 @@ export async function openPlanReviewSurface(
       : "working plan draft → plannotator browser review + draft reviewers → APPROVE auto-saves / DENY returns feedback") +
       WAVE_ARRIVAL_NOTICE,
   );
-  return (
-    planReviewBrowserGuidance({ ...(opts.custom !== undefined ? { custom: opts.custom } : {}) }) +
-    bindingSuffix(ctx.cwd, `command:${SCOPE}`)
-  );
+  return {
+    kind: "launched",
+    guidance:
+      planReviewBrowserGuidance({ ...(opts.custom !== undefined ? { custom: opts.custom } : {}) }) +
+      bindingSuffix(ctx.cwd, `command:${SCOPE}`),
+  };
 }
 
 /**
  * The door-facing open: the thin `sendUserMessage` wrapper over `openPlanReviewSurface` — the
- * command handler's delivery is the guidance injection; a `null` core return (slot refusal,
- * port-pick failure, or a newer open — the first two already loudly reported) injects nothing.
+ * command handler's delivery is the guidance injection; an unlaunched core result (slot refusal
+ * or port-pick failure, already loudly reported) or a retired one (a newer open took over)
+ * injects nothing.
  */
 export async function openPlanReviewAndGuide(
   pi: ExtensionAPI,
@@ -317,8 +328,8 @@ export async function openPlanReviewAndGuide(
   slot: DraftReviewSlot,
   owner: BrowserOperationOwner,
 ): Promise<void> {
-  const guidance = await openPlanReviewSurface(pi, ctx, gating, opts, draftReview, slot, owner);
-  if (guidance !== null) pi.sendUserMessage(guidance);
+  const opened = await openPlanReviewSurface(pi, ctx, gating, opts, draftReview, slot, owner);
+  if (opened.kind === "launched") pi.sendUserMessage(opened.guidance);
 }
 
 // ------------------------------------------------------------------------ registration

@@ -64,6 +64,7 @@ import {
   verdictsFor,
   type WaveLaunch,
   waveLaunchedResult,
+  waveRetiredResult,
 } from "./review.ts";
 
 /** The objective-arm descriptor for the shared renderer cores. */
@@ -335,7 +336,7 @@ export async function executeObjectiveReview(
       const choice = await chooseReviewLaunch(ctx.ui, "Objective", sig);
       if (choice.launch === "aborted") return objectiveReviewOutcomeResult({ status: "aborted" });
       if (choice.launch === "wave") {
-        const guidance = await wave.objective(ctx, {
+        const opened = await wave.objective(ctx, {
           // The reviewed bytes are the RENDERED markdown (prose + roadmap table) — never raw
           // JSON; the stale-guard baseline is the SAME read's raw bytes.
           rendered: renderObjectiveDraft(resumed.draft),
@@ -346,9 +347,14 @@ export async function executeObjectiveReview(
         // never report a successful launch (the door's own bridge abort handling settles the
         // background tasks and clears the primed surfaces).
         if (sig?.aborted) return objectiveReviewOutcomeResult({ status: "aborted" });
-        if (guidance !== null) return waveLaunchedResult(OBJECTIVE_SUBJECT, guidance);
-        // null = the synchronous port-pick failure (already loudly reported inside the core) —
-        // fall open to the plain blocking review in the same call: the review never wedges.
+        if (opened.kind === "launched") {
+          return waveLaunchedResult(OBJECTIVE_SUBJECT, opened.guidance);
+        }
+        // A newer browser open took over before this one started: never fall back (a blocking
+        // review here would supersede the newer browser review).
+        if (opened.kind === "retired") return waveRetiredResult(OBJECTIVE_SUBJECT);
+        // Unlaunched (already loudly reported inside the core) — fall open to the plain blocking
+        // review in the same call: the review never wedges.
       }
     }
   }

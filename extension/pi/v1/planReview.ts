@@ -40,8 +40,10 @@
 // `wave_launched` result carrying the door guidance verbatim; the browser decision then routes
 // through the door's background decision task. Esc ⇒ the plain flavor (never a cancel); abort
 // outranks every dialog result AND the awaited opener (an interrupted turn never reports a
-// launched wave); a null opener return (synchronous port-pick failure, loudly reported in the
-// core) falls open to the plain blocking review in the same call.
+// launched wave); an `unlaunched` opener result (a slot refusal or the port-pick failure, loudly
+// reported in the core) falls open to the plain blocking review in the same call, while a
+// `retired` one (a newer browser open took over first) returns the non-terminating
+// `wave_retired` result — never a fallback that would supersede the newer browser review.
 //
 // THE OBJECTIVE ARM routes to `pi/v1/objectiveReview.ts`; THE GIST ARM routes to
 // `pi/v1/gist.ts`'s `runGistReviewV1` — direct sibling imports (the injected-arm indirection
@@ -125,6 +127,7 @@ import {
   verdictsFor,
   type WaveLaunch,
   waveLaunchedResult,
+  waveRetiredResult,
 } from "./review.ts";
 
 /** The review bridge slice the installer builds over the plannotator event bus. */
@@ -658,7 +661,7 @@ export async function runPlanReviewV1(
       const choice = await chooseReviewLaunch(ctx.ui, "Plan", sig);
       if (choice.launch === "aborted") return reviewOutcomeResult({ status: "aborted" });
       if (choice.launch === "wave") {
-        const guidance = await wave.plan(ctx, {
+        const opened = await wave.plan(ctx, {
           draft: src.plan,
           ...(choice.custom !== undefined ? { custom: choice.custom } : {}),
         });
@@ -666,9 +669,12 @@ export async function runPlanReviewV1(
         // never report a successful launch (the door's own bridge abort handling settles the
         // background tasks and clears the primed surfaces).
         if (sig?.aborted) return reviewOutcomeResult({ status: "aborted" });
-        if (guidance !== null) return waveLaunchedResult(PLAN_SUBJECT, guidance);
-        // null = the synchronous port-pick failure (already loudly reported inside the core) —
-        // fall open to the plain blocking review in the same call: the review never wedges.
+        if (opened.kind === "launched") return waveLaunchedResult(PLAN_SUBJECT, opened.guidance);
+        // A newer browser open took over before this one started: never fall back (a blocking
+        // review here would supersede the newer browser review).
+        if (opened.kind === "retired") return waveRetiredResult(PLAN_SUBJECT);
+        // Unlaunched (already loudly reported inside the core) — fall open to the plain blocking
+        // review in the same call: the review never wedges.
       }
     }
     if (sig?.aborted) return reviewOutcomeResult({ status: "aborted" });

@@ -41,8 +41,10 @@
 // synchronously, before its first await — invocation order is the authority, matching the
 // slot's token, which also moves at door entry. (2) Detach before start: the predecessor is
 // retired — routing cutoff → drain → marker → abort → quiesce → close — BEFORE the successor
-// starts, so the process-wide `PLANNOTATOR_PORT` preset windows never overlap (each readiness
-// poll restores the value IT captured). (3) The routing cutoff (`detached`) is set
+// starts, and the start also waits for every earlier retirement still in flight and for the last
+// started operation's readiness poll (even a closed one's), so the process-wide
+// `PLANNOTATOR_PORT` preset windows never overlap (each readiness poll restores the value IT
+// captured). (3) The routing cutoff (`detached`) is set
 // synchronously when a detach begins, so a verdict arriving during the marker await or the
 // drain never enters the subject router (it gets one warning instead). (4) An admitted decision
 // (`routing`) is drained before the abort: the backend save is non-abortable and its session
@@ -53,7 +55,7 @@
 // ONE DEGRADE OWNER PER TERMINAL: the decision task degrades a settled-`unavailable` bridge (one
 // error line naming the bridge's warning, then the degrade); the observer degrades a `timeout`
 // and never races a settled bridge (`bridge_settled` is the decision task's). `degrade` is
-// idempotent; a degraded operation stays current (a later decision is answered with one warning;
+// idempotent and gated by BOTH fences; a degraded operation stays current (a later decision is answered with one warning;
 // a later open detaches it).
 //
 // Accepted edges: a network-failed marker push before readiness marks nothing (the unit dies
@@ -192,10 +194,16 @@ export interface BrowserOperationSpec<T> {
   onDecision(out: T): Promise<void>;
 }
 
-/** The handle `open` returns once the operation started and primed. */
-export interface OpenedBrowserOperation {
-  readonly url: string;
-}
+/**
+ * What `open` launched: `opened` (started and primed — the URL is deterministic); `failed`
+ * (nothing launched — the start failed and was reported loudly); `retired` (nothing launched — a
+ * newer open or the shutdown retired this one before it started; the newer open's guidance
+ * stands, so a caller must never fall back to another review surface on this arm).
+ */
+export type BrowserOpenResult =
+  | { readonly kind: "opened"; readonly url: string }
+  | { readonly kind: "failed" }
+  | { readonly kind: "retired" };
 
 /** The ctx slice the owner needs (`ExtensionContext` satisfies it; tests fake it). */
 export type BrowserOperationContext = ReportTarget &
@@ -204,15 +212,14 @@ export type BrowserOperationContext = ReportTarget &
 
 export interface BrowserOperationOwner {
   /**
-   * Open a browser operation: retire the previous one (detached `replaced`), start, prime, launch
-   * the background tasks. `null` = nothing launched (the start failed — already reported — or a
-   * newer open/shutdown retired this one first).
+   * Open a browser operation: retire the previous one (detached `replaced`), wait until every
+   * earlier start has quiesced, start, prime, launch the background tasks.
    */
-  open<T>(
-    ctx: BrowserOperationContext,
-    spec: BrowserOperationSpec<T>,
-  ): Promise<OpenedBrowserOperation | null>;
-  /** `session_shutdown`: detach the current operation (`session-ended`; no push on `quit`). */
+  open<T>(ctx: BrowserOperationContext, spec: BrowserOperationSpec<T>): Promise<BrowserOpenResult>;
+  /**
+   * `session_shutdown`: detach the current operation (`session-ended`; no push on `quit`), then
+   * wait for every retirement still in flight and the last start's readiness poll.
+   */
   shutdown(ctx: BrowserOperationContext, reason: SessionShutdownEvent["reason"]): Promise<void>;
 }
 
@@ -298,8 +305,21 @@ export function createBrowserOperationOwner(
   const { annotations, gating, status } = deps;
   const quietMs = deps.consoleQuietMs ?? CONSOLE_QUIET_MS;
   let current: OperationCore | null = null;
-  /** Every detach still in flight — `shutdown` awaits them all (a predecessor's drain included). */
-  const detaching = new Set<Promise<void>>();
+  /**
+   * The last operation that began its start — retained after it closes: its readiness poll may
+   * still hold the process-wide `PLANNOTATOR_PORT` preset until it quiesces (a decision can close
+   * an operation while its poll sleeps), so every later start waits for it.
+   */
+  let lastStarted: OperationCore | null = null;
+  /**
+   * Every detach still in flight with its target — a later start and `shutdown` await them all
+   * (a predecessor's drain included), never one targeting the waiter itself.
+   */
+  const detaching = new Set<{ target: OperationCore; done: Promise<void> }>();
+
+  /** The in-flight detaches, except any retiring `self` (a waiter never waits on its own). */
+  const pendingRetirements = (self: OperationCore | null): Promise<void>[] =>
+    [...detaching].filter((entry) => entry.target !== self).map((entry) => entry.done);
 
   /** The resource fence: the annotation surface is still the very object this op primed. */
   const owns = (op: OperationCore): boolean =>
@@ -402,18 +422,20 @@ export function createBrowserOperationOwner(
     cause: ReviewDetachCause,
     opts: { marker: boolean },
   ): Promise<void> => {
-    const retiring = detach(ctx, op, cause, opts);
+    const entry = { target: op, done: detach(ctx, op, cause, opts) };
     const untrack = (): void => {
-      detaching.delete(retiring);
+      detaching.delete(entry);
     };
-    detaching.add(retiring);
-    retiring.then(untrack, untrack);
-    return retiring;
+    detaching.add(entry);
+    entry.done.then(untrack, untrack);
+    return entry.done;
   };
 
   /** The one degrade path (idempotent): loud error + the notice + this op's surfaces cleared. */
   const degrade = <T>(op: Operation<T>, url: string): void => {
-    if (op.degraded || !applicable(op)) return;
+    // Both fences: a review that no longer speaks for the session, or whose surface another
+    // browser re-primed, neither reports, nor injects the fallback, nor flips `degraded`.
+    if (op.degraded || !applicable(op) || !owns(op)) return;
     op.degraded = true;
     report(
       op.ctx,
@@ -427,10 +449,8 @@ export function createBrowserOperationOwner(
     else pi.sendUserMessage(op.spec.degradeNotice, { deliverAs: "followUp" });
     // A post-degrade push refuses `no_surface`; a post-degrade wave start refuses
     // `no_draft_context` — consistent with "surface findings in-session".
-    if (owns(op)) {
-      clearAnnotationSurface(annotations);
-      op.companion?.clear();
-    }
+    clearAnnotationSurface(annotations);
+    op.companion?.clear();
   };
 
   /** The readiness observer: announce `ready`, degrade `timeout`; every other arm is silent. */
@@ -508,7 +528,7 @@ export function createBrowserOperationOwner(
     async open<T>(
       ctx: BrowserOperationContext,
       spec: BrowserOperationSpec<T>,
-    ): Promise<OpenedBrowserOperation | null> {
+    ): Promise<BrowserOpenResult> {
       // The repo's two-source cancellation idiom: the owner's abort OR the opening turn's.
       const turnSignal = ctx.signal;
       const controller = new AbortController();
@@ -535,11 +555,18 @@ export function createBrowserOperationOwner(
       current = op;
       const retiring = previous !== null && !previous.closed ? previous : null;
       if (retiring !== null) await retire(ctx, retiring, "replaced", { marker: true });
-      // A newer open or a shutdown retired this one while the predecessor was detaching:
-      // nothing started, nothing primed, nothing reported — the newer open's guidance stands.
+      // Serialize the start behind every earlier retirement still in flight (an older admitted
+      // save the predecessor was still draining included) and behind the last start's readiness
+      // poll (possibly a closed operation's), so preset windows never overlap. Each wait is
+      // bounded by its own budgets.
+      await Promise.allSettled(pendingRetirements(op));
+      const prior = lastStarted;
+      if (prior !== null) await bounded(prior.quiesced.promise, QUIESCE_BUDGET_MS);
+      // A newer open or a shutdown retired this one while it waited: nothing started, nothing
+      // primed, nothing reported — the newer open's guidance stands.
       if (!live(op)) {
         op.quiesced.resolve();
-        return null;
+        return { kind: "retired" };
       }
       if (retiring !== null) {
         report(
@@ -551,6 +578,7 @@ export function createBrowserOperationOwner(
         );
       }
 
+      lastStarted = op;
       let started: StartedSurface<T>;
       try {
         started = await spec.start({
@@ -560,7 +588,8 @@ export function createBrowserOperationOwner(
           deps: deps.browserDeps ?? {},
         });
       } catch (error) {
-        if (live(op)) {
+        const retired = !live(op);
+        if (!retired) {
           report(
             ctx,
             spec.scope,
@@ -572,7 +601,7 @@ export function createBrowserOperationOwner(
         }
         close(op);
         op.quiesced.resolve();
-        return null;
+        return retired ? { kind: "retired" } : { kind: "failed" };
       }
       // Quiesced = the readiness poll ended (its `finally` restored the env var it captured).
       void started.readiness.then(
@@ -581,7 +610,7 @@ export function createBrowserOperationOwner(
       );
       // Retired during the start: its controller is already aborted, so the bridge and the poll
       // settle `aborted` on their own — prime nothing, launch nothing.
-      if (!live(op)) return null;
+      if (!live(op)) return { kind: "retired" };
 
       primeAnnotationSurface(annotations, { mode: spec.mode, url: started.url });
       op.surface = annotations.surface;
@@ -590,7 +619,7 @@ export function createBrowserOperationOwner(
 
       void observe(op, started).catch((error: unknown) => failed(op, "readiness observer", error));
       void decide(op, started).catch((error: unknown) => failed(op, "decision task", error));
-      return { url: started.url };
+      return { kind: "opened", url: started.url };
     },
 
     async shutdown(ctx, reason): Promise<void> {
@@ -600,8 +629,12 @@ export function createBrowserOperationOwner(
         await retire(ctx, op, "session-ended", { marker: reason !== "quit" });
       }
       // A predecessor still being retired by a pending open (its admitted save draining) must
-      // finish while this ctx is live too — each detach is itself bounded.
-      await Promise.allSettled([...detaching]);
+      // finish while this ctx is live too — each detach is itself bounded. And the last start's
+      // readiness poll (a closed operation's, its decision already routed) restores the env
+      // var before the next activation can preset it.
+      await Promise.allSettled(pendingRetirements(null));
+      const prior = lastStarted;
+      if (prior !== null) await bounded(prior.quiesced.promise, QUIESCE_BUDGET_MS);
     },
   };
 }
