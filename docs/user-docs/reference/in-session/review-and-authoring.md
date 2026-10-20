@@ -125,7 +125,13 @@ reloaded session, but the wave is **not collectable** there — collection is pe
 `collect_review_wave` / `collect_draft_review_wave` answer `no_wave` naming that rule. Launching
 again starts a fresh wave over new children: perk never re-attaches to or reuses the earlier
 wave's children (they finish on their own, and their findings are never read). A session switch
-delivers no notice at all.
+delivers no notice at all. On the draft doors (`/plan-review-browser`, `/objective-review-browser`)
+the browser tab is marked detached at the reload — its `perk:wave` marker is replaced: findings
+will not arrive there and a decision made there is not routed — and the reload waits up to 60 s
+for an approval whose save was already in flight. If that save is still running at the deadline,
+perk warns (`… is still being saved after 60 s — proceeding`) and the reload continues while the
+save may still land: check the issue backend for an object carrying this run id before you save
+or review again. Otherwise re-run the door in the reloaded session.
 
 **When perk itself times out or cancels a wave**, it requests a stop and reports two facts in the
 failure detail (and on the attempt receipt): the engine's answer — `stop requested`, or
@@ -441,8 +447,17 @@ subject-appropriate doors (the plan door refuses objective stages).
 **APPROVE** applies verified Direct Edits to the plan artifact, then auto-saves the reviewed
 bytes — behind the four guards above (a moved draft or a changed destination saves nothing and
 asks for a fresh `plan_review`; a paused session refuses until `/plan-save`, the deliberate
-retry). **DENY** returns the feedback and any Direct Edits for a `plan_draft` revision round,
-with the draft-moved note when the draft changed.
+retry). The TUI line is `plan APPROVED in the browser — saved`; when the saved plan needs a repair
+(a failed objective-node advance, or a held session link or claim clear) it is a warning carrying
+the save message and its `/plan-save` retry — the plan itself saved. **DENY** returns the feedback
+and any Direct Edits for a `plan_draft` revision round, with the draft-moved note when the draft
+changed.
+
+Opening the door again replaces the earlier browser review: its tab is marked detached
+(replaced) and its decision is no longer routed — decide in the newer tab. A turn abort or a
+session reload/replacement detaches the open review the same way. A blocking `plan_review` or
+`/implement-here` leaves the tab open but revokes its authority: its verdict is ignored with a
+warning, as above.
 
 The door refuses when Plannotator is missing, the session is headless, the current stage is not a
 plan-authoring stage, or the draft is missing or invalid. Create a valid artifact with `plan_draft`
@@ -459,6 +474,11 @@ Edits never auto-apply to an objective: the browser edited rendered Markdown whi
 structured fields. An approval with Direct Edits therefore saves nothing and becomes a revise
 round; fold the diff into `objective_draft`, then re-review. **DENY** returns feedback for an
 `objective_draft` revision (with the draft-moved note when the draft changed).
+
+Like the plan door, opening the door again replaces the earlier browser review (its tab is marked
+detached and its decision is no longer routed); a turn abort or a session reload/replacement
+detaches it the same way; a blocking `plan_review` or `/implement-here` leaves the tab open but
+its verdict is ignored with a warning.
 
 The door refuses when Plannotator is missing, the session is headless, the stage is not objective
 authoring, or the structured draft is missing or invalid. It never reviews raw JSON, a pasted

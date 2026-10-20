@@ -318,22 +318,33 @@ export function approvedSubjectSaveResult(
 // ------------------------------------------------------ the launch chooser (the wave arm)
 
 /**
+ * A draft door open core's outcome (contracts.md §8.23): `launched` carries the composed
+ * guidance; `unlaunched` = nothing launched and already reported loudly (a slot refusal or the
+ * port-pick failure) — a wave-arm caller falls open to the plain blocking review; `retired` = a
+ * newer browser open (or the shutdown) retired this one before it started — nothing launched, and
+ * the caller must NOT fall back (a fallback review would take decision authority back from the
+ * newer browser review).
+ */
+export type DoorOpenResult =
+  | { kind: "launched"; guidance: string }
+  | { kind: "unlaunched" }
+  | { kind: "retired" };
+
+/**
  * The injected wave-launch deps (composed in pi/activation.ts from the door exports — structural on
  * purpose: this module imports NOTHING from door modules, avoiding the value-import cycle;
  * `planReviewBrowser.ts` value-imports the review arms). `present` is the plannotator
- * presence probe (`plannotatorPresent(pi)` at the call site); `plan`/`objective` are the
- * guidance-returning door open cores (`openPlanReviewSurface` / `openObjectiveReviewSurface`) —
- * one open path, byte-identical door semantics (contracts.md §8.23). `null` from an opener is
- * the synchronous port-pick failure (already loudly reported inside the core) — the caller
- * falls open to the plain blocking review.
+ * presence probe (`plannotatorPresent(pi)` at the call site); `plan`/`objective` are the door
+ * open cores (`openPlanReviewSurface` / `openObjectiveReviewSurface`) — one open path,
+ * byte-identical door semantics — returning a `DoorOpenResult`.
  */
 export interface WaveLaunch {
   present(): boolean;
-  plan(ctx: ExtensionContext, opts: { draft: string; custom?: string }): Promise<string | null>;
+  plan(ctx: ExtensionContext, opts: { draft: string; custom?: string }): Promise<DoorOpenResult>;
   objective(
     ctx: ExtensionContext,
     opts: { rendered: string; artifactRaw: string; custom?: string },
-  ): Promise<string | null>;
+  ): Promise<DoorOpenResult>;
 }
 
 /** The minimal structural `ctx.ui` subset the launch chooser needs (both dialogs signal-aware). */
@@ -398,6 +409,26 @@ export function waveLaunchedResult(subject: ReviewSubject, guidance: string): To
   return {
     content: [{ type: "text", text: guidance }],
     details: { ok: true, status: "wave_launched", ...subject.detailsExtra },
+  };
+}
+
+/**
+ * The NON-terminating wave-retired result: a newer browser review replaced this launch before it
+ * started, so this call opened nothing and no decision will route from it — the newer review's
+ * guidance stands (never a fallback review that would supersede it).
+ */
+export function waveRetiredResult(subject: ReviewSubject): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          "A newer browser review replaced this reviewer-wave launch before it started — this " +
+          "call opened nothing and no decision will route from it. Follow the newer review's " +
+          "guidance; do not call plan_review again while that browser review is open.",
+      },
+    ],
+    details: { ok: true, status: "wave_retired", ...subject.detailsExtra },
   };
 }
 

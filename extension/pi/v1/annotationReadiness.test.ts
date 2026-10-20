@@ -1,13 +1,18 @@
-// One shared completion-before-readiness regression over the real readiness observers. No
-// model inference: assert the continuation, then drive its instructed sequential tool call.
+// One shared completion-before-readiness regression over the real readiness observers — the
+// PR/stack doors' `observeBrowserReadiness` and the draft doors' observer inside the
+// browser-operation owner. No model inference: assert the continuation, then drive its
+// instructed sequential tool call.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createDraftReviewWaveState } from "../../authoring/review/draftContext.ts";
+import { createPerkStatus } from "../../surfaces/surfaces.ts";
 import { createMemoryWaveAdapter } from "../../testing/memoryAdapter.ts";
 import { reportWaveOver } from "../../waves/reportWave.ts";
+import {
+  type BrowserOperationOwner,
+  createBrowserOperationOwner,
+  settleReviewOutcome,
+} from "./browserOperation.ts";
 import { observeBrowserReadiness } from "./codeReview/browser.ts";
-import { observeObjectiveReviewReadiness } from "./objectiveReviewBrowser.ts";
-import { observePlanReviewReadiness } from "./planReviewBrowser.ts";
 import {
   type AnnotationMode,
   clearAnnotationSurface,
@@ -17,6 +22,7 @@ import {
   type FetchResponseLike,
   primeAnnotationSurface,
 } from "./providers/annotations.ts";
+import type { ReviewOutcome } from "./reviewOutcome.ts";
 
 function deferred<T>() {
   const controls: {
@@ -32,25 +38,37 @@ function deferred<T>() {
   return { promise, resolve: controls.resolve, reject: controls.reject };
 }
 
-function fixture(mode: AnnotationMode, idle: boolean) {
+/**
+ * The shared fixture. `prime` pre-primes the annotation surface (the PR/stack observer runs over
+ * a door-primed surface); the owner row leaves it unprimed — the owner primes at `open`.
+ */
+function fixture(mode: AnnotationMode, idle: boolean, prime = true) {
   const annotations = createAnnotationState();
   const surface = { mode, url: "http://127.0.0.1:45001" };
-  primeAnnotationSurface(annotations, surface);
+  if (prime) primeAnnotationSurface(annotations, surface);
   const readiness = deferred<"ready">();
+  const bridge = deferred<ReviewOutcome>();
   const started = {
-    ...surface,
+    url: surface.url,
     port: 45001,
     remote: false,
     readiness: readiness.promise,
     bridgePromise: new Promise<never>(() => {}),
   };
+  // The draft doors' started surface: the same address, a controllable plan-review bridge.
+  const draftStarted = { ...started, bridgePromise: bridge.promise };
   const sent: { message: string; options?: { deliverAs?: string } }[] = [];
   const pi = {
     sendUserMessage(message: string, options?: { deliverAs?: "steer" | "followUp" }) {
       sent.push({ message, options });
     },
   };
-  const ctx = { hasUI: true, ui: { notify() {} }, isIdle: () => idle };
+  const ctx = {
+    hasUI: true,
+    ui: { notify() {}, setStatus() {} },
+    isIdle: () => idle,
+    signal: undefined,
+  };
   const finding =
     mode === "review"
       ? { path: "src/a.ts", line: 3, body: "Final concern", severity: "major", confidence: "high" }
@@ -71,7 +89,9 @@ function fixture(mode: AnnotationMode, idle: boolean) {
     annotations,
     surface,
     readiness,
+    bridge,
     started,
+    draftStarted,
     sent,
     pi,
     ctx,
@@ -85,50 +105,76 @@ function fixture(mode: AnnotationMode, idle: boolean) {
   };
 }
 type Fixture = ReturnType<typeof fixture>;
-const observers: { name: string; mode: AnnotationMode; observe(f: Fixture): Promise<void> }[] = [
+
+/** Drain the queue a few times (the owner's observer runs between awaits). */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 6; i++) await new Promise((resolve) => setImmediate(resolve));
+}
+
+/** The draft doors' owner over the fixture (budgets expire immediately; pushes use its fetch). */
+function ownerFor(f: Fixture): BrowserOperationOwner {
+  return createBrowserOperationOwner(f.pi, {
+    annotations: f.annotations,
+    gating: { primeDeferred: (names) => [...names] },
+    status: createPerkStatus(),
+    annotationDeps: { fetchLike: f.fetchLike },
+    sleep: async () => {},
+  });
+}
+
+/** Open one draft-door operation over `started` (the owner primes the plan-mode surface). */
+async function openThrough(
+  owner: BrowserOperationOwner,
+  f: Fixture,
+  started: Fixture["draftStarted"] = f.draftStarted,
+): Promise<void> {
+  const opened = await owner.open(f.ctx, {
+    scope: "plan-review-browser",
+    start: async () => started,
+    mode: "plan",
+    primes: [],
+    degradeNotice: "unavailable (test)",
+    settle: settleReviewOutcome,
+    onDecision: async () => {},
+  });
+  assert.deepEqual(opened, { kind: "opened", url: f.surface.url });
+}
+
+/**
+ * Start observing: the PR/stack observer over the pre-primed surface, or the owner's observer
+ * after `open` primed it. Resolves to `done` — the promise the case awaits once readiness lands
+ * (wrapped, so awaiting the start never awaits readiness itself).
+ */
+const observers: {
+  name: string;
+  mode: AnnotationMode;
+  prime: boolean;
+  observe(f: Fixture): Promise<{ done: Promise<void> }>;
+}[] = [
   {
     name: "PR/stack",
     mode: "review",
-    observe: (f) => observeBrowserReadiness(f.pi, f.ctx, f.started, f.annotations),
+    prime: true,
+    observe: async (f) => ({
+      done: observeBrowserReadiness(f.pi, f.ctx, f.started, f.annotations),
+    }),
   },
   {
-    name: "plan",
+    name: "draft doors (owner)",
     mode: "plan",
-    observe: (f) =>
-      observePlanReviewReadiness(
-        f.pi,
-        f.ctx,
-        f.started,
-        createDraftReviewWaveState(),
-        f.annotations,
-        currentDoorSession(),
-      ),
-  },
-  {
-    name: "objective",
-    mode: "plan",
-    observe: (f) =>
-      observeObjectiveReviewReadiness(
-        f.pi,
-        f.ctx,
-        f.started,
-        createDraftReviewWaveState(),
-        f.annotations,
-        currentDoorSession(),
-      ),
+    prime: false,
+    observe: async (f) => {
+      await openThrough(ownerFor(f), f);
+      return { done: f.readiness.promise.then(flush) };
+    },
   },
 ];
-
-/** The always-current door-session token: these cases pin the ready-arm delivery continuation. */
-function currentDoorSession(): { degraded: boolean; readonly current: () => boolean } {
-  return { degraded: false, current: () => true };
-}
 
 for (const observer of observers) {
   for (const idle of [true, false]) {
     test(`${observer.name}: completion before readiness resumes held final replace and empty clear (idle=${idle})`, async () => {
-      const f = fixture(observer.mode, idle);
-      const observing = observer.observe(f);
+      const f = fixture(observer.mode, idle, observer.prime);
+      const observing = (await observer.observe(f)).done;
       const adapter = createMemoryWaveAdapter({
         completion: false,
         aggregate: {
@@ -219,16 +265,10 @@ for (const observer of observers) {
   }
 }
 
-test("a held final pure clear wakes on readiness even with zero held findings", async () => {
-  const f = fixture("plan", true);
-  const observing = observePlanReviewReadiness(
-    f.pi,
-    f.ctx,
-    f.started,
-    createDraftReviewWaveState(),
-    f.annotations,
-    currentDoorSession(),
-  );
+test("draft doors (owner): a held final pure clear wakes on readiness even with zero held findings", async () => {
+  const f = fixture("plan", true, false);
+  await openThrough(ownerFor(f), f);
+  const observing = f.readiness.promise.then(flush);
   const held = await executePushAnnotations(
     f.annotations,
     f.ctx,
@@ -335,5 +375,39 @@ for (const change of ["close", "reprime"] as const) {
     await observing;
     assert.equal(f.sent.length, 0);
     assert.equal(f.calls.length, 0);
+  });
+}
+
+for (const change of ["close", "replace"] as const) {
+  test(`draft doors (owner): late readiness does not wake a ${change === "close" ? "closed" : "replaced same-URL"} operation`, async () => {
+    const f = fixture("plan", true, false);
+    const owner = ownerFor(f);
+    await openThrough(owner, f);
+    if (change === "close") {
+      // A decided bridge closes the operation (the early-decision path).
+      f.bridge.resolve({ status: "completed", approved: false, reviewId: "r-1" });
+      await flush();
+      assert.equal(f.annotations.surface, null, "the decided operation closed its surface");
+    } else {
+      // A second open on the SAME URL replaces the first; the successor has pending work.
+      const successor = { ...f.draftStarted, readiness: deferred<"ready">().promise };
+      await openThrough(owner, f, successor);
+      await executePushAnnotations(
+        f.annotations,
+        f.ctx,
+        { angle: "correctness", findings: [f.finding] },
+        { fetchLike: f.fetchLike },
+      );
+      assert.equal(
+        f.annotations.held.length,
+        1,
+        "pending work makes the late-readiness refusal non-vacuous",
+      );
+    }
+    const before = f.calls.length;
+    f.makeReady();
+    await f.readiness.promise.then(flush);
+    assert.equal(f.sent.length, 0, "the retired operation's late readiness wakes nothing");
+    assert.equal(f.calls.length, before);
   });
 }
