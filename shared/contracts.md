@@ -128,7 +128,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   in the success message ("⚠ differing plan param ignored"), never silent and never a hard-fail.
   Non-param sources are announced in the success message (`plan source: …`; param-path messages
   stay byte-stable) and the machine-readable `plan_source` (`"plan-draft" | "param" |
-  "transcript" | null`) always lands in the tool's `details`.
+  "transcript" | null`) always lands in the tool's `details` — beside the two session-reconciliation
+  results `linkage` and `claim_clear` (→ §8.3 "Warm `/plan-save` direct linkage").
 
   **The objective-draft file tool.** The tool `objective_draft` writes the working objective
   during read-only objective authoring, under the shared draft-tool invariants above; its
@@ -573,7 +574,7 @@ end of the section).
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
 | `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list; the append-path pre-read FAILS CLOSED and is STRICT-DECODED: an unrebuildable branch OR a malformed persisted ledger — a non-array, or any row that is not `{pr: integer, event: string, at: string}` — refuses the append rather than LWW-erasing possibly-real earlier rows (an absent field is the normal empty first-append ledger; extra row fields are narrowed out), while the plain ledger READ stays fail-open/tolerant); best-effort tier with an asymmetric trust rule — a row can be MISSING spuriously (append failed after a real post) but never PRESENT spuriously, so `submit_pr_review` enforces skip-on-resume on presence (`already_posted` refusal; `allow_repost: true` is the deliberate override) while a missing row means verify posted-vs-pending against GitHub before re-posting |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
-| `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition (idempotent — a re-claim equal to the live claim appends nothing) **and by the cold claim** (`session_start` persists it from the claimed handoff's non-blank `objective_id`/`node_id` — the objective-plan cold door's `handoff_extra` — so implement-here suppression is structural in cold objective-plan sessions too), cleared on a successful non-planning transition for the same node and after a successful node-linked plan save (the save-path clear matches the **full claim identity** — objective **and** node — so a save linked elsewhere never clobbers an unrelated standing claim); best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
+| `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition (idempotent — a re-claim equal to the live claim appends nothing) **and by the cold claim** (`session_start` persists it from the claimed handoff's non-blank `objective_id`/`node_id` — the objective-plan cold door's `handoff_extra` — so implement-here suppression is structural in cold objective-plan sessions too), cleared on a successful non-planning transition for the same node and after a successful node-linked plan save whose session link landed (a held link keeps the claim as the retry's carrier; a held clear is surfaced in the save result as repair guidance, never as a save failure; the save-path clear matches the **full claim identity** — objective **and** node — so a save linked elsewhere never clobbers an unrelated standing claim); best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
 | `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented on each `perk.conflict-resolver` dispatch from EITHER warm surface — `/submit`'s PR-rebase drive on a definitively-unmergeable PR, or `/objective-sync`'s retained-continuation drive (§8.51) — (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`, shared, through `delivery/submit.ts`'s ONE `inspectConflictBudget` cap read + each consumer's strict verified `attempts.write`); the increment is persisted-and-verified BEFORE any dispatch on BOTH surfaces (submit/address primes a single-use `resolve_submit_conflicts` authorization; even lock contention consumes the already-counted attempt without refund, reset or retry) — an unverified write (strict read-back `false`) WITHHOLDS the dispatch with a loud report (the surface-uniform withhold posture; a THROWING read/write still propagates on the submit/address path — the pinned load-bearing failure arm — while the stack pipeline's total boundary translates it to `state_error`); reset to 0 on any clean mutating completion (a clean submit; a clean non-declined mutating stack sync/continue/abort/adopt); best-effort tier (cheaply reconstructable) |
 | `dream_bundle_digest` | string | the dream-wave finalized-bundle digest marker (§8.61): `""` = invalidated (cleared unconditionally at wave entry, BEFORE the stale-bundle removal attempt — the invalidation record); `sha256:<hex>` = the digest of the current finalized run-scratch bundle bytes, set only after a successful finalize write; the §8.63 dream-report recovery refuses unless the marker is present, non-empty, and byte-matches the bundle just read; per-field LWW, no rebuild change |
 | `perk_version` | string | the running perk (extension) version, stamped when run identity is established (the claim/fork/adopt/mint arms, §8.2) — the session-audit **exact-vintage** basis (the key literal is the cross-plane coordination point; the read side is `perk-dev`'s audit corpus/vintage layer); omitted when only the `perkVersion()` failure sentinel is available; best-effort tier |
@@ -674,6 +675,28 @@ cold save can never be reported as a warm failure by render-only payload fields 
 CLI↔extension version-skew lesson). The objective node→plan link outcome is **surfaced, never
 swallowed**: a failed advance shows a visible `⚠ … NOT advanced — re-run /plan-save` warning
 (the node↔plan link — the objective transition surface below).
+
+- **The save reconciliations ride the save result.** The save result carries the `link-plan-ref`
+  and `clear-node-claim` change results **verbatim** — `details.linkage` and `details.claim_clear`:
+  the session seam's `applied | unchanged | unverified | rejected` (`null` = not attempted). A held
+  arm appends `⚠ session link to plan #N NOT recorded|unverified — re-run /plan-save to retry
+  (<problem>)` / `⚠ planning claim for node <id> NOT cleared|clear unverified — re-run /plan-save
+  to retry (<problem>)` to the save message, and `/plan-save` reports such a save at `warning`.
+  Every diagnostic interpolated into the save message (the node-link `error` included) is folded
+  to one line while `details` carry the verbatim values, so the headline always carries the repair
+  guidance. The save stands (`ok: true`, terminating, the D1a gate exit unaffected) — a held
+  reconciliation is never a save failure. The seam's own report() remains the immediate loudness
+  channel (two notices by design); its detail-sink append is best-effort (`report()` contains a
+  throwing sink to one stderr line), so a broken persistence path can never fail the save.
+- **Claim retention.** The save-path claim clear runs only after a node-linked save whose session
+  link **landed** (`applied`/`unchanged`). A held link leaves the claim standing, so the
+  `/plan-save` retry recovers the node link (both-or-neither) instead of re-saving link-less.
+- **The producer↔consumer pairing.** The `perk plan save --json` goldens
+  `tests/golden/json/plan_save*.json` (every arm `PlanSaveOut` emits — linked, no node, node link
+  failed) are decoded by `decodePlanSave` in `extension/pi/v1/plan.test.ts`, which pins the TS
+  `PlanRef` projection (`consumed_learn`/`delivery_lineage` never escape) — a producer shape change
+  fails the consumer suite. The goldens are regenerated by `tests/test_json_goldens.py`, never
+  hand-edited.
 
 **Runner restriction floor.** `extension/substrate/childRestrictions.ts` exports two pure booleans:
 `isRunnerChild(env)` (`PI_SUBAGENT_CHILD === "1"`) and `decodeReadOnlyFloor(runner, raw)` over
@@ -1051,7 +1074,9 @@ reset wait's late end is inert) — and keeps its RPC `setStatus` dual-publish.
   set **atomically by `plan-save`** when invoked with `--objective-id` + `--node-id` (warm
   `plan_save` params `objective_id` + `node_id`) — fail-open + non-fatal + idempotent on re-save;
   a failed advance is warm-surfaced as `⚠ objective node <id> NOT advanced — re-run /plan-save to
-  retry`. When an approval-triggered save carries neither id, the link is recovered
+  retry`; a held post-save claim clear is surfaced the same way (`⚠ planning claim for node <id>
+  NOT cleared — re-run /plan-save to retry`) and rides `details.claim_clear` (§8.3 "Warm
+  `/plan-save` direct linkage"). When an approval-triggered save carries neither id, the link is recovered
   **both-or-neither** from the rebuilt `objective_node_claim` (any explicit value wins outright —
   never mixed; a malformed claim never blocks the save).
 - **Accepted backlink race:** concurrent `update_objective_node` writes are read-modify-write on

@@ -281,6 +281,18 @@ model resolution or worktree admission. It leaves no child directory, or one hol
 `recovery-descriptor.json` / `run-fanout-budget.json`. It still wakes the parent.
 _Avoid_: refused child, failed child (a runner that started and failed)
 
+### Plan save
+
+**Save reconciliation**:
+The two best-effort workflow-state writes a plan save performs after the backend save landed —
+the session link (`active_plan_ref`) and, only once that link landed, the planning-claim clear
+(`objective_node_claim`) — each reported as the session seam's change result (`applied` /
+`unchanged` / `unverified` / `rejected`) and carried verbatim into the save result's `details`
+(`linkage`, `claim_clear`). A held result is repair guidance on a SAVED plan, never a save failure;
+`/plan-save` is the retry, and a held link leaves the claim standing as that retry's link carrier.
+_Avoid_: save failure (for a held reconciliation), linkage error (as the save's outcome), unlinked
+save
+
 ### Review
 
 **Approval guidance**:
