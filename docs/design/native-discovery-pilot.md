@@ -156,7 +156,10 @@ Three statements, kept apart because they are different contracts:
 1. **What a script receives** is unchanged — a `kind: query` tool resolves to its structured value,
    an action to its text, and an action's soft failure rejects.
 2. **Read-write script callability** is unchanged — every active direct tool and every
-   deferred/codemode-exposed tool is nested-callable, actions included.
+   deferred/codemode-exposed tool is nested-callable, actions included. **Amended 2026-10-20:**
+   read-write only — under the read-only gate the nested policy (contracts §8.40) now admits a
+   nested call only to a gate-eligible query, a core builtin read or a foreign tool by its
+   posture, so a deferred inactive action (`push_annotations`) is refused nested there.
 3. **The gated read path** — the only rule this node adds: if codemode is ever un-suspended under
    the read-only gate, a script may reach only `kind: query` perk tools eligible under the gate
    plus the gate-allowed builtin reads, every foreign tool by its posture, and a foreign
