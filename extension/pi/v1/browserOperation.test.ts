@@ -910,6 +910,33 @@ test("drain: an in-flight decision holds shutdown AND a replacing open until it 
   }
 });
 
+test("drain: shutdown during a replacement still drains the predecessor's admitted save (the pending successor's quiesce expiring is not enough)", async () => {
+  const h = harness();
+  const a = fakeHandoff();
+  const saving = deferred<void>();
+  await h.owner.open(h.ctx, makeSpec(a.start, { onDecision: () => saving.promise }).spec);
+  a.readiness.resolve("ready");
+  a.bridge.resolve(COMPLETED);
+  await flush();
+  const b = fakeHandoff({ url: URL_B });
+  const openB = h.owner.open(h.ctx, makeSpec(b.start).spec);
+  await flush();
+  let done = false;
+  const shutting = h.owner.shutdown(h.ctx, "reload").then(() => {
+    done = true;
+  });
+  await flush();
+  // The pending successor's quiesce budget expires (it is still waiting on A's drain).
+  h.clock.expire(QUIESCE_BUDGET_MS);
+  await flush();
+  assert.equal(done, false, "shutdown still waits for A's admitted save");
+  saving.resolve();
+  await shutting;
+  assert.equal(await openB, null, "the successor never started");
+  assert.equal(b.calls, 0);
+  assert.equal(h.annotations.surface, null);
+});
+
 test("drain: a decided outcome after the cutoff (during the quiesce wait) is warned, never routed", async () => {
   const h = harness();
   const a = fakeHandoff({ honourAbort: false });

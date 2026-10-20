@@ -47,8 +47,8 @@
 // drain never enters the subject router (it gets one warning instead). (4) An admitted decision
 // (`routing`) is drained before the abort: the backend save is non-abortable and its session
 // reconciliation needs a live ctx — `session_shutdown` is the last moment the old activation can
-// finish it (Pi invalidates every captured ctx right after). (5) Marker before abort; abort
-// before quiesce.
+// finish it (Pi invalidates every captured ctx right after), so `shutdown` also awaits a
+// predecessor a pending open is still retiring. (5) Marker before abort; abort before quiesce.
 //
 // ONE DEGRADE OWNER PER TERMINAL: the decision task degrades a settled-`unavailable` bridge (one
 // error line naming the bridge's warning, then the degrade); the observer degrades a `timeout`
@@ -267,8 +267,6 @@ interface OperationCore {
 
 interface Operation<T> extends OperationCore {
   readonly spec: BrowserOperationSpec<T>;
-  readonly signal: AbortSignal;
-  started: StartedSurface<T> | null;
 }
 
 function live(op: OperationCore): boolean {
@@ -300,6 +298,8 @@ export function createBrowserOperationOwner(
   const { annotations, gating, status } = deps;
   const quietMs = deps.consoleQuietMs ?? CONSOLE_QUIET_MS;
   let current: OperationCore | null = null;
+  /** Every detach still in flight — `shutdown` awaits them all (a predecessor's drain included). */
+  const detaching = new Set<Promise<void>>();
 
   /** The resource fence: the annotation surface is still the very object this op primed. */
   const owns = (op: OperationCore): boolean =>
@@ -393,6 +393,22 @@ export function createBrowserOperationOwner(
     op.controller.abort();
     await bounded(op.quiesced.promise, QUIESCE_BUDGET_MS);
     close(op);
+  };
+
+  /** `detach`, tracked until it settles. */
+  const retire = (
+    ctx: BrowserOperationContext,
+    op: OperationCore,
+    cause: ReviewDetachCause,
+    opts: { marker: boolean },
+  ): Promise<void> => {
+    const retiring = detach(ctx, op, cause, opts);
+    const untrack = (): void => {
+      detaching.delete(retiring);
+    };
+    detaching.add(retiring);
+    retiring.then(untrack, untrack);
+    return retiring;
   };
 
   /** The one degrade path (idempotent): loud error + the notice + this op's surfaces cleared. */
@@ -506,8 +522,6 @@ export function createBrowserOperationOwner(
         controller,
         companion: spec.companion,
         spec,
-        signal,
-        started: null,
         surface: null,
         degraded: false,
         closed: false,
@@ -520,7 +534,7 @@ export function createBrowserOperationOwner(
       const previous = current;
       current = op;
       const retiring = previous !== null && !previous.closed ? previous : null;
-      if (retiring !== null) await detach(ctx, retiring, "replaced", { marker: true });
+      if (retiring !== null) await retire(ctx, retiring, "replaced", { marker: true });
       // A newer open or a shutdown retired this one while the predecessor was detaching:
       // nothing started, nothing primed, nothing reported — the newer open's guidance stands.
       if (!live(op)) {
@@ -560,7 +574,6 @@ export function createBrowserOperationOwner(
         op.quiesced.resolve();
         return null;
       }
-      op.started = started;
       // Quiesced = the readiness poll ended (its `finally` restored the env var it captured).
       void started.readiness.then(
         () => op.quiesced.resolve(),
@@ -582,9 +595,13 @@ export function createBrowserOperationOwner(
 
     async shutdown(ctx, reason): Promise<void> {
       const op = current;
-      if (op === null || op.closed) return;
       // On `quit` the server dies with the process — no push.
-      await detach(ctx, op, "session-ended", { marker: reason !== "quit" });
+      if (op !== null && !op.closed) {
+        await retire(ctx, op, "session-ended", { marker: reason !== "quit" });
+      }
+      // A predecessor still being retired by a pending open (its admitted save draining) must
+      // finish while this ctx is live too — each detach is itself bounded.
+      await Promise.allSettled([...detaching]);
     },
   };
 }

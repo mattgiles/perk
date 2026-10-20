@@ -5391,7 +5391,8 @@ decision authority.
   degraded, closed or re-primed surface gets no push.
 - **The drain.** An admitted decision (`onDecision` in flight — a save) is drained before the
   abort, at replacement and at `session_shutdown` (≤ 60 s; on expiry one warning naming the
-  run-id check, `decisionDrainExpiredWarning`, and the detach proceeds): the backend save is
+  run-id check, `decisionDrainExpiredWarning`, and the detach proceeds; `shutdown` also awaits a
+  predecessor a pending open is still retiring): the backend save is
   non-abortable and its session reconciliation needs a live ctx, and `session_shutdown` is
   awaited before Pi invalidates the old activation. After shutdown every late wake of the old
   activation's tasks is silent.
