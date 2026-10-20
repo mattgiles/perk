@@ -47,8 +47,8 @@ interactive session — the browser flow refuses headless.
    rendered from the exact fetched commits — to `review-<top>.patch` beside it, and opens
    plannotator on that static patch in the background (digest-verified against the checkout's
    `patch_sha256` before the open and again immediately before the request — a patch refreshed
-   while the open waited for an earlier browser review to close refuses there and leaves no
-   browser review; re-run the door). What you see is pinned: a member head force-pushed after the checkout
+   while the open waited — for an earlier browser review to close, or for a free port — refuses
+   there and leaves no browser review; re-run the door). What you see is pinned: a member head force-pushed after the checkout
    does not move the displayed diff, there is no live refresh, and the browser carries no
    repository context of its own — the detached checkout is where exploration (yours and the
    reviewers') happens. Resolution warnings (train blockers, recorded-vs-observed head drift)

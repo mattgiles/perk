@@ -736,6 +736,43 @@ test("/pr-review-browser <pr>: foreign success injects ONE URL-free guidance, pr
   }
 });
 
+test("/pr-review-browser <pr>: a bridge that fails immediately degrades AFTER the guidance — the guidance is delivered first, then the degrade notice", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: CHECKOUT_OK_JSON });
+  const priorPort = process.env.PLANNOTATOR_PORT;
+  // A plannotator that answers the request synchronously with an error (its server never binds).
+  const failing = (pi: ExtensionAPI): void => {
+    pi.registerCommand("plannotator-review", {
+      description: "fake plannotator (test)",
+      handler: async () => {},
+    });
+    pi.events.on("plannotator:request", (data) => {
+      (data as CodeReviewEnvelope).respond({ status: "error", error: "Port 1 in use" });
+    });
+  };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [failing],
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.runCommandHandler("pr-review-browser", "77");
+    await until(() => injected.length >= 2);
+    assert.equal(injected.length, 2, JSON.stringify(injected));
+    assert.match(injected[0] ?? "", /FOREIGN PR #77/, "the guidance is delivered first");
+    assert.equal(injected[1], DEGRADE_NOTICE, "then the degrade notice");
+    assert.ok(
+      h.notifies.some((n) => n.includes("plannotator reported error: Port 1 in use")),
+      "the bridge's warning is reported",
+    );
+    assert.equal(await sessionSurfacePrimed(h), false, "the degrade cleared the surface");
+  } finally {
+    await until(() => process.env.PLANNOTATOR_PORT === priorPort);
+    h.dispose();
+  }
+});
+
 test("/pr-review-browser <pr> in a discovery-cohort session: REVIEW_BROWSER_PRIMES are active when the guidance is sent", async () => {
   assert.deepEqual([...REVIEW_BROWSER_PRIMES], ["collect_review_wave", "push_annotations"]);
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
@@ -1090,6 +1127,7 @@ test("/pr-review-browser twice: an older review's late settle never clears the s
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
     extraExtensions: [servingPlannotator(sink)],
   });
+  const injected = spyInjections(h);
   try {
     // Review A comes up (its readiness poll ends on the first probe and restores the env).
     await h.runCommandHandler("pr-review-browser", "77");
@@ -1101,9 +1139,11 @@ test("/pr-review-browser twice: an older review's late settle never clears the s
     fakePerk(cwd, { stdout: CHECKOUT_78_JSON });
     await h.runCommandHandler("pr-review-browser", "78");
     assert.equal(sink.envelopes.length, 2, "B's request was emitted");
+    assert.equal(injected.length, 2, "each launched open injected its guidance once");
     // A's human finishes in the old tab AFTER B opened.
     sink.envelopes[0]?.respond({ status: "handled", result: { approved: true } });
     for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 5));
+    assert.equal(injected.length, 2, "A's late respond injected nothing (its bridge was aborted)");
     assert.equal(
       await sessionSurfacePrimed(h),
       true,
@@ -1172,8 +1212,10 @@ test("/pr-review-browser: /reload marks the browser detached and the successor a
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
     extraExtensions: [servingPlannotator(sink)],
   });
+  const injected = spyInjections(h);
   try {
     await h.runCommandHandler("pr-review-browser", "77");
+    assert.equal(injected.length, 1, "the guidance was injected once");
     await until(() => process.env.PLANNOTATOR_PORT === priorPort);
     assert.equal(await sessionSurfacePrimed(h), true, "the PR review is open and primed");
     const port = sink.requests[0]?.port ?? 0;
@@ -1207,6 +1249,7 @@ test("/pr-review-browser: /reload marks the browser detached and the successor a
     // A late decision on the detached tab reaches nothing (its bridge settled `aborted`).
     sink.envelopes[0]?.respond({ status: "handled", result: { approved: true } });
     for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 5));
+    assert.equal(injected.length, 1, "the detached tab's late respond injected nothing");
     assert.deepEqual(
       errors.lines.filter((line) => STALE_CTX.test(line)),
       [],
@@ -1239,6 +1282,7 @@ test("cross-door replacement: /pr-review-browser retires a live /plan-review-bro
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin, PERK_WAVE_RPC_PING_MS: "20" },
     extraExtensions: [servingPlannotator(sink)],
   });
+  const injected = spyInjections(h);
   const markerCalls = (port: number) =>
     sink.requests.filter((r) => r.port === port && r.url.startsWith("/api/external-annotations"));
   try {
@@ -1291,11 +1335,13 @@ test("cross-door replacement: /pr-review-browser retires a live /plan-review-bro
       markerCalls(prPort).some((r) => r.method === "POST" && r.body.includes("src/a.ts")),
       "the review-shaped batch reached the PR server",
     );
+    assert.equal(injected.length, 2, "each door's launched open injected its guidance once");
     // The detached plan tab's late verdict reaches nothing (its listener was disposed).
     const notifiesBefore = h.notifies.length;
     sink.emitDecision({ reviewId: "r-1", approved: true });
     for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 5));
     assert.deepEqual(h.notifies.slice(notifiesBefore), [], "nothing routed, nothing warned");
+    assert.equal(injected.length, 2, "the plan tab's late verdict injected nothing");
 
     // And back: the plan door replaces the PR review.
     await h.runCommandHandler("plan-review-browser", "");
@@ -1313,11 +1359,17 @@ test("cross-door replacement: /pr-review-browser retires a live /plan-review-bro
         n.includes("the earlier browser review (pr-review-browser) was replaced"),
       ),
     );
+    assert.equal(injected.length, 3, "the plan door's second open injected its guidance");
     // The PR tab's late respond is dropped by its settled bridge: nothing injected or warned.
     const afterReturn = h.notifies.length;
-    sink.envelopes[1]?.respond({ status: "handled", result: { approved: true } });
+    sink.envelopes[1]?.respond({
+      status: "handled",
+      result: { approved: false, feedback: "late feedback from the detached PR tab" },
+    });
     for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 5));
     assert.deepEqual(h.notifies.slice(afterReturn), []);
+    assert.equal(injected.length, 3, "the PR tab's late feedback injected nothing");
+    assert.ok(!injected.some((m) => m.includes("late feedback from the detached PR tab")));
     assert.equal(await sessionAnnotationMode(h), "plan", "the surface is the plan review's again");
   } finally {
     for (let i = 0; i < sink.planReviews; i++) {
@@ -1388,6 +1440,7 @@ test("/pr-review-browser <pr>: an operator's PLANNOTATOR_PORT range presets its 
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin, PLANNOTATOR_PORT: `${first}-${first + 2}` },
     extraExtensions: [fakePlannotator(sink)],
   });
+  spyInjections(h); // the launched open's guidance never starts a real agent turn
   // The selection was resolved at activation: clearing the variable proves the door never
   // re-reads it at open time (and lets `settleBridges` observe the poll's restore-by-delete).
   delete process.env.PLANNOTATOR_PORT;

@@ -312,8 +312,8 @@ checkout), checks out the **top** head detached at `review-<top>`, writes the co
 (pinned `base_sha` → top head, rendered from the exact fetched commits) to `review-<top>.patch`
 beside it, and opens plannotator on that **static patch** — verified against the checkout
 envelope's `patch_sha256` before the open and again immediately before the browser request (a
-patch refreshed while the open waited for an earlier review to close refuses at that point and
-leaves no browser review — re-run the door). The browser therefore shows a
+patch refreshed while the open waited — for an earlier review to close, or for a free port —
+refuses at that point and leaves no browser review — re-run the door). The browser therefore shows a
 pinned diff: moving refs cannot change it, there is no live refresh, and the browser has no
 repository context of its own (exploration happens in the detached checkout, which stays the
 reviewers' surface). A checkout of the same top PR refreshed while a review is open invalidates

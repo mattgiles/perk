@@ -19,14 +19,14 @@
 // annotation surface alone (`mode: "review"`, `settle: settleCodeReviewOutcome`).
 //
 // THE START REFUSAL. A door whose source must be re-checked at the moment of launch (the stack
-// door re-verifies its pinned patch digest — the start can wait on a predecessor's retirement)
-// throws `BrowserStartRefusal` from `spec.start` before emitting anything: the owner reports
-// its message verbatim and returns `failed {refused}`; any other start throw is the port-pick
-// failure line and a bare `failed`.
+// door re-verifies its pinned patch digest at the emission boundary — the start can wait on a
+// predecessor's retirement and on the port pick) throws `BrowserStartRefusal` from `spec.start`
+// before emitting anything: the owner reports its message verbatim and returns
+// `failed {refused}`; any other start throw is the port-pick failure line and a bare `failed`.
 //
 // THE BACKGROUND OPEN: the server URL is deterministic the moment the port is picked, so `open`
-// starts the handoff, primes, launches two background tasks and returns the URL — the door
-// injects its guidance immediately. The readiness observer announces `ready` (plus one
+// starts the handoff, primes, runs the door's delivery point (`onOpened` — its guidance
+// injection, before either task can emit), launches two background tasks and returns the URL. The readiness observer announces `ready` (plus one
 // annotation-delivery continuation) or degrades on `timeout`; the decision task awaits the
 // bridge (open-ended, exactly the `plan_review` bridge semantics) and routes a decided outcome.
 //
@@ -213,6 +213,14 @@ export interface BrowserOperationSpec<T> {
   settle(out: T): BrowserSettlement;
   /** Subject routing for a DECIDED outcome only. */
   onDecision(out: T): Promise<void>;
+  /**
+   * The door's delivery point (its guidance injection): run once, synchronously, right after the
+   * prime and BEFORE the readiness/decision tasks start, so nothing those tasks emit — an
+   * immediately settled bridge's degrade notice included — can overtake it. A throw is reported
+   * like a background-task failure and the operation proceeds. Absent for a door that delivers
+   * through its return value (a tool result — the host orders it before any `followUp`).
+   */
+  onOpened?: () => void;
 }
 
 /**
@@ -671,6 +679,13 @@ export function createBrowserOperationOwner(
       op.surface = annotations.surface;
       spec.companion?.prime();
       gating.primeDeferred(spec.primes);
+      if (spec.onOpened !== undefined) {
+        try {
+          spec.onOpened();
+        } catch (error) {
+          failed(op, "open delivery", error);
+        }
+      }
 
       void observe(op, started).catch((error: unknown) => failed(op, "readiness observer", error));
       void decide(op, started).catch((error: unknown) => failed(op, "decision task", error));

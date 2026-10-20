@@ -829,6 +829,7 @@ test("/stack-review-browser (no target): the active_objective ladder feeds --obj
     sessionManager: SessionManager.open(file),
     extraExtensions: [fakePlannotator(sink)],
   });
+  spyInjections(h); // the launched open's guidance never starts a real agent turn
   try {
     await h.runCommandHandler("stack-review-browser", "");
     const argv = readFileSync(argvFile, "utf8").trim().split("\n");
@@ -965,6 +966,7 @@ test("open_stack_review: a missing or digest-mismatched patch is bad_state namin
       env: { PERK_RUN_ID: RUN_ID },
       extraExtensions: [fakePlannotator(sink)],
     });
+    spyInjections(h); // the settled bridge's routed respond never starts a real agent turn
     try {
       const result = await h.invokeTool("open_stack_review", {});
       const details = result.details as { ok: boolean; error_type?: string };
@@ -1271,6 +1273,84 @@ async function until(done: () => boolean | Promise<boolean>, ms = 2000): Promise
     await new Promise((r) => setTimeout(r, 5));
   }
 }
+
+test("stack open: the patch is rewritten during the (asynchronous) port pick → the emission-boundary re-check refuses; nothing emitted or primed, the env preset restored", async () => {
+  const s = executeScaffold();
+  const annotations = createAnnotationState();
+  const priorPort = process.env.PLANNOTATOR_PORT;
+  const owner = createBrowserOperationOwner(s.pi, {
+    annotations,
+    gating: { primeDeferred: (names) => [...names] },
+    status: createPerkStatus(),
+    browserDeps: {
+      pickFreePort: async () => {
+        // A `perk pr review checkout --stack` refresh lands while the port is being picked.
+        writeFileSync(patchPathFor(s.checkoutPath), `${PATCH_TEXT}refreshed\n`, "utf8");
+        return 45061;
+      },
+      probe: async () => true,
+      intervalMs: 1,
+      budgetMs: 50,
+      sleep: async () => {},
+    },
+    consoleQuietMs: 10,
+  });
+  const latch = { opened: false };
+  const stackPin = createStackPinState();
+  const result = await executeOpenStackReview(s.pi, s.ctx, latch, stackPin, (ctx, opts) =>
+    openStackBrowser(s.pi, ctx, owner, opts),
+  );
+  const details = result.details as { ok: boolean; error_type?: string; error?: string };
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "bad_state");
+  assert.match(details.error ?? "", /^mismatch: .*refreshed since this snapshot was taken/);
+  assert.equal(s.envelopes.length, 0, "no request was emitted");
+  assert.equal(annotations.surface, null, "nothing primed");
+  assert.equal(stackPin.pinned, null, "no pin bound");
+  assert.equal(latch.opened, false, "the latch stays closed");
+  assert.equal(process.env.PLANNOTATOR_PORT, priorPort, "the preset was restored");
+});
+
+test("/stack-review-browser: a bridge that fails immediately degrades AFTER the guidance — the pin is bound and the guidance delivered first, then the stack degrade notice", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const planted = plantStackCheckout(cwd);
+  const bin = fakePerk(cwd, { stdout: planted.json });
+  const priorPort = process.env.PLANNOTATOR_PORT;
+  const failing = (pi: ExtensionAPI): void => {
+    pi.registerCommand("plannotator-review", {
+      description: "fake plannotator (test)",
+      handler: async () => {},
+    });
+    pi.events.on("plannotator:request", (data) => {
+      (data as CodeReviewEnvelope).respond({ status: "error", error: "Port 1 in use" });
+    });
+  };
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [failing],
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.runCommandHandler("stack-review-browser", "77");
+    await until(() => injected.length >= 2);
+    assert.equal(injected.length, 2, JSON.stringify(injected));
+    assert.match(injected[0] ?? "", /topped by PR #42/, "the guidance is delivered first");
+    assert.equal(injected[1], STACK_DEGRADE_NOTICE, "then the stack degrade notice");
+    const bound = await h.invokeTool("start_review_wave", {
+      angles: ["claimed-intent", "tests"],
+      pr: 42,
+      worktree: planted.checkoutPath,
+      stack: true,
+    });
+    const boundType = (bound.details as { error_type?: string }).error_type;
+    assert.notEqual(boundType, "bad_state", "the launched open bound the pin");
+    assert.notEqual(boundType, "bad_input");
+  } finally {
+    await until(() => process.env.PLANNOTATOR_PORT === priorPort);
+    h.dispose();
+  }
+});
 
 for (const drift of [true, false]) {
   test(

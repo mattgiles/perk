@@ -2250,7 +2250,9 @@ rides `submit_pr_review` with its gate ladder unchanged. The PR modes open throu
 activation's **browser-operation owner** (§8.23 "The browser-operation owner") with the
 code-review spec `openReviewBrowserCore` builds (mode `review`, `REVIEW_BROWSER_PRIMES`, no
 companion, no applicability fence, the door's degrade notice and respond mapper; it returns a
-`DoorOpenResult` and the door injects the guidance on `launched` only). The owner owns the
+`DoorOpenResult`, and the door injects the guidance on a launch only — through the core's
+`onLaunched` hook, the owner's delivery point, so an immediately failing bridge's degrade notice
+always lands AFTER the guidance). The owner owns the
 `push_annotations` surface-handle lifecycle over the per-activation annotation state:
 `primeAnnotationSurface(state, {mode: "review", url})` the moment the port is picked;
 `clearAnnotationSurface(state)` on settle, on the readiness-degrade arm and on detach — only
@@ -2277,9 +2279,11 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   presence probe (the `plannotator-review` command; the refusal names the fix: select the
   plannotator plan provider — `[providers] plan = "plannotator-plan"` —
   run `perk init`, then restart pi).
-- **The background open (foreign + active):** the handler starts `startPlannotatorBrowser`,
-  injects the mode guidance IMMEDIATELY (the URL is deterministic once the port is picked — no
-  blocking readiness poll in the handler), and ends its turn. The readiness promise is observed
+- **The background open (foreign + active):** the handler starts `startPlannotatorBrowser`
+  through the owner, injects the mode guidance IMMEDIATELY at the owner's delivery point —
+  synchronously after the prime, before the readiness/decision tasks start (the URL is
+  deterministic once the port is picked — no blocking readiness poll in the handler) — and ends
+  its turn. The readiness promise is observed
   in a background task: `ready` → an info note ("plannotator is up at <url> — browser opening")
   and, for the still-current surface with held or in-flight annotation work, one model
   continuation (idle → immediate, streaming → `followUp`). All four browser doors run this arm
@@ -2450,14 +2454,18 @@ adversarial wave — never a parallel rebuild.
   refusal registers nothing with the owner and detaches no live review: missing/unreadable/
   mismatch → the warm door reports an error and emits no request; `open_stack_review` returns
   `bad_state` naming the path — "the stack checkout was refreshed since this snapshot was taken
-  — re-run the stack review". (2) Again inside the owner's start, immediately BEFORE the request
-  is emitted (the core's `beforeStart` hook): the owner may first wait for a predecessor's
-  retirement (its drain included), and a `perk pr review checkout --stack` refresh in that
-  window throws `BrowserStartRefusal("<reason>: <detail>")` — the owner reports it verbatim,
-  emits and primes nothing, and the open returns `refused` (the warm door stops;
-  `open_stack_review` is `bad_state` with the latch CLOSED). "Verified immediately BEFORE the
-  request is emitted" therefore holds across the owner's wait; a launch-time refusal leaves NO
-  browser review (the predecessor was already retired) — the human re-runs the door. Moving refs cannot
+  — re-run the stack review". (2) Again at the emission boundary (the core's `beforeEmit` hook,
+  run inside `startPlannotatorBrowser`'s launch AFTER the port pick and the env preset, with no
+  await between the check and the emit): the owner may first wait for a predecessor's
+  retirement (its drain included) and the port pick is itself asynchronous, and a `perk pr
+  review checkout --stack` refresh in either window throws `BrowserStartRefusal("<reason>:
+  <detail>")` — the preset is restored, the owner reports it verbatim, nothing is emitted or
+  primed, and the open returns `refused` (the warm door stops; `open_stack_review` is
+  `bad_state` with the latch CLOSED). "Verified immediately BEFORE the request is emitted"
+  therefore holds across both waits; a launch-time refusal leaves NO browser review (the
+  predecessor was already retired) — the human re-runs the door. Plannotator reads the file when
+  it handles the request (its own setup path); a refresh after the emit is the open-review
+  residual below. Moving refs cannot
   change the displayed diff; there is no merge-base fallback, no live refresh, no workspace
   and no platform posting — reviewers and exploration keep the detached checkout. Residual:
   refreshing the same top PR's checkout while a review is OPEN invalidates that review (the
@@ -2477,8 +2485,9 @@ adversarial wave — never a parallel rebuild.
   worker's own `cache.plan-ref` arm, else the `no_objective` usage refusal naming the explicit
   forms (a malformed `pr:` token is a usage error, never silently a focus note). Gates in
   order: parse → `ctx.hasUI` → plannotator presence. Flow: the checkout `--stack` cold worker →
-  strict snapshot decode → the pre-open digest gate → the pin guard → the core → on `launched`,
-  bind the pin, then ONE guidance injection (`unlaunched`/`refused`: already reported, nothing
+  strict snapshot decode → the pre-open digest gate → the pin guard → the core → on a launch,
+  at the owner's delivery point (`onLaunched`, before any degrade can emit), bind the pin, then
+  ONE guidance injection (`unlaunched`/`refused`: already reported, nothing
   bound; `retired`: nothing — the newer open's guidance stands)
   (`prompts/stages/stack-review-browser/stack.md`, rendered with the snapshot table/notes —
   shared verbatim with `open_stack_review`, including the `review_context_command` variable —
@@ -5401,8 +5410,13 @@ doors: the draft doors (`/plan-review-browser`, `/objective-review-browser` and 
 local mode stays outside it). A draft door opens the slot FIRST (a refusal launches nothing),
 then `owner.open(ctx, spec)`: the spec binds the handoff flavor (`start`), the annotation
 `mode`, the deferred-tool `primes`, the door's `companion` context, the `applicable` fence, the
-`degradeNotice`, the bridge classifier (`settle`) and the subject router (`onDecision`, decided
-outcomes only). The draft flavor passes `mode: "plan"`, the draft-review companion,
+`degradeNotice`, the bridge classifier (`settle`), the subject router (`onDecision`, decided
+outcomes only) and the optional delivery point (`onOpened` — the door's guidance injection, run
+once synchronously right after the prime and BEFORE the readiness/decision tasks start, so
+nothing they emit, an immediately settled bridge's degrade notice included, can overtake it; a
+throw is reported like a background-task failure and the operation proceeds; a door that
+delivers through a tool result omits it — the host orders that result before any `followUp`).
+The draft flavor passes `mode: "plan"`, the draft-review companion,
 `applicable: review.isCurrent` and `settleReviewOutcome` (`completed` → decided, `unavailable`
 → unavailable, everything else → aborted); the code-review flavor passes `mode: "review"`, NO
 companion, NO applicability fence (always applicable — these doors have no slot) and
@@ -5434,7 +5448,7 @@ decision authority.
   newer open or a shutdown retired it while it waited — nothing started, nothing primed).
 - **The start refusal.** A door whose source must be re-checked at launch throws
   `BrowserStartRefusal(message)` from `spec.start` before emitting anything (the stack door's
-  patch-digest re-verify, §8.4): the owner reports the message verbatim (`error`, also logged)
+  patch-digest re-verify at the emission boundary, §8.4): the owner reports the message verbatim (`error`, also logged)
   and returns `failed {refused: message}`; any other start throw keeps the port-pick line
   ("could not pick a free local port for the plannotator <plan-review|review> server: <detail>")
   and a bare `failed`. Either way, after a retired predecessor no browser review remains.

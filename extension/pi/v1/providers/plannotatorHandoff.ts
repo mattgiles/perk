@@ -706,20 +706,32 @@ async function startPlannotatorSurface<T>(
  * fallback's `{mode: "local"}` the forced `since-base` local diff; the stack door's
  * `{mode: "patch", patchFile: <checkout>.patch}` plannotator's static-patch mode over the
  * pinned combined patch. Plannotator's defaults are otherwise untouched (deliberately NOT
- * `useLocal: false` — the human chose the full surface).
+ * `useLocal: false` — the human chose the full surface). `beforeEmit` is a caller's gate at the
+ * emission boundary: it runs inside the launch, after the port pick and the env preset, with no
+ * await before the request is emitted — a throw restores the preset and rejects the start (the
+ * stack door re-verifies its patch digest here; plannotator reads the file only when it handles
+ * the request).
  */
 export async function startPlannotatorBrowser(
   bus: PlannotatorBus,
-  opts: { cwd: string; source: CodeReviewSource; signal?: AbortSignal; activity: ActivitySink },
+  opts: {
+    cwd: string;
+    source: CodeReviewSource;
+    signal?: AbortSignal;
+    activity: ActivitySink;
+    beforeEmit?: () => void;
+  },
   deps: StartBrowserDeps = {},
 ): Promise<StartedBrowser> {
   return await startPlannotatorSurface(
-    (signal) =>
-      requestPlannotatorCodeReview(bus, {
+    (signal) => {
+      opts.beforeEmit?.();
+      return requestPlannotatorCodeReview(bus, {
         cwd: opts.cwd,
         source: opts.source,
         ...(signal !== undefined ? { signal } : {}),
-      }),
+      });
+    },
     CODE_REVIEW_READINESS_PROBE_PATH,
     opts.signal,
     deps,

@@ -553,6 +553,47 @@ test("code-review spec (mode review, no companion, no applicability fence): read
   assert.equal(d.session.sent.length, 1, "nothing injected beyond the notice");
 });
 
+test("open: the door's onOpened delivery point runs after the prime and BEFORE any background emission — an already-settled unavailable bridge degrades after it; a throwing onOpened is reported and the operation proceeds", async () => {
+  for (const arm of ["deliver", "throw"] as const) {
+    const h = harness();
+    const a = fakeCodeHandoff();
+    // The bridge settled before the start even returned (an immediate error respond).
+    a.bridge.resolve({ status: "error", warning: "plannotator reported error: Port 1 in use" });
+    const specA = makeCodeSpec(a.start);
+    const seen: { surface: unknown; primes: number }[] = [];
+    specA.spec.onOpened = () => {
+      seen.push({ surface: h.annotations.surface, primes: h.primes.length });
+      if (arm === "throw") throw new Error("injection failed");
+      h.session.pi.sendUserMessage("GUIDANCE");
+    };
+    assert.deepEqual(await h.owner.open(h.ctx, specA.spec), { kind: "opened", url: URL_A });
+    assert.deepEqual(
+      seen,
+      [{ surface: { mode: "review", url: URL_A }, primes: 1 }],
+      `${arm}: once, after the prime`,
+    );
+    await flush();
+    const degrade = { message: CODE_DEGRADE_NOTICE };
+    assert.deepEqual(
+      h.session.sent,
+      arm === "deliver" ? [{ message: "GUIDANCE" }, degrade] : [degrade],
+      `${arm}: the degrade notice never overtakes the delivery`,
+    );
+    assert.equal(h.annotations.surface, null, `${arm}: the degrade still cleared the surface`);
+    if (arm === "throw") {
+      assert.ok(
+        h.session.notifies.some(
+          (n) =>
+            n.severity === "error" &&
+            n.message ===
+              "perk: pr-review-browser — the browser open delivery failed: injection failed",
+        ),
+        "the delivery failure is reported like a background-task failure",
+      );
+    }
+  }
+});
+
 // ------------------------------------------------------------------ 2. ordering
 
 test("open: the predecessor is fully detached BEFORE the successor starts; the successor primes everything before open resolves", async () => {

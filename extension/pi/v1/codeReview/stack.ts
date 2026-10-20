@@ -18,9 +18,9 @@
 // two-plane derived-path convention; nothing carries the path), reporting its SHA-256. The door
 // verifies the digest against the file bytes at TWO points (`verifyStackPatch` — a refreshed
 // checkout is a `mismatch`, a gone checkout a `missing`): the pre-open refusal gate, and again
-// inside the browser-operation owner's start immediately before the request is emitted (the
-// owner may first wait out a predecessor's retirement — a refresh in that window refuses at
-// launch). It opens plannotator's static-patch mode `{cwd: <checkout>, patchFile:
+// at the emission boundary inside the browser-operation owner's start, after the port pick, with
+// no await before the request (the owner may first wait out a predecessor's retirement, and the
+// port pick is asynchronous — a refresh in either window refuses at launch). It opens plannotator's static-patch mode `{cwd: <checkout>, patchFile:
 // <checkout>.patch}`: no repository context, no merge-base fallback, no live refresh — moving
 // refs cannot change the displayed diff. On a launched open the verified `PinnedStack` (base
 // commit + every member head) is bound into the per-activation `StackPinState`, so the reviewer
@@ -382,6 +382,8 @@ export interface StackOpenOpts {
   /** The snapshot's digest of the derived `<checkout>.patch` (re-verified at launch). */
   patchSha256: string;
   guidance: string;
+  /** The warm door's delivery point (bind the pins, inject the guidance) — see the core. */
+  onLaunched?: () => void;
 }
 
 /**
@@ -390,12 +392,14 @@ export interface StackOpenOpts {
  * `<checkout>.patch`, the stack degrade notice and the stack respond mapper. The patch digest is
  * verified at TWO points: the caller's pre-open refusal gate (`verifyStackPatch`, then
  * `pinSupersedeRefusal` — an early refusal reaches no owner and detaches nothing), and again
- * inside the owner's start, immediately before the request is emitted (`beforeStart`): the owner
- * may first wait for a predecessor's retirement, and a `perk pr review checkout --stack` refresh
- * in that window must refuse (`refused`, reported verbatim) rather than show a refreshed patch
- * under the old pins — a launch-time refusal leaves no browser review (the predecessor was
- * already retired). Binding the pins is the caller's, on `launched` only; a later open of any
- * browser door replaces this review (the owner detaches it). The server port is picked by the
+ * at the emission boundary (`beforeEmit`: after the port pick and the env preset, with no await
+ * before the request is emitted): the owner may first wait for a predecessor's retirement and
+ * the port pick is itself asynchronous, and a `perk pr review checkout --stack` refresh in either
+ * window must refuse (`refused`, reported verbatim) rather than show a refreshed patch under the
+ * old pins — a launch-time refusal leaves no browser review (the predecessor was already
+ * retired). Binding the pins is the caller's, on `launched` only (the warm door at the owner's
+ * delivery point, `onLaunched`); a later open of any browser door replaces this review (the
+ * owner detaches it). The server port is picked by the
  * owner (mirroring Plannotator's own port selection — see plannotatorHandoff.ts).
  */
 export async function openStackBrowser(
@@ -413,10 +417,11 @@ export async function openStackBrowser(
     guidance: opts.guidance,
     degradeNotice: STACK_DEGRADE_NOTICE,
     respondMessageFor: stackRespondMessage,
-    beforeStart: () => {
+    beforeEmit: () => {
       const patch = verifyStackPatch(opts.checkoutPath, opts.patchSha256);
       if (!patch.ok) throw new BrowserStartRefusal(`${patch.reason}: ${patch.detail}`);
     },
+    ...(opts.onLaunched !== undefined ? { onLaunched: opts.onLaunched } : {}),
   });
 }
 
@@ -534,25 +539,28 @@ function registerStackReviewBrowser(
             : " → adversarial reviewers") +
           " → plannotator browser triage → judgment-routed per-PR posting",
       );
-      const opened = await openStackBrowser(pi, ctx, owner, {
+      const guidance =
+        stackReviewGuidance({
+          topPr: data.pr,
+          checkout: data.path,
+          stackBase: data.base_ref,
+          members: data.stack,
+          notes: data.stack_notes,
+          pinned,
+          ...(parsed.directive ? { directive: parsed.directive } : {}),
+        }) + bindingSuffix(ctx.cwd, `command:${SCOPE}`);
+      // `unlaunched` / `refused` are reported by the owner and bind nothing; `retired` yields to
+      // the newer open. On a launch the pins bind BEFORE the guidance reaches the model (its first
+      // step is the stack wave), both at the owner's delivery point — ahead of any degrade.
+      await openStackBrowser(pi, ctx, owner, {
         checkoutPath: data.path,
         patchSha256: data.patch_sha256,
-        guidance:
-          stackReviewGuidance({
-            topPr: data.pr,
-            checkout: data.path,
-            stackBase: data.base_ref,
-            members: data.stack,
-            notes: data.stack_notes,
-            pinned,
-            ...(parsed.directive ? { directive: parsed.directive } : {}),
-          }) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
+        guidance,
+        onLaunched: () => {
+          stackPin.pinned = pinned;
+          pi.sendUserMessage(guidance);
+        },
       });
-      // `unlaunched` / `refused` were reported by the owner; `retired` yields to the newer open.
-      if (opened.kind !== "launched") return;
-      // Bind the pins BEFORE the guidance reaches the model (its first step is the stack wave).
-      stackPin.pinned = pinned;
-      pi.sendUserMessage(opened.guidance);
     },
   });
 }

@@ -21,9 +21,10 @@
 // deterministic the moment the owner picks the port (mirroring Plannotator's own port selection;
 // plannotator reads the preset `PLANNOTATOR_PORT` at bind time — see plannotatorHandoff.ts), so
 // the handler injects the mode guidance IMMEDIATELY and ends its turn — no blocking readiness
-// poll in the handler. The owner observes readiness in the background: ready → an info note + a
-// continuation for pending annotation work; timeout / an error-or-unavailable bridge settle → a
-// loud error plus a degrade notice injected to the model (findings render in-session; posting
+// poll in the handler (the injection runs at the owner's delivery point, before its background
+// tasks start, so a degrade can never overtake it). The owner observes readiness in the
+// background: ready → an info note + a continuation for pending annotation work; timeout / an
+// error-or-unavailable bridge settle → a loud error plus a degrade notice injected to the model (findings render in-session; posting
 // unchanged) AND the annotation surface cleared. A decision made after that degrade is ignored
 // with one warning naming the re-run (the owner's one post-degrade rule). The owner clears the
 // surface only while this review still owns it, so an older review can never clear a
@@ -130,7 +131,7 @@ export const DEGRADE_NOTICE =
   "unchanged: perk composes nothing by default; `submit_pr_review` (dry-run first; gates " +
   "unchanged) only for a request-changes verdict or on the human's explicit request.";
 
-/** The code-review open's result: the door result, or a launch-time `beforeStart` refusal. */
+/** The code-review open's result: the door result, or a launch-time `beforeEmit` refusal. */
 export type ReviewBrowserOpenResult = DoorOpenResult | { kind: "refused"; detail: string };
 
 /** The code-review spec's door-supplied options (see `openReviewBrowserCore`). */
@@ -141,16 +142,23 @@ export interface ReviewBrowserCoreOpts {
   browserOpts: { cwd: string; source: CodeReviewSource };
   /** The fully composed guidance a `launched` result carries (binding suffix included). */
   guidance: string;
+  /**
+   * The caller's injection point (the owner's `onOpened`): run synchronously once the review is
+   * primed and before the owner's readiness/decision tasks start — a warm door injects its
+   * guidance here, so an immediately failing bridge's degrade notice lands AFTER it.
+   */
+  onLaunched?: () => void;
   /** The degrade notice for the browser-never-ready arm (default: the PR-mode notice). */
   degradeNotice?: string;
   /** The respond → injection mapper (default: `respondMessage` — the single-PR contract). */
   respondMessageFor?: (outcome: CodeReviewOutcome) => string | null;
   /**
-   * The launch-time gate, run inside the owner's start immediately before the request is
-   * emitted (after any predecessor's retirement): throw `BrowserStartRefusal` to refuse — the
-   * owner reports the message verbatim and nothing is emitted or primed.
+   * The launch-time gate, run at the emission boundary — inside the handoff's launch, after any
+   * predecessor's retirement, the port pick and the env preset, with no await before the request
+   * is emitted: throw `BrowserStartRefusal` to refuse — the preset is restored, the owner reports
+   * the message verbatim and nothing is emitted or primed.
    */
-  beforeStart?: () => void;
+  beforeEmit?: () => void;
 }
 
 /**
@@ -160,10 +168,12 @@ export interface ReviewBrowserCoreOpts {
  * respond mapper — and open it. The owner retires any earlier browser review first, starts the
  * handoff, primes the annotation surface + the deferred tools the guidance names, observes
  * readiness and the decision in the background, intercepts plannotator's setup chatter and
- * clears the surface only while this operation still owns it. Delivery is the caller's:
- * `launched` carries `opts.guidance`; `unlaunched` (the port-pick failure, already reported
- * loudly) and `retired` (a newer open took over — its guidance stands) deliver nothing;
- * `refused` (the caller's `beforeStart` refused, already reported) carries the refusal text.
+ * clears the surface only while this operation still owns it. Delivery is the caller's: a warm
+ * door injects through `onLaunched` (the owner's delivery point — before any background
+ * emission), a tool returns `launched`'s `opts.guidance` as its result; `unlaunched` (the
+ * port-pick failure, already reported loudly) and `retired` (a newer open took over — its
+ * guidance stands) deliver nothing; `refused` (the caller's `beforeEmit` refused, already
+ * reported) carries the refusal text.
  */
 export async function openReviewBrowserCore(
   pi: ExtensionAPI,
@@ -173,14 +183,17 @@ export async function openReviewBrowserCore(
 ): Promise<ReviewBrowserOpenResult> {
   const spec: BrowserOperationSpec<CodeReviewOutcome> = {
     scope: opts.scope,
-    start: async (launch) => {
-      opts.beforeStart?.();
-      return await startPlannotatorBrowser(
+    start: (launch) =>
+      startPlannotatorBrowser(
         pi.events,
-        { ...opts.browserOpts, signal: launch.signal, activity: launch.activity },
+        {
+          ...opts.browserOpts,
+          signal: launch.signal,
+          activity: launch.activity,
+          ...(opts.beforeEmit !== undefined ? { beforeEmit: opts.beforeEmit } : {}),
+        },
         launch.deps,
-      );
-    },
+      ),
     mode: "review",
     primes: REVIEW_BROWSER_PRIMES,
     degradeNotice: opts.degradeNotice ?? DEGRADE_NOTICE,
@@ -189,6 +202,7 @@ export async function openReviewBrowserCore(
     onDecision: async (out) => {
       routeBrowserRespond(pi, ctx, out, opts.scope, opts.respondMessageFor);
     },
+    ...(opts.onLaunched !== undefined ? { onOpened: opts.onLaunched } : {}),
   };
   const opened = await owner.open(ctx, spec);
   if (opened.kind === "retired") return { kind: "retired" };
@@ -203,8 +217,9 @@ export async function openReviewBrowserCore(
 /**
  * The shared PR-mode arm (foreign + active): the code-review open with this door's values —
  * PR-mode browser opts, the mode guidance + binding suffix, and the default degrade notice /
- * respond mapper — injecting the guidance only when the browser launched (an unlaunched open
- * was already reported; a retired one yields to the newer open's guidance).
+ * respond mapper — injecting the guidance only when the browser launched, at the owner's
+ * delivery point (an unlaunched open was already reported; a retired one yields to the newer
+ * open's guidance).
  */
 async function openBrowserAndGuide(
   pi: ExtensionAPI,
@@ -212,12 +227,13 @@ async function openBrowserAndGuide(
   owner: BrowserOperationOwner,
   opts: PrReviewBrowserGuidanceOpts,
 ): Promise<void> {
-  const opened = await openReviewBrowserCore(pi, ctx, owner, {
+  const guidance = prReviewBrowserGuidance(opts) + bindingSuffix(ctx.cwd, `command:${SCOPE}`);
+  await openReviewBrowserCore(pi, ctx, owner, {
     scope: SCOPE,
     browserOpts: { cwd: ctx.cwd, source: { mode: "pr", prUrl: opts.prUrl } },
-    guidance: prReviewBrowserGuidance(opts) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
+    guidance,
+    onLaunched: () => pi.sendUserMessage(guidance),
   });
-  if (opened.kind === "launched") pi.sendUserMessage(opened.guidance);
 }
 
 // ------------------------------------------------------------------------ registration
