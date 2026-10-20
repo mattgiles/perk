@@ -289,7 +289,8 @@ the session link (`active_plan_ref`) and, only once that link landed, the planni
 (`objective_node_claim`) — each reported as the session seam's change result (`applied` /
 `unchanged` / `unverified` / `rejected`) and carried verbatim into the save result's `details`
 (`linkage`, `claim_clear`). A held result is repair guidance on a SAVED plan, never a save failure;
-`/plan-save` is the retry, and a held link leaves the claim standing as that retry's link carrier.
+`/plan-save` is the retry (the same `plan_save` call when the save's explicit inputs are beyond the
+command's recovery), and a held link leaves the claim standing as that retry's link carrier.
 _Avoid_: save failure (for a held reconciliation), linkage error (as the save's outcome), unlinked
 save
 

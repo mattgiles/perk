@@ -109,7 +109,7 @@ for (const mode of ["tui", "print", "json", undefined] as const) {
   });
 }
 
-test("a throwing detail sink is contained: headline delivered once, one stderr line, no throw", () => {
+test("a throwing detail sink is contained: headline delivered once, one stderr write, no throw", () => {
   const { target, notifies } = fakeTarget(true, "tui");
   let sinkCalls = 0;
   attachReportDetailSink(target, () => {

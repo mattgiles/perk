@@ -84,6 +84,8 @@ the step (`⚠ session link to plan #N NOT recorded …` or
 reports it at warning severity, exactly like a failed objective-node advance. The plan issue
 needs no repair; in an objective-node planning session the planning claim stays in place until
 the retry links the session.
+When the agent's `plan_save` call passed explicit objective/node parameters (or consumed learn
+issues) that `/plan-save` cannot recover, the message asks for the same `plan_save` call instead.
 
 ### `/implement-here`
 

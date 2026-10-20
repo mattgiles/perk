@@ -65,7 +65,13 @@ export interface PlanBackend {
  * link did not land). The production adapter renders a held arm (`rejected`/`unverified`) as
  * repair guidance on the saved plan and carries both fields verbatim in the result `details`;
  * `applied`/`unchanged`/`null` render nothing, so happy-path output stays byte-stable — the
- * seam's type, not new API surface.
+ * seam's type, not new API surface. `retryByCommand` names the retry gesture that repair guidance
+ * may advertise: true when a bare `/plan-save` (which carries no link params and no
+ * `consumed_learn`) re-resolves this save's inputs — no explicit `consumed_learn`, and the link
+ * params equal what the standing claim now yields (both from the claim, or none with no claim).
+ * False only for a tool save with explicit inputs the command cannot recover; its retry is the
+ * same `plan_save` call (a bare `/plan-save` there would re-save link-less and re-link the session
+ * to a ref without the objective, lineage, or objective base).
  */
 export type SavePlanOutcome =
   | {
@@ -79,6 +85,7 @@ export type SavePlanOutcome =
       paramMismatch: boolean;
       linkage: WorkflowChangeResult | null;
       claimClear: WorkflowChangeResult | null;
+      retryByCommand: boolean;
     }
   | { status: "failed"; message: string; errorType: string };
 
@@ -215,6 +222,15 @@ export async function savePlan(
     }
   }
 
+  // Can the advertised `/plan-save` retry reproduce this save? The bare command resolves its link
+  // params from the claim standing NOW (the clear above leaves it on every held arm) and carries
+  // no `consumed_learn`, so it re-resolves the same inputs only when they match that.
+  const retryClaim = deps.session.nodeClaim();
+  const retryByCommand =
+    (input.consumedLearn === undefined || input.consumedLearn.length === 0) &&
+    objectiveId === retryClaim?.objective &&
+    nodeId === retryClaim?.node;
+
   return {
     status: "saved",
     ref: saved.ref,
@@ -226,6 +242,7 @@ export async function savePlan(
     paramMismatch: input.paramMismatch ?? false,
     linkage,
     claimClear,
+    retryByCommand,
   };
 }
 

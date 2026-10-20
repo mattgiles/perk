@@ -306,9 +306,10 @@ function isHeld(change: WorkflowChangeResult | null): change is HeldChange {
 function reconciliationSuffix(
   change: WorkflowChangeResult | null,
   subject: Record<HeldChange["status"], string>,
+  retry: string,
 ): string {
   if (!isHeld(change)) return "";
-  return ` · ⚠ ${subject[change.status]} — re-run /plan-save to retry (${foldLine(change.problem)})`;
+  return ` · ⚠ ${subject[change.status]} — ${retry} (${foldLine(change.problem)})`;
 }
 
 /**
@@ -334,7 +335,10 @@ export function planSaveNeedsRepair(details: PlanSaveOk): boolean {
  * plan, never a save failure — the result stays ok and terminating. `applied`/`unchanged`/`null`
  * render nothing, so happy-path messages are byte-stable. The message is single-line by
  * construction (every interpolated diagnostic is folded); `details` carry the verbatim values
- * (`objective_node`, `linkage`, `claim_clear`). The seam's own report() stays the immediate
+ * (`objective_node`, `linkage`, `claim_clear`). Every repair suffix advertises the retry that
+ * reproduces the save: `/plan-save` when the bare command re-resolves its inputs
+ * (`retryByCommand`), else the same `plan_save` call (a tool save with explicit link params or
+ * `consumed_learn` the command cannot recover). The seam's own report() stays the immediate
  * loudness channel for a held append. A `failed` outcome reports through the `failFor` seam
  * (same scope, same bytes).
  */
@@ -345,6 +349,9 @@ function renderSavePlanOutcome(ctx: ExtensionContext, save: SavePlanOutcome): Sa
   const ref = save.ref;
   const verb = save.existed ? "Updated" : "Saved";
   const nodeLink = save.nodeLink;
+  const retry = save.retryByCommand
+    ? "re-run /plan-save to retry"
+    : "re-run the same plan_save call to retry";
   // Render all THREE node-link outcomes (the silent-partial-failure fix). Both surfaces render
   // content[0].text, so this one site fixes the tool path (the model relays it) and the command
   // path (the user sees the notify) at once.
@@ -352,21 +359,29 @@ function renderSavePlanOutcome(ctx: ExtensionContext, save: SavePlanOutcome): Sa
   if (nodeLink?.linked === true) {
     linkSuffix = ` · linked objective node ${nodeLink.node} → in_progress`;
   } else if (nodeLink && nodeLink.linked === false) {
-    linkSuffix = ` · ⚠ objective node ${nodeLink.node} NOT advanced — re-run /plan-save to retry${
+    linkSuffix = ` · ⚠ objective node ${nodeLink.node} NOT advanced — ${retry}${
       nodeLink.error ? ` (${foldLine(nodeLink.error)})` : ""
     }`;
   }
   // A claim clear is only ever attempted on a node-linked save, so the node is named there.
   const claimNode = nodeLink?.node ?? "the claimed node";
   const reconcileSuffix =
-    reconciliationSuffix(save.linkage, {
-      rejected: `session link to plan #${ref.pr_id} NOT recorded`,
-      unverified: `session link to plan #${ref.pr_id} unverified`,
-    }) +
-    reconciliationSuffix(save.claimClear, {
-      rejected: `planning claim for node ${claimNode} NOT cleared`,
-      unverified: `planning claim for node ${claimNode} clear unverified`,
-    });
+    reconciliationSuffix(
+      save.linkage,
+      {
+        rejected: `session link to plan #${ref.pr_id} NOT recorded`,
+        unverified: `session link to plan #${ref.pr_id} unverified`,
+      },
+      retry,
+    ) +
+    reconciliationSuffix(
+      save.claimClear,
+      {
+        rejected: `planning claim for node ${claimNode} NOT cleared`,
+        unverified: `planning claim for node ${claimNode} clear unverified`,
+      },
+      retry,
+    );
   // Surface NON-param sources in the message (param-path success messages stay
   // byte-stable); a differing ignored param is visibly flagged, never silent.
   let sourceSuffix = "";

@@ -39,7 +39,8 @@ function headlineFor(prefix: string, message: string): string {
  * append may never fail its caller — callers report from inside their own failure paths (a held
  * workflow-state append reports from its catch), and the warm-command sink rides the same Pi
  * persistence path that may just have failed. A throwing sink therefore falls back to ONE stderr
- * line carrying the complete value (the only headful non-RPC stderr write) and never propagates.
+ * write carrying the complete value (the only headful non-RPC stderr write — the TUI charter's §1
+ * bounded exception) and never propagates.
  */
 export function report(
   target: ReportTarget,

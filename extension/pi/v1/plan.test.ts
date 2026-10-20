@@ -2001,7 +2001,7 @@ test("/plan-save when the link append AND the detail-sink append both fail: noth
       stderr.some((line) =>
         line.includes("active_plan_ref append threw — Error: disk full\nretry later"),
       ),
-      `the contained detail fell back to one stderr line (got ${JSON.stringify(stderr)})`,
+      `the contained detail fell back to one stderr write (got ${JSON.stringify(stderr)})`,
     );
     const seam = h.notifyEvents.find(
       (n) => /active_plan_ref append threw/.test(n.message) && !/Saved plan/.test(n.message),
@@ -2089,6 +2089,48 @@ test("/plan-save retry after a held link recovers the node link from the retaine
     assert.equal(saves.length, 2);
     assert.equal(saves[1]?.severity, "info");
     assert.doesNotMatch(saves[1]?.message ?? "", /⚠/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: explicit link params with no claim — the guidance repeats the same plan_save call, which re-links with the node", async () => {
+  const golden = readGolden("plan_save.json");
+  const { h, argvFile } = await loadSavingSession({
+    stdout: goldenBytes("plan_save.json"),
+    mode: "read-write",
+  });
+  const params = { plan: PLAN_MD, objective_id: "63", node_id: "1.1" };
+  try {
+    assert.equal(h.workflowState().objective_node_claim ?? null, null, "no claim carrier");
+    // Attempt 1: the session link is rejected. A bare `/plan-save` carries no link params and
+    // there is no claim to recover them from, so it is NOT the advertised retry.
+    const append = failStateAppend(h, {
+      field: "active_plan_ref",
+      when: "before",
+      message: "disk full",
+    });
+    const first = await h.invokeTool("plan_save", params);
+    append.restore();
+    const text = first.content[0]?.text ?? "";
+    assert.ok(
+      text.endsWith(
+        " · ⚠ session link to plan #123 NOT recorded — re-run the same plan_save call to retry (active_plan_ref append threw — Error: disk full)",
+      ),
+      text,
+    );
+    assert.doesNotMatch(text, /re-run \/plan-save/);
+    assert.equal(h.workflowState().active_plan_ref ?? null, null);
+
+    // Attempt 2: the advertised retry — the same call — carries the link and re-links the session.
+    rmSync(argvFile, { force: true });
+    const second = await h.invokeTool("plan_save", params);
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.equal(argv[argv.indexOf("--objective-id") + 1], "63");
+    assert.equal(argv[argv.indexOf("--node-id") + 1], "1.1");
+    assert.deepEqual(h.workflowState().active_plan_ref, projectedRef(golden));
+    assert.deepEqual((second.details as SaveDetails).linkage, { status: "applied" });
+    assert.doesNotMatch(second.content[0]?.text ?? "", /⚠/);
   } finally {
     h.dispose();
   }

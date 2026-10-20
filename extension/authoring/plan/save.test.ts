@@ -363,6 +363,46 @@ test("savePlan: a held session link keeps the claim standing — the retry's nod
   assert.deepEqual(unverified.nodeClaim(), claim, "the claim survives an unverified link too");
 });
 
+test("savePlan: retryByCommand — true only when a bare /plan-save re-resolves the save's inputs", async () => {
+  const nodeLink: ObjectiveNodeLink = {
+    linked: false,
+    node: "1.1",
+    status: null,
+    error: "advance failed",
+  };
+  const claim = { objective: "7", node: "1.1" };
+  async function retryByCommand(
+    input: { objectiveId?: string; nodeId?: string; consumedLearn?: string[] },
+    nodeClaim?: { objective: string; node: string },
+  ): Promise<boolean | undefined> {
+    const session = openMemoryWorkflowSession({
+      runId: "RID",
+      ...(nodeClaim !== undefined ? { nodeClaim } : {}),
+    });
+    const outcome = await savePlan(
+      { plan: PLAN, ...input },
+      depsFor(session, fakeBackend(savedResult(nodeLink))),
+    );
+    return outcome.status === "saved" ? outcome.retryByCommand : undefined;
+  }
+  // The command reproduces: no link at all, the claim-recovered link, an explicit link equal to
+  // the standing claim.
+  assert.equal(await retryByCommand({}), true, "no link params, no claim");
+  assert.equal(await retryByCommand({}, claim), true, "recovered from the claim");
+  assert.equal(await retryByCommand({ objectiveId: "7", nodeId: "1.1" }, claim), true);
+  // The command cannot reproduce: explicit link params with no claim / a different claim / a
+  // half-specified link, or an explicit consumed_learn (the command forwards none).
+  assert.equal(await retryByCommand({ objectiveId: "7", nodeId: "1.1" }), false, "no claim");
+  assert.equal(
+    await retryByCommand({ objectiveId: "9", nodeId: "1.1" }, claim),
+    false,
+    "a different claim would retarget the retry",
+  );
+  assert.equal(await retryByCommand({ objectiveId: "7" }, claim), false, "half-specified");
+  assert.equal(await retryByCommand({ consumedLearn: ["45"] }), false, "explicit consumed_learn");
+  assert.equal(await retryByCommand({ consumedLearn: [] }), true, "an empty list carries nothing");
+});
+
 test("savePlan: the claim-identity matrix — full match clears; partial identity never clobbers", async () => {
   const nodeLink: ObjectiveNodeLink = {
     linked: true,

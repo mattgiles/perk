@@ -687,10 +687,20 @@ swallowed**: a failed advance shows a visible `⚠ … NOT advanced — re-run /
   guidance. The save stands (`ok: true`, terminating, the D1a gate exit unaffected) — a held
   reconciliation is never a save failure. The seam's own report() remains the immediate loudness
   channel (two notices by design); its detail-sink append is best-effort (`report()` contains a
-  throwing sink to one stderr line), so a broken persistence path can never fail the save.
+  throwing sink with one stderr write of the complete value — the TUI charter's §1 bounded
+  exception), so a broken persistence path can never fail the save.
 - **Claim retention.** The save-path claim clear runs only after a node-linked save whose session
   link **landed** (`applied`/`unchanged`). A held link leaves the claim standing, so the
   `/plan-save` retry recovers the node link (both-or-neither) instead of re-saving link-less.
+- **The advertised retry reproduces the save.** Every repair suffix (the node-link `NOT advanced`
+  arm included) names `re-run /plan-save to retry` only when the bare command re-resolves the
+  save's inputs (`SavePlanOutcome.retryByCommand`): no explicit `consumed_learn`, and the link
+  params equal what the standing claim now yields (both recovered from it, or none with no claim).
+  Otherwise — a `plan_save` tool call with explicit link params or `consumed_learn` the command
+  cannot recover — the suffix reads `re-run the same plan_save call to retry`: a bare `/plan-save`
+  there would re-save link-less and re-link the session to a ref without the objective, lineage, or
+  objective base. The command and approval paths carry no explicit inputs, so they always name
+  `/plan-save`.
 - **The producer↔consumer pairing.** The `perk plan save --json` goldens
   `tests/golden/json/plan_save*.json` (every arm `PlanSaveOut` emits — linked, no node, node link
   failed) are decoded by `decodePlanSave` in `extension/pi/v1/plan.test.ts`, which pins the TS
