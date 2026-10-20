@@ -32,7 +32,12 @@ keep the text until the last one ends). Implement progress is the borrowed
   target receives the complete prefixed report on stderr exactly once; every headful mode receives
   a one-line Pi-managed notify. Only an explicitly mirrored RPC report may additionally write its
   complete value to stderr. Headful TUI, print, json, and missing-mode contexts never raw-log through
-  `report()`. A warm command's multiline detail is persisted in a display-only
+  `report()` — with ONE bounded exception: when an attached detail sink throws (its append rides
+  the same Pi persistence path that may just have failed), `report()` contains it with one stderr
+  write of the complete value instead of losing the detail or failing its caller (callers report
+  from inside their own failure paths, e.g. a held workflow-state append behind a landed plan
+  save). The headline notify has already been delivered; the write happens only on that failure
+  path. A warm command's multiline detail is persisted in a display-only
   `perk:report-detail` transcript entry; the equivalent model tool keeps complete detail in its
   Result. This boundary governs `report()` only — it does not claim every direct first-party stderr
   write has been migrated.
@@ -104,7 +109,7 @@ additionally mirrors the complete diagnostic to stderr.
 |---|---|---|---|---|
 | `ciExecutor.ts` · `runCiImpl` scope confirmation | `ctx.ui.confirm` | first CI run without trust/`--allow` | prompt | dialog (title + check list) |
 | `askUser.ts` · `runAskUserQuestion` | `ctx.ui.select` / `ctx.ui.input` | `ask_user_question` tool | prompt | dialog |
-| `report()` | `console.error` | headless complete fallback; explicitly mirrored RPC diagnostic | log block | complete report |
+| `report()` | `console.error` | headless complete fallback; explicitly mirrored RPC diagnostic; the contained throwing-detail-sink fallback (one write, any non-RPC headful mode — §1) | log block | complete report |
 | direct first-party writes outside `report()` | `console.error` / stderr | cache/config/session-data fallbacks, objective callbacks, binding warnings, worker/headless code | log | caller-owned |
 
 ### Not used today
@@ -138,7 +143,7 @@ never standing state.
 | Standing progress | footer segment / `belowEditor` widget | n/a (themed glyphs, §5) | checkpoint progress, objective budget |
 | Standing identity/state | footer | n/a | perk version, active objective, browser-wait activity, branch, model |
 | Interactive prompt | `confirm` / `select` / `input` | n/a | CI scope confirmation, `ask_user_question` |
-| Headless / RPC mirror | `console.error` | n/a | complete report when `!hasUI`; explicit `alsoLog` only when headful RPC |
+| Headless / RPC mirror | `console.error` | n/a | complete report when `!hasUI`; explicit `alsoLog` only when headful RPC; the one-write fallback when a headful command's detail sink throws (§1) |
 
 Placement rules:
 

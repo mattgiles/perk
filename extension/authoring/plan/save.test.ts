@@ -1,8 +1,8 @@
 // Direct feature tests for savePlan + planApprovalSave — memory session, deterministic fake
 // PlanBackend (the port-admission rule: one production adapter, one useful fake), fake gate; no
 // Pi, no cold door. The linkage/claimClear arms are the session seam's own WorkflowChangeResult
-// values passed through verbatim — every arm is pinned here (the adapter's rendering ignores
-// them by design).
+// values passed through verbatim — every arm is pinned here (the adapter renders only the held
+// arms, as repair guidance on the saved plan).
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -328,6 +328,79 @@ test("savePlan: claimClear arms — rejected/unverified via the seam knobs (link
     unverifiedOutcome.status === "saved" ? unverifiedOutcome.claimClear?.status : null,
     "unverified",
   );
+});
+
+test("savePlan: a held session link keeps the claim standing — the retry's node-link carrier", async () => {
+  const nodeLink: ObjectiveNodeLink = {
+    linked: true,
+    node: "1.1",
+    status: "in_progress",
+    error: null,
+  };
+  const claim = { objective: "7", node: "1.1" };
+  // No seeded active ref, so the one-shot knob hits the `link-plan-ref` append; the clear must
+  // then never be attempted (claimClear null), leaving the claim for the `/plan-save` retry.
+  const rejected = openMemoryWorkflowSession({ runId: "RID", nodeClaim: claim });
+  rejected.failNextApply();
+  const rejectedOutcome = await quietly(() =>
+    savePlan({ plan: PLAN }, depsFor(rejected, fakeBackend(savedResult(nodeLink)))),
+  );
+  assert.equal(rejectedOutcome.status, "saved", "a held link never fails the save");
+  if (rejectedOutcome.status !== "saved") return;
+  assert.equal(rejectedOutcome.linkage?.status, "rejected");
+  assert.equal(rejectedOutcome.claimClear, null, "the clear is not attempted over a held link");
+  assert.deepEqual(rejected.nodeClaim(), claim, "the claim survives");
+
+  const unverified = openMemoryWorkflowSession({ runId: "RID", nodeClaim: claim });
+  unverified.failNextApplyVerification();
+  const unverifiedOutcome = await quietly(() =>
+    savePlan({ plan: PLAN }, depsFor(unverified, fakeBackend(savedResult(nodeLink)))),
+  );
+  assert.equal(unverifiedOutcome.status, "saved");
+  if (unverifiedOutcome.status !== "saved") return;
+  assert.equal(unverifiedOutcome.linkage?.status, "unverified");
+  assert.equal(unverifiedOutcome.claimClear, null);
+  assert.deepEqual(unverified.nodeClaim(), claim, "the claim survives an unverified link too");
+});
+
+test("savePlan: retryByCommand — true only when a bare /plan-save re-resolves the save's inputs", async () => {
+  const nodeLink: ObjectiveNodeLink = {
+    linked: false,
+    node: "1.1",
+    status: null,
+    error: "advance failed",
+  };
+  const claim = { objective: "7", node: "1.1" };
+  async function retryByCommand(
+    input: { objectiveId?: string; nodeId?: string; consumedLearn?: string[] },
+    nodeClaim?: { objective: string; node: string },
+  ): Promise<boolean | undefined> {
+    const session = openMemoryWorkflowSession({
+      runId: "RID",
+      ...(nodeClaim !== undefined ? { nodeClaim } : {}),
+    });
+    const outcome = await savePlan(
+      { plan: PLAN, ...input },
+      depsFor(session, fakeBackend(savedResult(nodeLink))),
+    );
+    return outcome.status === "saved" ? outcome.retryByCommand : undefined;
+  }
+  // The command reproduces: no link at all, the claim-recovered link, an explicit link equal to
+  // the standing claim.
+  assert.equal(await retryByCommand({}), true, "no link params, no claim");
+  assert.equal(await retryByCommand({}, claim), true, "recovered from the claim");
+  assert.equal(await retryByCommand({ objectiveId: "7", nodeId: "1.1" }, claim), true);
+  // The command cannot reproduce: explicit link params with no claim / a different claim / a
+  // half-specified link, or an explicit consumed_learn (the command forwards none).
+  assert.equal(await retryByCommand({ objectiveId: "7", nodeId: "1.1" }), false, "no claim");
+  assert.equal(
+    await retryByCommand({ objectiveId: "9", nodeId: "1.1" }, claim),
+    false,
+    "a different claim would retarget the retry",
+  );
+  assert.equal(await retryByCommand({ objectiveId: "7" }, claim), false, "half-specified");
+  assert.equal(await retryByCommand({ consumedLearn: ["45"] }), false, "explicit consumed_learn");
+  assert.equal(await retryByCommand({ consumedLearn: [] }), true, "an empty list carries nothing");
 });
 
 test("savePlan: the claim-identity matrix — full match clears; partial identity never clobbers", async () => {

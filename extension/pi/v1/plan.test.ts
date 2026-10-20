@@ -4,8 +4,11 @@
 // context injection/strip (+ the active-window re-injection pin), the `plan_draft`/`plan_save`
 // tool harness cases (read-only carve-out, decode strictness, cold-door delegation, node-link
 // surfacing), the `/plan-save` severity mapping, the `approvalSave` seam, and the
-// `/implement-here` command arms. Driven through a REAL bound AgentSession (offline): a fake
-// `perk` (PERK_BIN) stands in for the GitHub write, so no network / gh / Python runs.
+// `/implement-here` command arms; plus the cross-plane golden pairing (every Python
+// `tests/golden/json/plan_save*.json` producer golden decodes through `decodePlanSave` and drives
+// the live save) and the held session-reconciliation matrix (a held link / claim clear is repair
+// guidance on a saved plan). Driven through a REAL bound AgentSession (offline): a fake `perk`
+// (PERK_BIN) stands in for the GitHub write, so no network / gh / Python runs.
 
 import assert from "node:assert/strict";
 import {
@@ -28,9 +31,10 @@ import {
   PLAN_CONTEXT_TYPE,
   planAuthoringContextContent,
 } from "../../authoring/plan/prose.ts";
+import type { ObjectiveNodeLink } from "../../authoring/plan/save.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
-import { soundPointer } from "../../session/workflowSession.ts";
-import { sessionDataDir } from "../../substrate/cache.ts";
+import { soundPointer, type WorkflowChangeResult } from "../../session/workflowSession.ts";
+import { type PlanRef, sessionDataDir } from "../../substrate/cache.ts";
 import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import { digestSessionData } from "../../substrate/sessionData.ts";
 import { readSessionPointers } from "../../substrate/sessionPointers.ts";
@@ -41,7 +45,9 @@ import { rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../../substrate/workf
 import type { ReportTarget } from "../../surfaces/report.ts";
 import { REPORT_DETAIL_TYPE } from "../../surfaces/surfaces.ts";
 import {
+  failEntryAppend,
   failModeAppend,
+  failStateAppend,
   failToolInstall,
   fakeGating,
   fakePerk,
@@ -51,8 +57,15 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../testing/harness.ts";
-import { approvalSave, decodePlanDraftParams, decodePlanSaveParams } from "./plan.ts";
-import { implementHereGuidance } from "./planReview.ts";
+import {
+  approvalSave,
+  decodePlanDraftParams,
+  decodePlanSave,
+  decodePlanSaveParams,
+  type PlanSavePayload,
+  planSaveNeedsRepair,
+} from "./plan.ts";
+import { implementHereGuidance, type PlanSaveOk } from "./planReview.ts";
 import { PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE } from "./providers/plannotator.ts";
 import { PLANNOTATOR_REVIEW_COMMAND } from "./providers/plannotatorHandoff.ts";
 
@@ -1697,6 +1710,527 @@ test("command/tool: a successful node link still shows → in_progress", async (
   }
 });
 
+// ------------------------------------- cross-plane goldens + held session reconciliations
+
+/** The Python producer goldens (`tests/test_json_goldens.py` is their single regen owner). */
+const GOLDEN_DIR = join(import.meta.dirname, "..", "..", "..", "tests", "golden", "json");
+
+/** The `perk plan save --json` golden envelope (the Python `PlanSaveOut` shape) the tests read. */
+interface PlanSaveGolden {
+  issue: { id: string; url: string; existed: boolean };
+  plan_ref: PlanRef & { consumed_learn: string[]; delivery_lineage: unknown };
+  cached: boolean;
+  updated: boolean;
+  objective_node: ObjectiveNodeLink | null;
+}
+
+function goldenBytes(name: string): string {
+  return readFileSync(join(GOLDEN_DIR, name), "utf8");
+}
+
+function readGolden(name: string): PlanSaveGolden {
+  return JSON.parse(goldenBytes(name)) as PlanSaveGolden;
+}
+
+/**
+ * The golden plan_ref projected onto the TS `PlanRef` fields — `consumed_learn` and
+ * `delivery_lineage` are Python-owned and never escape into workflow-state (§8.3).
+ */
+function projectedRef(golden: PlanSaveGolden): PlanRef {
+  const { provider, pr_id, url, labels, objective_id, base } = golden.plan_ref;
+  return { provider, pr_id, url, labels, objective_id, base };
+}
+
+/** The plan-save result details as the tests read them (ok-arm fields optional). */
+type SaveDetails = { ok: boolean } & Partial<PlanSaveOk>;
+
+const GOLDEN_CLAIM = { objective: "63", node: "1.1" };
+const SCRAPED_PLAN = "# Add retry\n\n## Summary\nRetry it.\n";
+
+/** A planted session over a fake `perk` answering `stdout` (argv of the latest call recorded). */
+async function loadSavingSession(opts: {
+  stdout: string;
+  mode: "read-write" | "read-only";
+  claim?: { objective: string; node: string };
+  assistantText?: string;
+}): Promise<{ h: Awaited<ReturnType<typeof loadPerkSession>>; argvFile: string }> {
+  const cwd = scaffoldRepo();
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: opts.stdout, argvFile });
+  const file = plantSession(
+    cwd,
+    [
+      {
+        run_id: "01RID",
+        mode: opts.mode,
+        ...(opts.claim !== undefined ? { objective_node_claim: opts.claim } : {}),
+      },
+    ],
+    opts.assistantText !== undefined ? { assistantText: opts.assistantText } : {},
+  );
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  return { h, argvFile };
+}
+
+/** Run `fn` with `console.error` captured (the contained-sink fallback / headless reports). */
+async function withStderr<T>(fn: () => Promise<T>): Promise<{ value: T; stderr: string[] }> {
+  const stderr: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => stderr.push(args.map(String).join(" "));
+  try {
+    return { value: await fn(), stderr };
+  } finally {
+    console.error = original;
+  }
+}
+
+function carriesField(data: unknown, field: string): boolean {
+  return typeof data === "object" && data !== null && Object.hasOwn(data, field);
+}
+
+test("cross-plane: every Python plan-save golden decodes through decodePlanSave", () => {
+  const names = readdirSync(GOLDEN_DIR)
+    .filter((name) => /^plan_save.*\.json$/.test(name))
+    .sort();
+  // Vacuity guard: every known producer arm must be present (a further golden is decoded too).
+  for (const known of [
+    "plan_save.json",
+    "plan_save_no_node.json",
+    "plan_save_node_link_failed.json",
+  ]) {
+    assert.ok(names.includes(known), `golden ${known} present (got ${JSON.stringify(names)})`);
+  }
+  for (const name of names) {
+    const golden = readGolden(name);
+    const decoded = decodePlanSave(JSON.parse(goldenBytes(name)));
+    assert.ok(decoded !== null, `${name} decodes`);
+    const expected: PlanSavePayload = {
+      // Derive-don't-decode: the rendered issue id/url come from the strict ref.
+      issue: { id: golden.plan_ref.pr_id, url: golden.plan_ref.url, existed: golden.issue.existed },
+      plan_ref: projectedRef(golden),
+      cached: golden.cached,
+      updated: golden.updated,
+      objective_node: golden.objective_node,
+    };
+    assert.deepEqual(decoded, expected, `${name} decodes to the TS projection`);
+  }
+  // The arms the goldens pin, read back through the decoder.
+  const arm = (name: string) => decodePlanSave(JSON.parse(goldenBytes(name)))?.objective_node;
+  assert.deepEqual(arm("plan_save.json"), {
+    linked: true,
+    node: "1.1",
+    status: "in_progress",
+    error: null,
+  });
+  assert.equal(arm("plan_save_no_node.json"), null);
+  assert.deepEqual(arm("plan_save_node_link_failed.json"), {
+    linked: false,
+    node: "1.1",
+    status: null,
+    error: "objective store write failed: 502",
+  });
+});
+
+test("cross-plane: the linked plan_save.json golden drives the tool — link and claim clear applied", async () => {
+  const golden = readGolden("plan_save.json");
+  const { h } = await loadSavingSession({
+    stdout: goldenBytes("plan_save.json"),
+    mode: "read-write",
+    claim: GOLDEN_CLAIM,
+  });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.equal(
+      result.content[0]?.text,
+      "Saved plan #123 → https://github.com/o/r/issues/123 · linked objective node 1.1 → in_progress",
+    );
+    assert.deepEqual(h.workflowState().active_plan_ref, projectedRef(golden));
+    assert.equal(h.workflowState().objective_node_claim ?? null, null, "the claim was cleared");
+    const details = result.details as SaveDetails;
+    assert.equal(details.ok, true);
+    assert.deepEqual(details.linkage, { status: "applied" });
+    assert.deepEqual(details.claim_clear, { status: "applied" });
+    assert.equal(result.terminate, true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("cross-plane: the plan_save_node_link_failed.json golden — saved, node NOT advanced, claim kept", async () => {
+  const { h } = await loadSavingSession({
+    stdout: goldenBytes("plan_save_node_link_failed.json"),
+    mode: "read-write",
+    claim: GOLDEN_CLAIM,
+  });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const details = result.details as SaveDetails;
+    assert.equal(details.ok, true);
+    assert.match(
+      result.content[0]?.text ?? "",
+      /objective node 1\.1 NOT advanced — re-run \/plan-save to retry \(objective store write failed: 502\)/,
+    );
+    assert.equal(details.claim_clear, null, "no node link ⇒ the clear is never attempted");
+    assert.deepEqual(h.workflowState().objective_node_claim, GOLDEN_CLAIM, "the claim survives");
+    assert.equal(result.terminate, true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/plan-save with a rejected session link: saved at warning, single-line repair guidance, gate exits, seam notice kept", async () => {
+  const { h } = await loadSavingSession({
+    stdout: PLAN_JSON,
+    mode: "read-only",
+    assistantText: SCRAPED_PLAN,
+  });
+  try {
+    const append = failStateAppend(h, {
+      field: "active_plan_ref",
+      when: "before",
+      message: "disk full\nretry later",
+    });
+    await h.invokeCommand("plan-save");
+    append.restore();
+    const saved = h.notifyEvents.find((n) => /Saved plan #42/.test(n.message));
+    assert.ok(saved, `the save notice (got ${JSON.stringify(h.notifyEvents)})`);
+    assert.match(
+      saved.message,
+      /^perk: plan-save — Saved plan #42 → .* · ⚠ session link to plan #42 NOT recorded — re-run \/plan-save to retry \(active_plan_ref append threw — Error: disk full retry later\)$/,
+    );
+    assert.doesNotMatch(saved.message, /[\r\n]/);
+    assert.equal(saved.severity, "warning");
+    assert.equal(h.workflowState().active_plan_ref ?? null, null, "nothing landed (rejected)");
+    assert.equal(await writeBlocked(h), false, "the save stood: the gate exited (D1a)");
+    const seam = h.notifyEvents.find(
+      (n) => n !== saved && /active_plan_ref append threw/.test(n.message),
+    );
+    assert.equal(seam?.severity, "error", "the seam's own immediate notice is retained");
+  } finally {
+    h.dispose();
+  }
+});
+
+const PLAN_NODE_MULTILINE_FAIL_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  issue: { id: "122", url: "https://gh/o/r/issues/122", existed: false },
+  plan_ref: {
+    provider: "github",
+    pr_id: "122",
+    url: "https://gh/o/r/issues/122",
+    labels: ["perk:plan"],
+    objective_id: "115",
+  },
+  cached: true,
+  objective_node: { linked: false, node: "1.2", status: null, error: "store 502\nretry later" },
+  dry_run: false,
+});
+
+test("display rule: a multi-line node error + a held link fold to one line on the tool and the command", async () => {
+  const { h } = await loadSavingSession({
+    stdout: PLAN_NODE_MULTILINE_FAIL_JSON,
+    mode: "read-write",
+    assistantText: SCRAPED_PLAN,
+  });
+  try {
+    const append = failStateAppend(h, {
+      field: "active_plan_ref",
+      when: "before",
+      message: "disk full\nretry later",
+    });
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const details = result.details as SaveDetails;
+    assert.equal(details.ok, true);
+    assert.equal(details.objective_node?.error, "store 502\nretry later", "details stay verbatim");
+    const text = result.content[0]?.text ?? "";
+    assert.doesNotMatch(text, /[\r\n]/);
+    assert.ok(
+      text.includes(
+        "objective node 1.2 NOT advanced — re-run /plan-save to retry (store 502 retry later)",
+      ),
+      text,
+    );
+    assert.ok(text.includes("session link to plan #122 NOT recorded"), text);
+
+    await h.invokeCommand("plan-save");
+    append.restore();
+    const saved = h.notifyEvents.filter((n) => /Saved plan #122/.test(n.message)).at(-1);
+    assert.ok(saved, `the command save notice (got ${JSON.stringify(h.notifyEvents)})`);
+    assert.doesNotMatch(saved.message, /[\r\n]/);
+    assert.ok(saved.message.includes("(store 502 retry later)"), saved.message);
+    assert.ok(saved.message.includes("session link to plan #122 NOT recorded"), saved.message);
+    assert.equal(saved.severity, "warning");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/plan-save when the link append AND the detail-sink append both fail: nothing throws past the save", async () => {
+  const { h } = await loadSavingSession({
+    stdout: PLAN_JSON,
+    mode: "read-only",
+    assistantText: SCRAPED_PLAN,
+  });
+  try {
+    const append = failEntryAppend(h, {
+      matches: (customType, data) =>
+        (customType === WORKFLOW_STATE_TYPE && carriesField(data, "active_plan_ref")) ||
+        customType === REPORT_DETAIL_TYPE,
+      when: "before",
+      message: "disk full\nretry later",
+    });
+    // The handler is awaited directly: a throw past the landed save would reject here.
+    const { stderr } = await withStderr(async () => {
+      try {
+        await h.runCommandHandler("plan-save", "");
+      } finally {
+        append.restore();
+      }
+    });
+    assert.ok(
+      append.attempted.some((a) => a.customType === REPORT_DETAIL_TYPE),
+      "the detail-sink append was reached (and thrown) — the containment was exercised",
+    );
+    assert.ok(
+      stderr.some((line) =>
+        line.includes("active_plan_ref append threw — Error: disk full\nretry later"),
+      ),
+      `the contained detail fell back to one stderr write (got ${JSON.stringify(stderr)})`,
+    );
+    const seam = h.notifyEvents.find(
+      (n) => /active_plan_ref append threw/.test(n.message) && !/Saved plan/.test(n.message),
+    );
+    assert.equal(seam?.severity, "error", "the seam's headline still reached the user");
+    const saved = h.notifyEvents.find((n) => /Saved plan #42/.test(n.message));
+    assert.ok(saved, `the save notice (got ${JSON.stringify(h.notifyEvents)})`);
+    assert.equal(saved.severity, "warning");
+    assert.doesNotMatch(saved.message, /[\r\n]/);
+    assert.ok(saved.message.includes("⚠ session link to plan #42 NOT recorded"), saved.message);
+    assert.equal(await writeBlocked(h), false, "the gate exited");
+    assert.equal(h.workflowState().active_plan_ref ?? null, null);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a rejected planning-claim clear — saved, link applied, repair guidance, the claim survives", async () => {
+  const { h } = await loadSavingSession({
+    stdout: goldenBytes("plan_save.json"),
+    mode: "read-write",
+    claim: GOLDEN_CLAIM,
+  });
+  try {
+    const append = failStateAppend(h, {
+      field: "objective_node_claim",
+      when: "before",
+      message: "boom",
+    });
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    append.restore();
+    const details = result.details as SaveDetails;
+    assert.equal(details.ok, true);
+    assert.deepEqual(details.linkage, { status: "applied" }, "the link entry carries no claim");
+    assert.equal(details.claim_clear?.status, "rejected");
+    assert.equal(
+      result.content[0]?.text,
+      "Saved plan #123 → https://github.com/o/r/issues/123 · linked objective node 1.1 → in_progress · ⚠ planning claim for node 1.1 NOT cleared — re-run /plan-save to retry (objective_node_claim append threw — Error: boom)",
+    );
+    assert.deepEqual(h.workflowState().objective_node_claim, GOLDEN_CLAIM, "the claim survives");
+    assert.equal(result.terminate, true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/plan-save retry after a held link recovers the node link from the retained claim", async () => {
+  const golden = readGolden("plan_save.json");
+  const { h, argvFile } = await loadSavingSession({
+    stdout: goldenBytes("plan_save.json"),
+    mode: "read-only",
+    claim: GOLDEN_CLAIM,
+    assistantText: SCRAPED_PLAN,
+  });
+  try {
+    // Attempt 1: the session link is rejected.
+    const append = failStateAppend(h, {
+      field: "active_plan_ref",
+      when: "before",
+      message: "disk full",
+    });
+    await h.invokeCommand("plan-save");
+    append.restore();
+    const first = h.notifyEvents.filter((n) => /Saved plan #123/.test(n.message));
+    assert.equal(first.length, 1, `one save notice (got ${JSON.stringify(h.notifyEvents)})`);
+    assert.equal(first[0]?.severity, "warning");
+    assert.match(
+      first[0]?.message ?? "",
+      / · ⚠ session link to plan #123 NOT recorded — re-run \/plan-save to retry \(active_plan_ref append threw — Error: disk full\)$/,
+    );
+    assert.doesNotMatch(first[0]?.message ?? "", /planning claim/, "no clear was attempted");
+    assert.equal(h.workflowState().active_plan_ref ?? null, null);
+    assert.deepEqual(h.workflowState().objective_node_claim, GOLDEN_CLAIM, "the claim is retained");
+    assert.equal(await writeBlocked(h), false, "the gate exited on the saved plan");
+
+    // Attempt 2: the advertised retry (now read-write) recovers the link from the claim.
+    rmSync(argvFile, { force: true });
+    await h.invokeCommand("plan-save");
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.equal(argv[argv.indexOf("--objective-id") + 1], "63", "objective recovered");
+    assert.equal(argv[argv.indexOf("--node-id") + 1], "1.1", "node recovered");
+    assert.deepEqual(h.workflowState().active_plan_ref, projectedRef(golden));
+    assert.equal(h.workflowState().objective_node_claim ?? null, null, "the claim was cleared");
+    const saves = h.notifyEvents.filter((n) => /Saved plan #123/.test(n.message));
+    assert.equal(saves.length, 2);
+    assert.equal(saves[1]?.severity, "info");
+    assert.doesNotMatch(saves[1]?.message ?? "", /⚠/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: explicit link params with no claim — the guidance repeats the same plan_save call, which re-links with the node", async () => {
+  const golden = readGolden("plan_save.json");
+  const { h, argvFile } = await loadSavingSession({
+    stdout: goldenBytes("plan_save.json"),
+    mode: "read-write",
+  });
+  const params = { plan: PLAN_MD, objective_id: "63", node_id: "1.1" };
+  try {
+    assert.equal(h.workflowState().objective_node_claim ?? null, null, "no claim carrier");
+    // Attempt 1: the session link is rejected. A bare `/plan-save` carries no link params and
+    // there is no claim to recover them from, so it is NOT the advertised retry.
+    const append = failStateAppend(h, {
+      field: "active_plan_ref",
+      when: "before",
+      message: "disk full",
+    });
+    const first = await h.invokeTool("plan_save", params);
+    append.restore();
+    const text = first.content[0]?.text ?? "";
+    assert.ok(
+      text.endsWith(
+        " · ⚠ session link to plan #123 NOT recorded — re-run the same plan_save call to retry (active_plan_ref append threw — Error: disk full)",
+      ),
+      text,
+    );
+    assert.doesNotMatch(text, /re-run \/plan-save/);
+    assert.equal(h.workflowState().active_plan_ref ?? null, null);
+
+    // Attempt 2: the advertised retry — the same call — carries the link and re-links the session.
+    rmSync(argvFile, { force: true });
+    const second = await h.invokeTool("plan_save", params);
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.equal(argv[argv.indexOf("--objective-id") + 1], "63");
+    assert.equal(argv[argv.indexOf("--node-id") + 1], "1.1");
+    assert.deepEqual(h.workflowState().active_plan_ref, projectedRef(golden));
+    assert.deepEqual((second.details as SaveDetails).linkage, { status: "applied" });
+    assert.doesNotMatch(second.content[0]?.text ?? "", /⚠/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("an append that throws AFTER the branch took it is the control: applied, no suffix, /plan-save at info", async () => {
+  const tool = await loadSavingSession({ stdout: PLAN_JSON, mode: "read-write" });
+  try {
+    const append = failStateAppend(tool.h, {
+      field: "active_plan_ref",
+      when: "after",
+      message: "disk full",
+    });
+    const result = await tool.h.invokeTool("plan_save", { plan: PLAN_MD });
+    append.restore();
+    const details = result.details as SaveDetails;
+    assert.deepEqual(details.linkage, { status: "applied" }, "the read-back is the proof");
+    assert.equal(result.content[0]?.text, "Saved plan #42 → https://gh/o/r/issues/42");
+  } finally {
+    tool.h.dispose();
+  }
+
+  const command = await loadSavingSession({
+    stdout: PLAN_JSON,
+    mode: "read-only",
+    assistantText: SCRAPED_PLAN,
+  });
+  try {
+    const append = failStateAppend(command.h, {
+      field: "active_plan_ref",
+      when: "after",
+      message: "disk full",
+    });
+    await command.h.invokeCommand("plan-save");
+    append.restore();
+    const saved = command.h.notifyEvents.find((n) => /Saved plan #42/.test(n.message));
+    assert.equal(saved?.severity, "info");
+    assert.doesNotMatch(saved?.message ?? "", /⚠/);
+    assert.equal(
+      (command.h.workflowState().active_plan_ref as { pr_id?: string } | null)?.pr_id,
+      "42",
+    );
+  } finally {
+    command.h.dispose();
+  }
+});
+
+test("planSaveNeedsRepair: a failed node advance or a held reconciliation needs repair; landed ones never", () => {
+  const base: PlanSaveOk = {
+    issue: { id: "42", url: "https://gh/o/r/issues/42" },
+    plan_ref: {
+      provider: "github",
+      pr_id: "42",
+      url: "https://gh/o/r/issues/42",
+      labels: ["perk:plan"],
+      objective_id: null,
+    },
+    cached: true,
+    existed: false,
+    updated: false,
+    objective_node: null,
+    plan_source: "param",
+    linkage: null,
+    claim_clear: null,
+  };
+  const landed: (WorkflowChangeResult | null)[] = [
+    null,
+    { status: "applied" },
+    { status: "unchanged" },
+  ];
+  const held: WorkflowChangeResult[] = [
+    { status: "rejected", problem: "append threw" },
+    { status: "unverified", problem: "read-back failed" },
+  ];
+  for (const change of landed) {
+    assert.equal(planSaveNeedsRepair({ ...base, linkage: change }), false, JSON.stringify(change));
+    assert.equal(planSaveNeedsRepair({ ...base, claim_clear: change }), false);
+  }
+  for (const change of held) {
+    assert.equal(planSaveNeedsRepair({ ...base, linkage: change }), true, change.status);
+    assert.equal(planSaveNeedsRepair({ ...base, claim_clear: change }), true, change.status);
+  }
+  assert.equal(
+    planSaveNeedsRepair({
+      ...base,
+      objective_node: { linked: false, node: "1.1", status: null, error: "boom" },
+    }),
+    true,
+  );
+  assert.equal(
+    planSaveNeedsRepair({
+      ...base,
+      objective_node: { linked: true, node: "1.1", status: "in_progress", error: null },
+      linkage: { status: "applied" },
+      claim_clear: { status: "applied" },
+    }),
+    false,
+  );
+});
+
 // -------------------------------------------- the approvalSave orchestration seam (pure fakes)
 
 const FAIL_ENVELOPE = JSON.stringify({
@@ -1725,13 +2259,23 @@ function runIdEntry(runId: string): unknown {
   return { type: "custom", customType: WORKFLOW_STATE_TYPE, data: { run_id: runId } };
 }
 
-/** An ExtensionAPI fake: appendEntry lands on the branch; exec returns the canned payload. */
+/**
+ * An ExtensionAPI fake: appendEntry lands on the branch; exec returns the canned payload. `drop`
+ * silently loses the entries it selects (the append returns, nothing lands — the read-back miss
+ * the seam classifies `unverified`).
+ */
 function fakeApprovalPi(
   branch: unknown[],
-  opts: { stdout: string; code?: number; argvs?: string[][] },
+  opts: {
+    stdout: string;
+    code?: number;
+    argvs?: string[][];
+    drop?: (customType: string, data: unknown) => boolean;
+  },
 ): ExtensionAPI {
   return {
     appendEntry(customType: string, data?: unknown) {
+      if (opts.drop?.(customType, data)) return;
       branch.push({ type: "custom", customType, data });
     },
     async exec(_cmd: string, args: string[]) {
@@ -1906,6 +2450,37 @@ test("approvalSave: a planted claim is recovered into the argv and cleared on su
     assert.equal(argv[argv.indexOf("--node-id") + 1], "1.2", "node recovered");
     const rebuilt = rebuildWorkflowState(branch as BranchEntry[]);
     assert.equal(rebuilt.objective_node_claim, null, "the claim was cleared");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("approvalSave: an unverified session link (a lost append) — saved, repair guidance, the gate still exits", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const pi = fakeApprovalPi(branch, {
+      stdout: PLAN_JSON,
+      drop: (_customType, data) => carriesField(data, "active_plan_ref"),
+    });
+    const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
+    const gating = fakeGating(true);
+    const { value: outcome } = await withStderr(() =>
+      approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" }),
+    );
+    assert.equal(outcome.status, "saved");
+    if (outcome.status !== "saved") return;
+    const details = outcome.result.details;
+    assert.equal(details.ok, true, "a held link is never a save failure");
+    assert.equal(details.ok ? details.linkage?.status : null, "unverified");
+    assert.ok(
+      (outcome.result.content[0]?.text ?? "").endsWith(
+        " · ⚠ session link to plan #42 unverified — re-run /plan-save to retry (plan-ref read-back failed for github:42)",
+      ),
+      outcome.result.content[0]?.text,
+    );
+    assert.equal(outcome.gateExited, true, "saved while read-only — the gate still exits");
+    assert.equal(gating.exits, 1);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

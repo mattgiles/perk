@@ -54,6 +54,7 @@ import {
 import { extractPlanMarkdown, resolvePlanSource } from "../../authoring/plan/source.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { deriveTitle } from "../../session/sessionName.ts";
+import type { WorkflowChangeResult } from "../../session/workflowSession.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import {
   booleanField,
@@ -87,6 +88,7 @@ import {
   type ApprovalSaveOutcome,
   executePlanReview,
   type PlanReviewV1Deps,
+  type PlanSaveOk,
   runImplementHereCommand,
   type SaveResult,
 } from "./planReview.ts";
@@ -154,9 +156,11 @@ export function decodePlanSaveParams(params: unknown): PlanSaveParams | null {
  * (`docs/learned/workflow/cold-door-client.md`: strict iff appended to workflow-state): only
  * `plan_ref` is strict. The rendered `issue.id`/`url` are DERIVED from the strict ref — the cold
  * door constructs the ref from the issue (`pr_id == issue.id`, `url == issue.url`), so they are
- * byte-identical by construction; `existed` and `objective_node` are advisory.
+ * byte-identical by construction; `existed` and `objective_node` are advisory. Exported (with
+ * `decodePlanSave`) so the cross-plane golden test types its expectations against the decoder's
+ * own return shape.
  */
-interface PlanSavePayload {
+export interface PlanSavePayload {
   issue: { id: string; url: string; existed: boolean | undefined };
   plan_ref: PlanRef;
   cached?: boolean;
@@ -217,9 +221,10 @@ function decodeObjectiveNode(payload: ColdJson): ObjectiveNodeLink | null {
  * rename under CLI↔extension version skew) skew-harmless. `existed` and
  * `objective_node` are advisory — the plan genuinely saved, so the success report must survive
  * them. With `plan_ref` the only strict field, `bad_output` is reachable only for a payload whose
- * persistence would corrupt workflow-state.
+ * persistence would corrupt workflow-state. Exported for the offline tests (the Python
+ * `plan_save*.json` goldens are decoded through it — the cross-plane producer/consumer pairing).
  */
-function decodePlanSave(payload: ColdJson): PlanSavePayload | null {
+export function decodePlanSave(payload: ColdJson): PlanSavePayload | null {
   const ref = decodePlanRef(payload);
   if (ref === null) return null;
   const issue = objectField(payload, "issue");
@@ -278,14 +283,64 @@ function coldDoorPlanBackend(pi: ExtensionAPI, ctx: ExtensionContext): PlanBacke
 
 // ---------------------------------------------------------------- the byte-stable rendering
 
+/** Collapse each newline run (and its flanking whitespace) to one space — the display fold. */
+const NEWLINE_RUN = /\s*(?:\r\n|\n|\r)\s*/g;
+
+/**
+ * Fold a diagnostic to one line for the save MESSAGE (the `gateTransitionNotice` fold): the
+ * message's first line is `report()`'s headline, so a multi-line diagnostic would push the repair
+ * guidance behind it into the persistence-backed detail sink. `details` keep the verbatim value.
+ */
+function foldLine(text: string): string {
+  return text.replace(NEWLINE_RUN, " ");
+}
+
+type HeldChange = Extract<WorkflowChangeResult, { status: "rejected" | "unverified" }>;
+
+/** A session reconciliation that did not land as asked (`null` = not attempted, never held). */
+function isHeld(change: WorkflowChangeResult | null): change is HeldChange {
+  return change !== null && (change.status === "rejected" || change.status === "unverified");
+}
+
+/** The repair-guidance suffix for one held reconciliation; empty for applied/unchanged/null. */
+function reconciliationSuffix(
+  change: WorkflowChangeResult | null,
+  subject: Record<HeldChange["status"], string>,
+  retry: string,
+): string {
+  if (!isHeld(change)) return "";
+  return ` · ⚠ ${subject[change.status]} — ${retry} (${foldLine(change.problem)})`;
+}
+
+/**
+ * True when a SAVED plan carries a fact the human must repair with a `/plan-save` retry: a failed
+ * objective-node advance, or a held session link / planning-claim clear. Drives the `/plan-save`
+ * warning severity — the save itself stood either way (exported for the offline tests).
+ */
+export function planSaveNeedsRepair(details: PlanSaveOk): boolean {
+  return (
+    details.objective_node?.linked === false ||
+    isHeld(details.linkage) ||
+    isHeld(details.claim_clear)
+  );
+}
+
 /**
  * Render a feature `SavePlanOutcome` as the warm-door SaveResult — the ONE message-assembly
- * site every plan-save surface shares (tool, command, approval seam, review arm). Byte-stable:
- * verb/existed, the node-link suffix (all THREE outcomes — a failed advance is a non-fatal
- * sub-step but must be VISIBLE, the §8.3 "surfaced, never swallowed" intent), the source suffix
- * + param-mismatch flag. The outcome's `linkage`/`claimClear` seam results are deliberately NOT
- * rendered (append/read-back failures stay loud through the seam's report() path exactly as
- * always); a `failed` outcome reports through the `failFor` seam (same scope, same bytes).
+ * site every plan-save surface shares (tool, command, approval seam, review arm). The save fact
+ * leads (verb/existed, issue, url), then the source suffix + param-mismatch flag, then the
+ * node-link suffix (all THREE outcomes — a failed advance is a non-fatal sub-step but must be
+ * VISIBLE, the §8.3 "surfaced, never swallowed" intent), then one suffix per HELD session
+ * reconciliation (`linkage`/`claimClear` `rejected`/`unverified`): repair guidance on a saved
+ * plan, never a save failure — the result stays ok and terminating. `applied`/`unchanged`/`null`
+ * render nothing, so happy-path messages are byte-stable. The message is single-line by
+ * construction (every interpolated diagnostic is folded); `details` carry the verbatim values
+ * (`objective_node`, `linkage`, `claim_clear`). Every repair suffix advertises the retry that
+ * reproduces the save: `/plan-save` when the bare command re-resolves its inputs
+ * (`retryByCommand`), else the same `plan_save` call (a tool save with explicit link params or
+ * `consumed_learn` the command cannot recover). The seam's own report() stays the immediate
+ * loudness channel for a held append. A `failed` outcome reports through the `failFor` seam
+ * (same scope, same bytes).
  */
 function renderSavePlanOutcome(ctx: ExtensionContext, save: SavePlanOutcome): SaveResult {
   if (save.status === "failed") {
@@ -294,6 +349,9 @@ function renderSavePlanOutcome(ctx: ExtensionContext, save: SavePlanOutcome): Sa
   const ref = save.ref;
   const verb = save.existed ? "Updated" : "Saved";
   const nodeLink = save.nodeLink;
+  const retry = save.retryByCommand
+    ? "re-run /plan-save to retry"
+    : "re-run the same plan_save call to retry";
   // Render all THREE node-link outcomes (the silent-partial-failure fix). Both surfaces render
   // content[0].text, so this one site fixes the tool path (the model relays it) and the command
   // path (the user sees the notify) at once.
@@ -301,10 +359,29 @@ function renderSavePlanOutcome(ctx: ExtensionContext, save: SavePlanOutcome): Sa
   if (nodeLink?.linked === true) {
     linkSuffix = ` · linked objective node ${nodeLink.node} → in_progress`;
   } else if (nodeLink && nodeLink.linked === false) {
-    linkSuffix = ` · ⚠ objective node ${nodeLink.node} NOT advanced — re-run /plan-save to retry${
-      nodeLink.error ? ` (${nodeLink.error})` : ""
+    linkSuffix = ` · ⚠ objective node ${nodeLink.node} NOT advanced — ${retry}${
+      nodeLink.error ? ` (${foldLine(nodeLink.error)})` : ""
     }`;
   }
+  // A claim clear is only ever attempted on a node-linked save, so the node is named there.
+  const claimNode = nodeLink?.node ?? "the claimed node";
+  const reconcileSuffix =
+    reconciliationSuffix(
+      save.linkage,
+      {
+        rejected: `session link to plan #${ref.pr_id} NOT recorded`,
+        unverified: `session link to plan #${ref.pr_id} unverified`,
+      },
+      retry,
+    ) +
+    reconciliationSuffix(
+      save.claimClear,
+      {
+        rejected: `planning claim for node ${claimNode} NOT cleared`,
+        unverified: `planning claim for node ${claimNode} clear unverified`,
+      },
+      retry,
+    );
   // Surface NON-param sources in the message (param-path success messages stay
   // byte-stable); a differing ignored param is visibly flagged, never silent.
   let sourceSuffix = "";
@@ -318,7 +395,7 @@ function renderSavePlanOutcome(ctx: ExtensionContext, save: SavePlanOutcome): Sa
     }
   }
   return ok(
-    `${verb} plan #${ref.pr_id} → ${ref.url}${sourceSuffix}${linkSuffix}`,
+    `${verb} plan #${ref.pr_id} → ${ref.url}${sourceSuffix}${linkSuffix}${reconcileSuffix}`,
     {
       issue: { id: ref.pr_id, url: ref.url },
       plan_ref: ref,
@@ -327,6 +404,8 @@ function renderSavePlanOutcome(ctx: ExtensionContext, save: SavePlanOutcome): Sa
       updated: save.updated,
       objective_node: nodeLink,
       plan_source: save.source,
+      linkage: save.linkage,
+      claim_clear: save.claimClear,
     },
     { terminate: true },
   );
@@ -664,17 +743,18 @@ export function installPlanBindings(
         confirmed: outcome.status === "saved",
         ...(outcome.result.details.ok ? {} : { detail: outcome.result.details.error }),
       });
-      // Severity reflects a failed objective-node advance: not-ok → error; saved-but-link-failed →
-      // warning; otherwise info. A failed node-link never blocks the gate exit above (the plan was
-      // saved) — but it MUST surface (the silent-partial-failure fix), in headless runs too.
+      // Severity reflects a repair-needed save: not-ok → error; saved but with a failed
+      // objective-node advance, a held session link, or a held planning-claim clear → warning
+      // (`planSaveNeedsRepair`); otherwise info. None of them blocks the gate exit above (the plan
+      // was saved) — but each MUST surface (the silent-partial-failure fix), in headless runs too.
       const result = outcome.result;
       const message = result.content[0]?.text ?? "plan-save done";
       // `SaveResult` flows through `approvalSave` concretely — `details.ok` narrows the union,
-      // so the node-link severity read is typed (no assertion).
+      // so the repair-needed read is typed (no assertion).
       const details = result.details;
       const severity: Severity = !details.ok
         ? "error"
-        : details.objective_node?.linked === false
+        : planSaveNeedsRepair(details)
           ? "warning"
           : "info";
       report(ctx, "plan-save", severity, message);
