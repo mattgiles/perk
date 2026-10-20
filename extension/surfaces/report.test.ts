@@ -109,6 +109,26 @@ for (const mode of ["tui", "print", "json", undefined] as const) {
   });
 }
 
+test("a throwing detail sink is contained: headline delivered once, one stderr line, no throw", () => {
+  const { target, notifies } = fakeTarget(true, "tui");
+  let sinkCalls = 0;
+  attachReportDetailSink(target, () => {
+    sinkCalls += 1;
+    throw new Error("persistence broken");
+  });
+  const message = "append threw — Error: disk full\nretry later";
+  let returned: string | undefined;
+  const stderr = captureStderr(() => {
+    returned = report(target, "plan-save", "error", message);
+  });
+  assert.equal(sinkCalls, 1, "the sink was reached");
+  assert.deepEqual(notifies, [
+    { message: "perk: plan-save — append threw — Error: disk full", type: "error" },
+  ]);
+  assert.equal(returned, `perk: plan-save — ${message}`);
+  assert.deepEqual(stderr, [`perk: plan-save — ${message}`]);
+});
+
 test("attached detail sink is not called for a single-line message", () => {
   const { target } = fakeTarget(true, "tui");
   const details: string[] = [];

@@ -1581,28 +1581,36 @@ export function fakeGating(
   return g;
 }
 
+/** The recorded attempts + restore handle every append-failure knob returns. */
+export interface EntryAppendFailure {
+  attempted: { customType: string; data: unknown }[];
+  restore(): void;
+}
+
 /**
- * Inject a mode-persistence failure into a live session: the session manager's
- * `appendCustomEntry` (what `pi.appendEntry` late-binds to) throws `message` for a
- * `perk:workflow-state` entry carrying `mode` (or every such entry when `mode` is omitted).
- * `when: "after"` records the entry first — Pi's own non-transactional shape (the entry reaches
- * the branch before the persistence that fails); `"before"` throws without recording. Every
- * attempted append is recorded; `restore` reinstates the original.
+ * Inject an entry-persistence failure into a live session (the core every append-failure knob
+ * shares): the session manager's `appendCustomEntry` (what `pi.appendEntry` late-binds to) throws
+ * `message` for every entry `matches` selects. `when: "after"` records the entry first — Pi's own
+ * non-transactional shape (the entry reaches the branch before the persistence that fails);
+ * `"before"` throws without recording. Through `appendWorkflowStateClassified`, `before` yields
+ * `rejected` (the entry never landed) while `after` yields `applied` (the read-back is the proof
+ * authority — the control, not a held arm). Every attempted append is recorded; `restore`
+ * reinstates the original.
  */
-export function failModeAppend(
+export function failEntryAppend(
   h: PerkSession,
-  opts: { mode?: "read-only" | "read-write"; when: "before" | "after"; message: string },
-): { attempted: { customType: string; data: unknown }[]; restore(): void } {
+  opts: {
+    matches: (customType: string, data: unknown) => boolean;
+    when: "before" | "after";
+    message: string;
+  },
+): EntryAppendFailure {
   const manager = h.session.sessionManager;
   const original = manager.appendCustomEntry;
   const attempted: { customType: string; data: unknown }[] = [];
   manager.appendCustomEntry = (customType: string, data?: unknown): string => {
     attempted.push({ customType, data });
-    const mode = (data as { mode?: unknown } | undefined)?.mode;
-    const hit =
-      customType === WORKFLOW_STATE_TYPE &&
-      mode !== undefined &&
-      (opts.mode === undefined || mode === opts.mode);
+    const hit = opts.matches(customType, data);
     if (hit && opts.when === "before") throw new Error(opts.message);
     const id = original.call(manager, customType, data);
     if (hit) throw new Error(opts.message);
@@ -1614,6 +1622,52 @@ export function failModeAppend(
       manager.appendCustomEntry = original;
     },
   };
+}
+
+/** True when `data` is a non-null object carrying `field` as an OWN property (presence, not truthiness). */
+function carriesField(data: unknown, field: string): boolean {
+  return typeof data === "object" && data !== null && Object.hasOwn(data, field);
+}
+
+/**
+ * Inject a workflow-state persistence failure for one field: throws for every
+ * `perk:workflow-state` entry whose data carries `field` as an own property — presence, so the
+ * claim clear's `{objective_node_claim: null}` matches. `when` as in `failEntryAppend` (`before`
+ * → the seam's `rejected`; `after` → `applied`).
+ */
+export function failStateAppend(
+  h: PerkSession,
+  opts: { field: keyof WorkflowState; when: "before" | "after"; message: string },
+): EntryAppendFailure {
+  return failEntryAppend(h, {
+    matches: (customType, data) =>
+      customType === WORKFLOW_STATE_TYPE && carriesField(data, opts.field),
+    when: opts.when,
+    message: opts.message,
+  });
+}
+
+/**
+ * Inject a mode-persistence failure into a live session: throws for a `perk:workflow-state`
+ * entry carrying `mode` (or every such entry when `mode` is omitted). `when` as in
+ * `failEntryAppend`.
+ */
+export function failModeAppend(
+  h: PerkSession,
+  opts: { mode?: "read-only" | "read-write"; when: "before" | "after"; message: string },
+): EntryAppendFailure {
+  return failEntryAppend(h, {
+    matches: (customType, data) => {
+      const mode = (data as { mode?: unknown } | undefined)?.mode;
+      return (
+        customType === WORKFLOW_STATE_TYPE &&
+        mode !== undefined &&
+        (opts.mode === undefined || mode === opts.mode)
+      );
+    },
+    when: opts.when,
+    message: opts.message,
+  });
 }
 
 /**

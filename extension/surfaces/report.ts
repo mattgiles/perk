@@ -34,6 +34,12 @@ function headlineFor(prefix: string, message: string): string {
  * value on stderr. Headful targets receive a managed one-line headline; multiline detail goes to an
  * attached display-only sink in every non-RPC mode. `{ alsoLog: true }` is narrowly an RPC/headless
  * diagnostic mirror and never permits raw terminal output in a headful non-RPC context.
+ *
+ * The detail-sink append is BEST-EFFORT: the headline has already been delivered, and a diagnostic
+ * append may never fail its caller — callers report from inside their own failure paths (a held
+ * workflow-state append reports from its catch), and the warm-command sink rides the same Pi
+ * persistence path that may just have failed. A throwing sink therefore falls back to ONE stderr
+ * line carrying the complete value (the only headful non-RPC stderr write) and never propagates.
  */
 export function report(
   target: ReportTarget,
@@ -55,6 +61,13 @@ export function report(
     return full;
   }
 
-  if (message.split(LOGICAL_LINE).length > 1) detailSinks.get(target)?.(full, severity);
+  const sink = message.split(LOGICAL_LINE).length > 1 ? detailSinks.get(target) : undefined;
+  if (sink !== undefined) {
+    try {
+      sink(full, severity);
+    } catch {
+      console.error(full);
+    }
+  }
   return full;
 }

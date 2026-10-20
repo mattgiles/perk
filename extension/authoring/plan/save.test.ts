@@ -1,8 +1,8 @@
 // Direct feature tests for savePlan + planApprovalSave — memory session, deterministic fake
 // PlanBackend (the port-admission rule: one production adapter, one useful fake), fake gate; no
 // Pi, no cold door. The linkage/claimClear arms are the session seam's own WorkflowChangeResult
-// values passed through verbatim — every arm is pinned here (the adapter's rendering ignores
-// them by design).
+// values passed through verbatim — every arm is pinned here (the adapter renders only the held
+// arms, as repair guidance on the saved plan).
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -328,6 +328,39 @@ test("savePlan: claimClear arms — rejected/unverified via the seam knobs (link
     unverifiedOutcome.status === "saved" ? unverifiedOutcome.claimClear?.status : null,
     "unverified",
   );
+});
+
+test("savePlan: a held session link keeps the claim standing — the retry's node-link carrier", async () => {
+  const nodeLink: ObjectiveNodeLink = {
+    linked: true,
+    node: "1.1",
+    status: "in_progress",
+    error: null,
+  };
+  const claim = { objective: "7", node: "1.1" };
+  // No seeded active ref, so the one-shot knob hits the `link-plan-ref` append; the clear must
+  // then never be attempted (claimClear null), leaving the claim for the `/plan-save` retry.
+  const rejected = openMemoryWorkflowSession({ runId: "RID", nodeClaim: claim });
+  rejected.failNextApply();
+  const rejectedOutcome = await quietly(() =>
+    savePlan({ plan: PLAN }, depsFor(rejected, fakeBackend(savedResult(nodeLink)))),
+  );
+  assert.equal(rejectedOutcome.status, "saved", "a held link never fails the save");
+  if (rejectedOutcome.status !== "saved") return;
+  assert.equal(rejectedOutcome.linkage?.status, "rejected");
+  assert.equal(rejectedOutcome.claimClear, null, "the clear is not attempted over a held link");
+  assert.deepEqual(rejected.nodeClaim(), claim, "the claim survives");
+
+  const unverified = openMemoryWorkflowSession({ runId: "RID", nodeClaim: claim });
+  unverified.failNextApplyVerification();
+  const unverifiedOutcome = await quietly(() =>
+    savePlan({ plan: PLAN }, depsFor(unverified, fakeBackend(savedResult(nodeLink)))),
+  );
+  assert.equal(unverifiedOutcome.status, "saved");
+  if (unverifiedOutcome.status !== "saved") return;
+  assert.equal(unverifiedOutcome.linkage?.status, "unverified");
+  assert.equal(unverifiedOutcome.claimClear, null);
+  assert.deepEqual(unverified.nodeClaim(), claim, "the claim survives an unverified link too");
 });
 
 test("savePlan: the claim-identity matrix — full match clears; partial identity never clobbers", async () => {

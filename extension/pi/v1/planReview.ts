@@ -75,6 +75,7 @@ import type {
 import { type PlanSource, resolvePlanSource } from "../../authoring/plan/source.ts";
 import { REFINE_STAGE } from "../../authoring/refinement/context.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import type { WorkflowChangeResult } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import type { Result } from "../../substrate/result.ts";
@@ -139,6 +140,15 @@ export interface PlanSaveOk {
   updated: boolean;
   objective_node: ObjectiveNodeLink | null;
   plan_source: PlanSource | null;
+  /**
+   * The two post-save session reconciliations — the seam's own change results, VERBATIM (`null`
+   * = not attempted). `linkage` is the `link-plan-ref` append (always attempted on a save);
+   * `claim_clear` the `clear-node-claim` append (null without a node link, a matching claim, or
+   * a landed session link). A held arm (`rejected`/`unverified`) is repair guidance on a SAVED
+   * plan, never a save failure.
+   */
+  linkage: WorkflowChangeResult | null;
+  claim_clear: WorkflowChangeResult | null;
 }
 
 /**

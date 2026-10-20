@@ -61,10 +61,11 @@ export interface PlanBackend {
  * (`source`/`paramMismatch` ride through for the adapter's message assembly) and the two
  * workflow-state results — the session seam's own `WorkflowChangeResult` values passed through
  * VERBATIM (lossless by construction; `null` means not attempted: `linkage` when the save
- * failed before it, `claimClear` when there was no matching claim / no node link). The
- * production adapter's rendering ignores both fields (byte-stable output); they exist so the
- * feature outcome is honest and the direct feature tests can pin every arm — the seam's type,
- * not new API surface.
+ * failed before it, `claimClear` when there was no matching claim / no node link / the session
+ * link did not land). The production adapter renders a held arm (`rejected`/`unverified`) as
+ * repair guidance on the saved plan and carries both fields verbatim in the result `details`;
+ * `applied`/`unchanged`/`null` render nothing, so happy-path output stays byte-stable — the
+ * seam's type, not new API surface.
  */
 export type SavePlanOutcome =
   | {
@@ -106,9 +107,11 @@ export interface PlanSaveDeps {
  * `session.nodeClaim()`; any explicit value — even one — wins outright, never mixed) →
  * `backend.save` → `capturePlanningPointer()` (best-effort thunk) → link the live session
  * (`apply({kind:"link-plan-ref"})` — append iff the ref differs) → refresh the session name
- * (best-effort thunk; the title is explicit-else-derived) → on a node-linked save whose
- * FULL claim identity matches (resolved objective + linked node), clear the claim
- * (`apply({kind:"clear-node-claim"})` — an unrelated claim is never clobbered). Never throws.
+ * (best-effort thunk; the title is explicit-else-derived) → on a node-linked save whose session
+ * link LANDED (`applied`/`unchanged`) and whose FULL claim identity matches (resolved objective +
+ * linked node), clear the claim (`apply({kind:"clear-node-claim"})` — an unrelated claim is never
+ * clobbered; a held link keeps the claim as the `/plan-save` retry's node-link carrier). Never
+ * throws.
  */
 export async function savePlan(
   input: {
@@ -167,8 +170,8 @@ export async function savePlan(
   deps.capturePlanningPointer();
 
   // Link the live session: the seam appends iff the rebuilt ref differs, with a strict
-  // read-back — verbatim into the outcome (the adapter's rendering ignores it; the append
-  // helper's report() stays the loudness channel).
+  // read-back — verbatim into the outcome (the adapter renders a held arm as repair guidance;
+  // the append helper's report() stays the immediate loudness channel).
   const linkage = deps.session.apply({ kind: "link-plan-ref", ref: saved.ref });
 
   // Refresh the session name (contracts.md §8.71(h)) — unconditional after the link attempt:
@@ -187,10 +190,16 @@ export async function savePlan(
 
   // A successful node-linked save clears the matching claim (best-effort — failure only risks
   // a stale claim silently linking a later, unrelated save; surfaced via the seam's loud
-  // report()). The FULL claim identity must match — the resolved objective AND the linked node
-  // — so a save linked to objective B node 1.1 never clears objective A's standing 1.1 claim.
+  // report() and the rendered repair guidance). The FULL claim identity must match — the
+  // resolved objective AND the linked node — so a save linked to objective B node 1.1 never
+  // clears objective A's standing 1.1 claim. The clear runs ONLY once the session link landed:
+  // on a held linkage (`rejected`/`unverified`) the claim is left standing deliberately — in a
+  // warm node-planning session it is the ONLY carrier the advertised `/plan-save` retry can
+  // recover the objective/node from (clearing it would make the retry re-save link-less). The
+  // stale-claim risk this trades for stays bounded by the full-identity match on every clear.
+  const linkLanded = linkage.status === "applied" || linkage.status === "unchanged";
   let claimClear: WorkflowChangeResult | null = null;
-  if (saved.nodeLink?.linked === true) {
+  if (saved.nodeLink?.linked === true && linkLanded) {
     const linkedNode = saved.nodeLink.node ?? nodeId ?? null;
     const claim = deps.session.nodeClaim();
     if (

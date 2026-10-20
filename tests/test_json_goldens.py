@@ -7,9 +7,18 @@ from the *pre-swap* hand-rolled builders, so a green run after the swap to ``Out
 proves the serialized keys stayed byte-identical.
 
 Regen all snapshots with ``PERK_UPDATE_GOLDEN=1 uv run pytest tests/test_json_goldens.py``.
+
+The ``plan_save*.json`` goldens are also the TypeScript consumer's cross-plane fixture:
+``extension/pi/v1/plan.test.ts`` decodes every ``plan_save*.json`` through ``decodePlanSave``,
+so a producer shape change fails that suite too — regenerate them here, never hand-edit them.
 """
 
+from typing import TYPE_CHECKING
+
 from _golden import assert_golden
+
+if TYPE_CHECKING:
+    from perk.cli.commands.plan.save_cmd import ObjectiveNodeLink
 
 # --- init report --------------------------------------------------------------------------
 
@@ -156,9 +165,9 @@ def _plan_ref():
     )
 
 
-def _plan_save_result(*, with_node: bool):
+def _plan_save_result(*, node: "ObjectiveNodeLink | None"):
     from perk.backends import issue_backend
-    from perk.cli.commands.plan.save_cmd import ObjectiveNodeLink, PlanSaveResult
+    from perk.cli.commands.plan.save_cmd import PlanSaveResult
 
     return PlanSaveResult(
         issue=issue_backend.IssueRef(
@@ -170,24 +179,31 @@ def _plan_save_result(*, with_node: bool):
         dry_run=False,
         cached=True,
         updated=False,
-        objective_node=(
-            ObjectiveNodeLink(linked=True, node="1.1", status="in_progress", error=None)
-            if with_node
-            else None
-        ),
+        objective_node=node,
     )
 
 
 def test_golden_plan_save_with_node() -> None:
-    from perk.cli.commands.plan.save_cmd import _result_to_dict
+    from perk.cli.commands.plan.save_cmd import ObjectiveNodeLink, _result_to_dict
 
-    assert_golden("plan_save", _result_to_dict(_plan_save_result(with_node=True)))
+    node = ObjectiveNodeLink(linked=True, node="1.1", status="in_progress", error=None)
+    assert_golden("plan_save", _result_to_dict(_plan_save_result(node=node)))
 
 
 def test_golden_plan_save_no_node() -> None:
     from perk.cli.commands.plan.save_cmd import _result_to_dict
 
-    assert_golden("plan_save_no_node", _result_to_dict(_plan_save_result(with_node=False)))
+    assert_golden("plan_save_no_node", _result_to_dict(_plan_save_result(node=None)))
+
+
+def test_golden_plan_save_node_link_failed() -> None:
+    """The producer's own reported reconciliation failure: saved, but the node NOT advanced."""
+    from perk.cli.commands.plan.save_cmd import ObjectiveNodeLink, _result_to_dict
+
+    node = ObjectiveNodeLink(
+        linked=False, node="1.1", status=None, error="objective store write failed: 502"
+    )
+    assert_golden("plan_save_node_link_failed", _result_to_dict(_plan_save_result(node=node)))
 
 
 # --- pr submit / ready / land / feedback / review-context ---------------------------------
