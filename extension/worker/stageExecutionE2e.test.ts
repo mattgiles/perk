@@ -13,10 +13,12 @@
 // classifier on the injected runtime and plant model-using tools plus Pi's real codemode, pinning
 // `budget.tokens` against Pi's own session census. The builtin-factory scenarios read the live
 // session on a real request: the worker's own `tool_search`/`codemode` builtins (activation,
-// opt-out, disable, replacement) and the absence of any MCP handler. The compaction and retry
-// scenarios drive the settings-following behavior on real sessions: an in-drive compaction counted
-// at its boundary, a project opt-out, a compaction that trips the token cap with no further
-// provider request, and retried, exhausted and non-retryable provider errors.
+// opt-out, disable, replacement) and its `mcp` builtin (project-only config, a direct and a
+// codemode-reached server, the disable, global files untouched, children on the real agent dir).
+// The compaction and retry scenarios drive the settings-following behavior on real sessions: an
+// in-drive compaction counted at its boundary, a project opt-out, a compaction that trips the
+// token cap with no further provider request, and retried, exhausted and non-retryable provider
+// errors.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -38,13 +40,17 @@ import {
   getCurrentTools,
   isRetryableAssistantError,
 } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { agentScratchDir, type PlanRef, runEventsPath } from "../substrate/cache.ts";
+import { readSessionPointers } from "../substrate/sessionPointers.ts";
 import {
   bareModelRuntime,
   fakePerkRouter,
   fauxModelRuntime,
+  mcpFixtureServer,
+  plantGlobalModelAuth,
   plantMcpRegistrar,
+  plantProjectMcpConfig,
   plantWorkerModelTools,
   plantWorkerProviderExtension,
   recordingClassifier,
@@ -136,6 +142,8 @@ async function runDrive(opts: {
   plantModelTools?: Parameters<typeof plantWorkerModelTools>[1];
   /** Plant arbitrary project files into the scaffolded worktree before the drive. */
   plant?: (cwd: string) => void;
+  /** Plant files into the drive's global agent dir (`PI_CODING_AGENT_DIR`) before the drive. */
+  plantGlobal?: (globalAgentDir: string) => void;
   /**
    * Called with the default faux runtime right after it is built (the `model`-absent path), so a
    * scenario can register its recording classifier on it before the drive.
@@ -173,6 +181,7 @@ async function runDrive(opts: {
   // factory's global-dir default) ever lands in the operator's real one.
   const globalAgentDir = mkdtempSync(join(tmpdir(), "perk-e2e-global-"));
   setEnv("PI_CODING_AGENT_DIR", globalAgentDir);
+  opts.plantGlobal?.(globalAgentDir);
 
   let request: WorkerModelRequest;
   let providerCalls = (): number => 0;
@@ -320,6 +329,74 @@ function captureStderr(t: TestContext): () => string[] {
   return () => spy.mock.calls.map((call) => call.arguments.map(String).join(" "));
 }
 
+/** The global agent-dir files the worker's MCP builtin must never read for config nor write. */
+const GLOBAL_MCP_GUARD_FILES = ["auth.json", "models.json", "mcp-auth.json", "mcp.json"] as const;
+
+/**
+ * Plant what an operator's real agent dir carries — model auth (`plantGlobalModelAuth`, plus any
+ * `extraCredentials` merged into its `auth.json`), an empty `mcp-auth.json`, and a global
+ * `mcp.json` declaring a direct `global_leak` fixture whose startup marker lives under the dir —
+ * then snapshot the bytes. `assertUntouched` proves the worker's MCP builtin never connected the
+ * global server and never wrote the dir: the four files byte-identical, no `mcp.log`, no marker.
+ */
+function globalMcpLeak(
+  auth: { provider: string; key: string },
+  extraCredentials: Record<string, string> = {},
+): { plant: (dir: string) => void; assertUntouched: () => void } {
+  const snapshot = new Map<string, Buffer>();
+  let root: string | undefined;
+  return {
+    plant: (dir) => {
+      root = dir;
+      plantGlobalModelAuth(dir, auth);
+      if (Object.keys(extraCredentials).length > 0) {
+        const stored = JSON.parse(readFileSync(join(dir, "auth.json"), "utf8")) as Record<
+          string,
+          unknown
+        >;
+        for (const [provider, key] of Object.entries(extraCredentials)) {
+          stored[provider] = { type: "api_key", key };
+        }
+        writeFileSync(join(dir, "auth.json"), `${JSON.stringify(stored, null, 2)}\n`, "utf8");
+      }
+      writeFileSync(join(dir, "mcp-auth.json"), "{}\n", "utf8");
+      const leak = mcpFixtureServer({
+        token: "global-leak",
+        exposure: "direct",
+        marker: join(dir, "global-leak-marker"),
+      });
+      writeFileSync(
+        join(dir, "mcp.json"),
+        `${JSON.stringify({ mcpServers: { global_leak: leak } }, null, 2)}\n`,
+        "utf8",
+      );
+      for (const name of GLOBAL_MCP_GUARD_FILES) snapshot.set(name, readFileSync(join(dir, name)));
+    },
+    assertUntouched: () => {
+      assert.ok(root, "the global agent dir was planted");
+      for (const [name, bytes] of snapshot) {
+        assert.ok(readFileSync(join(root, name)).equals(bytes), `global ${name} is byte-identical`);
+      }
+      assert.equal(existsSync(join(root, "mcp.log")), false, "no global mcp.log was written");
+      assert.equal(
+        existsSync(join(root, "global-leak-marker")),
+        false,
+        "the global mcp.json server was never spawned",
+      );
+    },
+  };
+}
+
+/** The stdio fixture's recorded calls (`<cwd>/mcp-fixture-calls.log`, one JSON line per call). */
+function fixtureCalls(cwd: string): { args: unknown; token?: string }[] {
+  const path = join(cwd, "mcp-fixture-calls.log");
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { args: unknown; token?: string });
+}
+
 // --- Scenario 1: implement HAPPY (the load-bearing assumption) ----------------------------------
 
 const implementHappyRoutes = {
@@ -347,13 +424,41 @@ function throwawayAgentDirs(): Set<string> {
   return new Set(readdirSync(tmpdir()).filter((name) => name.startsWith("perk-worker-agent-")));
 }
 
+/** The `perk-worker-agent-*` dirs that appeared since `before` (absolute paths). */
+function newThrowawayAgentDirs(before: Set<string>): string[] {
+  return [...throwawayAgentDirs()]
+    .filter((name) => !before.has(name))
+    .map((n) => join(tmpdir(), n));
+}
+
+/**
+ * The §8.35 worker pointer outlives the drive: the recorded session file still exists after
+ * `runStage` returned (the throwaway dir's removal never takes it along) and lives under the REAL
+ * agent dir — the drive's global dir, never a `perk-worker-agent-*` path.
+ */
+function assertWorkerSessionPointer(result: {
+  cwd: string;
+  runId: string;
+  globalAgentDir: string;
+}): void {
+  const file = readSessionPointers(result.cwd, result.runId)?.implementation.worker?.session_file;
+  assert.ok(file, "the worker recorded its implementation session pointer");
+  assert.ok(existsSync(file), `the recorded session file survives the drive: ${file}`);
+  assert.ok(
+    file.startsWith(result.globalAgentDir),
+    `the session file lives under the real agent dir: ${file}`,
+  );
+}
+
 test("e2e: implement HAPPY — faux model calls submit → completed/submit_tool + full event stream", async () => {
   const dirsBefore = throwawayAgentDirs();
-  const { outcome, events, cwd, runId } = await runDrive({
+  const result = await runDrive({
     stage: "implement",
     routes: implementHappyRoutes,
     responses: implementHappyResponses(),
   });
+  const { outcome, events, cwd, runId } = result;
+  assertWorkerSessionPointer(result);
 
   // The dispose-time removal: the drive's throwaway agentDir no longer exists afterwards (no
   // NEW perk-worker-agent-* entry survives the drive; pre-existing entries are outside scope).
@@ -461,12 +566,14 @@ test("e2e: address HAPPY — finalize_address ok → completed/address_resolved"
 // --- Scenario 3: implement PREMATURE-IDLE ------------------------------------------------------
 
 test("e2e: implement PREMATURE-IDLE — model goes idle without submit → failed/agent_idle_incomplete", async () => {
-  const { outcome, events } = await runDrive({
+  const result = await runDrive({
     stage: "implement",
     responses: [
       fauxAssistantMessage([fauxText("I looked but did nothing")], { stopReason: "stop" }),
     ],
   });
+  const { outcome, events } = result;
+  assertWorkerSessionPointer(result);
 
   assert.equal(outcome.status, "failed");
   assert.equal(outcome.terminal_signal, "agent_idle_incomplete");
@@ -574,7 +681,7 @@ test("e2e: NO-EXTENSION-TOOLS — empty packages list → zero-turn failed/no_ex
 
 test("e2e: EXTERNAL-ABORT — a mid-drive abort ends the real session → aborted/external_abort", async () => {
   const controller = new AbortController();
-  const { outcome, events } = await runDrive({
+  const result = await runDrive({
     stage: "implement",
     responses: [
       fauxAssistantMessage([fauxToolCall("read", { path: ".pi/settings.json" })], {
@@ -589,6 +696,8 @@ test("e2e: EXTERNAL-ABORT — a mid-drive abort ends the real session → aborte
       if (event.kind === "tool_outcome") controller.abort();
     },
   });
+  const { outcome, events } = result;
+  assertWorkerSessionPointer(result);
 
   assert.equal(outcome.status, "aborted");
   assert.equal(outcome.terminal_signal, "external_abort");
@@ -863,16 +972,19 @@ test("e2e: the real worker entry admits the installed SDK and drives to completi
   // SDK): the entry admits it, links the seam, and the explicit `--model` drive completes. A PATH
   // `pi` printing a below-floor version and a bogus CLI stamp change nothing — the worker reads
   // only the SDK it loaded. Minimal env: no operator credentials; the provider key lives in the
-  // scratch agent dir's auth.json, read by the production `ModelRuntime.create()`.
+  // scratch agent dir's auth.json, read by the production `ModelRuntime.create()`. That dir also
+  // carries a global `mcp.json`/`mcp-auth.json`; the worker's MCP builtin connects only the
+  // project's server and leaves every global file untouched.
   const runId = `01JE2E${String(runCounter++).padStart(20, "0")}`;
   const cwd = scaffoldWorkerWorktree({ runId, stage: "implement" });
   plantWorkerProviderExtension(cwd, extProviders());
+  const projectMarker = join(cwd, "mcp-fixture-marker");
+  plantProjectMcpConfig(cwd, {
+    fixture: mcpFixtureServer({ token: "cold", exposure: "direct", marker: projectMarker }),
+  });
   const agentDir = mkdtempSync(join(tmpdir(), "perk-e2e-global-"));
-  writeFileSync(
-    join(agentDir, "auth.json"),
-    `${JSON.stringify({ [EXT_PROVIDER]: { type: "api_key", key: "k" } })}\n`,
-    "utf8",
-  );
+  const global = globalMcpLeak({ provider: "e2e-cold", key: "c" }, { [EXT_PROVIDER]: "k" });
+  global.plant(agentDir);
   const bin = mkdtempSync(join(tmpdir(), "perk-e2e-bin-"));
   writeFileSync(join(bin, "pi"), "#!/bin/sh\necho 0.0.1\n", "utf8");
   chmodSync(join(bin, "pi"), 0o755);
@@ -919,6 +1031,8 @@ test("e2e: the real worker entry admits the installed SDK and drives to completi
     readdirSync(childTmp).filter((name) => name.startsWith("perk-worker-agent-")),
     [],
   );
+  assert.equal(existsSync(projectMarker), true, "the project's MCP server was spawned");
+  global.assertUntouched();
 });
 
 test("e2e: a virtual model routes to a physical target with a different identity → completed", async () => {
@@ -1466,11 +1580,13 @@ test("e2e: PRODUCTION SHAPE — the worker's own builtin codemode (models:WORKER
   assertAccounted(result, runtime);
 });
 
-// --- Pi's builtin factories in the worker: discovery, codemode, and no MCP -----------------------
+// --- Pi's builtin factories in the worker: discovery, codemode, and MCP -------------------------
 //
-// The worker supplies Pi's `codemode` and `tool-search` builtins (CLI identity) beside its policy
-// extension; configuration alone decides activation. Every live-session fact is read inside a
-// scripted reply (`observeLive`), before `runStage` disposes the runtime.
+// The worker supplies Pi's `codemode`, `tool-search` and `mcp` builtins (CLI identity) beside its
+// policy extension; configuration alone decides activation. Every live-session fact is read inside
+// a scripted reply (`observeLive`), before `runStage` disposes the runtime. The MCP scenarios
+// connect the committed stdio fixture (`mcpStdioFixture.ts`) from the project's `.pi/mcp.json`
+// and plant a global `mcp.json`/`mcp-auth.json` the worker must never touch (`globalMcpLeak`).
 
 /** The discovery family members eligible in the drivable read-write stages. */
 const FAMILY = ["collect_review_wave", "push_annotations", "objective_stack_status"];
@@ -1566,21 +1682,207 @@ test("e2e: -builtin:<name> disables a worker builtin — neither loads, even whe
   assertAccounted(result, observed.runtime());
 });
 
-test("e2e: the worker loads no builtin:mcp — .pi/mcp.json is inert and a project registerMcpServer is reported, never connected", async (t) => {
+const BUILTIN_MCP = { path: "builtin:mcp", source: "builtin" };
+
+/** A direct call of the stdio fixture's `echo` tool as the project's `fixture` server. */
+const mcpEchoCall = (text: string) =>
+  fauxAssistantMessage([fauxToolCall("mcp__fixture__echo", { text })], {
+    stopReason: "toolUse" as const,
+  });
+
+test("e2e: builtin:mcp connects the project's .pi/mcp.json — a direct server is declared and called; its log lands in the throwaway dir; nothing global is read or written", async (t) => {
   const stderr = captureStderr(t);
   const observed = observeAccounting();
   const live = observeLive();
-  const server = { command: process.execPath, args: ["-e", "process.exit(0)"] };
+  const global = globalMcpLeak({ provider: "e2e-global", key: "g" });
+  const dirsBefore = throwawayAgentDirs();
+  let configPath = "";
+  let throwawayLogs: string[] = [];
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      live.at(mcpEchoCall("x")),
+      // Read mid-drive: the throwaway dir is removed at dispose.
+      async () => {
+        throwawayLogs = newThrowawayAgentDirs(dirsBefore).flatMap((dir) => {
+          const log = join(dir, "mcp.log");
+          return existsSync(log) ? [readFileSync(log, "utf8")] : [];
+        });
+        return submitCall();
+      },
+      idle(),
+    ],
+    plant: (cwd) => {
+      configPath = plantProjectMcpConfig(cwd, {
+        fixture: mcpFixtureServer({ token: "s3cret", exposure: "direct" }),
+        bad: { command: process.execPath, args: "not-an-array" },
+      });
+      plantMcpRegistrar(cwd);
+    },
+    plantGlobal: global.plant,
+    onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
+  });
+  const first = live.first();
+  assert.ok(first.extensionPaths.includes("builtin:mcp"), "the worker loads its MCP builtin");
+  assert.deepEqual(first.tools.get("mcp__fixture__echo"), BUILTIN_MCP);
+  assert.ok(first.declared.includes("mcp__fixture__echo"), "direct: declared on request 1");
+  assert.deepEqual(
+    [...first.tools.keys()].filter((name) => name.startsWith("mcp__global_leak")),
+    [],
+    "the global mcp.json server never registered",
+  );
+  const echo = result.events.find(
+    (e) => e.kind === "tool_outcome" && e.tool === "mcp__fixture__echo",
+  );
+  assert.ok(echo?.kind === "tool_outcome" && echo.ok, "the MCP call succeeded");
+  assert.deepEqual(
+    fixtureCalls(result.cwd).map((call) => [call.args, call.token]),
+    [[{ text: "x" }, "s3cret"]],
+    "the fixture ran the call, launched with the project entry's env",
+  );
+  assert.equal(throwawayLogs.length, 1, "exactly one throwaway dir carries an mcp.log");
+  assert.match(throwawayLogs[0] ?? "", /\[fixture\] info echo/, "the server log went there");
+  global.assertUntouched();
+  const configErrors = stderr().filter((line) =>
+    line.startsWith("perk worker: mcp config error — "),
+  );
+  assert.equal(configErrors.length, 1, JSON.stringify(configErrors));
+  assert.ok(
+    configErrors[0]?.startsWith(`perk worker: mcp config error — ${configPath}: `),
+    configErrors[0],
+  );
+  assert.ok(
+    configErrors[0]?.includes('server "bad": args must be an array of strings'),
+    configErrors[0],
+  );
+  assert.ok(
+    !stderr().some((line) => line.includes("register_mcp_server")),
+    "the project registration is connected by the builtin, not reported",
+  );
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assertAccounted(result, observed.runtime());
+});
+
+test("e2e: a default-exposure project server is reached from the worker's builtin codemode, which Pi's autoEnableCodemode activates", async () => {
+  const observed = observeAccounting();
+  const live = observeLive();
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      live.at(codemodeCall('return await tools.mcp__fixture__echo({ text: "y" });')),
+      submitCall(),
+      idle(),
+    ],
+    plant: (cwd) => {
+      plantProjectMcpConfig(cwd, { fixture: mcpFixtureServer({ token: "c0dem0de" }) });
+    },
+    onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
+  });
+  const first = live.first();
+  assert.deepEqual(first.tools.get("codemode"), BUILTIN_CODEMODE);
+  assert.ok(first.declared.includes("codemode"), "no defaultTools: Pi's MCP builtin activated it");
+  assert.ok(!first.declared.includes("mcp__fixture__echo"), "codemode exposure: never declared");
+  const outcomes = codemodeOutcomes(result.events);
+  assert.deepEqual(
+    outcomes.map((o) => o.ok),
+    [true],
+    JSON.stringify(outcomes.map((o) => o.summary)),
+  );
+  assert.deepEqual(
+    fixtureCalls(result.cwd).map((call) => [call.args, call.token]),
+    [[{ text: "y" }, "c0dem0de"]],
+  );
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assertAccounted(result, observed.runtime());
+});
+
+test("e2e: child-auth stand-ins — mid-drive, a subagent child's in-process and background construction calls resolve the REAL agent dir and its auth", async () => {
+  // Stand-ins, not a live worker-spawned child: the exact calls pi-subagents makes —
+  // `ModelRuntime.create()` + `getAgentDir()` in-process, and a fresh process inheriting the
+  // worker's env — run while the worker session lives. The throwaway dir holds no model auth, so a
+  // child that resolved it would see the provider unconfigured.
+  const CHILD = "e2e-child";
+  const dirsBefore = throwawayAgentDirs();
+  const sdkEntry = import.meta.resolve("@earendil-works/pi-coding-agent");
+  const script =
+    `const sdk = await import(${JSON.stringify(sdkEntry)});\n` +
+    "const runtime = await sdk.ModelRuntime.create();\n" +
+    `process.stdout.write(JSON.stringify({ agentDir: sdk.getAgentDir(), configured: runtime.hasConfiguredAuth(${JSON.stringify(CHILD)}) }));\n`;
+  type ChildReport = { agentDir: string; configured: boolean };
+  const reports: { path: string; report: ChildReport | undefined; detail: string }[] = [];
+  let throwaway: { dir: string; files: string[] }[] = [];
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      async () => {
+        const runtime = await ModelRuntime.create();
+        reports.push({
+          path: "in-process",
+          report: { agentDir: getAgentDir(), configured: runtime.hasConfiguredAuth(CHILD) },
+          detail: "",
+        });
+        const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+          env: process.env,
+          encoding: "utf8",
+          timeout: 60_000,
+        });
+        reports.push({
+          path: "background",
+          report: child.status === 0 ? (JSON.parse(child.stdout) as ChildReport) : undefined,
+          detail: child.stderr,
+        });
+        throwaway = newThrowawayAgentDirs(dirsBefore).map((dir) => ({
+          dir,
+          files: readdirSync(dir),
+        }));
+        return submitCall();
+      },
+      idle(),
+    ],
+    plantGlobal: (dir) => plantGlobalModelAuth(dir, { provider: CHILD, key: "child-key" }),
+  });
+  assert.equal(result.outcome.status, "completed");
+  assert.deepEqual(
+    reports.map((r) => r.path),
+    ["in-process", "background"],
+  );
+  for (const { path, report, detail } of reports) {
+    assert.ok(report, `${path}: the child stand-in reported (${detail})`);
+    assert.equal(report.agentDir, result.globalAgentDir, `${path}: the real agent dir`);
+    assert.ok(!report.agentDir.includes("perk-worker-agent-"), `${path}: never the throwaway`);
+    assert.equal(report.configured, true, `${path}: the provider's auth.json credential resolves`);
+  }
+  assert.ok(throwaway.length > 0, "the drive's throwaway dir existed mid-drive");
+  for (const { dir, files } of throwaway) {
+    assert.ok(
+      !files.includes("auth.json") && !files.includes("models.json"),
+      `the discriminating control: ${dir} holds no model auth (${files.join(", ")})`,
+    );
+  }
+});
+
+test("e2e: -builtin:mcp disables the worker's MCP builtin — nothing connects and a project registerMcpServer is reported", async (t) => {
+  const stderr = captureStderr(t);
+  const observed = observeAccounting();
+  const live = observeLive();
+  let marker = "";
   const result = await runDrive({
     stage: "implement",
     routes: implementHappyRoutes,
     responses: [live.at(submitCall()), idle()],
+    extraSettings: { extensions: ["-builtin:mcp"] },
     plant: (cwd) => {
-      writeFileSync(
-        join(cwd, ".pi", "mcp.json"),
-        `${JSON.stringify({ mcpServers: { inert_file: server } }, null, 2)}\n`,
-        "utf8",
-      );
+      marker = join(cwd, "mcp-fixture-marker");
+      plantProjectMcpConfig(cwd, {
+        fixture: mcpFixtureServer({ token: "off", exposure: "direct", marker }),
+      });
       plantMcpRegistrar(cwd);
     },
     onRuntime: observed.onRuntime,
@@ -1588,9 +1890,8 @@ test("e2e: the worker loads no builtin:mcp — .pi/mcp.json is inert and a proje
   });
   const first = live.first();
   // The positive floor proves the census surface lists builtins at all.
-  assert.ok(first.extensionPaths.includes("builtin:tool-search"));
   assert.ok(first.extensionPaths.includes("builtin:codemode"));
-  assert.ok(!first.extensionPaths.includes("builtin:mcp"), "the worker supplies no MCP factory");
+  assert.ok(!first.extensionPaths.includes("builtin:mcp"), "disabled: not loaded");
   assert.ok(
     first.extensionPaths.some((path) => path.endsWith("worker-mcp-registrar.ts")),
     "the registrar loaded",
@@ -1600,11 +1901,7 @@ test("e2e: the worker loads no builtin:mcp — .pi/mcp.json is inert and a proje
     [],
     "no MCP tool is registered",
   );
-  assert.deepEqual(
-    first.declared.filter((name) => name.startsWith("mcp__")),
-    [],
-    "no MCP tool is declared",
-  );
+  assert.equal(existsSync(marker), false, "the project server was never spawned");
   const reports = stderr().filter((line) => line.startsWith("perk worker: extension error — "));
   assert.ok(
     reports.some((line) =>
@@ -1618,7 +1915,7 @@ test("e2e: the worker loads no builtin:mcp — .pi/mcp.json is inert and a proje
   assert.equal(result.outcome.status, "completed");
   assert.equal(result.outcome.terminal_signal, "submit_tool");
   for (const name of ["mcp.log", "mcp-auth.json"]) {
-    assert.equal(existsSync(join(result.globalAgentDir, name)), false, `no ${name} was written`);
+    assert.equal(existsSync(join(result.globalAgentDir, name)), false, `no global ${name}`);
   }
   assertAccounted(result, observed.runtime());
 });
