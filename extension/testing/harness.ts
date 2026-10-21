@@ -1484,6 +1484,22 @@ export async function recordingRuntime() {
         record(stop),
       ]);
     },
+    /**
+     * Script a turn that makes each call in order (one model response per call, each under its
+     * own id), then stops.
+     */
+    callsThenStop(
+      calls: readonly { tool: string; args: Parameters<typeof fauxToolCall>[1]; id: string }[],
+    ) {
+      reg.setResponses([
+        ...calls.map(({ tool, args, id }) =>
+          record(() =>
+            fauxAssistantMessage([fauxToolCall(tool, args, { id })], { stopReason: "toolUse" }),
+          ),
+        ),
+        record(stop),
+      ]);
+    },
     last: (): RecordedRequest => {
       const request = requests.at(-1);
       assert.ok(request !== undefined, "a model request was made");

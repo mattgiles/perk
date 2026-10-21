@@ -1,6 +1,6 @@
 // The live tool catalog's F1 guards (contracts.md §8.3/§8.40): every terminal / interactive /
-// orchestration tool is declared `model-only`, so `ctx.executeTool()` can never reach a
-// `terminate: true` result; the `kind: terminal` set is pinned AND kept honest by a
+// orchestration tool — and every carve-out writer — is declared `model-only`, so
+// `ctx.executeTool()` can never reach a `terminate: true` result or a bounded write; the `kind: terminal` set is pinned AND kept honest by a
 // per-registration source scan (a reviewed-set guard, not a proof: a non-terminal registration
 // that terminates through a helper absent from TERMINATING_ENTRY_POINTS, without the token in
 // its span, is undetected — the structural half is `kind → model-only`). Real sessions, no fakes.
@@ -25,6 +25,14 @@ const PI_V1 = join(import.meta.dirname, "v1");
 before(ensureToolCatalog);
 
 const MODEL_ONLY_KINDS = new Set(["terminal", "interactive", "orchestration", "host"]);
+
+/** Model-only iff a model-only kind or a carve-out writer (declared, never script-callable). */
+function isModelOnly(name: string): boolean {
+  const policy = perkToolPolicy(name);
+  return (
+    policy !== undefined && (MODEL_ONLY_KINDS.has(policy.kind) || typeof policy.gated === "object")
+  );
+}
 
 const TERMINAL_TOOLS = [
   "plan_review",
@@ -179,7 +187,7 @@ function terminateMismatches(scanned: ScannedRegistration[]): string[] {
 
 // --- the census -------------------------------------------------------------------------------
 
-test("exposure census: model-only iff terminal/interactive/orchestration/host; readOnlyHint iff not blocked", async () => {
+test("exposure census: model-only iff terminal/interactive/orchestration/host or a carve-out writer; readOnlyHint iff not blocked", async () => {
   const h = await loadPerkSessionAt(scaffoldRepo());
   try {
     for (const name of perkToolNames()) {
@@ -188,7 +196,9 @@ test("exposure census: model-only iff terminal/interactive/orchestration/host; r
       assert.ok(policy !== undefined && info !== null, name);
       assert.equal(
         info.exposure,
-        MODEL_ONLY_KINDS.has(policy.kind) ? "model-only" : "direct",
+        MODEL_ONLY_KINDS.has(policy.kind) || typeof policy.gated === "object"
+          ? "model-only"
+          : "direct",
         `${name} (${policy.kind})`,
       );
       assert.deepEqual(
@@ -298,7 +308,9 @@ function nestedProbe(targets: readonly string[], outcomes: Map<string, Outcome>)
 
 for (const mode of ["on", "only"] as const) {
   test(`nested-runner probe (codemode ${mode}): model-only perk tools are declared but never callable`, async () => {
-    const targets = ["submit", "plan_review", "run_scout_wave"];
+    // A bounded writer (`plan_draft`, a carve-out) answers not-found exactly like the model-only
+    // kinds: agent-core refuses it before any hook.
+    const targets = ["submit", "plan_review", "run_scout_wave", "plan_draft"];
     const outcomes = new Map<string, Outcome>();
     const reg = await fauxModelRuntime();
     const h = await loadPerkSessionAt(scaffoldRepo(), {
@@ -323,16 +335,18 @@ for (const mode of ["on", "only"] as const) {
       }
       const active = h.session.getActiveToolNames();
       const callable = new Set(h.session.getCallableToolNames());
-      const modelOnly = perkToolNames().filter((name) =>
-        MODEL_ONLY_KINDS.has(perkToolPolicy(name)?.kind ?? ""),
+      const modelOnly = perkToolNames().filter(isModelOnly);
+      const carveOuts = perkToolNames().filter(
+        (name) => typeof perkToolPolicy(name)?.gated === "object",
       );
+      assert.ok(carveOuts.includes("plan_draft") && carveOuts.every((n) => modelOnly.includes(n)));
       for (const name of targets) assert.ok(active.includes(name), `${name} is active (declared)`);
       assert.deepEqual(
         modelOnly.filter((name) => callable.has(name)),
         [],
-        "no model-only perk tool is callable",
+        "no model-only perk tool (no carve-out writer) is callable",
       );
-      assert.ok(callable.has("plan_draft"), "an action perk tool stays callable");
+      assert.ok(callable.has("run_ci"), "a non-writer action perk tool stays callable");
     } finally {
       h.dispose();
     }

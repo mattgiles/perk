@@ -14,6 +14,7 @@ import {
   deriveOutputSchema,
   derivePiMetadata,
   discoveryFamily,
+  type GateLanding,
   GIST_STAGES,
   gatedToolsFor,
   gateSuspends,
@@ -36,12 +37,14 @@ import {
   perkToolPolicy,
   perkToolsFor,
   postureFor,
+  READ_ONLY_STAGES,
   REGISTRY_STAGE_IDS,
   reconcileTarget,
   recordPerkTool,
   SYNTHETIC_PATH_TOOL_POLICY,
   sameNames,
   stageToolsFor,
+  strandedWriters,
   suspensionStep,
   type ToolPolicy,
   toolMatrix,
@@ -89,6 +92,23 @@ test("stage families: every member is a registry id; the worktree family is the 
   for (const id of PLANNING_READ_STAGES) assert.equal(modes.get(id), "read-only", id);
   for (const id of PLANNING_READ_STAGES) assert.ok(!WORKTREE_STAGES.includes(id), id);
   assert.ok(!PLANNING_READ_STAGES.includes("objective-author"));
+  // The lift family: every registry read-only stage, registry order — the planning family inside.
+  assert.deepEqual(
+    READ_ONLY_STAGES,
+    loadRegistry()
+      .stages.filter((s) => s.mode === "read-only")
+      .map((s) => s.id),
+  );
+  assert.deepEqual(READ_ONLY_STAGES, [
+    "gist-author",
+    "objective-author",
+    "objective-plan",
+    "plan",
+    "audit",
+    "objective-refine",
+  ]);
+  for (const id of PLANNING_READ_STAGES) assert.ok(READ_ONLY_STAGES.includes(id), id);
+  for (const id of READ_ONLY_STAGES) assert.ok(!WORKTREE_STAGES.includes(id), id);
 });
 
 test("derivePiMetadata: terminal/interactive/orchestration/host are model-only; readOnlyHint iff not blocked", () => {
@@ -129,6 +149,15 @@ test("derivePiMetadata: terminal/interactive/orchestration/host are model-only; 
     derivePiMetadata({ ...base, kind: "orchestration", gated: { carveOut: "one file" } }),
     { exposure: "model-only", annotations: { readOnlyHint: true } },
   );
+  // A bounded writer (an action carve-out) is model-only: declared, never script-callable — in
+  // and out of the cohort alike.
+  for (const options of [{}, { cohort: true }, { cohort: false }]) {
+    assert.deepEqual(
+      derivePiMetadata({ ...base, kind: "action", gated: { carveOut: "one file" } }, options),
+      { exposure: "model-only", annotations: { readOnlyHint: true } },
+      JSON.stringify(options),
+    );
+  }
 });
 
 test("derivePiMetadata: a query with declared success details gets the ok-discriminated outputSchema envelope", () => {
@@ -890,7 +919,7 @@ test("toolMatrix: perk + builtin rows, the postures section, sorted eligibility,
     nested: "blocked",
     mode_over_stage: false,
     declared: "always",
-    exposure: "direct",
+    exposure: "model-only",
   });
   assert.equal(m.tools.tt_allowed?.nested, "allowed");
   assert.equal(m.tools.tt_model_only?.nested, "blocked");
@@ -900,12 +929,23 @@ test("toolMatrix: perk + builtin rows, the postures section, sorted eligibility,
     nested: "verdict",
     registrar: "core",
   });
+  // The suspended row carries its lift: the read-only stages, and per stage the writers that keep
+  // `only` suspended (the two mode-over-stage direct actions; the family is all queries here).
+  const stranded = Object.fromEntries(
+    READ_ONLY_STAGES.map((stage) => [stage, ["tt_over", "tt_over_blocked"]]),
+  );
   assert.deepEqual(m.tools.codemode, {
     owner: "builtin",
     gated: "blocked",
     nested: "blocked",
     registrar: "extension",
+    suspended: {
+      lifted_in: [...READ_ONLY_STAGES],
+      stranded_writers: { nonparticipant: stranded, cohort: stranded },
+    },
   });
+  for (const name of ["read", "edit", "tool_search"])
+    assert.equal("suspended" in (m.tools[name] ?? {}), false, name);
   assert.deepEqual(m.tools.tool_search, {
     owner: "builtin",
     gated: "allowed",
@@ -1045,4 +1085,215 @@ test("gate suspension: only the builtin-sourced codemode; suspended while read-o
   );
   assert.equal(sameNames(["a", "b"], ["b", "a", "a"]), true);
   assert.equal(sameNames(["a"], ["a", "b"]), false);
+});
+
+// --- the codemode lift (contracts.md §8.40) -------------------------------------------------------
+//
+
+test("strandedWriters: a registered, gate-eligible, direct, nested-blocked perk tool — catalog order", () => {
+  // Recorded inside the test (top-level records run before every test): a gate-allowed direct
+  // action that is NOT mode-over-stage, stranded exactly where it is staged.
+  recordPerkTool("tt_allowed_action", { stages: ["plan"], gated: "allowed", kind: "action" });
+  const only = (names: readonly string[]) => ({ registered: names });
+  // A registered gate-allowed direct action strands where it is gate-eligible…
+  assert.deepEqual(strandedWriters("plan", only(["tt_allowed_action"])), ["tt_allowed_action"]);
+  assert.deepEqual(strandedWriters("implement", only(["tt_allowed_action"])), []);
+  // …but not when this activation deferred it, nor when the host never registered it.
+  assert.deepEqual(
+    strandedWriters("plan", { ...only(["tt_allowed_action"]), deferred: ["tt_allowed_action"] }),
+    [],
+  );
+  assert.deepEqual(strandedWriters("plan", only([])), []);
+  assert.deepEqual(strandedWriters("plan", only(["read", "codemode"])), []);
+  // A carve-out (model-only), a gate-eligible query, a model-only kind and a gate-blocked action
+  // never strand.
+  for (const [name, stage] of [
+    ["tt_carve", "plan"],
+    ["tt_carve", "objective-refine"],
+    ["tt_allowed", "plan"],
+    ["tt_allowed_wide", "objective-plan"],
+    ["tt_deferred", "plan"],
+    ["tt_model_only", "plan"],
+    ["tt_blocked", "implement"],
+  ] as const) {
+    assert.deepEqual(strandedWriters(stage, only([name])), [], `${name} @ ${stage}`);
+  }
+  // A mode-over-stage gate-allowed action strands in every known stage.
+  for (const stage of REGISTRY_STAGE_IDS)
+    assert.deepEqual(strandedWriters(stage, only(["tt_over"])), ["tt_over"], stage);
+  // No `registered` fact → the whole catalog is a candidate, in catalog order.
+  assert.deepEqual(
+    strandedWriters("plan"),
+    perkToolNames().filter((n) => ["tt_over", "tt_over_blocked", "tt_allowed_action"].includes(n)),
+  );
+  assert.deepEqual(strandedWriters("implement"), ["tt_over", "tt_over_blocked"]);
+});
+
+test("the codemode lift: eligible under the gate only in a read-only stage with mode on, or only without a stranded writer", () => {
+  const codemode = BUILTIN("codemode");
+  const noWriters = { registered: ["read", "bash", "codemode", "tt_allowed", "tt_carve"] };
+  for (const stage of [...REGISTRY_STAGE_IDS, null, "no-such-stage"]) {
+    const readOnlyStage = stage !== null && READ_ONLY_STAGES.includes(stage);
+    const at = `${stage}`;
+    // No landing (or no codemode fact): suspended everywhere, as before.
+    assert.equal(isEligible("codemode", codemode, stage, "read-only"), false, at);
+    assert.equal(isEligible("codemode", codemode, stage, "read-only", noWriters), false, at);
+    // Mode on: lifted in exactly the read-only stages.
+    assert.equal(
+      isEligible("codemode", codemode, stage, "read-only", { codemode: "on" }),
+      readOnlyStage,
+      `${at} on`,
+    );
+    // Mode only: lifted there iff no stranded writer among the registered names.
+    assert.equal(
+      isEligible("codemode", codemode, stage, "read-only", { codemode: "only" }),
+      false,
+      `${at} only, the whole catalog (tt_over strands)`,
+    );
+    assert.equal(
+      isEligible("codemode", codemode, stage, "read-only", { codemode: "only", ...noWriters }),
+      readOnlyStage,
+      `${at} only, no writer registered`,
+    );
+    assert.equal(
+      isEligible("codemode", codemode, stage, "read-only", {
+        codemode: "only",
+        registered: [...noWriters.registered, "tt_over"],
+      }),
+      false,
+      `${at} only, a stranded writer registered`,
+    );
+    // Read-write: eligible whatever the landing.
+    assert.equal(isEligible("codemode", codemode, stage, "read-write"), true, at);
+    // The other builtins ignore the landing; a foreign namesake never lifts.
+    const landings: GateLanding[] = [{}, { codemode: "on" }, { codemode: "only", ...noWriters }];
+    for (const landing of landings) {
+      assert.equal(isEligible("read", BUILTIN("read"), stage, "read-only", landing), true);
+      assert.equal(isEligible("edit", BUILTIN("edit"), stage, "read-only", landing), false);
+      assert.equal(isEligible("write", BUILTIN("write"), stage, "read-only", landing), false);
+      assert.equal(
+        isEligible("tool_search", BUILTIN("tool_search"), stage, "read-only", landing),
+        true,
+      );
+      assert.equal(
+        isEligible("codemode", pkg("npm:some-codemode"), stage, "read-only", landing),
+        false,
+        `${at}: a foreign namesake`,
+      );
+    }
+  }
+  // An unscoped `only` lifts nowhere even with nothing stranded; the stage normalizes first.
+  assert.equal(
+    isEligible("codemode", codemode, "constructor", "read-only", { codemode: "on" }),
+    false,
+  );
+  // The perk arms ignore the landing.
+  for (const landing of [{}, { codemode: "on" as const }])
+    assert.equal(isEligible("tt_blocked", undefined, "implement", "read-only", landing), false);
+});
+
+test("the codemode lift in the suspension step: a lifted landing suspends nothing and consumes the memo; a non-lifted one keeps today's rows", () => {
+  const infos = new Map<string, Provenance>([
+    ["codemode", BUILTIN("codemode")],
+    ["edit", BUILTIN("edit")],
+  ]);
+  const on = { codemode: "on" as const };
+  assert.equal(gateSuspends("codemode", BUILTIN("codemode"), "plan", on), false);
+  assert.equal(gateSuspends("codemode", BUILTIN("codemode"), "plan"), true);
+  assert.equal(gateSuspends("codemode", BUILTIN("codemode"), "implement", on), true);
+  assert.equal(gateSuspends("codemode", BUILTIN("codemode"), null, on), true);
+  assert.equal(gateSuspends("codemode", pkg("npm:some-codemode"), "plan", on), false);
+  assert.equal(gateSuspends("edit", BUILTIN("edit"), "plan", on), false);
+  // A lifted landing switches nothing off and remembers nothing.
+  assert.deepEqual(
+    suspensionStep({ active: ["edit", "codemode"], infos }, "read-only", [], "plan", on),
+    { active: ["edit", "codemode"], suspended: [] },
+  );
+  // It restores an inactive remembered codemode exactly once and drops it from the memo…
+  const restored = suspensionStep(
+    { active: ["edit"], infos },
+    "read-only",
+    ["codemode"],
+    "plan",
+    on,
+  );
+  assert.deepEqual(restored, { active: ["edit", "codemode"], suspended: [] });
+  assert.deepEqual(
+    suspensionStep({ active: restored.active, infos }, "read-only", restored.suspended, "plan", on),
+    { active: ["edit", "codemode"], suspended: [] },
+    "never twice",
+  );
+  // …drops an already-active remembered codemode from the memo without changing the set…
+  assert.deepEqual(
+    suspensionStep({ active: ["edit", "codemode"], infos }, "read-only", ["codemode"], "plan", on),
+    { active: ["edit", "codemode"], suspended: [] },
+  );
+  // …and once consumed, a later deactivation is never undone (eligibility alone activates nothing).
+  assert.deepEqual(suspensionStep({ active: ["edit"], infos }, "read-only", [], "plan", on), {
+    active: ["edit"],
+    suspended: [],
+  });
+  // `only` lifts by the stranded-writer rule over the registered names.
+  const onlyClear = { codemode: "only" as const, registered: ["edit", "codemode"] };
+  assert.deepEqual(
+    suspensionStep({ active: ["edit", "codemode"], infos }, "read-only", [], "audit", onlyClear),
+    { active: ["edit", "codemode"], suspended: [] },
+  );
+  assert.deepEqual(
+    suspensionStep({ active: ["edit", "codemode"], infos }, "read-only", [], "audit", {
+      codemode: "only",
+    }),
+    { active: ["edit"], suspended: ["codemode"] },
+    "the whole catalog strands tt_over",
+  );
+  // A non-lifted landing keeps today's rows: switched off and remembered.
+  for (const [stage, landing] of [
+    ["implement", on],
+    [null, on],
+    ["plan", {}],
+  ] as const) {
+    assert.deepEqual(
+      suspensionStep({ active: ["edit", "codemode"], infos }, "read-only", [], stage, landing),
+      { active: ["edit"], suspended: ["codemode"] },
+      `${stage}`,
+    );
+  }
+  // An unregistered remembered name is retained untouched.
+  const bare = new Map<string, Provenance>([["edit", BUILTIN("edit")]]);
+  assert.deepEqual(
+    suspensionStep({ active: ["edit"], infos: bare }, "read-only", ["codemode"], "plan", on),
+    { active: ["edit"], suspended: ["codemode"] },
+  );
+  // The read-write arm is unchanged by any landing.
+  assert.deepEqual(
+    suspensionStep({ active: ["edit"], infos }, "read-write", ["codemode"], "plan", on),
+    { active: ["edit", "codemode"], suspended: [] },
+  );
+  assert.deepEqual(
+    suspensionStep({ active: ["edit", "codemode"], infos }, "read-write", ["codemode"], "plan", on),
+    { active: ["edit", "codemode"], suspended: [] },
+  );
+});
+
+test("the codemode lift in presentation: hiddenDeclarationsFor declares a lifted codemode and hides it otherwise", () => {
+  const infos = new Map<string, Provenance>([
+    ["read", BUILTIN("read")],
+    ["edit", BUILTIN("edit")],
+    ["codemode", BUILTIN("codemode")],
+  ]);
+  const declared = [...infos.keys()];
+  assert.deepEqual(
+    hiddenDeclarationsFor(declared, infos, "plan", "read-only", { codemode: "on" }).sort(),
+    ["edit", LOADOUT_HOST_NAME],
+  );
+  assert.deepEqual(hiddenDeclarationsFor(declared, infos, "plan", "read-only").sort(), [
+    "codemode",
+    "edit",
+    LOADOUT_HOST_NAME,
+  ]);
+  assert.ok(
+    hiddenDeclarationsFor(declared, infos, "implement", "read-only", { codemode: "on" }).includes(
+      "codemode",
+    ),
+  );
 });

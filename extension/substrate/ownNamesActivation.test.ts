@@ -722,7 +722,7 @@ function nestedWriter(target: string, sibling: string, outcomes: NestedOutcome[]
 
 const NESTED_WRITER = "fixture_nested_writer";
 
-test("nested execution (A): under the gate a nested write and a nested bounded writer meet the backstop with their parent call id while a nested read runs; read-write, the same write lands", async () => {
+test("nested execution (A): under the gate a nested write meets the backstop with its parent call id while a nested read runs and a nested bounded writer is not even found; read-write, the same write lands", async () => {
   const rt = await recordingRuntime();
   const outcomes: NestedOutcome[] = [];
   const runId = "01OWNNESTED";
@@ -761,20 +761,15 @@ test("nested execution (A): under the gate a nested write and a nested bounded w
     );
     assert.equal(read?.isError, false, read?.text);
     assert.match(read?.text ?? "", /sibling notes/, "the nested read saw the file");
+    // The bounded writer is model-only: agent-core answers not-found before any tool_call hook.
     assert.equal(draft?.isError, true);
-    assert.ok(
-      draft?.text.includes(
-        "perk read-only mode: plan_draft is blocked (nested call — a bounded writer is never a nested grant; only gate-eligible queries and builtin reads run through another tool).",
-      ),
-      draft?.text,
-    );
+    assert.match(draft?.text ?? "", /Tool plan_draft not found/, draft?.text);
     const parent = `call-${NESTED_WRITER}`;
     assert.deepEqual(
       seen.filter((e) => e.parentToolCallId !== undefined),
       [
         { toolName: "write", parentToolCallId: parent, block: true },
         { toolName: "read", parentToolCallId: parent, block: undefined },
-        { toolName: "plan_draft", parentToolCallId: parent, block: true },
       ],
     );
     assert.equal(existsSync(target), false, "nothing written under the gate");
@@ -789,6 +784,9 @@ test("nested execution (A): under the gate a nested write and a nested bounded w
     assert.equal(outcomes[3]?.name, "write");
     assert.equal(outcomes[3]?.isError, false, outcomes[3]?.text);
     assert.equal(readFileSync(target, "utf8"), "nested\n");
+    // Model-only everywhere: the writer stays unreachable through another tool read-write too.
+    assert.equal(outcomes[5]?.name, "plan_draft");
+    assert.match(outcomes[5]?.text ?? "", /Tool plan_draft not found/, outcomes[5]?.text);
   } finally {
     h.dispose();
   }

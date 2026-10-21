@@ -388,7 +388,12 @@ joins the worker to the discovery cohort, a committed `-tool_search` opts out), 
 `codemode.mode` / `codemode.inlineBudget` settings apply. A project `"extensions":
 ["-builtin:<name>"]` entry keeps a builtin out of the worker; a project extension registering its
 own `codemode`/`tool_search` replaces the builtin (the worker prints pi's loader warning,
-`perk worker: extension warning — builtin:<name>: …`). **MCP is off in the worker:** it loads no
+`perk worker: extension warning — builtin:<name>: …`). In an interactive session, a `+codemode`
+(or `--tools +codemode`) stays on under the read-only gate in the registry's read-only stages
+(`gist-author`, `objective-author`, `objective-plan`, `plan`, `audit`, `objective-refine`) with
+`codemode.mode` `on`; with `only` it stays on only in discovery-cohort sessions (a `-tool_search`
+session keeps it off there) — and never through a `/plan` toggle in a stage-less or worktree
+session, where the gate switches it off. **MCP is off in the worker:** it loads no
 MCP support, so `.pi/mcp.json` is inert there, nothing reads/writes pi's `mcp.json` /
 `mcp-auth.json` / `mcp.log`, and a project extension's `registerMcpServer` is reported on stderr
 (`perk worker: extension error — <path> (register_mcp_server): …`), never connected. A project

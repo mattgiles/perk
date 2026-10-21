@@ -191,7 +191,7 @@ test("nested execution in the cohort (A): a deferred inactive member is callable
   }
 });
 
-test("nested execution under the gate (A): the nested policy admits the query and the builtin reads and refuses every writer and action, each with its parent call id", async () => {
+test("nested execution under the gate (A): the nested policy admits the query and the builtin reads and refuses every write and action, each with its parent call id; a bounded writer is not even found", async () => {
   const cwd = scaffoldRepo();
   writeFileSync(join(cwd, "notes.txt"), "nested notes\n");
   const file = plantSession(cwd, [{ stage: "implement", mode: "read-only" }]);
@@ -205,7 +205,8 @@ test("nested execution under the gate (A): the nested policy admits the query an
       { name: "bash", args: { command: "ls" } },
       { name: "bash", args: { command: "touch nested-x" } },
       { name: "write", args: { path: "nested-target.txt", content: "nested\n" } },
-      // Mode-over-stage: direct-eligible in the gated implement landing, never nested.
+      // A bounded writer (mode-over-stage: direct-eligible in the gated implement landing) is
+      // model-only: agent-core answers not-found before any tool_call hook.
       { name: "plan_draft", args: { plan: "# nested" } },
       // The deferred INACTIVE action: nested-callable per Pi, refused by the nested policy.
       { name: "push_annotations", args: { angle: "probe", findings: [] } },
@@ -255,6 +256,8 @@ test("nested execution under the gate (A): the nested policy admits the query an
     assert.match(observed[2]?.text ?? "", /notes\.txt/, "the nested ls listed it");
     assert.equal(existsSync(join(cwd, "nested-x")), false, "the vetoed touch never ran");
     assert.equal(existsSync(join(cwd, "nested-target.txt")), false, "the write never landed");
+    assert.match(observed[5]?.text ?? "", /Tool plan_draft not found/, "the writer is not found");
+    // Every call that reached tool_call carries the parent id; the writer never reaches it.
     assert.deepEqual(seen, [
       { toolName: "objective_stack_status", parentToolCallId: PARENT_ID, reason: undefined },
       { toolName: "read", parentToolCallId: PARENT_ID, reason: undefined },
@@ -268,11 +271,6 @@ test("nested execution under the gate (A): the nested policy admits the query an
         toolName: "write",
         parentToolCallId: PARENT_ID,
         reason: "perk read-only mode: write is blocked (file modifications disabled).",
-      },
-      {
-        toolName: "plan_draft",
-        parentToolCallId: PARENT_ID,
-        reason: nested("plan_draft", "a bounded writer"),
       },
       {
         toolName: "push_annotations",
