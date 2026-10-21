@@ -19,6 +19,8 @@
 //   `{ at, entries }` to the exit log immediately before exiting — `entries` is the watched
 //   directory's listing at the moment the server exits (a shutdown-ordering oracle).
 //
+// `$PERK_MCP_FIXTURE_INIT_DELAY_MS` (default 0) holds back the `initialize` answer: a
+// slow-starting server.
 // It exits when stdin closes (the client closed the transport), after
 // `$PERK_MCP_FIXTURE_EXIT_DELAY_MS` (default 0) — a delay that keeps it alive through part of the
 // client's close sequence.
@@ -43,6 +45,7 @@ const send = (message: Record<string, unknown>): void => {
 
 const marker = process.env.PERK_MCP_FIXTURE_MARKER;
 if (marker) writeFileSync(marker, `${process.pid}\n`, "utf8");
+const initDelayMs = Number(process.env.PERK_MCP_FIXTURE_INIT_DELAY_MS ?? "0") || 0;
 
 const ECHO_TOOL = {
   name: "echo",
@@ -73,16 +76,23 @@ lines.on("line", (line) => {
   // Other notifications (`notifications/initialized`) need no answer.
   if (message.id === undefined) return;
   switch (message.method) {
-    case "initialize":
-      send({
-        id: message.id,
-        result: {
-          protocolVersion: message.params?.protocolVersion,
-          capabilities: { tools: {}, logging: {} },
-          serverInfo: { name: "perk-mcp-fixture", version: "1.0.0" },
-        },
-      });
+    case "initialize": {
+      const id = message.id;
+      const protocolVersion = message.params?.protocolVersion;
+      const answer = (): void => {
+        send({
+          id,
+          result: {
+            protocolVersion,
+            capabilities: { tools: {}, logging: {} },
+            serverInfo: { name: "perk-mcp-fixture", version: "1.0.0" },
+          },
+        });
+      };
+      if (initDelayMs > 0) setTimeout(answer, initDelayMs);
+      else answer();
       return;
+    }
     case "tools/list":
       send({ id: message.id, result: { tools: [ECHO_TOOL] } });
       return;

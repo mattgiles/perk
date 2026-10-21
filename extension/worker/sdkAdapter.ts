@@ -374,8 +374,21 @@ export function createDriveSession(
   let bound: DriveSessionLike = runtime.session;
   let unsubscribe: (() => void) | null = null;
   let uninstallGate: (() => void) | null = null;
+  let abortRequested = false;
   let retainedAbort: Promise<void> | null = null;
+  /** `session.abort()` with an owned rejection, folded into the chain `dispose()` drains. */
+  const fireAbort = (): void => {
+    const fired = runtime.session.abort().catch((err) => {
+      console.error(`perk worker: session.abort() rejected — ${String(err)}`);
+    });
+    retainedAbort =
+      retainedAbort === null ? fired : Promise.all([retainedAbort, fired]).then(() => undefined);
+  };
   const rawListener = (event: DriveEvent): void => {
+    // An abort that landed before the agent run existed (Pi's prompt preflight — the MCP builtin
+    // waits there for direct servers) had no run to stop. Pi delivers `agent_start` synchronously
+    // before the run's first request, so re-applying the abort here refuses that request.
+    if (abortRequested && event.type === "agent_start") fireAbort();
     const translated = translateEvent(event);
     if (translated !== null) listener(translated);
   };
@@ -414,17 +427,18 @@ export function createDriveSession(
       await bound.prompt(text);
     },
     /**
-     * OWNED + IDEMPOTENT: fires `session.abort()` on the runtime's live session exactly once —
-     * the drive can trip repeatedly (every post-trip `turn_ended` re-calls this), but later
-     * calls are no-ops, so no abort work can outlive `dispose()`'s drain. The rejection has an
-     * owner: the logging catch attaches immediately (never unhandled), and the caught chain is
-     * retained so `dispose()` drains it before returning.
+     * OWNED + LATCHED: the first call fires `session.abort()` on the runtime's live session and
+     * latches the request — the drive can trip repeatedly (every post-trip `turn_ended` re-calls
+     * this), but later calls are no-ops. The latch outlives a premature abort: `session.abort()`
+     * stops only a running agent, so every later `agent_start` re-fires it before that run's
+     * first request (an abort during Pi's prompt preflight is never lost). Each rejection has an
+     * owner: the logging catch attaches immediately (never unhandled), and every caught chain is
+     * retained so `dispose()` drains it before returning — no abort work outlives the drain.
      */
     abort(): void {
-      if (retainedAbort !== null) return;
-      retainedAbort = runtime.session.abort().catch((err) => {
-        console.error(`perk worker: session.abort() rejected — ${String(err)}`);
-      });
+      if (abortRequested) return;
+      abortRequested = true;
+      fireAbort();
     },
     /**
      * The defensive-rebind arm: when the runtime replaced its session mid-drive, unsubscribe the

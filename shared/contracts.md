@@ -4162,6 +4162,13 @@ The drive terminates on the **first** of:
      `turn_end`; the budget verdict stands over it. A compaction's own summarization call is
      cancelled by the same abort when a trip (wall clock, external) lands while it runs; the
      aborted `compaction_end` carries no usage and Pi persists no entry.
+   - *Prompt-preflight boundary* — a trip can land inside the driving `prompt()` before Pi's
+     agent run exists (its `before_agent_start` handlers run first; the MCP builtin waits there
+     up to 10 s for `direct` servers), where `session.abort()` has no run to stop. The
+     drive-session handle latches the abort and re-fires `session.abort()` on every later
+     `agent_start`, which Pi delivers synchronously before the run's first request, so pi-ai
+     refuses that request before provider dispatch: **zero** provider requests and no tool
+     follow a preflight trip.
 4. **A post-acceptance provider error Pi does not recover from** → `failed`/`model_error`.
    Pi's `turn_end` carries the turn's assistant message for error turns too, and the seam's fold
    **replaces** its recorded error on every `turn_end` (that turn's error, or none) — so an error
