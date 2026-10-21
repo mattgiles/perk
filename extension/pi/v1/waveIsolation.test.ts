@@ -222,11 +222,6 @@ test("two sessions share no review-wave pending state (launch/collect isolate pe
 
 // --- a same-version reload: activation isolation + late-event isolation ------------------------
 
-/**
- * Drive a promise to settlement while `setTimeout` is mocked: the harness's own ticks and the
- * collect grace sleep on `setTimeout`, so the mocked clock is advanced in small steps between
- * macrotask drains (`setImmediate` is never mocked). Bounded — a stuck promise fails, never hangs.
- */
 /** Every recorded spawn carries a string launch token, and no two spawns share one. */
 function assertDistinctLaunchTokens(fake: FakeSubagents): void {
   const tokens = fake.spawns.map(
@@ -236,21 +231,55 @@ function assertDistinctLaunchTokens(fake: FakeSubagents): void {
   assert.equal(new Set(tokens).size, tokens.length, "every launch mints its own token");
 }
 
+/**
+ * The real `setTimeout`, captured at module load — before any test arms the mocked clock, which
+ * replaces the global but never this reference.
+ */
+const realSetTimeout = globalThis.setTimeout;
+/** The mocked time one driver step advances: one harness tick (`TICK_MS`). */
+const DRIVE_STEP_MS = 50;
+/** The REAL time one driven wait may take before it fails (never hangs; generous for a busy host). */
+const DRIVE_BUDGET_MS = 20_000;
+/**
+ * The engine deadline the two reload tests arm. The drivers advance the mocked clock while the
+ * driven work waits on real I/O, so the deadline sits beyond anything they can advance between a
+ * wave's launch and its collection — at most `DRIVE_BUDGET_MS` real milliseconds per wait, one
+ * `DRIVE_STEP_MS` step per real millisecond — and a launched wave never times out mid-test.
+ */
+const RELOAD_WAVE_TIMEOUT_MS = 3_600_000;
+
+/**
+ * Drain macrotasks while advancing the mocked clock until `done()`: the harness's own ticks, the
+ * collect grace and the door's readiness poll sleep on `setTimeout`, so the clock is advanced one
+ * step between macrotask drains (`setImmediate` is never mocked). The driven work also awaits
+ * REAL I/O — a threadpool file read, a loopback socket — so each step yields at least one real
+ * millisecond and the bound is real time: a budget counted in event-loop turns alone runs out in
+ * a few milliseconds on a contended host, long before that I/O completes. Bounded — a stuck
+ * condition fails, never hangs.
+ */
+async function driveUntil(t: TestContext, done: () => boolean): Promise<void> {
+  const deadline = Date.now() + DRIVE_BUDGET_MS;
+  while (!done() && Date.now() < deadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+    if (done()) break;
+    t.mock.timers.tick(DRIVE_STEP_MS);
+    await new Promise((resolve) => realSetTimeout(resolve, 1));
+  }
+  assert.ok(done(), `the driven condition held within ${DRIVE_BUDGET_MS}ms of real time`);
+}
+
+/** Drive a promise to settlement under the mocked clock (`driveUntil`). */
 async function underMockedTimers<T>(t: TestContext, promise: Promise<T>): Promise<T> {
   let done = false;
   const tracked = promise.finally(() => {
     done = true;
   });
-  for (let step = 0; step < 400 && !done; step++) {
-    await new Promise((resolve) => setImmediate(resolve));
-    if (!done) t.mock.timers.tick(50);
-  }
-  assert.ok(done, "the driven promise settled within the bounded mocked-clock budget");
+  await driveUntil(t, () => done);
   return await tracked;
 }
 
 test("same-version reload: pending waves are activation-local and a pre-reload wave's late completion never settles a wave launched afterwards", async (t) => {
-  const waveTimeoutMs = 1_000;
+  const waveTimeoutMs = RELOAD_WAVE_TIMEOUT_MS;
   const priorTimeout = process.env.PERK_WAVE_TIMEOUT_MS;
   process.env.PERK_WAVE_TIMEOUT_MS = String(waveTimeoutMs);
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
@@ -531,17 +560,8 @@ function servingPlannotator(
   };
 }
 
-/** Drain macrotasks while advancing the mocked clock until `done()` (bounded — never hangs). */
-async function driveUntil(t: TestContext, done: () => boolean): Promise<void> {
-  for (let step = 0; step < 400 && !done(); step++) {
-    await new Promise((resolve) => setImmediate(resolve));
-    if (!done()) t.mock.timers.tick(50);
-  }
-  assert.ok(done(), "the driven condition held within the bounded mocked-clock budget");
-}
-
 test("same-version reload (draft pair): the primed context and the pending wave are activation-local; a relaunch after re-priming is a fresh wave", async (t) => {
-  const waveTimeoutMs = 1_000;
+  const waveTimeoutMs = RELOAD_WAVE_TIMEOUT_MS;
   const priorTimeout = process.env.PERK_WAVE_TIMEOUT_MS;
   process.env.PERK_WAVE_TIMEOUT_MS = String(waveTimeoutMs);
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
