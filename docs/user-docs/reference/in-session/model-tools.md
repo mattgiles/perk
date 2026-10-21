@@ -272,8 +272,11 @@ tool is eligible in a session when its stage is one of the tool's stages and the
 read-only and the tool is **mode-over-stage**. A session with no stage (or an unknown one) is
 eligible for every tool the mode allows. Foreign tools get the same treatment through the posture
 table above, and Pi's builtins through their own rows: `read`/`grep`/`find`/`ls` and `tool_search`
-allowed, `bash` under the read-only verdict, `edit`/`write` and `codemode` blocked. The full
-stage-by-tool result is committed as `shared/fixtures/tool-matrix.json`.
+allowed, `bash` under the read-only verdict, `edit`/`write` and `codemode` blocked. Under the gate a
+call another tool makes is narrowed further: of the builtins only the core reads (and `bash` under
+its verdict) run nested, never `tool_search` or `codemode` (**Nested calls under the gate**, below).
+The full stage-by-tool result is committed as `shared/fixtures/tool-matrix.json`, including what
+each landing still admits nested.
 
 Perk applies all of this in three separate ways. **Activation:** perk switches on and off only
 its own tools — at every session start and tree navigation, when the gate turns on or off, after
@@ -291,9 +294,24 @@ the reviewer-wave companions `start_draft_review_wave`, `collect_draft_review_wa
 `push_annotations` — so toggling `/plan` in any session (a worktree session included) leaves the
 whole draft → review → reviewer-wave flow reachable.
 
-Terminal, interactive and orchestration tools are declared to the model as **model-only**: Pi never
-lets another tool (for example a `codemode` script) call them through `ctx.executeTool()`, so no
-nested call can end the turn or open a human surface.
+**Nested calls under the gate.** A tool can call another tool through Pi's `ctx.executeTool()` —
+a `codemode` script, or any extension tool that nests. Pi itself never lets another tool call a
+**model-only** tool — terminal, interactive, orchestration and host tools, and Pi's own
+`tool_search` — and answers `Tool <name> not found`, so no nested call can end the turn or open a
+human surface. Otherwise, in a read-write session a nested call reaches every active tool and every
+deferred one. Under the read-only gate (plan mode, or an inherited restriction) a nested call first
+meets the same checks as a direct one, with the same wordings: `edit`/`write`, a tool not
+registered in the session and a tool ineligible under the gate (for example `codemode`, or
+`collect_review_wave` in a gated implement session) get the refusals described under
+**Structural read-only gate** below. A nested call
+that passes those checks is then narrowed further: it reaches only a gate-eligible perk query
+(`objective_stack_status`), the core reads `read`, `grep`, `find` and `ls`, `bash` under the same
+read-only verdict, and a foreign tool by its posture above. Anything else the gate admits directly
+— a bounded writer (`plan_draft`, `objective_draft`, `objective_refinement_draft`, …), another perk
+action such as `push_annotations`, or an extension builtin — is refused with `perk read-only mode:
+<name> is blocked (nested call — <class> is never a nested grant; only gate-eligible queries and
+builtin reads run through another tool).` A tool being hidden, deferred, found by `tool_search` or
+annotated `readOnlyHint` never grants a nested call.
 
 ### Structural read-only gate
 
@@ -315,7 +333,8 @@ hidden guidance names the stage's sanctioned bounded writers (its carve-out tool
 stage. Independently of what was shown, every call is checked: a tool not registered in the
 session is refused (`perk read-only mode: <name> is blocked (tool not registered).`), and every
 ineligible tool is denied, including `edit`, `write`, save/delivery tools, `codemode` and unknown
-or late-registered foreign mutators — even if activation or presentation failed. Allowlisted `bash` retains a textual command-position sub-allowlist. It first applies the
+or late-registered foreign mutators — even if activation or presentation failed. A call another
+tool makes is narrowed further (**Nested calls under the gate**, above). Allowlisted `bash` retains a textual command-position sub-allowlist. It first applies the
 whole-command destructive veto, then walks every command position — after sequencing operators and
 newlines, inside substitutions, after shell keywords/redirections/wrappers, and at `find -exec`/
 `fd -x` — then matches every emitted command against `SAFE_PATTERNS` in

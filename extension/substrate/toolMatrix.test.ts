@@ -12,9 +12,11 @@ import { sharedDir } from "./resources.ts";
 import {
   BUILTIN_TOOL_POLICY,
   gatedToolsFor,
+  nestedPostureFor,
   PACKAGE_TOOL_POLICY,
   PLANNING_READ_STAGES,
   perkToolNames,
+  postureFor,
   REGISTRY_STAGE_IDS,
   SYNTHETIC_PATH_TOOL_POLICY,
   stageToolsFor,
@@ -81,6 +83,39 @@ test("toolMatrix() is the derived views: perk + builtin rows, the posture table,
   const unscoped = matrix.eligible[UNSCOPED_MATRIX_KEY];
   assert.deepEqual(unscoped?.["read-only"], [...gatedToolsFor(null), ...gatedBuiltins].sort());
   assert.deepEqual(unscoped?.["read-write"], Object.keys(matrix.tools).sort());
+  // The nested arm: every row's `nested` is the derived nested posture, and every landing's
+  // `nested` list is its `read-only` list filtered through the rows not blocked nested.
+  for (const [name, row] of Object.entries(matrix.tools)) {
+    const provenance =
+      row.owner === "builtin" ? { path: `builtin:${name}`, source: "builtin" } : undefined;
+    assert.equal(row.nested, nestedPostureFor(postureFor(name, provenance)), `${name} nested`);
+  }
+  for (const [landing, row] of Object.entries(matrix.eligible)) {
+    assert.deepEqual(
+      row.nested,
+      row["read-only"].filter((name) => matrix.tools[name]?.nested !== "blocked"),
+      `${landing} nested`,
+    );
+  }
+});
+
+test("the nested arm: the one query is the only perk row admitted nested; writers, actions and tool_search are not", () => {
+  const matrix = toolMatrix();
+  const nestedPerk = Object.entries(matrix.tools)
+    .filter(([, row]) => row.owner === "perk" && row.nested === "allowed")
+    .map(([name]) => name);
+  assert.deepEqual(nestedPerk, ["objective_stack_status"]);
+  const plan = matrix.eligible.plan;
+  assert.ok(plan !== undefined);
+  assert.deepEqual(plan.nested, ["bash", "find", "grep", "ls", "objective_stack_status", "read"]);
+  for (const name of ["plan_draft", "push_annotations"]) {
+    assert.ok(plan["read-only"].includes(name), `${name} stays gate-eligible in plan`);
+    assert.ok(!plan.nested.includes(name), `${name} is never nested-eligible`);
+  }
+  assert.equal(matrix.tools.plan_draft?.nested, "blocked");
+  assert.equal(matrix.tools.tool_search?.nested, "blocked");
+  assert.equal(matrix.tools.bash?.nested, "verdict");
+  assert.equal(matrix.tools.read?.nested, "allowed");
 });
 
 test("the one query is gate-allowed in the worktree family and the planning/refinement stages", () => {

@@ -23,6 +23,7 @@ import {
   isPerkTool,
   LOADOUT_HOST_NAME,
   type Mode,
+  nestedPostureFor,
   normalizePackageSpec,
   normalizeStage,
   OBJECTIVE_STAGES,
@@ -309,8 +310,31 @@ test("validateToolPolicy: refuses the host kind, unknown stages, deferred model-
     );
   }
   assert.throws(
-    () => validateToolPolicy("vp_carve", {}, { ...ok, gated: { carveOut: " " } }, REGISTRY_IDS),
+    () =>
+      validateToolPolicy(
+        "vp_carve",
+        {},
+        { ...ok, kind: "action", result: undefined, gated: { carveOut: " " } },
+        REGISTRY_IDS,
+      ),
     /a carve-out must name its bounded write/,
+  );
+  // A query is a pure read: a carve-out on one is refused; an action carve-out registers.
+  assert.throws(
+    () =>
+      validateToolPolicy(
+        "vp_query_carve",
+        {},
+        { ...ok, gated: { carveOut: "one file" } },
+        REGISTRY_IDS,
+      ),
+    /perk tool policy: vp_query_carve — a query never writes — gated must be allowed or blocked/,
+  );
+  validateToolPolicy(
+    "vp_action_carve",
+    {},
+    { ...ok, kind: "action", result: undefined, gated: { carveOut: "one file" } },
+    REGISTRY_IDS,
   );
   // A deferred carve-out writer would be named by the read-only context while undeclared.
   assert.throws(
@@ -387,6 +411,69 @@ recordPerkTool("tt_allowed_wide", {
   gated: "allowed",
   kind: "query",
   result: { properties: {} },
+});
+// A model-only kind that is gate-allowed (an orchestration launcher's shape).
+recordPerkTool("tt_model_only", { stages: ["plan"], gated: "allowed", kind: "orchestration" });
+
+test("nestedPostureFor: only a gate-allowed perk query and the core builtin reads run nested; foreign keeps its gate posture; unknown is blocked", () => {
+  const perk: [string, "allowed" | "blocked"][] = [
+    ["tt_allowed", "allowed"],
+    ["tt_allowed_wide", "allowed"],
+    ["tt_deferred", "allowed"],
+    // a carve-out writer, an action (gate-allowed or not) and a model-only kind
+    ["tt_carve", "blocked"],
+    ["tt_over", "blocked"],
+    ["tt_blocked", "blocked"],
+    ["tt_model_only", "blocked"],
+  ];
+  for (const [name, expected] of perk) {
+    assert.equal(nestedPostureFor(postureFor(name, undefined)), expected, name);
+    // The catalog wins over any provenance, nested too.
+    assert.equal(nestedPostureFor(postureFor(name, BUILTIN(name))), expected, `${name} builtin`);
+  }
+  // A gate-blocked query is no nested grant either.
+  assert.equal(
+    nestedPostureFor({
+      owner: "perk",
+      policy: { stages: ["plan"], gated: "blocked", kind: "query" },
+    }),
+    "blocked",
+  );
+  const builtins: Record<string, "allowed" | "blocked" | "verdict"> = {
+    read: "allowed",
+    grep: "allowed",
+    find: "allowed",
+    ls: "allowed",
+    bash: "verdict",
+    edit: "blocked",
+    write: "blocked",
+    tool_search: "blocked",
+    codemode: "blocked",
+  };
+  assert.deepEqual(Object.keys(builtins), Object.keys(BUILTIN_TOOL_POLICY));
+  for (const [name, expected] of Object.entries(builtins)) {
+    assert.equal(nestedPostureFor(postureFor(name, BUILTIN(name))), expected, name);
+  }
+  // A non-builtin namesake classifies by its package, never by the builtin row.
+  assert.equal(nestedPostureFor(postureFor("tool_search", pkg("npm:pi-web-access"))), "allowed");
+  assert.equal(nestedPostureFor(postureFor("tool_search", OTHER_INLINE)), "blocked");
+  for (const [posture, row] of Object.entries(POSTURE_ROWS)) {
+    assert.equal(
+      nestedPostureFor({
+        owner: "foreign",
+        posture: posture as keyof typeof POSTURE_ROWS,
+        key: "k",
+      }),
+      row.gated,
+      posture,
+    );
+  }
+  assert.equal(nestedPostureFor(postureFor("subagent", SUBAGENTS)), "allowed");
+  assert.equal(nestedPostureFor(postureFor("structured_output", ENGINE)), "allowed");
+  assert.equal(nestedPostureFor(postureFor("p", pkg("npm:@plannotator/pi-extension"))), "blocked");
+  assert.equal(nestedPostureFor({ owner: "unknown" }), "blocked");
+  assert.equal(nestedPostureFor(postureFor(MCP_TOOL, BUILTIN("mcp"))), "blocked");
+  assert.equal(nestedPostureFor(postureFor("x", undefined)), "blocked");
 });
 
 test("the formula: stage membership × mode posture, the mode-over-stage term, unscoped and unknown stages", () => {
@@ -496,6 +583,12 @@ test("postureFor: catalog → exact synthetic path → builtin → package row (
   assert.deepEqual(postureFor("codemode", BUILTIN("codemode")), {
     owner: "builtin",
     gated: "blocked",
+    registrar: "extension",
+  });
+  assert.deepEqual(postureFor("read", BUILTIN("read")), {
+    owner: "builtin",
+    gated: "allowed",
+    registrar: "core",
   });
   assert.deepEqual(postureFor("mcp_query", BUILTIN("mcp")), { owner: "unknown" });
   // Pi's own MCP builtin: a server tool and a resource tool are builtin-sourced names outside the
@@ -794,14 +887,29 @@ test("toolMatrix: perk + builtin rows, the postures section, sorted eligibility,
       (a, b) => REGISTRY_IDS.indexOf(a) - REGISTRY_IDS.indexOf(b),
     ),
     gated: "carve-out",
+    nested: "blocked",
     mode_over_stage: false,
     declared: "always",
     exposure: "direct",
   });
-  assert.deepEqual(m.tools.bash, { owner: "builtin", gated: "verdict", registrar: "core" });
+  assert.equal(m.tools.tt_allowed?.nested, "allowed");
+  assert.equal(m.tools.tt_model_only?.nested, "blocked");
+  assert.deepEqual(m.tools.bash, {
+    owner: "builtin",
+    gated: "verdict",
+    nested: "verdict",
+    registrar: "core",
+  });
   assert.deepEqual(m.tools.codemode, {
     owner: "builtin",
     gated: "blocked",
+    nested: "blocked",
+    registrar: "extension",
+  });
+  assert.deepEqual(m.tools.tool_search, {
+    owner: "builtin",
+    gated: "allowed",
+    nested: "blocked",
     registrar: "extension",
   });
   assert.deepEqual(
@@ -837,7 +945,35 @@ test("toolMatrix: perk + builtin rows, the postures section, sorted eligibility,
       [...gatedToolsFor(stage), "read", "grep", "find", "ls", "bash", "tool_search"].sort(),
     );
     assert.ok(row["read-write"].includes("edit") && row["read-write"].includes("codemode"));
+    // The nested view: the gate-eligible queries plus the core builtin reads (bash by verdict).
+    assert.deepEqual(
+      row.nested,
+      [
+        ...gatedToolsFor(stage).filter((n) => perkToolPolicy(n)?.kind === "query"),
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+      ].sort(),
+      stage,
+    );
   }
+  assert.deepEqual(m.eligible.plan?.nested, [
+    "bash",
+    "find",
+    "grep",
+    "ls",
+    "read",
+    "tt_allowed",
+    "tt_allowed_wide",
+    "tt_deferred",
+    // the validation tests' recorded plan-stage queries
+    "vp_dup",
+    "vr_dup",
+  ]);
+  assert.ok(m.eligible.plan?.["read-only"].includes("tt_carve"));
+  assert.ok(m.eligible.plan?.["read-only"].includes("tt_model_only"));
   // Outside the cohort a family member is eligible like any tool; its row reads the registered
   // default (`direct`).
   assert.deepEqual(m.eligible.unscoped?.["read-write"], Object.keys(m.tools).sort());

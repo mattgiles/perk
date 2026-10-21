@@ -107,9 +107,19 @@ in every landing it is staged in — today exactly `objective_stack_status` (the
 plus the read-only planning/refinement stages `plan`, `objective-plan`, `objective-refine`).
 "Read-only" is the gate's guarantee — no working-tree, index, local-branch or remote mutation —
 not "no Git call": the stacked status read's single remote-tracking-only fetch of origin is
-inside it. The only perk tools a gated codemode script could ever reach (contracts §8.40
-"The gated read path"); eligibility never un-suspends codemode.
+inside it. The only perk tools the **nested policy** admits under the gate (contracts §8.40
+"The nested policy") — a codemode script's calls included, should codemode ever be un-suspended;
+eligibility never un-suspends codemode.
 _Avoid_: gated read tool, read-only query (ambiguous with `readOnlyHint`, a hint and never a grant)
+
+**Nested policy**:
+The read-only backstop's narrowing of a nested call — one another tool issued through
+`ctx.executeTool` (Pi's `parentToolCallId`). Under an effective read-only gate a nested call
+reaches only a **gate-eligible query**, a core builtin read (`bash` by its verdict) and a foreign
+tool by its gate posture; every bounded writer, every other perk kind and the extension builtins
+(`tool_search`, `codemode`) are refused, though the same tools may be admitted direct. Derived
+from a tool's classification (`nestedPostureFor`), never from its name or annotations.
+_Avoid_: nested grant — a hidden, deferred or `readOnlyHint` tool is never one
 
 **Eligibility formula**:
 The one rule deciding whether a tool may be active in a (stage, mode) landing:
