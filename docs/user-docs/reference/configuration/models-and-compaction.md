@@ -72,8 +72,11 @@ builtin, and the worker prints Pi's warning saying so.
 project file — an `env` value for a stdio server, an `Authorization` header for an HTTP server
 (both accept Pi's `${VAR}` references, so the secret can stay in the environment). An HTTP
 server's headers are sent with every request. Exposure works as in an interactive session: a
-`direct` server's tools are offered to the model, and the default `codemode` exposure turns on the
-worker's codemode so scripts can call them. `"enabled": false` turns a server off (`disabled` is
+`direct` server's tools are offered to the model, the default `codemode` exposure turns on the
+worker's codemode so scripts can call them, and `deferred` exposure turns on `tool_search`. Those
+two switch on even when `defaultTools` opts out (`-codemode`, `-tool_search`); to keep them off,
+set `"autoEnableCodemode": false` in `.pi/mcp.json` (codemode only) or keep the builtin out with
+`-builtin:codemode` / `-builtin:tool-search`. `"enabled": false` turns a server off (`disabled` is
 not a key Pi reads). Servers that extensions register with `registerMcpServer` connect too; when
 an extension and the file name the same server, whichever registered first keeps it. A few
 entries are refused, each with one `perk worker: mcp config error — <path>: …` line on stderr
