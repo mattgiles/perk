@@ -402,6 +402,36 @@ test("createDriveSession: abort is idempotent — repeated trips launch exactly 
   await handle.dispose();
 });
 
+test("createDriveSession: an abort latched before the agent run re-fires on agent_start, never otherwise", async () => {
+  let emit: (e: DriveEvent) => void = () => {};
+  const session = new FakeSession((e) => {
+    emit = e;
+  });
+  const seen: StageEvent[] = [];
+  const handle = createDriveSession({ session, dispose() {} }, (e) => seen.push(e));
+  await handle.bind();
+  await handle.prompt("go");
+  emit({ type: "agent_start" });
+  assert.equal(session.abortCalls, 0, "no abort requested: agent_start is inert");
+
+  handle.abort();
+  assert.equal(session.abortCalls, 1, "the request fires at once");
+  handle.abort();
+  assert.equal(session.abortCalls, 1, "a repeated trip is a no-op");
+  emit({ type: "agent_start" });
+  assert.equal(session.abortCalls, 2, "the run that starts after the request is aborted too");
+  emit({ type: "turn_end", message: { role: "assistant" } });
+  assert.equal(session.abortCalls, 2, "only a run start re-fires");
+  assert.deepEqual(
+    seen.map((e) => e.kind),
+    ["turn_ended"],
+    "agent_start itself never reaches the seam",
+  );
+  await handle.dispose();
+  emit({ type: "agent_start" });
+  assert.equal(session.abortCalls, 2, "nothing fires after dispose (unsubscribed)");
+});
+
 // --- the turn-boundary gate over the agent's finishTurn ------------------------------------------
 
 /** A fake agent whose `finishTurn` is the session's own hook (records calls, returns `inner`). */

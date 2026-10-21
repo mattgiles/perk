@@ -1920,6 +1920,71 @@ test("e2e: -builtin:mcp disables the worker's MCP builtin — nothing connects a
   assertAccounted(result, observed.runtime());
 });
 
+/**
+ * Resolves once `path()` names an existing file (polled every 10 ms); polling stops when `until`
+ * settles, so it never dangles — race it against the same drive.
+ */
+function fileAppears(path: () => string, until: Promise<unknown>): Promise<void> {
+  let done = false;
+  void until.finally(() => {
+    done = true;
+  });
+  return new Promise((resolve) => {
+    const poll = (): void => {
+      if (done) return;
+      if (existsSync(path())) resolve();
+      else setTimeout(poll, 10);
+    };
+    poll();
+  });
+}
+
+test("e2e: an abort while Pi waits for a starting direct MCP server is never lost — no provider request follows", async () => {
+  // Pi's first prompt waits (up to 10 s) for direct servers before the agent run exists, so an
+  // abort there finds no run to stop. The slow fixture holds its `initialize` answer; the signal
+  // fires once the server process exists, i.e. inside that wait.
+  const controller = new AbortController();
+  let marker = "";
+  const drive = runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      fauxAssistantMessage([fauxToolCall("read", { path: ".pi/settings.json" })], {
+        stopReason: "toolUse",
+      }),
+      submitCall(),
+      idle(),
+    ],
+    signal: controller.signal,
+    plant: (cwd) => {
+      marker = join(cwd, "mcp-fixture-marker");
+      plantProjectMcpConfig(cwd, {
+        slow: mcpFixtureServer({
+          token: "slow",
+          exposure: "direct",
+          marker,
+          initDelayMs: 3_000,
+        }),
+      });
+    },
+  });
+  const { reached, result } = await abortOnBarrier(
+    drive,
+    fileAppears(() => marker, drive),
+    controller,
+  );
+  assert.equal(reached, true, "the server process started before the drive ended");
+  assert.equal(result.outcome.status, "aborted");
+  assert.equal(result.outcome.terminal_signal, "external_abort");
+  assert.equal(result.providerCalls, 0, "the first request never reached the provider");
+  assert.deepEqual(
+    result.events.flatMap((e) => (e.kind === "tool_outcome" ? [e.tool] : [])),
+    [],
+    "no tool ran after the abort",
+  );
+  assertMonotonicSeq(result.events);
+});
+
 // --- Compaction and retry follow the settings, counted at their own boundaries -----------------
 //
 // The worker honours Pi's compaction and retry settings exactly like a warm session (the merged

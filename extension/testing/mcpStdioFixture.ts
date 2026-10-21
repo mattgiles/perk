@@ -10,6 +10,7 @@
 //   handles a notification (Pi's synchronous server-log append) before it resolves the response,
 //   so once the call returns its log line already exists.
 //
+// `$PERK_MCP_FIXTURE_INIT_DELAY_MS` holds back the `initialize` answer (a slow-starting server).
 // It exits when stdin closes (the client closed the transport).
 
 import { appendFileSync, writeFileSync } from "node:fs";
@@ -50,16 +51,24 @@ lines.on("line", (line) => {
   // Notifications (`notifications/initialized`) carry no id and need no answer.
   if (message.id === undefined) return;
   switch (message.method) {
-    case "initialize":
-      send({
-        id: message.id,
-        result: {
-          protocolVersion: message.params?.protocolVersion,
-          capabilities: { tools: {}, logging: {} },
-          serverInfo: { name: "perk-mcp-fixture", version: "1.0.0" },
+    case "initialize": {
+      const id = message.id;
+      const protocolVersion = message.params?.protocolVersion;
+      setTimeout(
+        () => {
+          send({
+            id,
+            result: {
+              protocolVersion,
+              capabilities: { tools: {}, logging: {} },
+              serverInfo: { name: "perk-mcp-fixture", version: "1.0.0" },
+            },
+          });
         },
-      });
+        Number(process.env.PERK_MCP_FIXTURE_INIT_DELAY_MS ?? 0),
+      );
       return;
+    }
     case "tools/list":
       send({ id: message.id, result: { tools: [ECHO_TOOL] } });
       return;
