@@ -382,8 +382,9 @@ past the refusal (an aliased `models` in a project-registered codemode, a projec
 classifier itself) is counted at turn end and bounded by the turn, token and wall-clock limits.
 
 The worker's own codemode is **pi's builtin `codemode`**, loaded beside pi's builtin
-`tool_search` with the CLI's builtin identity (`builtin:codemode` / `builtin:tool-search`). Both
-register inactive; the repo's `defaultTools` decides (`+codemode`; perk's seeded `+tool_search`
+`tool_search` and pi's MCP builtin with the CLI's builtin identity (`builtin:codemode` /
+`builtin:tool-search` / `builtin:mcp`). Codemode and `tool_search` register inactive; the repo's
+`defaultTools` decides (`+codemode`; perk's seeded `+tool_search`
 joins the worker to the discovery cohort, a committed `-tool_search` opts out), and the
 `codemode.mode` / `codemode.inlineBudget` settings apply. A project `"extensions":
 ["-builtin:<name>"]` entry keeps a builtin out of the worker; a project extension registering its
@@ -393,12 +394,24 @@ own `codemode`/`tool_search` replaces the builtin (the worker prints pi's loader
 (`gist-author`, `objective-author`, `objective-plan`, `plan`, `audit`, `objective-refine`) with
 `codemode.mode` `on`; with `only` it stays on only in discovery-cohort sessions (a `-tool_search`
 session keeps it off there) — and never through a `/plan` toggle in a stage-less or worktree
-session, where the gate switches it off. **MCP is off in the worker:** it loads no
-MCP support, so `.pi/mcp.json` is inert there, nothing reads/writes pi's `mcp.json` /
-`mcp-auth.json` / `mcp.log`, and a project extension's `registerMcpServer` is reported on stderr
-(`perk worker: extension error — <path> (register_mcp_server): …`), never connected. A project
-extension that brings its own MCP support is the repo's choice and outside that guarantee.
-perk's **report children** (every wave lane) load no MCP support either: pi-subagents attaches
+session, where the gate switches it off. **MCP in the worker is project-only** (factory-scoped
+isolation through pi's public `McpExtensionOptions`; no agent-dir env override, so model auth,
+subagent children and the session store keep the real agent dir): the worker connects only the
+trusted project's `.pi/mcp.json` servers, registering each through pi's own `registerMcpServer`
+checks, and never reads or writes the agent dir's `mcp.json` / `mcp-auth.json`; server logs go to
+`mcp.log` in the throwaway agent dir. Credentials must be explicit in the project file (`env` for
+stdio, an `Authorization` header for HTTP; `${VAR}` references resolve). Refused, each printed as
+`perk worker: mcp config error — <path>: …` while the rest load: an override-only entry (no
+`command`/`url`/`type` — there is no global server to override), an entry with `auth`, a name an
+extension already registered, anything pi's validator rejects. The worker holds no MCP sign-in: an
+OAuth server's first 401 prints `perk worker: MCP server "<name>" (<origin>) asked for an OAuth
+sign-in — …` (origin only, never path/query/userinfo). `direct` servers are declared to the model;
+the default `codemode` exposure turns on the worker's codemode (pi's `autoEnableCodemode`).
+`-builtin:mcp` keeps MCP out (a project `registerMcpServer` is then reported on stderr as
+`perk worker: extension error — <path> (register_mcp_server): …`, never connected). A project
+extension that brings its own MCP support replaces the builtin and is the repo's choice, outside
+that guarantee.
+perk's **report children** (every wave lane) load no MCP support at all: pi-subagents attaches
 pi's MCP builtin only to launches naming `mcp:` tools and perk's never do, so `.pi/mcp.json`
 adds nothing to them. In a session that does register MCP tools, the read-only gate hides and
 blocks them (direct or nested calls); a definition's `tools:` allowlist alone never excludes
@@ -609,8 +622,8 @@ missing-dir warning. Seeded-door previews, skills create/refine, and `plan resum
 and omit these; their real launches still apply the same checks and injection. `perk resume
 --dry-run` reports the resolved agent dir + its source (`env`/`config`/`default`) in its own preview.
 
-**Non-goals:** `--remote`, the headless worker (throwaway agentDir; no MCP support loaded, so no
-MCP config or credentials are read there), and a hand-run `pi` are unaffected — run bare `perk` for a plain session that carries the redirect. Use direnv or your
+**Non-goals:** `--remote`, the headless worker (throwaway agentDir; its MCP support reads only the
+project's `.pi/mcp.json`, never the agent dir's MCP config or credentials), and a hand-run `pi` are unaffected — run bare `perk` for a plain session that carries the redirect. Use direnv or your
 shell for a hand-run Pi redirect.
 
 ### `[compaction]`

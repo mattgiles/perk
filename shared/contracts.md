@@ -3855,8 +3855,9 @@ statically, and links the seam only by a dynamic import after admission (guard-e
   (extensions/settings/skills) stays locked out via the throwaway `agentDir` — the isolation
   invariant; loader/install mechanics live in `extension/worker/sdkAdapter.ts`. The throwaway dir
   carries exactly **one** global setting, `cacheWarming: "off"`, written by the adapter at mint
-  time (Pi reads the warming mode from global settings only — see *Cache-warming-off*), and still
-  no extensions or skills. Auth and
+  time (Pi reads the warming mode from global settings only — see *Cache-warming-off*), plus the
+  worker MCP builtin's `mcp.log` once a server logs (*Builtin factories*), and still no extensions
+  or skills. Auth and
   `models.json` are **not** throwaway-scoped: they come from the worker-minted `ModelRuntime`
   (`ModelRuntime.create()` — the global agent dir's `auth.json`/`models.json`,
   `PI_CODING_AGENT_DIR`-aware, plus provider env keys; offline), handed explicitly to the
@@ -3898,36 +3899,80 @@ statically, and links the seam only by a dynamic import after admission (guard-e
   `autoCompactionEnabled`/`autoRetryEnabled` against each scenario's settings, an in-drive
   compaction that completes, a project opt-out, a compaction that trips the token cap, a recovered
   retry, exhausted retries and a non-retryable error.
-- **Builtin factories** — `sdkAdapter.ts::workerBuiltinExtensions`. Beside `perk-worker-policy`
-  (always first, never replaced), `resourceLoaderOptions.extensionFactories` carries Pi's two
-  builtin tool extensions in the CLI's order and with the CLI's exact identity: `{ name:
-  "codemode", factory: createCodemodeExtension({ models: WORKER_CODEMODE_MODELS }), replaceable:
-  true, builtin: true }` and `{ name: "tool-search", factory: createToolSearchExtension(),
-  replaceable: true, builtin: true }`. Each loads as `builtin:<name>` with `sourceInfo.source ===
-  "builtin"` (the provenance §8.40's posture table and cohort join key on). Both register their
-  tool **inactive** — **configuration alone activates them**: the resolved `defaultTools`
-  (`perk init`'s seeded `+tool_search`, a committed `-tool_search` opt-out, a `+codemode`). A
-  project `extensions: ["-builtin:<name>"]` entry disables one (it never loads); a project
-  extension that registers the same tool name **replaces** it (Pi's loader omits the builtin and
-  records a warning, printed as `perk worker: extension warning — builtin:<name>: …`).
-  `codemode`'s `mode`/`inlineBudget` are left to the merged `codemode.*` settings. **Per-factory
-  isolation:** `tool-search` reads no file, env var or global dir; `codemode` reads the merged
-  settings (throwaway global + project) and the session's entries, its sandbox worker/wasm
-  resolving from the host package — no global-dir read. **MCP: not supplied.** The worker
-  registers no MCP factory: Pi's `createMcpExtension` defaults its server config, credential store
-  and log to the **global** agent dir, and isolating them would layer a perk `mcp.json` reader and
-  credential store on Pi's implementation — deferred. Within the **worker-supplied extension
-  set** (the policy extension + the two builtins) nothing reads the global or project `mcp.json`,
-  nothing reads or writes `mcp-auth.json`, nothing writes `mcp.log`, and a worktree's
-  `.pi/mcp.json` is inert; a project extension's `pi.registerMcpServer()` is reported by Pi at
-  bind as a `register_mcp_server` extension error (printed — see `ctx.hasUI === false`) and never
-  connected, and the drive continues. **Outside the guarantee:** a project extension that loads
-  its own MCP handler (Pi's public `createMcpExtension`, or any extension handling
-  `mcp_servers_change`) connects servers on its own account — the repo's own choice, exactly as
-  *Model-call policy*'s *Scope*. Pi's `llama.cpp` builtin is not supplied either (providers come
-  from the worker-minted `ModelRuntime` and project extensions). The e2e tier pins activation,
-  opt-out, disable and replacement on a real request, and the absence of `builtin:mcp` by a live
-  loaded-extension census (`getExtensionPaths()`).
+- **Builtin factories** — `sdkAdapter.ts::workerBuiltinExtensions(agentDir)`. Beside
+  `perk-worker-policy` (always first, never replaced), `resourceLoaderOptions.extensionFactories`
+  carries Pi's three builtin tool extensions in the CLI's order and with the CLI's exact identity:
+  `{ name: "codemode", factory: createCodemodeExtension({ models: WORKER_CODEMODE_MODELS }),
+  replaceable: true, builtin: true }`, `{ name: "tool-search", factory:
+  createToolSearchExtension(), replaceable: true, builtin: true }` and `{ name: "mcp", factory:
+  (pi) => createMcpExtension(workerMcpOptions(pi, agentDir))(pi), replaceable: true, builtin:
+  true }`. Each loads as `builtin:<name>` with `sourceInfo.source === "builtin"` (the provenance
+  §8.40's posture table and cohort join key on). `codemode` and `tool-search` register their tool
+  **inactive** — **configuration alone activates them**: the resolved `defaultTools` (`perk
+  init`'s seeded `+tool_search`, a committed `-tool_search` opt-out, a `+codemode`), and Pi's MCP
+  `autoEnableCodemode` (default on) when a `codemode`-exposure server is configured. A project
+  `extensions: ["-builtin:<name>"]` entry disables one (it never loads; with `-builtin:mcp` a
+  project `pi.registerMcpServer()` is again reported by Pi at bind as a `register_mcp_server`
+  extension error, printed — see `ctx.hasUI === false` — and never connected); a project extension
+  that registers the same tool name (for `mcp`, the `/mcp` command) **replaces** it (Pi's loader
+  omits the builtin and records a warning, printed as `perk worker: extension warning —
+  builtin:<name>: …`) and owns its own resources. `codemode`'s `mode`/`inlineBudget` are left to
+  the merged `codemode.*` settings. **Per-factory isolation:** `tool-search` reads no file, env
+  var or global dir; `codemode` reads the merged settings (throwaway global + project) and the
+  session's entries, its sandbox worker/wasm resolving from the host package — no global-dir read.
+  - **MCP — factory-scoped isolation** (`sdkAdapter.ts::workerMcpOptions`). Pi's
+    `createMcpExtension` defaults its server config, credential store and log to the **global**
+    agent dir; the worker replaces every one of them through Pi's public `McpExtensionOptions`, for
+    this factory only. `createTransport`/`startupWaitMs` keep Pi's defaults.
+    - **Config (`loadConfig`)** — the trusted project's `<worktree>/.pi/mcp.json` only; the global
+      `mcp.json` is never read. Five guards, each printing one `perk worker: mcp config error —
+      <path>: <message>` stderr line while the load continues: an untrusted project loads nothing
+      (`ctx.isProjectTrusted()` is `true` by construction in the worker); a missing file is silent,
+      any other read failure (a directory, `EACCES`) is an error; a JSON failure, a non-object root,
+      a present-but-non-object `mcpServers` (an absent one is accepted — e.g. a file carrying only
+      `autoEnableCodemode`) or a non-boolean `autoEnableCodemode` is an error, as in Pi's own
+      loader; a non-object entry is an error; an override-only entry (no `command`, `url` or
+      `type` — there is no global server to override) and an entry with `auth` (allowed only in the
+      global file) are errors. Every other entry goes to Pi's public `pi.registerMcpServer(name,
+      config)` — Pi's validator, ownership and namespace checks — and a refusal is printed with
+      Pi's message (a name a project extension already registered is refused, never overridden by
+      the file). So every project server carries `scope: "extension"` / `source: "builtin:mcp"`
+      (visible only in the unreachable `/mcp`). The loader returns no file servers of its own and
+      never throws (a throw inside Pi's `session_start` handler would leave the builtin
+      uninitialized; an unexpected failure is printed and loads nothing). **Registry rule:** the
+      names the factory holds registered are exactly the entries that passed the latest load —
+      every other tracked name (removed, rejected, or refused on re-registration) is unregistered.
+    - **Credentials** — a stateless headless store: nothing is loaded or saved, `mcp-auth.json` is
+      never read or written, no lock file is placed. An OAuth-capable HTTP server reaches Pi's own
+      sign-in-required decision on its first 401 (the empty-store refresh), the one sign-in
+      decision the store can observe; there the worker prints once per server `perk worker: MCP
+      server "<name>" (<origin>) asked for an OAuth sign-in — …` with headless guidance (an
+      explicit `Authorization` header or env credential in the project's `.pi/mcp.json`, or an
+      interactive run). An `insufficient_scope` challenge is decided by Pi without the store and
+      stays silent headless. `openUrl` prints `perk worker: MCP sign-in refused — …` and throws,
+      and `updateConfig` throws — both unreachable headless (`/mcp` is `hasUI`-gated), fail-closed.
+      Every diagnostic names the server and the URL's **origin** only: userinfo, path, query and
+      fragment never reach stderr.
+    - **Log** — `logPath = <throwaway agentDir>/mcp.log`, removed with the dir at dispose, after
+      `AgentSessionRuntime.dispose()` awaited `session_shutdown`, where the builtin closes every
+      connection.
+    - **Real agent dir everywhere else** — the isolation moves nothing outside the factory: no
+      `PI_CODING_AGENT_DIR` override and no env toggling, so the worker's own `ModelRuntime.create()`,
+      a subagent child (in-process `ModelRuntime.create()` + `getAgentDir()`, or a background
+      process inheriting the worker's env) and `SessionManager.create(worktree)`'s session dir keep
+      resolving the real agent dir — and the §8.35 worker pointer's session file survives the
+      throwaway dir's removal. The e2e tier pins the parent on both harness paths and the children
+      by stand-ins for both construction paths; a live worker-spawned subagent is not exercised.
+    - **Outside the guarantee:** a project extension's own MCP handler (one that replaces the
+      builtin, or any extension handling `mcp_servers_change` beside it) connects servers on its
+      own account — the repo's own choice, exactly as *Model-call policy*'s *Scope*; and Pi's
+      `${VAR}`/`!command` config values in a project entry resolve as in any trusted project.
+  Pi's `llama.cpp` builtin is not supplied (providers come from the worker-minted `ModelRuntime`
+  and project extensions). The e2e tier pins activation, opt-out, disable and replacement on a real
+  request; for MCP, a `direct` and a `codemode`-reached project server connected and called (the
+  server log under the throwaway dir), the global `auth.json`/`models.json`/`mcp-auth.json`/
+  `mcp.json` byte-identical with no global `mcp.log` and the global server never spawned, and
+  `-builtin:mcp`.
 - **Model-call policy (a constrained capability)** — `extension/worker/modelCallPolicy.ts`. Pi
   reports a codemode script's `models.*` usage only when the script ends (its mid-script
   `tool_execution_update` partials carry per-call rows with `cost` only, never tokens), and no
@@ -3984,7 +4029,7 @@ own CLI order, and re-runs identically on any session replacement:
 
 1. **Services** — `createAgentSessionServices({ cwd, agentDir, settingsManager, modelRuntime,
    resourceLoaderOptions: { extensionFactories } })` (`extensionFactories` = the policy extension
-   + the two builtins, *Builtin factories*) loads the project extensions and applies their queued
+   + the three builtins, *Builtin factories*) loads the project extensions and applies their queued
    `registerProvider` (config and native) and `registerVirtualModel` registrations onto the
    worker-minted runtime, then refreshes its availability. Services **never** derive a runtime
    from the throwaway `agentDir` (that would be an empty auth store). Extension load errors, loader
