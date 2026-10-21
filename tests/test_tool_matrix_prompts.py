@@ -293,3 +293,25 @@ def test_match_rule_representative_cases() -> None:
     assert referenced_tools("`subagent` and subagent_supervisor") == []
     assert "read" not in _scan_universe()
     assert "write" not in _scan_universe()
+
+
+def test_codemode_lift_rides_the_registry_read_only_stages() -> None:
+    """The codemode lift (contracts.md §8.40): the matrix's suspended codemode row is lifted in
+    exactly the registry's read-only stages; every carve-out writer is `model-only` (never a
+    script member, so Pi's `only` cannot hide it); for a discovery nonparticipant both
+    mode-over-stage actions strand every lifted stage (keeping `only` suspended there)."""
+    suspended = MATRIX["tools"]["codemode"]["suspended"]
+    read_only = [stage.id for stage in REGISTRY.stages if stage.mode == "read-only"]
+    assert suspended["lifted_in"] == read_only
+    carve_outs = {
+        name: entry
+        for name, entry in MATRIX["tools"].items()
+        if entry.get("owner") == "perk" and entry["gated"] == "carve-out"
+    }
+    assert carve_outs, "the matrix carries the bounded writers"
+    for name, entry in carve_outs.items():
+        assert entry["exposure"] == "model-only", name
+    for stage in read_only:
+        stranded = suspended["stranded_writers"]["nonparticipant"][stage]
+        assert {"collect_draft_review_wave", "push_annotations"} <= set(stranded), stage
+        assert suspended["stranded_writers"]["cohort"][stage] == [], stage

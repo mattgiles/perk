@@ -1727,7 +1727,10 @@ async function assertNeverUndone(h: Fixture, label: string): Promise<void> {
 // A call carrying `parentToolCallId` (another tool issued it through `ctx.executeTool`) is narrowed
 // further under the gate: only a gate-eligible perk query, a core builtin read (`bash` by verdict)
 // and a foreign tool by its gate posture run. Every nested denial is pinned beside its admitted
-// direct twin, so each pin discriminates the nested branch.
+// direct twin, so each pin discriminates the nested branch. A bounded writer (and every model-only
+// kind) never reaches this hook nested in a real session — Pi refuses it first (a script's
+// `tools.<name> does not exist.`, agent-core's `Tool <name> not found`); the fake host fabricates
+// the event to pin the defense-in-depth arm behind both.
 
 const PARENT_ID = "toolu_parent";
 
@@ -1804,7 +1807,7 @@ test("the nested policy: under the gate a nested call reaches only a gate-eligib
   assertForeignInvariance(h);
 });
 
-test("the nested policy follows the landing: delegation by posture, the refinement writer, an unknown stage, the gate exit", async () => {
+test("the nested policy follows the landing: delegation by posture, the refinement writer's defense-in-depth arm, an unknown stage, the gate exit", async () => {
   const h = gateFixture(() => false);
   h.gate.syncFromState("read-only", "implement");
   await assertAdmittedBothWays(h, "subagent", {}, "implement: ");
