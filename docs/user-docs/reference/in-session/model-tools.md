@@ -295,20 +295,23 @@ the reviewer-wave companions `start_draft_review_wave`, `collect_draft_review_wa
 whole draft → review → reviewer-wave flow reachable.
 
 **Nested calls under the gate.** A tool can call another tool through Pi's `ctx.executeTool()` —
-a `codemode` script, or any extension tool that nests. In a read-write session a nested call
-reaches whatever a direct call could. Under the read-only gate (plan mode, or an inherited
-restriction) a nested call is narrowed further than a direct one: it reaches only a gate-eligible
-perk query (`objective_stack_status`), the core reads `read`, `grep`, `find` and `ls`, `bash` under
-the same read-only verdict, and a foreign tool by its posture above. Every bounded writer
-(`plan_draft`, `objective_draft`, `objective_refinement_draft`, …), every other perk tool — even an
-action the gate allows directly, such as `push_annotations` — and Pi's extension builtins
-(`tool_search`, `codemode`) are refused with `perk read-only mode: <name> is blocked (nested call —
-<class> is never a nested grant; only gate-eligible queries and builtin reads run through another
-tool).` A tool being hidden, deferred, found by `tool_search` or annotated `readOnlyHint` never
-grants a nested call. Terminal, interactive, orchestration and host tools — and Pi's own
-`tool_search` — are declared to the model as **model-only**: Pi never lets another tool call them
-at all (it answers `Tool <name> not found`), so no nested call can end the turn or open a human
-surface.
+a `codemode` script, or any extension tool that nests. Pi itself never lets another tool call a
+**model-only** tool — terminal, interactive, orchestration and host tools, and Pi's own
+`tool_search` — and answers `Tool <name> not found`, so no nested call can end the turn or open a
+human surface. Otherwise, in a read-write session a nested call reaches every active tool and every
+deferred one. Under the read-only gate (plan mode, or an inherited restriction) a nested call first
+meets the same checks as a direct one, with the same wordings: `edit`/`write`, a tool not
+registered in the session and a tool ineligible under the gate (for example `codemode`, or
+`collect_review_wave` in a gated implement session) get the refusals described under
+**Structural read-only gate** below. A nested call
+that passes those checks is then narrowed further: it reaches only a gate-eligible perk query
+(`objective_stack_status`), the core reads `read`, `grep`, `find` and `ls`, `bash` under the same
+read-only verdict, and a foreign tool by its posture above. Anything else the gate admits directly
+— a bounded writer (`plan_draft`, `objective_draft`, `objective_refinement_draft`, …), another perk
+action such as `push_annotations`, or an extension builtin — is refused with `perk read-only mode:
+<name> is blocked (nested call — <class> is never a nested grant; only gate-eligible queries and
+builtin reads run through another tool).` A tool being hidden, deferred, found by `tool_search` or
+annotated `readOnlyHint` never grants a nested call.
 
 ### Structural read-only gate
 
