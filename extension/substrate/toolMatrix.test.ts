@@ -17,6 +17,7 @@ import {
   PLANNING_READ_STAGES,
   perkToolNames,
   postureFor,
+  READ_ONLY_STAGES,
   REGISTRY_STAGE_IDS,
   SYNTHETIC_PATH_TOOL_POLICY,
   stageToolsFor,
@@ -160,5 +161,45 @@ test("the one query is gate-allowed in the worktree family and the planning/refi
       !matrix.eligible[stage]?.["read-only"].includes("objective_stack_status"),
       `${stage} read-only excludes it`,
     );
+  }
+});
+
+test("the codemode lift: lifted in the read-only stages; `only` strands the two mode-over-stage actions for a nonparticipant and nothing in the cohort; the writers are model-only", () => {
+  const matrix = toolMatrix();
+  const row = matrix.tools.codemode;
+  assert.ok(row?.owner === "builtin" && row.suspended !== undefined);
+  assert.deepEqual(row.suspended.lifted_in, READ_ONLY_STAGES);
+  for (const stage of READ_ONLY_STAGES) {
+    assert.deepEqual(
+      row.suspended.stranded_writers.nonparticipant[stage],
+      ["collect_draft_review_wave", "push_annotations"],
+      `${stage} nonparticipant`,
+    );
+    assert.deepEqual(row.suspended.stranded_writers.cohort[stage], [], `${stage} cohort`);
+  }
+  assert.deepEqual(
+    Object.keys(row.suspended.stranded_writers.nonparticipant).sort(),
+    [...READ_ONLY_STAGES].sort(),
+  );
+  // The five action carve-outs (the bounded writers) are model-only and never nested grants.
+  const writers = Object.entries(matrix.tools)
+    .filter(([, t]) => t.owner === "perk" && t.gated === "carve-out" && t.kind === "action")
+    .map(([name]) => name);
+  assert.deepEqual(writers.sort(), [
+    "gist_draft",
+    "objective_draft",
+    "objective_node",
+    "objective_refinement_draft",
+    "plan_draft",
+  ]);
+  for (const [name, t] of Object.entries(matrix.tools)) {
+    if (t.owner !== "perk" || t.gated !== "carve-out") continue;
+    assert.equal(t.exposure, "model-only", `${name} exposure`);
+    assert.equal(t.nested, "blocked", `${name} nested`);
+  }
+  // The unconditional eligibility view is unchanged: codemode never appears under the gate.
+  for (const [landing, eligible] of Object.entries(matrix.eligible)) {
+    assert.ok(!eligible["read-only"].includes("codemode"), `${landing} read-only`);
+    assert.ok(eligible["read-write"].includes("codemode"), `${landing} read-write`);
   }
 });

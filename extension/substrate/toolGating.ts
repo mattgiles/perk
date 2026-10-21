@@ -9,8 +9,11 @@
 //  - ACTIVATION is own-names-only: at every reconciliation point perk installs
 //    `reconcileTarget` — the live active set with perk's own names replaced by the eligible ones —
 //    and never activates or deactivates a foreign tool. The one non-perk exception is a builtin
-//    the gate suspends (codemode: hidden-but-active, its own hook would hide every direct tool),
-//    switched off while presenting read-only and back on at release (`suspensionStep`). A session
+//    the gate suspends (codemode: in mode `only` its own hook hides every declared direct tool),
+//    switched off while presenting read-only and back on at release (`suspensionStep`) — except
+//    where the landing lifts it (a registry read-only stage, mode `on` or a stranded-writer-free
+//    `only`, read from Pi's settings): there a user-enabled codemode is kept, or restored from the
+//    memo, and the memo is consumed so a later deactivation is never undone. A session
 //    whose live set needs no change and whose presented mode does not flip gets NO
 //    `setActiveTools` call (a bare session — no stage, read-write, no floor, default registration
 //    — gets none at all).
@@ -87,8 +90,8 @@
 // of a registered, eligible perk tool from the active set (a `defaultTools` preference, a foreign
 // `setActiveTools`) is undone by the next reconciliation — perk's own activation is
 // policy-owned. Composition limit: codemode builds its description from the unfiltered callable
-// set, so in a read-write stage session it may name diet-hidden tools; under the gate codemode is
-// suspended.
+// set, so it may name diet-hidden or gate-blocked tools (`edit`/`write` under a lifted gate) —
+// presentation only: the backstop refuses them, nested or direct.
 //
 // Substrate only: the gate-ENTRY consumers are perk-owned plan mode (`pi/v1/plan.ts`: `/plan`,
 // `--plan`, `Ctrl+Alt+P`), the warm `/objective-plan` factory (`pi/v1/objectivePlanning.ts`) and
@@ -101,6 +104,7 @@ import { readOnlyBashVerdict } from "./readOnlyBash.ts";
 import {
   carveOutWritersFor,
   discoveryFamily,
+  type GateLanding,
   type GateTransition,
   hiddenDeclarationsFor,
   isEligible,
@@ -271,7 +275,7 @@ export function registerToolGating(
   // already sees it); on a failed install it falls back to the settled gate.
   let presentedMode: Mode = "read-write";
   // The builtins the gate switched off (codemode), restored when the presentation turns
-  // read-write. Updated only after a successful install.
+  // read-write or a lifted landing consumes the memo. Updated only after a successful install.
   let suspended: string[] = [];
   // Whether this activation joined the discovery cohort; the family members it deferred (catalog
   // order); and those the next install must still deactivate once (cleared only after a
@@ -318,7 +322,13 @@ export function registerToolGating(
     try {
       const live = pi.getActiveTools();
       const infos = provenanceMap();
-      const step = suspensionStep({ active: live, infos }, presentedMode, suspended);
+      const step = suspensionStep(
+        { active: live, infos },
+        presentedMode,
+        suspended,
+        stageId,
+        landing(infos),
+      );
       const deferring = new Set(pendingDeferral);
       const joined = step.active.filter((name) => !deferring.has(name));
       const target =
@@ -432,9 +442,22 @@ export function registerToolGating(
     return new Map(pi.getAllTools().map((t) => [t.name, t.sourceInfo] as const));
   }
 
-  /** The registered tool's provenance, or undefined when the name is not registered here. */
-  function registeredProvenance(name: string): Provenance | undefined {
-    return pi.getAllTools().find((t) => t.name === name)?.sourceInfo;
+  /**
+   * The session's codemode mode, read exactly as Pi's builtin reads it (the merged `codemode.mode`
+   * setting: `only`, else `on`). A codemode factory's own `mode` option shadows the setting and is
+   * invisible here — the worker's factory passes none. Unreadable → undefined: no lift.
+   */
+  function readCodemodeMode(): "on" | "only" | undefined {
+    try {
+      return pi.getSettings().codemode?.mode === "only" ? "only" : "on";
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The session facts a codemode lift reads, over the registry the caller already read. */
+  function landing(infos: ReadonlyMap<string, Provenance>): GateLanding {
+    return { codemode: readCodemodeMode(), deferred, registered: [...infos.keys()] };
   }
 
   // Enforce the whole policy even if presentation failed or a tool was activated between
@@ -450,14 +473,15 @@ export function registerToolGating(
       }
       // A name this session never registered is never callable here — a catalogued perk name
       // included (classification is by catalog, callability by the live registry).
-      const provenance = registeredProvenance(event.toolName);
+      const infos = provenanceMap();
+      const provenance = infos.get(event.toolName);
       if (provenance === undefined) {
         return {
           block: true,
           reason: `perk read-only mode: ${event.toolName} is blocked (tool not registered).`,
         };
       }
-      if (!isEligible(event.toolName, provenance, stageId, "read-only")) {
+      if (!isEligible(event.toolName, provenance, stageId, "read-only", landing(infos))) {
         return {
           block: true,
           reason: `perk read-only mode: ${event.toolName} is blocked (tool not allowlisted).`,
@@ -624,7 +648,13 @@ export function registerToolGating(
       // activates it (a `tool_search` hit, a prime).
       try {
         const infos = provenanceMap();
-        const hidden = hiddenDeclarationsFor([...infos.keys()], infos, stageId, presentedMode);
+        const hidden = hiddenDeclarationsFor(
+          [...infos.keys()],
+          infos,
+          stageId,
+          presentedMode,
+          landing(infos),
+        );
         const declared = new Set(loadout.declared.map((t) => t.name));
         for (const name of deferred) {
           if (!declared.has(name) && !hidden.includes(name)) hidden.push(name);

@@ -120,6 +120,14 @@ export const REGISTRY_STAGE_IDS: readonly string[] = REGISTRY.stages.map((s) => 
 const REGISTRY_STAGE_SET: ReadonlySet<string> = new Set(REGISTRY_STAGE_IDS);
 
 /**
+ * The registry's read-only stages (`mode: read-only`), in registry order — where a user-enabled
+ * codemode survives the gate (the codemode lift). Derived from the registry, never listed.
+ */
+export const READ_ONLY_STAGES: readonly string[] = REGISTRY.stages
+  .filter((s) => s.mode === "read-only")
+  .map((s) => s.id);
+
+/**
  * The worktree family: the stages that consume the plan-ref selector (implement / submit /
  * address / land / learn). Derived from the registry, never listed.
  */
@@ -254,19 +262,24 @@ export function deriveOutputSchema(result: QueryResultSchema): object {
 
 /**
  * Derive the Pi `exposure` + `annotations` (+ `outputSchema` for a query) for a policy — never
- * hand-set on a definition. `exposure` is `deferred` only for a family member re-registered
- * inside the discovery cohort (`cohort: true`); registration and the golden matrix derive without
- * it, so every family member registers `direct`.
+ * hand-set on a definition. A model-only kind and every carve-out writer are `model-only`: a
+ * bounded writer is declared to the model but never a member of a codemode script's `tools` and
+ * never reachable through `ctx.executeTool` (Pi refuses both before any hook), so Pi's codemode
+ * `only` mode cannot hide it from the model. `exposure` is `deferred` only for a family member
+ * re-registered inside the discovery cohort (`cohort: true`); registration and the golden matrix
+ * derive without it, so every family member registers `direct`. A carve-out is never deferred
+ * (validation refuses it), so the two never compete for the one enum.
  */
 export function derivePiMetadata(
   policy: ToolPolicy,
   options: { cohort?: boolean } = {},
 ): PiToolMetadata {
-  const exposure = MODEL_ONLY_KINDS.has(policy.kind)
-    ? "model-only"
-    : policy.declared === "deferred" && options.cohort === true
-      ? "deferred"
-      : "direct";
+  const exposure =
+    MODEL_ONLY_KINDS.has(policy.kind) || typeof policy.gated === "object"
+      ? "model-only"
+      : policy.declared === "deferred" && options.cohort === true
+        ? "deferred"
+        : "direct";
   return {
     exposure,
     ...(policy.gated === "blocked" ? {} : { annotations: { readOnlyHint: true } }),
@@ -457,11 +470,28 @@ export const SYNTHETIC_PATH_TOOL_POLICY: Readonly<Record<string, ForeignPosture>
   "<inline:pi-subagents:prompt-runtime>": "child-engine",
 };
 
-/** A builtin's row: its gate posture, its registrar, and whether the gate suspends it. */
+/**
+ * A builtin's row: its gate posture, its registrar, and — for a builtin the gate suspends — the
+ * stages where a user-enabled instance is lifted instead (`liftedIn`; the landing's codemode mode
+ * decides, see `lifted`).
+ */
 export type BuiltinRow = {
   gated: BuiltinPosture;
   registrar: "core" | "extension";
-  suspendedUnderGate?: true;
+  suspendedUnderGate?: { liftedIn: readonly string[] };
+};
+
+/**
+ * The session facts a codemode lift reads beyond (stage, mode): the session's codemode mode (Pi's
+ * merged `codemode.mode` setting), the names this activation actually deferred, and the names
+ * registered in this session. Absent facts fail closed: no `codemode` → no lift; no `deferred`
+ * → nothing deferred; no `registered` → the whole catalog is a candidate (more stranded
+ * writers, never fewer).
+ */
+export type GateLanding = {
+  codemode?: "on" | "only";
+  deferred?: readonly string[];
+  registered?: readonly string[];
 };
 
 /**
@@ -471,10 +501,12 @@ export type BuiltinRow = {
  * table and the reconciliation). Nested under the gate only the `core` rows keep their posture
  * (`nestedPostureFor`); every `extension` row (`tool_search`, `codemode`) is blocked nested — the
  * discriminator `/btw` uses too. `codemode` is blocked AND suspended under the gate — the one
- * non-perk tool the gate ever deactivates: its description embeds the callable direct tools'
- * schemas (`edit`/`write` included), and in mode `only` its own loadout hook hides every callable
- * direct tool, so a hidden-but-active codemode would leave a gated session without `read`, `bash`
- * or perk's direct tools. The gate switches it off instead and back on at release.
+ * non-perk tool the gate ever deactivates — except in the registry's read-only stages, where a
+ * user-enabled codemode is lifted (kept active, declared and directly callable): mode `on` always,
+ * mode `only` only when no stranded writer would lose its last path (`strandedWriters` — Pi's
+ * `only` hides every declared direct tool). Elsewhere a hidden-but-active codemode could strand
+ * the gated session's direct tools, so the gate switches it off and back on at release; its
+ * scripts stay bounded by the nested policy wherever it runs.
  */
 export const BUILTIN_TOOL_POLICY: Readonly<Record<string, BuiltinRow>> = {
   read: { gated: "allowed", registrar: "core" },
@@ -485,7 +517,11 @@ export const BUILTIN_TOOL_POLICY: Readonly<Record<string, BuiltinRow>> = {
   edit: { gated: "blocked", registrar: "core" },
   write: { gated: "blocked", registrar: "core" },
   tool_search: { gated: "allowed", registrar: "extension" },
-  codemode: { gated: "blocked", registrar: "extension", suspendedUnderGate: true },
+  codemode: {
+    gated: "blocked",
+    registrar: "extension",
+    suspendedUnderGate: { liftedIn: READ_ONLY_STAGES },
+  },
 };
 
 const BUILTIN_NAMES: readonly string[] = Object.keys(BUILTIN_TOOL_POLICY);
@@ -574,12 +610,15 @@ function formula(
  * Whether a tool is eligible in a (stage, mode) landing. A perk tool is classified by its catalog
  * name (pass `undefined` provenance freely); every other tool by its provenance — an `unknown`
  * one is eligible only read-write (it passes every diet; under the gate the backstop blocks it).
+ * A gate-blocked builtin is eligible under the gate only where the landing lifts it (`landing` is
+ * read by that arm alone).
  */
 export function isEligible(
   name: string,
   provenance: Provenance | undefined,
   stage: string | null | undefined,
   mode: Mode,
+  landing: GateLanding = {},
 ): boolean {
   const scoped = normalizeStage(stage);
   const posture = postureFor(name, provenance);
@@ -599,10 +638,67 @@ export function isEligible(
       return formula(row.stages, row.gated !== "blocked", false, scoped, mode);
     }
     case "builtin":
-      return mode === "read-write" || posture.gated !== "blocked";
+      return (
+        mode === "read-write" ||
+        posture.gated !== "blocked" ||
+        lifted(name, provenance, stage, landing)
+      );
     case "unknown":
       return mode === "read-write";
   }
+}
+
+/**
+ * The perk tools Pi's codemode `only` mode would strand in a gated landing: registered in this
+ * session (`landing.registered`, else every catalogued name), eligible under the gate in the
+ * stage, exposed `direct` here (not deferred in this activation, not model-only) and blocked
+ * nested — so `only` would hide them from the model while the nested policy refuses them to a
+ * script, leaving no path at all. Catalog order. A catalogued name the host never registered can
+ * never strand (only registered names exist in a session).
+ */
+export function strandedWriters(
+  stage: string | null | undefined,
+  landing: GateLanding = {},
+): string[] {
+  const registered = landing.registered === undefined ? null : new Set(landing.registered);
+  const deferred = new Set(landing.deferred ?? []);
+  return [...CATALOG].flatMap(([name, policy]) => {
+    if (registered !== null && !registered.has(name)) return [];
+    if (!isEligible(name, undefined, stage, "read-only")) return [];
+    if (deferred.has(name) || derivePiMetadata(policy).exposure !== "direct") return [];
+    return nestedPostureFor({ owner: "perk", policy }) === "blocked" ? [name] : [];
+  });
+}
+
+/** A builtin-sourced row's suspension, or undefined when the gate never suspends the tool. */
+function suspensionFor(
+  name: string,
+  provenance: Provenance | undefined,
+): BuiltinRow["suspendedUnderGate"] {
+  if (provenance?.source !== "builtin" || !Object.hasOwn(BUILTIN_TOOL_POLICY, name)) {
+    return undefined;
+  }
+  return BUILTIN_TOOL_POLICY[name]?.suspendedUnderGate;
+}
+
+/**
+ * The codemode lift: a suspended builtin row stays on under the gate in one of its `liftedIn`
+ * stages when the session's codemode mode is `on`, or is `only` and no stranded writer would lose
+ * its last path. Unscoped and unknown stages never lift; an unread mode never lifts.
+ */
+function lifted(
+  name: string,
+  provenance: Provenance | undefined,
+  stage: string | null | undefined,
+  landing: GateLanding,
+): boolean {
+  const suspension = suspensionFor(name, provenance);
+  const scoped = normalizeStage(stage);
+  if (suspension === undefined || scoped === null || !suspension.liftedIn.includes(scoped)) {
+    return false;
+  }
+  if (landing.codemode === "on") return true;
+  return landing.codemode === "only" && strandedWriters(scoped, landing).length === 0;
 }
 
 /**
@@ -711,11 +807,12 @@ export function hiddenDeclarationsFor(
   infos: ReadonlyMap<string, Provenance>,
   stage: string | null | undefined,
   mode: Mode,
+  landing: GateLanding = {},
 ): string[] {
   const hidden = [LOADOUT_HOST_NAME];
   for (const name of declared) {
     if (name === LOADOUT_HOST_NAME) continue;
-    if (!isEligible(name, infos.get(name), stage, mode)) hidden.push(name);
+    if (!isEligible(name, infos.get(name), stage, mode, landing)) hidden.push(name);
   }
   return hidden;
 }
@@ -732,28 +829,50 @@ export type LoadoutPresentation = {
   readonly descriptions?: never;
 };
 
-/** Whether the read-only gate suspends this tool: a builtin-sourced row marked suspended. */
-export function gateSuspends(name: string, provenance: Provenance | undefined): boolean {
-  if (provenance?.source !== "builtin" || !Object.hasOwn(BUILTIN_TOOL_POLICY, name)) return false;
-  return BUILTIN_TOOL_POLICY[name]?.suspendedUnderGate === true;
+/**
+ * Whether the read-only gate suspends this tool in a gated landing: a builtin-sourced row marked
+ * suspended that the landing does not lift (no stage or landing: the row alone).
+ */
+export function gateSuspends(
+  name: string,
+  provenance: Provenance | undefined,
+  stage: string | null = null,
+  landing: GateLanding = {},
+): boolean {
+  return suspensionFor(name, provenance) !== undefined && !lifted(name, provenance, stage, landing);
 }
 
 /**
  * The gate's suspension step, applied to the live active set before `reconcileTarget`: presenting
- * read-only removes every active suspended builtin (remembering it); presenting read-write
- * restores what the gate suspended earlier, when still registered and inactive, and forgets the
- * memo. `suspended` is the memo to keep once the install succeeds.
+ * read-only removes every active builtin the landing suspends (remembering it) — and a lifted
+ * landing CONSUMES the memo: every remembered name that is a registered suspended builtin lifted
+ * here leaves the memo, restored when inactive (once; perk never adds a name the memo does not
+ * hold), so a later deactivation by the user or host is never undone. An unregistered remembered
+ * name is retained untouched. Presenting read-write restores what the gate suspended earlier,
+ * when still registered and inactive, and forgets the memo. `suspended` is the memo to keep once
+ * the install succeeds.
  */
 export function suspensionStep(
   live: { active: readonly string[]; infos: ReadonlyMap<string, Provenance> },
   mode: Mode,
   suspended: readonly string[],
+  stage: string | null = null,
+  landing: GateLanding = {},
 ): { active: string[]; suspended: string[] } {
   if (mode === "read-only") {
-    const now = live.active.filter((name) => gateSuspends(name, live.infos.get(name)));
+    const now = live.active.filter((name) =>
+      gateSuspends(name, live.infos.get(name), stage, landing),
+    );
+    const consumed = suspended.filter((name) => {
+      const provenance = live.infos.get(name);
+      return (
+        suspensionFor(name, provenance) !== undefined && lifted(name, provenance, stage, landing)
+      );
+    });
+    const restore = consumed.filter((name) => !live.active.includes(name));
     return {
-      active: live.active.filter((name) => !now.includes(name)),
-      suspended: [...new Set([...suspended, ...now])],
+      active: [...live.active.filter((name) => !now.includes(name)), ...restore],
+      suspended: [...new Set([...suspended.filter((name) => !consumed.includes(name)), ...now])],
     };
   }
   const restore = suspended.filter(
@@ -791,6 +910,18 @@ export type ToolMatrixEntry =
       gated: BuiltinPosture;
       nested: BuiltinPosture;
       registrar: "core" | "extension";
+      /**
+       * A suspended row only: the stages where it is lifted, and per lifted stage the stranded
+       * writers that keep codemode `only` suspended there — for a discovery nonparticipant
+       * (nothing deferred) and a cohort session (the family deferred) — over the whole catalog.
+       */
+      suspended?: {
+        lifted_in: string[];
+        stranded_writers: {
+          nonparticipant: Record<string, string[]>;
+          cohort: Record<string, string[]>;
+        };
+      };
     };
 
 /** One foreign posture row as the matrix renders it. */
@@ -836,12 +967,26 @@ function postureEntry(posture: ForeignPosture): PostureMatrixEntry {
 /** The golden matrix, derived from the catalog + the posture table (order-independent). */
 export function toolMatrix(): ToolMatrix {
   const tools: Record<string, ToolMatrixEntry> = {};
+  const strandedBy = (landing: GateLanding, stages: readonly string[]) =>
+    Object.fromEntries(stages.map((stage) => [stage, strandedWriters(stage, landing).sort()]));
   for (const [name, row] of Object.entries(BUILTIN_TOOL_POLICY)) {
+    const suspension = row.suspendedUnderGate;
     tools[name] = {
       owner: "builtin",
       gated: row.gated,
       nested: nestedPostureFor({ owner: "builtin", gated: row.gated, registrar: row.registrar }),
       registrar: row.registrar,
+      ...(suspension !== undefined
+        ? {
+            suspended: {
+              lifted_in: registryOrdered(suspension.liftedIn),
+              stranded_writers: {
+                nonparticipant: strandedBy({}, suspension.liftedIn),
+                cohort: strandedBy({ deferred: discoveryFamily() }, suspension.liftedIn),
+              },
+            },
+          }
+        : {}),
     };
   }
   for (const [name, policy] of CATALOG) {

@@ -28,6 +28,7 @@ import {
   type Mode,
   perkToolNames,
   perkToolsFor,
+  READ_ONLY_STAGES,
   REGISTRY_STAGE_IDS,
   WORKTREE_STAGES,
 } from "./toolPolicy.ts";
@@ -109,14 +110,20 @@ type Install = { names: string[]; liveForeign: string[]; hidden: string[] };
  */
 function gateFixture(
   floor: () => boolean,
-  opts: { registry?: readonly FakeTool[]; active?: readonly string[] } = {},
+  opts: {
+    registry?: readonly FakeTool[];
+    active?: readonly string[];
+    /** Pi's merged settings (`getSettings`); default `{}` — codemode mode `on`; null = no API. */
+    settings?: { codemode?: { mode?: string } } | null;
+  } = {},
 ) {
   const hooks = new Map<string, Hook>();
   let registry: FakeTool[] = [...(opts.registry ?? defaultRegistry())];
   let active: string[] = [...(opts.active ?? defaultActive(registry))];
+  const settings = opts.settings === undefined ? {} : opts.settings;
   // `append` throws before recording; `append-after` records THEN throws (Pi's non-transactional
   // append: the entry reaches the branch before the persistence that fails).
-  let fail: "snapshot" | "census" | "toolset" | "append" | "append-after" | undefined;
+  let fail: "snapshot" | "census" | "toolset" | "append" | "append-after" | "settings" | undefined;
   const appends: unknown[] = [];
   const installs: Install[] = [];
   const pi = {
@@ -147,6 +154,14 @@ function gateFixture(
       appends.push(data);
       if (fail === "append-after") throw new Error("append-after");
     },
+    ...(settings === null
+      ? {}
+      : {
+          getSettings: () => {
+            if (fail === "settings") throw new Error("settings");
+            return settings;
+          },
+        }),
   } as unknown as ExtensionAPI;
   const gate = registerToolGating(pi, floor);
   const hiddenNow = (): string[] => {
@@ -1077,6 +1092,148 @@ test("codemode is suspended under the gate and restored at release; a never-acti
   assertForeignInvariance(foreign);
 });
 
+// --- the codemode lift (contracts.md §8.40) --------------------------------------------------------
+//
+// In a registry read-only stage a user-enabled codemode stays on under the gate when Pi's codemode
+// mode is `on`, or is `only` with no stranded writer (a registered, gate-eligible, direct,
+// nested-blocked perk tool — today the two mode-over-stage actions while they are not deferred).
+
+const CODEMODE_TOOL: FakeTool = builtin("codemode");
+
+/** A session with Pi's builtin codemode registered and active, under the given settings. */
+function withCodemode(
+  opts: { floor?: () => boolean; mode?: "on" | "only"; registry?: readonly FakeTool[] } = {},
+): Fixture {
+  const registry = [...(opts.registry ?? defaultRegistry()), CODEMODE_TOOL];
+  return gateFixture(opts.floor ?? (() => false), {
+    registry,
+    active: [...defaultActive(registry)],
+    settings: opts.mode === undefined ? {} : { codemode: { mode: opts.mode } },
+  });
+}
+
+/** Codemode lifted: active, declared, a direct call admitted, a nested one still refused. */
+async function assertLifted(h: Fixture, label: string): Promise<void> {
+  assert.ok(h.active().includes("codemode"), `${label}: codemode kept active`);
+  assert.equal(h.hidden().includes("codemode"), false, `${label}: codemode declared`);
+  assert.equal(await blockOf(h, "codemode"), undefined, `${label}: a direct call admitted`);
+  assert.deepEqual(
+    await blockOf(h, "codemode", {}, PARENT_ID),
+    nestedDenial("codemode", "an extension builtin"),
+    `${label}: a nested call still refused`,
+  );
+}
+
+/** Codemode suspended: switched off, hidden, a direct call `tool not allowlisted`. */
+async function assertSuspended(h: Fixture, label: string): Promise<void> {
+  assert.ok(!h.active().includes("codemode"), `${label}: codemode switched off`);
+  assert.ok(h.hidden().includes("codemode"), `${label}: codemode hidden`);
+  assert.deepEqual(
+    await blockOf(h, "codemode"),
+    {
+      block: true,
+      reason: "perk read-only mode: codemode is blocked (tool not allowlisted).",
+    },
+    `${label}: a direct call refused`,
+  );
+}
+
+test("the codemode lift: mode on keeps a user-enabled codemode active, declared and directly callable in every registry read-only stage; nested still refused", async () => {
+  for (const stage of READ_ONLY_STAGES) {
+    const h = withCodemode({ mode: "on" });
+    h.gate.syncFromState("read-only", stage);
+    await assertLifted(h, stage);
+    // The rest of the gate stands: edit/write and the unknown inline stay refused.
+    for (const name of ["edit", "write", "foreign_mutator"])
+      assert.equal((await blockOf(h, name))?.block, true, `${stage}: ${name}`);
+    assertForeignInvariance(h);
+  }
+  // The default settings (no codemode key) read as `on`.
+  const defaulted = withCodemode();
+  defaulted.gate.syncFromState("read-only", "plan");
+  await assertLifted(defaulted, "default settings");
+  // A worktree stage, an unknown stage and an unscoped gate never lift.
+  for (const stage of ["implement", "bogus", undefined]) {
+    const h = withCodemode({ mode: "on" });
+    h.gate.syncFromState("read-only", stage);
+    await assertSuspended(h, `${stage}`);
+  }
+});
+
+test("the codemode lift under mode only: lifted in a cohort session; a nonparticipant keeps it suspended (its mode-over-stage actions stay direct) unless its registry lacks them", async () => {
+  const cohort = withCodemode({ mode: "only" });
+  cohort.gate.joinDiscoveryCohort(discoveryFamily());
+  cohort.gate.syncFromState("read-only", "plan");
+  await assertLifted(cohort, "cohort plan");
+
+  for (const stage of ["plan", "audit"]) {
+    const outside = withCodemode({ mode: "only" });
+    outside.gate.syncFromState("read-only", stage);
+    await assertSuspended(outside, `nonparticipant ${stage}`);
+    // Both actions are gate-eligible (mode-over-stage) and direct here: they would be stranded.
+    for (const name of ["push_annotations", "collect_draft_review_wave"])
+      assert.ok(outside.active().includes(name), `${stage}: ${name} declared and direct`);
+  }
+
+  // Pi's registry filter left both out: nothing strands, so `only` lifts.
+  const filtered = withCodemode({
+    mode: "only",
+    registry: defaultRegistry().filter(
+      (t) => !["push_annotations", "collect_draft_review_wave"].includes(t.name),
+    ),
+  });
+  filtered.gate.syncFromState("read-only", "plan");
+  await assertLifted(filtered, "nonparticipant without the actions");
+});
+
+test("the codemode lift fails closed: an unreadable setting, a child floor in an unscoped session", async () => {
+  const unreadable = withCodemode({ mode: "on" });
+  unreadable.fail("settings");
+  unreadable.gate.syncFromState("read-only", "plan");
+  await assertSuspended(unreadable, "a throwing settings read");
+  // A host without `getSettings` at all is the same unread mode.
+  const registry = [...defaultRegistry(), CODEMODE_TOOL];
+  const bare = gateFixture(() => false, {
+    registry,
+    active: defaultActive(registry),
+    settings: null,
+  });
+  bare.gate.syncFromState("read-only", "plan");
+  await assertSuspended(bare, "no getSettings");
+
+  // A child floor: children are unscoped, so the floor never lifts.
+  const child = withCodemode({ mode: "on", floor: () => true });
+  child.gate.syncFromState(undefined, undefined);
+  await assertSuspended(child, "child floor");
+  // A /plan toggle in a read-write stage never lifts.
+  const toggled = withCodemode({ mode: "on" });
+  toggled.gate.syncFromState("read-write", "implement");
+  toggled.gate.enter();
+  await assertSuspended(toggled, "a /plan toggle in implement");
+});
+
+test("the codemode lift follows the stage: plan → implement → plan suspends with the memo, then restores; exit from either state leaves exactly one codemode", async () => {
+  const h = withCodemode({ mode: "on" });
+  h.gate.syncFromState("read-only", "plan");
+  await assertLifted(h, "plan");
+  h.gate.syncFromState("read-only", "implement");
+  await assertSuspended(h, "implement");
+  h.gate.syncFromState("read-only", "plan");
+  await assertLifted(h, "plan again");
+  assert.equal(h.active().filter((n) => n === "codemode").length, 1, "restored once");
+  h.gate.exit();
+  assert.equal(h.active().filter((n) => n === "codemode").length, 1, "exit from a lifted landing");
+
+  const g = withCodemode({ mode: "on" });
+  g.gate.syncFromState("read-only", "plan");
+  g.gate.syncFromState("read-only", "implement");
+  await assertSuspended(g, "implement");
+  g.gate.exit();
+  assert.equal(g.active().filter((n) => n === "codemode").length, 1, "exit from a suspension");
+  assertForeignInvariance(h, ["codemode"]);
+  assertForeignInvariance(g, ["codemode"]);
+});
+
 // --- the discovery cohort ---------------------------------------------------------------------------
 
 test("the cohort join: applied by the next reconciliation as ONE install (the family deactivated once); idempotent; nonparticipants keep the family", async () => {
@@ -1479,6 +1636,91 @@ test("a throwing closing install keeps the cohort deferral pending for the next 
   await h.call("before_agent_start");
   for (const name of family) assert.ok(!h.active().includes(name), `${name} deactivated now`);
 });
+
+test("the codemode lift in the restoration window: a reload in a gated plan landing removes nothing; a /tree restore landing in implement waits for the close to suspend", async () => {
+  for (const [label, open] of OPENERS) {
+    const h = reloaded({ codemode: true });
+    await open(h);
+    h.gate.syncFromState("read-only", "plan");
+    assert.ok(h.active().includes("codemode"), `${label}: kept in the window`);
+    await h.call("agent_start");
+    assert.ok(h.active().includes("codemode"), `${label}: kept through the close`);
+    for (const [i, install] of h.installs.entries())
+      assert.ok(install.names.includes("codemode"), `${label}: install #${i} kept codemode`);
+    assert.equal(h.hidden().includes("codemode"), false, `${label}: declared`);
+  }
+
+  // Lifted in plan; a /tree restore opens the window and the landing moves to implement.
+  const t = reloaded({ codemode: true });
+  t.gate.syncFromState("read-only", "plan");
+  assert.ok(t.active().includes("codemode"));
+  t.restore(t.active());
+  await t.call("session_tree");
+  const before = t.active();
+  const from = t.installs.length;
+  t.gate.syncFromState("read-only", "implement");
+  assertOnlyAdds(t, from, before, "the stage sync");
+  assert.ok(t.active().includes("codemode"), "the suspension waits for the close");
+  assert.equal((await blockOf(t, "codemode"))?.block, true, "enforcement is immediate");
+  await t.call("agent_start");
+  assert.ok(!t.active().includes("codemode"), "suspended at the close");
+  t.gate.exit();
+  assert.equal(t.active().filter((n) => n === "codemode").length, 1, "the memo restores it");
+  assertForeignInvariance(t, ["codemode"]);
+});
+
+test("the codemode lift consumes the suspension memo: a lift's restore inside the window lands at once, the close consumes the memo, and a later deactivation is never undone", async () => {
+  // Suspended and remembered in gated implement; the window opens; a sync to gated plan.
+  const viaSync = async (opener: (h: Fixture) => unknown): Promise<Fixture> => {
+    const h = reloaded({ codemode: true });
+    h.gate.syncFromState("read-only", "implement");
+    assert.ok(!h.active().includes("codemode"), "suspended in implement");
+    await opener(h);
+    return h;
+  };
+  for (const [label, open] of OPENERS) {
+    const h = await viaSync(open);
+    const before = h.active();
+    const from = h.installs.length;
+    h.gate.syncFromState("read-only", "plan");
+    // The stage removals (implement's objective_node) wait; codemode's restore lands at once.
+    assert.ok(perkToolsFor("implement", "read-only").includes("objective_node"));
+    assert.ok(!perkToolsFor("plan", "read-only").includes("objective_node"));
+    assertOnlyAdds(h, from, before, `${label}: the in-window sync`);
+    assert.ok(h.active().includes("codemode"), `${label}: restored at once`);
+    assert.ok(h.active().includes("objective_node"), `${label}: the removal waits`);
+    await h.call("agent_start");
+    assert.ok(!h.active().includes("objective_node"), `${label}: the removal landed`);
+    assert.ok(h.active().includes("codemode"), `${label}: codemode active after the close`);
+    await assertNeverUndone(h, label);
+  }
+
+  // The same through Pi's /tree restore of a loadout that already carries codemode.
+  const t = reloaded({ codemode: true });
+  t.gate.syncFromState("read-only", "implement");
+  assert.ok(!t.active().includes("codemode"));
+  t.restore([...t.active(), "codemode"]);
+  await t.call("session_tree");
+  const before = t.active();
+  const from = t.installs.length;
+  t.gate.syncFromState("read-only", "plan");
+  assertOnlyAdds(t, from, before, "tree restore: the in-window sync");
+  await t.call("agent_start");
+  assert.ok(t.active().includes("codemode"), "tree restore: kept through the close");
+  await assertNeverUndone(t, "tree restore");
+});
+
+/** The user (or host) switches codemode off: no later point, nor the gate exit, brings it back. */
+async function assertNeverUndone(h: Fixture, label: string): Promise<void> {
+  h.setActive(h.active().filter((n) => n !== "codemode"));
+  await h.call("before_agent_start");
+  await h.call("resources_discover");
+  await h.call("agent_start");
+  assert.ok(!h.active().includes("codemode"), `${label}: never re-added under the gate`);
+  h.gate.exit();
+  assert.ok(!h.active().includes("codemode"), `${label}: the exit adds nothing`);
+  assertForeignInvariance(h, ["codemode"]);
+}
 
 // --- the nested policy (contracts.md §8.40) --------------------------------------------------------
 //

@@ -989,7 +989,53 @@
       "gated": "blocked",
       "nested": "blocked",
       "owner": "builtin",
-      "registrar": "extension"
+      "registrar": "extension",
+      "suspended": {
+        "lifted_in": [
+          "gist-author",
+          "objective-author",
+          "objective-plan",
+          "plan",
+          "audit",
+          "objective-refine"
+        ],
+        "stranded_writers": {
+          "cohort": {
+            "audit": [],
+            "gist-author": [],
+            "objective-author": [],
+            "objective-plan": [],
+            "objective-refine": [],
+            "plan": []
+          },
+          "nonparticipant": {
+            "audit": [
+              "collect_draft_review_wave",
+              "push_annotations"
+            ],
+            "gist-author": [
+              "collect_draft_review_wave",
+              "push_annotations"
+            ],
+            "objective-author": [
+              "collect_draft_review_wave",
+              "push_annotations"
+            ],
+            "objective-plan": [
+              "collect_draft_review_wave",
+              "push_annotations"
+            ],
+            "objective-refine": [
+              "collect_draft_review_wave",
+              "push_annotations"
+            ],
+            "plan": [
+              "collect_draft_review_wave",
+              "push_annotations"
+            ]
+          }
+        }
+      }
     },
     "collect_draft_review_wave": {
       "declared": "deferred",
@@ -1066,7 +1112,7 @@
     },
     "gist_draft": {
       "declared": "always",
-      "exposure": "direct",
+      "exposure": "model-only",
       "gated": "carve-out",
       "kind": "action",
       "mode_over_stage": false,
@@ -1136,7 +1182,7 @@
     },
     "objective_draft": {
       "declared": "always",
-      "exposure": "direct",
+      "exposure": "model-only",
       "gated": "carve-out",
       "kind": "action",
       "mode_over_stage": false,
@@ -1149,7 +1195,7 @@
     },
     "objective_node": {
       "declared": "always",
-      "exposure": "direct",
+      "exposure": "model-only",
       "gated": "carve-out",
       "kind": "action",
       "mode_over_stage": false,
@@ -1168,7 +1214,7 @@
     },
     "objective_refinement_draft": {
       "declared": "always",
-      "exposure": "direct",
+      "exposure": "model-only",
       "gated": "carve-out",
       "kind": "action",
       "mode_over_stage": false,
@@ -1314,7 +1360,7 @@
     },
     "plan_draft": {
       "declared": "always",
-      "exposure": "direct",
+      "exposure": "model-only",
       "gated": "carve-out",
       "kind": "action",
       "mode_over_stage": true,
