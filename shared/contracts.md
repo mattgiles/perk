@@ -3928,8 +3928,10 @@ statically, and links the seam only by a dynamic import after admission (guard-e
       `mcp.json` is never read. Five guards, each printing one `perk worker: mcp config error —
       <path>: <message>` stderr line while the load continues: an untrusted project loads nothing
       (`ctx.isProjectTrusted()` is `true` by construction in the worker); a missing file is silent,
-      any other read failure (a directory, `EACCES`) is an error; a JSON failure, a non-object root,
-      a present-but-non-object `mcpServers` (an absent one is accepted — e.g. a file carrying only
+      any other read failure (a directory, `EACCES`) is an error; a JSON failure (printed as
+      `invalid JSON` plus the parser's numeric position when it gives one — never the parser's
+      text, which can quote the file's inline credentials), a non-object root, a
+      present-but-non-object `mcpServers` (an absent one is accepted — e.g. a file carrying only
       `autoEnableCodemode`) or a non-boolean `autoEnableCodemode` is an error, as in Pi's own
       loader; a non-object entry is an error; an override-only entry (no `command`, `url` or
       `type` — there is no global server to override) and an entry with `auth` (allowed only in the
