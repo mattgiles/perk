@@ -812,7 +812,7 @@ test("workerMcpOptions loadConfig: every rejected file or entry prints one prefi
       {
         name: "an override-only entry",
         plant: (h) => h.plant({ mcpServers: { s: { enabled: false } } }),
-        says: 'server "s" needs "command" or "url" \u2014 the worker reads no global mcp.json',
+        says: 'server "s" needs "command" or "url" — the worker reads no global mcp.json',
       },
       {
         name: "a project auth entry",
@@ -838,11 +838,7 @@ test("workerMcpOptions loadConfig: every rejected file or entry prints one prefi
     assert.ok(loaded.errors[0]?.startsWith(`${h.configPath}: `), `${row.name}: path-prefixed`);
     assert.ok(loaded.errors[0]?.includes(row.says), `${row.name}: ${loaded.errors[0]}`);
     const lines = h.stderr();
-    assert.deepEqual(
-      lines,
-      [`${prefix}\u2014 ${loaded.errors[0]}`],
-      `${row.name}: one stderr line`,
-    );
+    assert.deepEqual(lines, [`${prefix}— ${loaded.errors[0]}`], `${row.name}: one stderr line`);
   }
 });
 
@@ -957,11 +953,11 @@ test("workerMcpOptions credentials: a stateless store that reports the empty-sto
   await credentials.forServer("other", "not a url").withRefreshLock(async () => undefined);
   const lines = h.stderr();
   assert.deepEqual(lines, [
-    'perk worker: MCP server "remote" (https://mcp.example.com:8443) asked for an OAuth sign-in \u2014 ' +
+    'perk worker: MCP server "remote" (https://mcp.example.com:8443) asked for an OAuth sign-in — ' +
       "the headless worker holds no MCP credentials, never reads mcp-auth.json and opens no " +
       "browser; give the server an explicit Authorization header or env credential in the " +
       "project's .pi/mcp.json, or run this stage interactively.",
-    'perk worker: MCP server "other" (unparseable url) asked for an OAuth sign-in \u2014 ' +
+    'perk worker: MCP server "other" (unparseable url) asked for an OAuth sign-in — ' +
       "the headless worker holds no MCP credentials, never reads mcp-auth.json and opens no " +
       "browser; give the server an explicit Authorization header or env credential in the " +
       "project's .pi/mcp.json, or run this stage interactively.",
@@ -980,7 +976,7 @@ test("workerMcpOptions openUrl and updateConfig refuse with headless guidance", 
     /the headless worker opens no browser/,
   );
   assert.deepEqual(h.stderr(), [
-    "perk worker: MCP sign-in refused \u2014 the headless worker opens no browser " +
+    "perk worker: MCP sign-in refused — the headless worker opens no browser " +
       "(https://auth.example.com); give the server an explicit Authorization header or env " +
       "credential in the project's .pi/mcp.json, or run this stage interactively.",
   ]);
