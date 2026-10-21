@@ -3909,9 +3909,13 @@ statically, and links the seam only by a dynamic import after admission (guard-e
   true }`. Each loads as `builtin:<name>` with `sourceInfo.source === "builtin"` (the provenance
   §8.40's posture table and cohort join key on). `codemode` and `tool-search` register their tool
   **inactive** — **configuration alone activates them**: the resolved `defaultTools` (`perk
-  init`'s seeded `+tool_search`, a committed `-tool_search` opt-out, a `+codemode`), and Pi's MCP
-  `autoEnableCodemode` (default on) when a `codemode`-exposure server is configured. A project
-  `extensions: ["-builtin:<name>"]` entry disables one (it never loads; with `-builtin:mcp` a
+  init`'s seeded `+tool_search`, a committed `-tool_search` opt-out, a `+codemode`), and the
+  project's MCP config. Pi's MCP builtin activates the tool its servers' exposure needs at session
+  start, whatever `defaultTools` says: `codemode` for a `codemode`-exposure server (unless
+  `autoEnableCodemode: false`), `tool_search` for a `deferred` one — so a committed `-tool_search`
+  or `-codemode` does not keep that tool off when such a server is configured; only
+  `-builtin:<name>` keeps the builtin absent. A project `extensions: ["-builtin:<name>"]` entry
+  disables one (it never loads; with `-builtin:mcp` a
   project `pi.registerMcpServer()` is again reported by Pi at bind as a `register_mcp_server`
   extension error, printed — see `ctx.hasUI === false` — and never connected); a project extension
   that registers the same tool name (for `mcp`, the `/mcp` command) **replaces** it (Pi's loader

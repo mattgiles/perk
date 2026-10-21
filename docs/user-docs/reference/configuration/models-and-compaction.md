@@ -71,15 +71,22 @@ builtin, and the worker prints Pi's warning saying so.
 `mcp-auth.json`, and never writes either. Give each server its credentials explicitly in the
 project file — an `env` value for a stdio server, an `Authorization` header for an HTTP server
 (both accept Pi's `${VAR}` references, so the secret can stay in the environment). Exposure works
-as in an interactive session: a `direct` server's tools are offered to the model, and the default
-`codemode` exposure turns on the worker's codemode so scripts can call them. Servers that
+as in an interactive session: a `direct` server's tools are offered to the model, the default
+`codemode` exposure turns on the worker's codemode so scripts can call them, and `deferred`
+exposure turns on `tool_search`. Those two switch on even when `defaultTools` opts out
+(`-codemode`, `-tool_search`); to keep them off, set `"autoEnableCodemode": false` in
+`.pi/mcp.json` (codemode only) or keep the builtin out with `-builtin:codemode` /
+`-builtin:tool-search`. Servers that
 extensions register with `registerMcpServer` connect too. A few entries are refused, each with one
 `perk worker: mcp config error — <path>: …` line on stderr while the rest load: an entry with no
 `command` or `url` (there is no global server for it to override), an entry with `auth` (allowed
 only in the global file), a server name an extension already registered, and anything Pi's own
-validation rejects. The worker holds no MCP sign-in: a server that asks for OAuth fails to connect,
-and the worker prints `perk worker: MCP server "<name>" (<origin>) asked for an OAuth sign-in — …`
-— give it an explicit credential or run the stage interactively. Server logs go to the worker's
+validation rejects. The worker holds no MCP sign-in, so a server that asks for OAuth fails to
+connect — give it an explicit credential or run the stage interactively. When the server's first
+answer is a plain `401`, the worker prints `perk worker: MCP server "<name>" (<origin>) asked for an
+OAuth sign-in — …`. A server that instead answers with an `insufficient_scope` challenge (asking
+for more permissions) fails **silently**: Pi decides that case without the worker seeing it, so a
+missing line does not rule out an authentication problem. Server logs go to the worker's
 temporary directory, removed when the run ends. A project extension that brings its own MCP
 support replaces the builtin and is the repo's own choice, outside that guarantee.
 

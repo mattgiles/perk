@@ -403,10 +403,16 @@ checks, and never reads or writes the agent dir's `mcp.json` / `mcp-auth.json`; 
 stdio, an `Authorization` header for HTTP; `${VAR}` references resolve). Refused, each printed as
 `perk worker: mcp config error — <path>: …` while the rest load: an override-only entry (no
 `command`/`url`/`type` — there is no global server to override), an entry with `auth`, a name an
-extension already registered, anything pi's validator rejects. The worker holds no MCP sign-in: an
-OAuth server's first 401 prints `perk worker: MCP server "<name>" (<origin>) asked for an OAuth
-sign-in — …` (origin only, never path/query/userinfo). `direct` servers are declared to the model;
-the default `codemode` exposure turns on the worker's codemode (pi's `autoEnableCodemode`).
+extension already registered, anything pi's validator rejects. The worker holds no MCP sign-in, so
+an OAuth server fails to connect. Its first plain 401 (pi's empty-store refresh) prints
+`perk worker: MCP server "<name>" (<origin>) asked for an OAuth sign-in — …` (origin only, never
+path/query/userinfo); an `insufficient_scope` challenge (401 or 403) is decided by pi before the
+credential store is consulted and fails **silently** headless — a missing line does not rule out
+auth. `direct` servers are declared to the model;
+the default `codemode` exposure turns on the worker's codemode (pi's `autoEnableCodemode`) and
+`deferred` exposure turns on `tool_search` — at session start, overriding a committed
+`-codemode`/`-tool_search`; only `"autoEnableCodemode": false` (codemode) or
+`-builtin:codemode`/`-builtin:tool-search` keeps them off.
 `-builtin:mcp` keeps MCP out (a project `registerMcpServer` is then reported on stderr as
 `perk worker: extension error — <path> (register_mcp_server): …`, never connected). A project
 extension that brings its own MCP support replaces the builtin and is the repo's choice, outside
