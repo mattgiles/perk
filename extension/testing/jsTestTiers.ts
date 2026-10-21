@@ -52,6 +52,7 @@ export const SLOW_JS_TEST_FILES: readonly string[] = [
   "extension/pi/v1/waveIsolation.test.ts",
   "extension/runSessionRecord.test.ts",
   "extension/session/saveDestination.test.ts",
+  "extension/substrate/codemodeLift.test.ts",
   "extension/substrate/config.test.ts",
   "extension/substrate/discoveryPilot.test.ts",
   "extension/substrate/git.test.ts",
