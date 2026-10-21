@@ -21,17 +21,20 @@ import { join } from "node:path";
 import { before, test } from "node:test";
 import {
   type AgentToolResult,
+  createCodemodeExtension,
   createMcpExtension,
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { registerPerkTool } from "../pi/perkTool.ts";
 import {
+  COHORT_SETTINGS,
   loadAt,
   type PerkSession,
   recordingRuntime,
   scaffoldRepo,
   staged,
+  toolSearch,
 } from "../testing/harness.ts";
 import { ensureToolCatalog } from "../testing/toolCatalog.ts";
 
@@ -465,6 +468,60 @@ test("direct model call: read-write declares and runs a direct-exposure MCP tool
         assert.ok(!declared.includes(MCP_TOOL), "the loadout host hides the declaration");
         assert.equal(text, BLOCKED);
         assert.equal(mcp.calls(), 0);
+      }
+    } finally {
+      h.dispose();
+    }
+  }
+});
+
+// --- T5: a codemode script under the /plan gate (the codemode lift) -----------------------------
+
+test("codemode script: in a cohort /plan gate the MCP builtin's auto-activated codemode stays on (lifted), and its script's MCP call meets the backstop with the codemode parent id; read-write reaches the server", async () => {
+  const script = `try {
+  const value = await tools.${MCP_TOOL}({ query: "x" });
+  return "MCP-RESULT " + JSON.stringify({ ok: true, value });
+} catch (error) {
+  return "MCP-RESULT " + JSON.stringify({ ok: false, message: String(error.message) });
+}`;
+  for (const mode of ["read-only", "read-write"] as const) {
+    const mcp = mcpFixture();
+    const rt = await recordingRuntime();
+    const h = await staged("plan", mode, {
+      headful: false,
+      model: rt.reg.getModel(),
+      modelRuntime: rt.reg.modelRuntime,
+      extraExtensions: [
+        mcp.extension,
+        toolSearch(),
+        { name: "codemode", factory: createCodemodeExtension(), builtin: true },
+      ],
+      settings: COHORT_SETTINGS,
+    });
+    const seen = spyNested(h);
+    try {
+      await connected(h, mcp);
+      assert.ok(
+        h.session.getActiveToolNames().includes("codemode"),
+        `${mode}: Pi's MCP builtin auto-activated codemode (and the gate kept it)`,
+      );
+      rt.callThenStop("codemode", { code: script });
+      await h.session.prompt("search the docs from a script");
+      const text = toolResultText(h, "call-codemode");
+      const match = /MCP-RESULT (\{.*\})/s.exec(text);
+      assert.ok(match?.[1] !== undefined, text);
+      const outcome = JSON.parse(match[1]) as { ok: boolean; message?: string };
+      if (mode === "read-only") {
+        assert.equal(outcome.ok, false, text);
+        assert.ok(outcome.message?.includes(BLOCKED), outcome.message);
+        assert.deepEqual(seen, [{ toolName: MCP_TOOL, parent: "call-codemode", reason: BLOCKED }]);
+        assert.equal(mcp.calls(), 0, "the server was never reached");
+      } else {
+        assert.equal(outcome.ok, true, text);
+        assert.deepEqual(seen, [
+          { toolName: MCP_TOOL, parent: "call-codemode", reason: undefined },
+        ]);
+        assert.equal(mcp.calls(), 1, "the script's call reaches the server");
       }
     } finally {
       h.dispose();
