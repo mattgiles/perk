@@ -156,15 +156,19 @@ A codemode script calling a perk tool receives:
   alike (no throw);
 - from an **action** tool, its text on success, and a **rejection** carrying the result text
   (`<tool> failed: <message>`) on a soft failure — catch it with `try`/`catch` and the script
-  continues.
+  continues;
+- from a **bounded writer** (`plan_draft`, `objective_draft`, `objective_refinement_draft`,
+  `objective_node`, `gist_draft`) nothing at all: a writer is not a member of the script's `tools`,
+  so reading `tools.plan_draft` throws a `TypeError` (`tools.plan_draft does not exist.`) before
+  any call is made. The model calls the writers directly.
 
 In the headless worker, the worker's own codemode (Pi's builtin, activated by `defaultTools`) has
 no `models` namespace, and a script that names a classifier or image-generation call is refused
 before it runs; see the worker rules in
 [Models and compaction](../configuration/models-and-compaction.md#models).
 
-Terminal, interactive and orchestration tools are model-only: never callable from a script or
-another tool, and never given an output schema.
+Terminal, interactive and orchestration tools, and the bounded writers, are model-only: never
+callable from a script or another tool, and never given an output schema.
 
 ### Report-wave results
 
@@ -272,7 +276,8 @@ tool is eligible in a session when its stage is one of the tool's stages and the
 read-only and the tool is **mode-over-stage**. A session with no stage (or an unknown one) is
 eligible for every tool the mode allows. Foreign tools get the same treatment through the posture
 table above, and Pi's builtins through their own rows: `read`/`grep`/`find`/`ls` and `tool_search`
-allowed, `bash` under the read-only verdict, `edit`/`write` and `codemode` blocked. Under the gate a
+allowed, `bash` under the read-only verdict, `edit`/`write` and `codemode` blocked (except where an
+enabled `codemode` stays on in a read-only stage — **Structural read-only gate**, below). Under the gate a
 call another tool makes is narrowed further: of the builtins only the core reads (and `bash` under
 its verdict) run nested, never `tool_search` or `codemode` (**Nested calls under the gate**, below).
 The full stage-by-tool result is committed as `shared/fixtures/tool-matrix.json`, including what
@@ -283,7 +288,8 @@ its own tools — at every session start and tree navigation, when the gate turn
 every extension has started, and when each new prompt starts (not between the model requests
 inside one prompt) — and never activates or deactivates a foreign or builtin tool, with one
 exception: under the read-only gate perk switches `codemode` off, and back on when the gate turns
-off. **Presentation:** before every model request, `perk_stage` hides every ineligible tool's
+off — except in a registry read-only stage, where an enabled `codemode` stays on (below). Perk
+never turns on a `codemode` you did not enable. **Presentation:** before every model request, `perk_stage` hides every ineligible tool's
 declaration (and its prompt-snippet line) from the model; a hidden tool stays active and
 callable.
 **Enforcement:** under the read-only gate the tool-call check below blocks every ineligible call,
@@ -296,19 +302,20 @@ whole draft → review → reviewer-wave flow reachable.
 
 **Nested calls under the gate.** A tool can call another tool through Pi's `ctx.executeTool()` —
 a `codemode` script, or any extension tool that nests. Pi itself never lets another tool call a
-**model-only** tool — terminal, interactive, orchestration and host tools, and Pi's own
-`tool_search` — and answers `Tool <name> not found`, so no nested call can end the turn or open a
-human surface. Otherwise, in a read-write session a nested call reaches every active tool and every
+**model-only** tool — terminal, interactive, orchestration and host tools, the bounded writers,
+and Pi's own `tool_search`: a `codemode` script never has one in its `tools` (reading
+`tools.<name>` throws `tools.<name> does not exist.`), and an extension tool nesting through
+`ctx.executeTool()` gets `Tool <name> not found` — so no nested call can end the turn, open a
+human surface or write a draft. Otherwise, in a read-write session a nested call reaches every active tool and every
 deferred one. Under the read-only gate (plan mode, or an inherited restriction) a nested call first
 meets the same checks as a direct one, with the same wordings: `edit`/`write`, a tool not
-registered in the session and a tool ineligible under the gate (for example `codemode`, or
+registered in the session and a tool ineligible under the gate (for example a switched-off `codemode`, or
 `collect_review_wave` in a gated implement session) get the refusals described under
 **Structural read-only gate** below. A nested call
 that passes those checks is then narrowed further: it reaches only a gate-eligible perk query
 (`objective_stack_status`), the core reads `read`, `grep`, `find` and `ls`, `bash` under the same
 read-only verdict, and a foreign tool by its posture above. Anything else the gate admits directly
-— a bounded writer (`plan_draft`, `objective_draft`, `objective_refinement_draft`, …), another perk
-action such as `push_annotations`, or an extension builtin — is refused with `perk read-only mode:
+— another perk action such as `push_annotations`, or an extension builtin — is refused with `perk read-only mode:
 <name> is blocked (nested call — <class> is never a nested grant; only gate-eligible queries and
 builtin reads run through another tool).` A tool being hidden, deferred, found by `tool_search` or
 annotated `readOnlyHint` never grants a nested call.
@@ -319,10 +326,22 @@ Effective read-only gating is the existing workflow mode **or** a captured runne
 floor. Perk activates the stage's own tools that are eligible read-only there and hides every
 other ineligible declaration: `edit` and `write` stay active but are not declared to the model
 (their prompt-snippet lines disappear too, and return when the gate turns off), and so are
-`never` and unknown-provenance foreign tools. `codemode` is switched off while the gate is on and
-back on when it turns off: its description would list the write tools' schemas, and in `only`
-mode it hides every direct tool itself, so a hidden-but-active codemode would leave the session
-without `read`, `bash` or perk's tools. Each stage therefore sees its own tools: an `objective-refine`
+`never` and unknown-provenance foreign tools. A `codemode` you enabled (`--tools +codemode`,
+`defaultTools: ["+codemode"]`, or Pi's MCP builtin turning it on for a codemode-exposure server)
+**stays on** in the registry's read-only stages — `gist-author`, `objective-author`,
+`objective-plan`, `plan`, `audit` and `objective-refine` — when Pi's `codemode.mode` setting is
+`on` (the default). In `only` mode it stays on only when no direct perk tool would be stranded:
+`only` hides every direct tool from the model, and a direct action no script may call would be
+lost. That holds in discovery-cohort sessions (their reviewer-wave companions are deferred); a
+`-tool_search` session keeps `only` switched off in every gated stage, because
+`push_annotations` and `collect_draft_review_wave` stay direct there. What `only` leaves the model
+is scripts for the reads (`read`, `bash`, the gate-eligible `objective_stack_status`) and direct
+calls for the bounded writers and `plan_review`. Everywhere else under the gate — a worktree
+stage's `/plan` toggle, a session with no stage, an inherited restriction in a child, or an
+unreadable setting — `codemode` is switched off while the gate is on and back on when it turns
+off. A script under the gate is still bounded by **Nested calls under the gate** (above): it
+reaches the reads and `objective_stack_status`, never `edit`/`write`, unsafe `bash`, an unknown or
+MCP tool, or a bounded writer. Each stage therefore sees its own tools: an `objective-refine`
 session, for instance, gets read/research/question, `plan_review`, `objective_refinement_draft`,
 the `objective_stack_status` read and the mode-over-stage set — no node claim, no objective or gist draft, no save tool, no
 delegation. Because the `/plan` flow's tools are mode-over-stage, `plan_draft` is reachable there
@@ -332,7 +351,7 @@ hidden guidance names the stage's sanctioned bounded writers (its carve-out tool
 `[READ-ONLY MODE] (stage <id>)` marker, or `[READ-ONLY MODE] (unscoped)` in a session with no
 stage. Independently of what was shown, every call is checked: a tool not registered in the
 session is refused (`perk read-only mode: <name> is blocked (tool not registered).`), and every
-ineligible tool is denied, including `edit`, `write`, save/delivery tools, `codemode` and unknown
+ineligible tool is denied, including `edit`, `write`, save/delivery tools, a switched-off `codemode` and unknown
 or late-registered foreign mutators — even if activation or presentation failed. A call another
 tool makes is narrowed further (**Nested calls under the gate**, above). Allowlisted `bash` retains a textual command-position sub-allowlist. It first applies the
 whole-command destructive veto, then walks every command position — after sequencing operators and
@@ -449,15 +468,20 @@ the session tree, not on resume or fork; perk keeps what Pi restored and adds no
 On Pi 1.0, tools Pi restores after `/reload` or tree navigation survive perk's reconciliation —
 for example an MCP server's tools that reconnect before your next prompt. Until that prompt starts,
 perk only adds tools; anything it would switch off (a tool the new stage or mode does not allow,
-the deferred discovery tools, a suspended `codemode`) waits for the next prompt. Meanwhile that
+the deferred discovery tools, a suspended `codemode`) waits for the next prompt, while a `codemode`
+a read-only stage keeps on comes back at once. Meanwhile that
 tool is not declared to the model, though its usage notes can still appear in the system prompt
 of that one prompt. Waiting changes no permission: a tool read-only mode does not allow is
 blocked at once, while a deferred discovery tool the stage and mode allow stays callable as
 before.
 
 One composition limit: `codemode` writes its own description from every callable tool, so in a
-read-write stage session with codemode active, that description may name a tool the diet hides.
-This affects only what the model reads; under the gate codemode is switched off.
+read-write stage session that description may name a tool the diet hides, and in a read-only
+stage in `only` mode it may list `edit`/`write`. This affects only what the model reads — the
+gate still refuses them. The bounded writers are never listed. A script's `store()`/`load()`
+append `codemode-store` entries to the session and `image()` writes a temp file — outside the
+worktree, outside the gate's guarantee — and the interactive builtin's `models.*` calls spend
+model budget; perk sets no budget for them.
 
 ### Native tool discovery (default)
 

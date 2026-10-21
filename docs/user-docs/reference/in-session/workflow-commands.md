@@ -28,7 +28,11 @@ Toggle perk plan mode — a read-only exploration and plan-authoring session. Th
 what is actually in force: under a runner restriction floor it says the read-only gate stays on;
 a transition that fails is reported with its cause, and the gate never opens on a failure — a
 failed mode write says the persisted mode is unverified (the next session start re-syncs from the
-session; `/plan` re-enters). Paired tools:
+session; `/plan` re-enters). A `codemode` you enabled stays on in a session launched into a
+read-only stage (`perk plan`'s `plan` stage among them); a `/plan` toggle in a session with no
+stage or in another stage — a worktree session's, for instance — still switches it off while the
+gate is on (see
+[Structural read-only gate](./model-tools.md#structural-read-only-gate)). Paired tools:
 
 - **`plan_draft`** — write or overwrite the working plan draft in the session data directory. It
   is the sanctioned artifact write while read-only, not a save. *Non-terminating.*

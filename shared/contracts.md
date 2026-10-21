@@ -801,7 +801,9 @@ allows) and **presents** every other tool through the `perk_stage` loadout host:
 tool the formula makes ineligible under the gate — `edit`/`write`, a `never` or
 `unknown`-provenance foreign tool, an out-of-stage foreign row — is hidden from the model
 (declaration and prompt snippet), while staying active as its owner left it; the one exception,
-`codemode`, is switched off for the gate's duration and restored at release (§8.40). The read-only bar each non-blocked posture meets: `ask_user_question` and
+`codemode`, is switched off for the gate's duration and restored at release — except where the
+codemode lift holds (a registry read-only stage, §8.40 **The builtin rows**), which keeps a
+user-enabled codemode on. The read-only bar each non-blocked posture meets: `ask_user_question` and
 `plan_review` mutate nothing; the `plan_draft`/`objective_draft`/`gist_draft`/
 `objective_refinement_draft` session-data carve-outs write one fixed artifact in the run-scoped
 session data dir; `objective_node` delegates a bounded node transition to the canonical Python
@@ -840,8 +842,8 @@ writes); and `run_dream_wave` (the gated learn-dream session's wave call: NO par
 manifest read AND its one write, the fixed-name run-scratch bundle beside that manifest, are both
 derived from the claimed run's manifest path, §8.61 — the no-aimable-writer posture on both
 sides) — perk's own names installed via `pi.setActiveTools` only when they must change (perk
-never activates or deactivates a foreign tool, and of the builtins only suspends `codemode`;
-§8.40), the rest presented by the host's hidden declarations; (2) rejects at `tool_call` **every** name not registered in this session — a
+never activates or deactivates a foreign tool, and of the builtins only suspends `codemode` —
+never where the codemode lift holds; §8.40), the rest presented by the host's hidden declarations; (2) rejects at `tool_call` **every** name not registered in this session — a
 catalogued perk name included — and every registered tool the formula makes ineligible there
 (`isEligible(name, provenance, stage, "read-only")`), including `plan_save`, delivery and
 unknown/late foreign mutators, even when installation or presentation failed; and (3) a call
@@ -983,10 +985,13 @@ and the gate is the single read-only authority. Beside the gate, the same rebuil
 
 **Terminal tools are model-only.** Every perk tool's Pi `exposure` is derived from its policy
 descriptor (§8.40), never hand-set: `kind` `terminal` (anything that can return
-`terminate: true`), `interactive` or `orchestration` → `model-only` — declared to the model,
-never in Pi's callable set — so a nested `ctx.executeTool()` (e.g. a `codemode` script, mode
-`on` or `only`) can never reach a turn-ending result: the nested runner answers
-`Tool <name> not found`. The terminal set is pinned — `plan_review`, `plan_save`,
+`terminate: true`), `interactive` or `orchestration` — and every carve-out writer (`gated:
+{ carveOut }`: the bounded writers `plan_draft`, `objective_draft`, `objective_refinement_draft`,
+`objective_node`, `gist_draft`) — → `model-only`: declared to the model, never in Pi's callable
+set. So no nested caller can reach a turn-ending result or a bounded write, and Pi refuses both
+before any `tool_call` hook: a `codemode` script (mode `on` or `only`) never has the name as a
+member of its `tools` (the sandbox throws `tools.<name> does not exist.`), and an extension tool
+nesting through `ctx.executeTool()` gets agent-core's `Tool <name> not found`. The terminal set is pinned — `plan_review`, `plan_save`,
 `objective_save`, `gist_save`, `submit`, `ready`, `finalize_address`, `land`, `learn` — and kept
 honest by a **per-registration source scan** (`extension/pi/perkTool.test.ts`): for every
 `registerPerkTool` call, the definition literal terminates iff its span carries
@@ -8096,7 +8101,10 @@ runtime), a query without `result` (`a query tool must declare its success detai
 script API``), a `result.properties` declaring `ok` (the seam owns the discriminant), a
 `result.required` name absent from `result.properties`, and a divergent re-registration (`result`
 included). **Derived Pi metadata:** `kind ∈ {terminal, interactive,
-orchestration, host}` → `exposure: "model-only"` (§8.3's terminal guarantee); else `declared: deferred`
+orchestration, host}` or a carve-out (`gated: { carveOut }` — the bounded writers) →
+`exposure: "model-only"` (§8.3's terminal guarantee: declared, never a script member, never
+reachable through `ctx.executeTool`; a carve-out is never `declared: deferred`, so the two never
+compete for the one enum); else `declared: deferred`
 in a discovery-cohort session (`derivePiMetadata(policy, { cohort: true })`) → `"deferred"`; else
 `"direct"` — registration and the golden matrix derive without the cohort, so a family member
 registers (and tabulates) `direct`. `gated ≠ blocked` → `annotations.readOnlyHint: true` ("never
@@ -8113,7 +8121,10 @@ plan-ref selector: `implement`/`submit`/`address`/`land`/`learn`), `PLAN_FAMILY_
 `AUTHORING_STAGES` (`plan`/`objective-plan`/`objective-author`), `GIST_STAGES`
 (`gist-author`/`gist-save`), `PLANNING_READ_STAGES` (`plan`/`objective-plan`/`objective-refine` —
 the read-only planning/refinement stages where a gate-allowed query composes with authoring;
-`objective-author` is excluded: no objective exists yet).
+`objective-author` is excluded: no objective exists yet). Beside them, `READ_ONLY_STAGES`
+(derived — every registry stage with `mode: read-only`, registry order: `gist-author`,
+`objective-author`, `objective-plan`, `plan`, `audit`, `objective-refine`) is the codemode lift's
+family (**The builtin rows**, below), never a `stages` spread.
 
 **Structured results (the Result seam).** Every perk tool result passes through
 `structureResult` (`extension/substrate/result.ts`), which derives exactly two fields:
@@ -8132,7 +8143,7 @@ failure REJECTS the script call with `<label> failed: <message>` (catchable; the
 after a `catch`), an action's success resolves to its text, and a QUERY tool's result — success
 or soft failure — RESOLVES to its structured `{ ok, … }` value. The model-only kinds never become
 script APIs: they are `exposure: "model-only"` (uncallable from the nested runner) and can never
-carry `result`/`outputSchema`. The worker adapter (§8.11) already prefers `details.ok`, so its
+carry `result`/`outputSchema`; the carve-out writers are model-only too (never script members). The worker adapter (§8.11) already prefers `details.ok`, so its
 verdicts are unchanged.
 
 **The eligibility formula.**
@@ -8142,7 +8153,8 @@ posture for version skew) is eligible for exactly the tools the mode allows (`mo
 gated ≠ blocked` — the mode-over-stage term scopes known stages only). `isEligible(name,
 provenance, stage, mode)` classifies the tool first (`postureFor`, below): a perk tool by its
 catalog name (provenance ignored), a foreign tool by its posture row, a builtin by its gate
-posture alone (`mode = read-write ∨ gated ≠ blocked`, never stage-scoped), and an `unknown` tool
+posture alone (`mode = read-write ∨ gated ≠ blocked`, never stage-scoped) or the codemode lift (an
+optional fifth argument, the session's `GateLanding` — read by that arm alone), and an `unknown` tool
 is eligible only read-write (it passes every diet; under the gate the backstop blocks it). The
 derived views are **perk-only** — they are what perk's activation installs:
 
@@ -8176,7 +8188,11 @@ stage×tool result is the **golden matrix** `shared/fixtures/tool-matrix.json` �
 `extension/substrate/toolMatrix.test.ts` from `toolMatrix()` (regenerate with
 `PERK_UPDATE_TOOL_MATRIX=1`), byte-drift-guarded, test-only (neither plane reads it at runtime):
 `tools` — one row per perk tool (`kind`/`stages`/`gated`/`nested`/`mode_over_stage`/`declared`/
-`exposure`) and per builtin (`gated`/`nested`/`registrar`), never a foreign name — `nested` is the
+`exposure`) and per builtin (`gated`/`nested`/`registrar`, and on the suspended `codemode` row
+`suspended`: `lifted_in` — the lift family — and `stranded_writers`, per lifted stage the
+`strandedWriters` over the whole catalog for a discovery `nonparticipant` (nothing deferred) and a
+`cohort` session (the family deferred); today `["collect_draft_review_wave", "push_annotations"]`
+and `[]` in every lifted stage), never a foreign name — `nested` is the
 derived nested posture beside the gate arm (**The nested policy**, below); `postures` — `packages` (normalized
 spec → `posture`/`stages` (`"all"` or a registry-ordered list)/`gated`, plus the `except` row),
 `paths` (the exact synthetic-path rows) and `unknown` (`stages: all`, `gated: blocked`); and
@@ -8193,10 +8209,27 @@ seam providers' packages, minus the known tool-less set — ponytail, `@tombell/
 (allowed under the gate subject to `readOnlyBashVerdict`, §8.3), `edit`/`write` `blocked`; the
 CLI's builtin extensions `tool_search` `allowed` (a search is a read — what it activates is
 governed by the posture table and the reconciliation) and `codemode` `blocked` and
-**suspended under the gate** (`suspendedUnderGate` — its description embeds the callable direct
-tools' schemas, `edit`/`write` included in mode `only`, and in mode `only` its own loadout hook
-hides every callable direct tool, so a hidden-but-active codemode would leave a gated session
-without `read`, `bash` or perk's direct tools; the gate switches it off instead — below). Builtins are never
+**suspended under the gate** (`suspendedUnderGate: { liftedIn }` — in mode `only` its own
+loadout hook hides every declared direct tool, so a hidden-but-active codemode could leave a
+gated session without its direct tools; the gate switches it off instead — below) EXCEPT where
+the **codemode lift** holds: in a `liftedIn` stage (`READ_ONLY_STAGES`, every registry read-only
+stage) a user-enabled codemode stays active, declared and directly callable under the gate when
+the session's codemode mode is `on`, or is `only` and the landing has **no stranded writer** —
+`strandedWriters(stage, landing)`, pure: a perk tool registered in this session, eligible under
+the gate in the stage, exposed `direct` here (not in this activation's deferred memo, not
+model-only) and nested-blocked, i.e. one Pi's `only` would hide with no script path back. The
+bounded writers are model-only (§8.3), so today's members are the mode-over-stage actions
+`push_annotations`/`collect_draft_review_wave` while registered and not deferred: `only` lifts in
+a discovery-cohort session, stays suspended in every gated stage of a nonparticipant, and lifts
+there only when Pi's registry filter left both out. The lift reads a `GateLanding` (`{ codemode?,
+deferred?, registered? }`, fail-closed when a fact is absent): the mode is Pi's merged
+`codemode.mode` setting read exactly as Pi's builtin reads it (`getSettings().codemode?.mode ===
+"only" ? "only" : "on"`) — an unreadable setting never lifts, and a codemode factory's own `mode`
+option (which shadows the setting) is invisible to perk, a documented limit (only test factories
+and the worker's factory pass options; the worker's passes `models` only). Unscoped sessions,
+unknown stages, a `/plan` toggle in a read-write stage and child floors (children are unscoped)
+never lift. perk never activates an inactive codemode: a lift only keeps one the user enabled,
+or restores one the gate itself suspended earlier. Builtins are never
 stage-scoped and sit outside the prompt-guard scan universe. `/btw` derives its side-session
 tools from the `registrar: core` rows (read-only → the plainly `allowed` ones; read-write → all);
 the nested policy uses the same discriminator — nested under the gate only a `registrar: core` row
@@ -8278,8 +8311,17 @@ perk reinstalls the live set unchanged — only while the loadout host is active
 the prompt's snippet map for the new presentation. **The gate's one non-perk exception:** before
 reconciling, a builtin row marked `suspendedUnderGate` (only `codemode`, matched with
 `source: "builtin"` — a foreign namesake is governed by its provenance) is switched off while the
-presented mode is read-only, and the gate remembers it; when the presentation turns read-write
-it is switched back on if still registered and inactive (`suspensionStep`, pure). The memo is
+presented mode is read-only and the landing does not lift it (`gateSuspends(name, provenance,
+stage, landing)`), and the gate remembers it; when the presentation turns read-write it is
+switched back on if still registered and inactive (`suspensionStep`, pure). A **lifted landing
+consumes the memo**: every remembered name that is a registered suspended builtin lifted there
+leaves the memo, switched back on when inactive (once — perk never adds a name the memo does not
+hold) and simply forgotten when already active, so a later deactivation by the user or the host
+is never undone (eligibility alone activates nothing); an unregistered remembered name is retained
+untouched. The gate passes `suspensionStep`, the backstop's ineligible arm and the host's
+`hiddenDeclarationsFor` the same landing (`{ codemode, deferred, registered }` over the registry
+it already read); arms, order and wordings are unchanged (a suspended codemode keeps
+`tool not allowlisted`; a nested codemode call keeps the extension-builtin refusal). The memo is
 updated only after a successful install. When the gate is entered inside the **Restoration
 window** (below), codemode is switched off at the window's close; until then it is hidden by
 eligibility and blocked by the backstop. **Zero-call guarantee:** a session whose live set
@@ -8300,7 +8342,11 @@ rule: between a `session_start` with reason `reload` (or a `session_tree`) and t
 `agent_start`, every install adds only — a removal-bearing reconciliation installs the live set
 plus its additions, one install, an identical list included, so Pi re-runs the loadout hooks and
 rebuilds the prompt for the new landing — and the removals land at `agent_start`: the cohort's
-family deferral, the stage diet and the codemode suspension, their memos completing only then.
+family deferral, the stage diet and the codemode suspension, their memos completing only then. A
+lift's restore is an addition, so it lands at once; a re-suspension is a removal and waits. When
+an in-window install adds codemode back beside pending removals it commits no memo, and the
+closing `agent_start` apply meets an already-active, lifted codemode and consumes the entry — so
+a later deactivation is never undone there either.
 `agent_start` is the first extension event after Pi's clear and fires for a prompt and for a
 `sendMessage`-triggered turn alike (which has no `before_agent_start`); a removal there cannot
 change the declarations of the run's first request (Pi snapshots them before the emit), so the host
@@ -8451,12 +8497,19 @@ third term) and adds nothing — a `tool_search` activation or a priming does no
 fork, and perk never replays it.
 
 **The codemode composition limit.** codemode builds its own description from the UNFILTERED
-callable set (mode `only`: every callable direct tool, `edit`/`write` included; mode `on`: the
-`codemode`/`deferred`-exposure tools); other hooks' hidden declarations do not reach that list.
-In a read-write stage session with codemode active, its description may therefore name diet-hidden
-foreign tools — accepted, presentation-only. Under the gate codemode is suspended (above), so no
-gated request carries that list; a nested `ctx.executeTool()` from any gate-allowed tool still
-goes through the `tool_call` backstop, narrowed by the nested policy.
+callable set (mode `only`: every callable tool — the callable reads and foreign tools,
+`edit`/`write` included; mode `on`: the `codemode`/`deferred`-exposure tools); other hooks' hidden
+declarations do not reach that list. Its description may therefore name diet-hidden foreign tools
+in a read-write stage session, and gate-blocked ones (`edit`/`write`) under a lifted gate —
+accepted, presentation-only: the backstop refuses them, nested or direct. The carve-out writers
+and every model-only kind are outside the callable set, so they are never listed, and mode `on`'s
+`Codemode: tools.<name>(args)` description rewrite never touches them. Two script effects sit
+outside the gate's worktree guarantee and are recorded, not policed: `store()`/`load()` append
+`codemode-store` session entries, and `image()` writes a temp file. The CLI builtin's `models.*`
+script API (classifiers, image generation) is model spend outside the read-only guarantee too —
+perk adds no model-budget mechanism (the worker's own codemode factory passes `models: false`,
+§8.11). A nested `ctx.executeTool()` from any gate-allowed tool still goes through the `tool_call`
+backstop, narrowed by the nested policy.
 
 **The nested policy.** A `tool_call` carrying Pi's `parentToolCallId` (typed on every
 `ToolCallEventBase` variant since Pi 1.1.0 — another tool issued the call through
@@ -8483,25 +8536,30 @@ a nested grant; only gate-eligible queries and builtin reads run through another
 unchanged. The branch is depth-blind (Pi passes the immediate caller's id, so a nested-of-nested
 call is nested), runs identically under a child floor, and holds inside the open **Restoration
 window** — enforcement never waits for `agent_start`. Read-write sessions keep no call-time
-backstop, direct or nested. Pi answers a model-only tool (every terminal/interactive/
-orchestration/host perk tool, and Pi's builtin `tool_search`, which declares
-`exposure: "model-only"`) `Tool <name> not found` before any `tool_call` event, so those arms are
+backstop, direct or nested. Three refusal boundaries stand in front of a model-only tool (every
+terminal/interactive/orchestration/host perk tool, every carve-out writer, and Pi's builtin
+`tool_search`, which declares `exposure: "model-only"`), each before any `tool_call` event: a
+codemode script's `tools` never has the name as a member (the sandbox throws
+`tools.<name> does not exist.`); an extension tool nesting through `ctx.executeTool` gets
+agent-core's `Tool <name> not found`; and behind both the hook arm for those classes stays as
 defense in depth. Security limit, explicit: a foreign `delegation` tool admitted under the gate
 stays admitted nested, exactly as it is admitted direct — the policy narrows perk and builtin
 nested reach and is no sandbox for a foreign tool's internals or for a child it spawns (perk's
 report children carry no `subagent`, and the descendant ceiling denies every launch from a child).
 Three contracts stay apart: (i) what a script receives is unchanged (**Structured results**,
-above); (ii) read-write script callability is unchanged — every active direct and every
-deferred/codemode-exposed tool is nested-callable, actions included; (iii) under the read-only
-gate a nested call — a codemode script's included, should codemode ever be un-suspended — reaches
+above); (ii) read-write script callability: every active direct and every
+deferred/codemode-exposed tool is nested-callable, actions included — the carve-out writers
+excluded (model-only everywhere, so no script and no nesting tool reaches one, gate or not);
+(iii) under the read-only gate a nested call — a lifted codemode's script included — reaches
 only the gate-eligible queries, the core builtin reads and a foreign tool by its posture. The
 gate-eligible query set is `objective_stack_status` (`gated: "allowed"`, staged in
 `WORKTREE_STAGES` ∪ `PLANNING_READ_STAGES` = `plan`, `objective-plan`, `objective-refine`;
 `objective-author` excluded). Its cold door performs one remote-tracking-only fetch of origin for
 a stacked objective (the §8.44 fetch — `refs/remotes/origin/*`, objects and `FETCH_HEAD`; never
 the working tree, the index, a local branch, a tag or the remote), which the gate's guarantee
-admits as a read (§8.51 pins the bound). Eligibility alone un-suspends nothing: the codemode
-suspension stands and un-suspension is its own change, never a side effect.
+admits as a read (§8.51 pins the bound). Where codemode runs under the gate is the codemode
+lift's rule alone (**The builtin rows**, above; tabulated by the matrix's `suspended` view) — a
+query's eligibility never decides it, and the lift never widens what a script reaches.
 
 **Native discovery (the converged default).** The **discovery cohort** is the sessions whose host
 has Pi's builtin `tool_search` registered and active at `session_start`

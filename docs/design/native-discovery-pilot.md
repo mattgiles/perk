@@ -172,6 +172,15 @@ true-up (2026-10) the set holds `objective_stack_status` (gate-allowed in the wo
 the read-only planning/refinement stages); the codemode suspension still stands —
 un-suspension is its own change (contracts §8.40).
 
+**Amended 2026-10-21:** the suspension is lifted in the registry's read-only stages (the
+**codemode lift**, contracts §8.40 **The builtin rows**): a user-enabled codemode stays on there
+under mode `on`, and under `only` wherever no stranded writer would lose its last path (the
+discovery cohort; a nonparticipant keeps `only` suspended). The gated read path of statement 3 is
+built and pinned (`extension/substrate/codemodeLift.test.ts`): a gated script reaches the
+gate-eligible query and the builtin reads, and the bounded writers — now model-only — are not
+script members at all. Statement 2 now excludes the bounded writers, read-write too. The record:
+`docs/design/archive/pi-1.1.0-codemode-lift.md`.
+
 ## 7. Decision
 
 **ADOPT.** Every row of §4 is PASS: S1, S2, D1, D2, P1–P6 and C1 offline, and the live legs D3,

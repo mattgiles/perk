@@ -87,11 +87,20 @@ _Avoid_: PERK_TOOLS, perk tool list, tool census (for perk's own tools)
 A perk tool's registration-time record — the stages it belongs to, its gate posture (`allowed`,
 `blocked`, or a **carve-out** naming its one bounded write), whether it is mode-over-stage, its
 kind (`terminal` / `interactive` / `orchestration` / `query` / `action`, plus `host` reserved for
-the loadout host; the first three and `host` are declared model-only), whether it is a
+the loadout host; the first three and `host` are declared model-only, as is every carve-out),
+whether it is a
 discovery-pilot family member (`declared: deferred`), and — for `kind: query` only — its `result`:
 the success details' schema. The tool's Pi metadata
 (`exposure`, `annotations`, a query's `outputSchema`) is derived from it, never hand-set.
 _Avoid_: tool config, tool metadata, tool flags
+
+**Bounded writer**:
+A perk tool whose gate posture is a carve-out — its one sanctioned write while read-only
+(`plan_draft`, `objective_draft`, `objective_refinement_draft`, `objective_node`, `gist_draft`).
+Registered model-only: declared to the model and called directly, but never a member of a codemode
+script's `tools` and never reachable through `ctx.executeTool` — so Pi's codemode `only` mode,
+which hides only direct tools, cannot take one from the model, which is why `only` can lift.
+_Avoid_: draft tool (a gate-blocked save is not one), sanctioned writer
 
 **Structured result**:
 The Pi-facing shape the registration seam derives on every perk tool result: `structuredContent`
@@ -108,17 +117,19 @@ plus the read-only planning/refinement stages `plan`, `objective-plan`, `objecti
 "Read-only" is the gate's guarantee — no working-tree, index, local-branch or remote mutation —
 not "no Git call": the stacked status read's single remote-tracking-only fetch of origin is
 inside it. The only perk tools the **nested policy** admits under the gate (contracts §8.40
-"The nested policy") — a codemode script's calls included, should codemode ever be un-suspended;
-eligibility never un-suspends codemode.
+"The nested policy") — a lifted codemode's script calls included.
 _Avoid_: gated read tool, read-only query (ambiguous with `readOnlyHint`, a hint and never a grant)
 
 **Nested policy**:
 The read-only backstop's narrowing of a nested call — one another tool issued through
 `ctx.executeTool` (Pi's `parentToolCallId`). Under an effective read-only gate a nested call
 reaches only a **gate-eligible query**, a core builtin read (`bash` by its verdict) and a foreign
-tool by its gate posture; every bounded writer, every other perk kind and the extension builtins
-(`tool_search`, `codemode`) are refused, though the same tools may be admitted direct. Derived
-from a tool's classification (`nestedPostureFor`), never from its name or annotations.
+tool by its gate posture; every other perk kind and the extension builtins (`tool_search`,
+`codemode`) are refused, though the same tools may be admitted direct. A **bounded writer** never
+even reaches it nested — Pi refuses a model-only tool first (a script's
+`tools.<name> does not exist.`, agent-core's `Tool <name> not found`), the policy's writer arm
+staying behind both. Derived from a tool's classification (`nestedPostureFor`), never from its name
+or annotations.
 _Avoid_: nested grant — a hidden, deferred or `readOnlyHint` tool is never one
 
 **Eligibility formula**:
@@ -139,10 +150,29 @@ _Avoid_: mode switch, plan stage (for the toggle)
 perk's activation rule: at every reconciliation point it installs the live active set with only
 its own names replaced — the eligible always-declared perk tools plus, inside the discovery
 cohort, the live eligible deferred ones — and never activates or deactivates a foreign tool (of
-the builtins, the read-only gate only suspends `codemode` and restores it at release); a session
+the builtins, the read-only gate only suspends `codemode` — never where the **codemode lift**
+holds — and restores it at release); a session
 whose live set already matches gets no install. Door-primed activation is perk's only activation
 of a deferred tool.
 _Avoid_: snapshot restore, baseline, admitted set, perk-owned allowlist
+
+**Codemode lift**:
+The read-only gate keeping a user-enabled codemode on instead of suspending it: in a registry
+read-only stage (`READ_ONLY_STAGES`) when the session's codemode mode is `on`, or is `only` with no
+**stranded writer**. Never unscoped, never a read-write stage's `/plan` toggle, never a child
+floor; it keeps or restores a codemode the user enabled and never activates one, and a lifted
+landing consumes the suspension memo (so a later deactivation is never undone). A lifted
+codemode's scripts stay bounded by the **nested policy**.
+_Avoid_: un-suspension, codemode allowlist
+
+**Stranded writer**:
+A perk tool registered in this session, gate-eligible in the stage, exposed `direct` there and
+nested-blocked — what Pi's codemode `only` mode would hide from the model with no script path back,
+so its presence keeps `only` suspended (`strandedWriters`). Coined for the bounded writers, now
+model-only; today's members are the mode-over-stage actions `push_annotations` and
+`collect_draft_review_wave` in every gated stage of a discovery nonparticipant (deferred, hence
+never stranded, in the cohort).
+_Avoid_: `only`-strand, hidden writer
 
 **Discovery cohort**:
 The sessions in which perk re-registers the pilot family (`declared: deferred`) deferred and
