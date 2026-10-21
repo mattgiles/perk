@@ -58,16 +58,30 @@ another name, or a project tool that calls a classifier itself — is counted at
 turn and bounded by the worker's turn, token, and wall-clock limits.
 
 The worker's own codemode is **Pi's builtin `codemode`**, which the worker loads together with
-Pi's builtin `tool_search`. Both start switched off; the repo's `defaultTools` decides, exactly as
-in an interactive session (`+codemode` turns codemode on; perk's seeded `+tool_search` turns on
-discovery, and a committed `-tool_search` opts out). The codemode `mode` and `inlineBudget`
-settings apply. To keep either builtin out of the worker, add `"extensions":
-["-builtin:codemode"]` (or `-builtin:tool-search`) to the repo's `.pi/settings.json`. A project
-extension that registers its own `codemode` replaces the builtin, and the worker prints Pi's
-warning saying so. **MCP is off in the worker:** it loads no MCP support, so `.pi/mcp.json` has no
-effect there, nothing reads or writes Pi's MCP config, credentials or log, and a project
-extension's `registerMcpServer` is reported on stderr rather than connected. A project extension
-that brings its own MCP support is the repo's own choice and outside that guarantee.
+Pi's builtin `tool_search` and Pi's builtin MCP support. Codemode and `tool_search` start switched
+off; the repo's `defaultTools` decides, exactly as in an interactive session (`+codemode` turns
+codemode on; perk's seeded `+tool_search` turns on discovery, and a committed `-tool_search` opts
+out). The codemode `mode` and `inlineBudget` settings apply. To keep a builtin out of the worker,
+add `"extensions": ["-builtin:codemode"]` (or `-builtin:tool-search`, `-builtin:mcp`) to the
+repo's `.pi/settings.json`. A project extension that registers its own `codemode` replaces the
+builtin, and the worker prints Pi's warning saying so.
+
+**MCP in the worker is project-only.** The worker connects the servers in the repo's own
+`.pi/mcp.json` and nothing from your agent directory: it never reads your global `mcp.json` or
+`mcp-auth.json`, and never writes either. Give each server its credentials explicitly in the
+project file — an `env` value for a stdio server, an `Authorization` header for an HTTP server
+(both accept Pi's `${VAR}` references, so the secret can stay in the environment). Exposure works
+as in an interactive session: a `direct` server's tools are offered to the model, and the default
+`codemode` exposure turns on the worker's codemode so scripts can call them. Servers that
+extensions register with `registerMcpServer` connect too. A few entries are refused, each with one
+`perk worker: mcp config error — <path>: …` line on stderr while the rest load: an entry with no
+`command` or `url` (there is no global server for it to override), an entry with `auth` (allowed
+only in the global file), a server name an extension already registered, and anything Pi's own
+validation rejects. The worker holds no MCP sign-in: a server that asks for OAuth fails to connect,
+and the worker prints `perk worker: MCP server "<name>" (<origin>) asked for an OAuth sign-in — …`
+— give it an explicit credential or run the stage interactively. Server logs go to the worker's
+temporary directory, removed when the run ends. A project extension that brings its own MCP
+support replaces the builtin and is the repo's own choice, outside that guarantee.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -346,8 +360,8 @@ filesystem checks. `perk resume --dry-run` reports the resolved agent directory 
 (`env` / `config` / `default`) in its own preview.
 
 **Scope boundaries:** local launches only. `--remote` dispatch is unaffected, the headless worker
-keeps its throwaway agent directory (and loads no MCP support, so no MCP config or credentials are
-read there), and a hand-run `pi` is outside perk's control. Use direnv or
+keeps its throwaway agent directory (its MCP support reads only the project's `.pi/mcp.json`, never
+the agent directory's MCP config or credentials), and a hand-run `pi` is outside perk's control. Use direnv or
 your shell to set `PI_CODING_AGENT_DIR` for hand-run Pi sessions.
 
 ## Related

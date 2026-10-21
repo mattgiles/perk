@@ -8,10 +8,10 @@
 // covered in stageExecution.test.ts.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import {
   createAgentSession,
   createCodemodeExtension,
@@ -34,6 +34,7 @@ import {
   selectWorkerModel,
   translateEvent,
   workerBuiltinExtensions,
+  workerMcpOptions,
   workerPolicyExtension,
 } from "./sdkAdapter.ts";
 
@@ -619,7 +620,10 @@ test("workerPolicyExtension: plain scripts, other tools and non-string code pass
 /** A tool definition as a fake `pi` records it from `registerTool`. */
 type RegisteredDefinition = { name: string; description: string; defaultActive?: boolean };
 
-/** Run an extension factory against a recording fake `pi`; return the tools it registered. */
+/**
+ * Run an extension factory against a recording fake `pi`; return the tools it registered. The
+ * hook, renderer and command registrations the MCP factory makes are accepted as no-ops.
+ */
 function registeredBy(factory: (pi: never) => unknown): RegisteredDefinition[] {
   const tools: RegisteredDefinition[] = [];
   const fakePi = {
@@ -629,28 +633,32 @@ function registeredBy(factory: (pi: never) => unknown): RegisteredDefinition[] {
     appendEntry() {},
     getAllTools: () => [],
     getSettings: () => ({}),
+    on() {},
+    registerToolRenderer() {},
+    registerCommand() {},
   };
   void factory(fakePi as never);
   return tools;
 }
 
-test("workerBuiltinExtensions: Pi's codemode then tool-search with the CLI's builtin identity, no MCP", () => {
-  const entries = workerBuiltinExtensions().map((entry) => {
+test("workerBuiltinExtensions: Pi's codemode, tool-search and mcp with the CLI's builtin identity", () => {
+  const entries = workerBuiltinExtensions("/tmp/perk-worker-agent-x").map((entry) => {
     assert.ok(typeof entry === "object", "a named inline extension");
     return entry;
   });
   assert.deepEqual(
     entries.map((e) => e.name),
-    ["codemode", "tool-search"],
-    "the CLI's order; Pi's mcp and llama.cpp builtins are not supplied",
+    ["codemode", "tool-search", "mcp"],
+    "the CLI's order; Pi's llama.cpp builtin is not supplied",
   );
   for (const entry of entries) {
     assert.equal(entry.builtin, true, `${entry.name} loads as builtin:${entry.name}`);
     assert.equal(entry.replaceable, true, `a project registration of ${entry.name} replaces it`);
     assert.equal(entry.hidden, undefined, "builtin identity alone (Pi hides builtins itself)");
   }
-  const [codemode, toolSearch] = entries;
-  assert.ok(codemode && toolSearch);
+  const [codemode, toolSearch, mcp] = entries;
+  assert.ok(codemode && toolSearch && mcp);
+  assert.deepEqual(registeredBy(mcp.factory), [], "mcp registers server tools only on connect");
   const codemodeTools = registeredBy(codemode.factory);
   assert.deepEqual(
     codemodeTools.map((t) => [t.name, t.defaultActive]),
@@ -671,6 +679,318 @@ test("workerBuiltinExtensions: Pi's codemode then tool-search with the CLI's bui
   assert.ok(
     !codemodeTools[0]?.description.includes(modelsGlobal),
     "the worker's codemode: models off",
+  );
+});
+
+// --- workerMcpOptions: the MCP builtin's factory-scoped isolation --------------------------------
+
+type McpRegistryCall = ["register", string, unknown] | ["unregister", string];
+
+/**
+ * The adapter over a recording fake `pi` (registrations by name throw when listed in `refuse`,
+ * the way Pi refuses before touching its registry), a fake session context rooted at a fresh
+ * project dir, and a silenced `console.error` spy.
+ */
+function mcpHarness(t: TestContext) {
+  const project = mkdtempSync(join(tmpdir(), "perk-mcp-adapter-"));
+  t.after(() => rmSync(project, { recursive: true, force: true }));
+  mkdirSync(join(project, ".pi"), { recursive: true });
+  const configPath = join(project, ".pi", "mcp.json");
+  const calls: McpRegistryCall[] = [];
+  const refuse = new Map<string, string>();
+  const fakePi = {
+    registerMcpServer(name: string, config: unknown) {
+      calls.push(["register", name, config]);
+      const refusal = refuse.get(name);
+      if (refusal !== undefined) throw new Error(refusal);
+    },
+    unregisterMcpServer(name: string) {
+      calls.push(["unregister", name]);
+    },
+  };
+  const agentDir = join(project, "throwaway-agent");
+  const options = workerMcpOptions(fakePi as never, agentDir);
+  const stderrSpy = t.mock.method(console, "error", () => {});
+  let trusted = true;
+  return {
+    project,
+    configPath,
+    agentDir,
+    options,
+    calls,
+    refuse,
+    plant(content: unknown): void {
+      writeFileSync(
+        configPath,
+        typeof content === "string" ? content : JSON.stringify(content),
+        "utf8",
+      );
+    },
+    setTrusted(value: boolean): void {
+      trusted = value;
+    },
+    load() {
+      const loadConfig = options.loadConfig;
+      assert.ok(loadConfig, "the worker supplies its own loader");
+      return loadConfig({ cwd: project, isProjectTrusted: () => trusted } as never);
+    },
+    stderr: (): string[] => stderrSpy.mock.calls.map((c) => c.arguments.map(String).join(" ")),
+    /** Drain the recorded registry calls and stderr lines (between loads). */
+    drain(): { calls: McpRegistryCall[]; stderr: string[] } {
+      const drained = { calls: calls.splice(0), stderr: this.stderr() };
+      stderrSpy.mock.resetCalls();
+      return drained;
+    },
+  };
+}
+
+const STDIO = { command: "node", args: ["server.js"], exposure: "direct" };
+const HTTP = { url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer t0ken" } };
+
+test("workerMcpOptions loadConfig: trusted project entries register with their raw config; no file servers returned", (t) => {
+  const h = mcpHarness(t);
+  h.plant({ autoEnableCodemode: false, mcpServers: { local: STDIO, remote: HTTP } });
+  const loaded = h.load();
+  assert.deepEqual(loaded, { servers: [], errors: [], autoEnableCodemode: false });
+  assert.deepEqual(h.drain(), {
+    calls: [
+      ["register", "local", STDIO],
+      ["register", "remote", HTTP],
+    ],
+    stderr: [],
+  });
+
+  // A file carrying only the codemode toggle is accepted (Pi's loader parity).
+  h.plant({ autoEnableCodemode: true });
+  assert.deepEqual(h.load(), { servers: [], errors: [], autoEnableCodemode: true });
+  assert.deepEqual(
+    h.drain().calls,
+    [
+      ["unregister", "local"],
+      ["unregister", "remote"],
+    ],
+    "the registry rule: entries absent from this load are unregistered",
+  );
+});
+
+test("workerMcpOptions loadConfig: no project mcp.json is silent and registers nothing", (t) => {
+  const h = mcpHarness(t);
+  assert.deepEqual(h.load(), { servers: [], errors: [] });
+  assert.deepEqual(h.drain(), { calls: [], stderr: [] });
+});
+
+test("workerMcpOptions loadConfig: every rejected file or entry prints one prefixed stderr line and the load returns", (t) => {
+  const prefix = "perk worker: mcp config error ";
+  const cases: { name: string; plant: (h: ReturnType<typeof mcpHarness>) => void; says: string }[] =
+    [
+      { name: "malformed JSON", plant: (h) => h.plant("{ not json"), says: "JSON" },
+      {
+        name: "a directory at the path",
+        plant: (h) => mkdirSync(h.configPath),
+        says: "EISDIR",
+      },
+      {
+        name: "a non-object root",
+        plant: (h) => h.plant([1]),
+        says: 'expected an object with an "mcpServers" object',
+      },
+      {
+        name: "a non-object mcpServers",
+        plant: (h) => h.plant({ mcpServers: [] }),
+        says: 'expected an object with an "mcpServers" object',
+      },
+      {
+        name: "a non-boolean autoEnableCodemode",
+        plant: (h) => h.plant({ autoEnableCodemode: "yes", mcpServers: {} }),
+        says: "autoEnableCodemode must be a boolean",
+      },
+      {
+        name: "a non-object entry",
+        plant: (h) => h.plant({ mcpServers: { s: "node" } }),
+        says: 'server "s" must be an object',
+      },
+      {
+        name: "an override-only entry",
+        plant: (h) => h.plant({ mcpServers: { s: { enabled: false } } }),
+        says: 'server "s" needs "command" or "url" — the worker reads no global mcp.json',
+      },
+      {
+        name: "a project auth entry",
+        plant: (h) =>
+          h.plant({ mcpServers: { s: { url: "https://x.example/mcp", auth: { provider: "p" } } } }),
+        says: 'server "s": auth is only allowed in the global mcp.json, which the worker never reads',
+      },
+      {
+        name: "a registration Pi refuses",
+        plant: (h) => {
+          h.refuse.set("s", 'MCP server "s" is already registered by extension "/wt/ext.ts"');
+          h.plant({ mcpServers: { s: STDIO } });
+        },
+        says: 'MCP server "s" is already registered by extension "/wt/ext.ts"',
+      },
+    ];
+  for (const row of cases) {
+    const h = mcpHarness(t);
+    row.plant(h);
+    const loaded = h.load();
+    assert.deepEqual(loaded.servers, [], row.name);
+    assert.equal(loaded.errors.length, 1, `${row.name}: one error`);
+    assert.ok(loaded.errors[0]?.startsWith(`${h.configPath}: `), `${row.name}: path-prefixed`);
+    assert.ok(loaded.errors[0]?.includes(row.says), `${row.name}: ${loaded.errors[0]}`);
+    const lines = h.stderr();
+    assert.deepEqual(lines, [`${prefix}— ${loaded.errors[0]}`], `${row.name}: one stderr line`);
+  }
+});
+
+test("workerMcpOptions loadConfig: an untrusted project registers nothing and drops what was tracked", (t) => {
+  const h = mcpHarness(t);
+  h.plant({ mcpServers: { a: STDIO, b: HTTP } });
+  h.load();
+  h.drain();
+  h.setTrusted(false);
+  assert.deepEqual(h.load(), { servers: [], errors: [] });
+  assert.deepEqual(h.drain(), {
+    calls: [
+      ["unregister", "a"],
+      ["unregister", "b"],
+    ],
+    stderr: [],
+  });
+  h.setTrusted(true);
+  h.load();
+  assert.deepEqual(
+    h.drain().calls.map((c) => c.slice(0, 2)),
+    [
+      ["register", "a"],
+      ["register", "b"],
+    ],
+    "nothing was tracked after the untrusted load, so nothing is unregistered",
+  );
+});
+
+test("workerMcpOptions loadConfig: a later load unregisters exactly the removed, parse-rejected or refused name", (t) => {
+  const h = mcpHarness(t);
+  h.plant({ mcpServers: { a: STDIO, b: HTTP, c: STDIO } });
+  h.load();
+  h.drain();
+
+  h.plant({ mcpServers: { a: STDIO, c: STDIO } });
+  h.load();
+  assert.deepEqual(
+    h.drain().calls.map((c) => c.slice(0, 2)),
+    [
+      ["unregister", "b"],
+      ["register", "a"],
+      ["register", "c"],
+    ],
+    "removed: unregistered before the survivors re-register",
+  );
+
+  h.plant({ mcpServers: { a: { enabled: false }, c: STDIO } });
+  h.load();
+  const parseRejected = h.drain();
+  assert.deepEqual(
+    parseRejected.calls.map((c) => c.slice(0, 2)),
+    [
+      ["unregister", "a"],
+      ["register", "c"],
+    ],
+  );
+  assert.equal(parseRejected.stderr.length, 1);
+
+  h.refuse.set("c", 'Invalid MCP server registered by extension "builtin:mcp": nope');
+  h.load();
+  const refused = h.drain();
+  assert.deepEqual(
+    refused.calls.map((c) => c.slice(0, 2)),
+    [
+      ["register", "c"],
+      ["unregister", "c"],
+    ],
+    "a refused re-registration drops the previous one",
+  );
+  assert.equal(refused.stderr.length, 2, "the override line and the refusal line");
+
+  h.refuse.clear();
+  h.load();
+  assert.deepEqual(
+    h.drain().calls.map((c) => c.slice(0, 2)),
+    [["register", "c"]],
+    "a refused name is not tracked: nothing left to unregister",
+  );
+});
+
+test("workerMcpOptions: the log lives under the throwaway agent dir", (t) => {
+  const h = mcpHarness(t);
+  assert.equal(h.options.logPath, join(h.agentDir, "mcp.log"));
+  assert.equal(h.options.createTransport, undefined, "Pi's own transports");
+  assert.equal(h.options.startupWaitMs, undefined, "Pi's own startup wait");
+});
+
+test("workerMcpOptions credentials: a stateless store that reports the empty-store sign-in once per server, origin only", async (t) => {
+  const h = mcpHarness(t);
+  const credentials = h.options.credentials;
+  assert.ok(credentials);
+  const secretUrl = "https://user:hunter2@mcp.example.com:8443/v1/mcp?api_key=SECRET#frag";
+  assert.equal(credentials.tokens("remote", secretUrl), undefined);
+  assert.equal(credentials.remove("remote", secretUrl), false);
+  const server = credentials.forServer("remote", secretUrl);
+  assert.equal(h.stderr().length, 0, "constructing a server store prints nothing");
+  assert.equal(await server.load(), undefined);
+  assert.throws(
+    () => server.save({ serverUrl: secretUrl }),
+    /the headless worker stores no MCP credentials/,
+  );
+
+  assert.equal(await server.withRefreshLock(async () => 41), 41, "returns fn()");
+  await assert.rejects(
+    server.withRefreshLock(async () => {
+      throw new Error("sign-in required");
+    }),
+    /sign-in required/,
+    "Pi's own refusal propagates",
+  );
+  await credentials.forServer("other", "not a url").withRefreshLock(async () => undefined);
+  const lines = h.stderr();
+  assert.deepEqual(lines, [
+    'perk worker: MCP server "remote" (https://mcp.example.com:8443) asked for an OAuth sign-in — ' +
+      "the headless worker holds no MCP credentials, never reads mcp-auth.json and opens no " +
+      "browser; give the server an explicit Authorization header or env credential in the " +
+      "project's .pi/mcp.json, or run this stage interactively.",
+    'perk worker: MCP server "other" (unparseable url) asked for an OAuth sign-in — ' +
+      "the headless worker holds no MCP credentials, never reads mcp-auth.json and opens no " +
+      "browser; give the server an explicit Authorization header or env credential in the " +
+      "project's .pi/mcp.json, or run this stage interactively.",
+  ]);
+  for (const secret of ["hunter2", "user", "SECRET", "api_key", "/v1/mcp", "frag"]) {
+    assert.ok(!lines.join("\n").includes(secret), `${secret} never reaches stderr`);
+  }
+});
+
+test("workerMcpOptions openUrl and updateConfig refuse with headless guidance", (t) => {
+  const h = mcpHarness(t);
+  const { openUrl, updateConfig } = h.options;
+  assert.ok(openUrl && updateConfig);
+  assert.throws(
+    () => openUrl("https://auth.example.com/authorize?client_id=c&state=SECRET"),
+    /the headless worker opens no browser/,
+  );
+  assert.deepEqual(h.stderr(), [
+    "perk worker: MCP sign-in refused — the headless worker opens no browser " +
+      "(https://auth.example.com); give the server an explicit Authorization header or env " +
+      "credential in the project's .pi/mcp.json, or run this stage interactively.",
+  ]);
+  assert.throws(
+    () =>
+      updateConfig(
+        { name: "local", config: { command: "node" }, source: "builtin:mcp", scope: "extension" },
+        { enabled: false },
+      ),
+    {
+      message:
+        'the headless worker never edits MCP configuration (server "local" in builtin:mcp); ' +
+        "edit the project's .pi/mcp.json and re-run the stage",
+    },
   );
 });
 

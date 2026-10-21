@@ -840,6 +840,64 @@ export default function (pi) {
   return path;
 }
 
+/** The committed stdio MCP echo server (`mcpStdioFixture.ts`), launched as `node <path>`. */
+export const MCP_STDIO_FIXTURE = resolve(import.meta.dirname, "mcpStdioFixture.ts");
+
+/**
+ * One `mcpServers` entry launching the stdio fixture: `token` rides the entry's `env` (the
+ * fixture records it on every call), `marker` is a path the fixture touches at startup (the
+ * "was it ever spawned" oracle), `exposure` is Pi's per-server exposure (omitted ⇒ Pi's
+ * `codemode` default).
+ */
+export function mcpFixtureServer(opts: {
+  token: string;
+  exposure?: "codemode" | "deferred" | "direct" | "hidden";
+  marker?: string;
+}): Record<string, unknown> {
+  return {
+    command: process.execPath,
+    args: [MCP_STDIO_FIXTURE],
+    env: {
+      PERK_MCP_FIXTURE_TOKEN: opts.token,
+      ...(opts.marker !== undefined ? { PERK_MCP_FIXTURE_MARKER: opts.marker } : {}),
+    },
+    ...(opts.exposure !== undefined ? { exposure: opts.exposure } : {}),
+  };
+}
+
+/** Write `<cwd>/.pi/mcp.json` carrying `servers` as its `mcpServers` (returns the path). */
+export function plantProjectMcpConfig(cwd: string, servers: Record<string, unknown>): string {
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  const path = join(cwd, ".pi", "mcp.json");
+  writeFileSync(path, `${JSON.stringify({ mcpServers: servers }, null, 2)}\n`, "utf8");
+  return path;
+}
+
+/**
+ * Plant model auth into a (global) agent dir the way a real operator has it: `auth.json` holding
+ * one `api_key` credential for `provider`, and a `models.json` declaring `provider` as an
+ * `openai-completions` endpoint (an unroutable loopback port — nothing ever dials it) with one
+ * model `m` and NO inline `apiKey`, so the provider is configured only if `auth.json` was read.
+ */
+export function plantGlobalModelAuth(dir: string, opts: { provider: string; key: string }): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "auth.json"),
+    `${JSON.stringify({ [opts.provider]: { type: "api_key", key: opts.key } }, null, 2)}\n`,
+    "utf8",
+  );
+  const models = {
+    providers: {
+      [opts.provider]: {
+        baseUrl: "http://127.0.0.1:9/v1",
+        api: "openai-completions",
+        models: [{ id: "m" }],
+      },
+    },
+  };
+  writeFileSync(join(dir, "models.json"), `${JSON.stringify(models, null, 2)}\n`, "utf8");
+}
+
 /**
  * A hermetic `ModelRuntime` with NO provider seeded — any non-builtin provider must come from a
  * planted extension's registration. Hermetic: an in-memory credential store pre-populated with one

@@ -546,10 +546,15 @@ activates the worker's own codemode (which has no `models` namespace). There are
 worker, so a deferred tool comes back only by search or by a successful `start_review_wave`. To
 keep a builtin out of the worker entirely, add `"extensions": ["-builtin:tool-search"]` (or
 `-builtin:codemode`) to the repo's `.pi/settings.json`; a project extension that registers its own
-`codemode` or `tool_search` replaces the builtin (the worker prints the loader's warning). **MCP is
-off in the worker:** it loads no MCP support, so `.pi/mcp.json` has no effect there and a project
-extension's `registerMcpServer` is reported on stderr, not connected. A project extension that
-brings its own MCP support is outside that — it connects servers on its own account.
+`codemode` or `tool_search` replaces the builtin (the worker prints the loader's warning). **MCP in
+the worker is project-only:** Pi's MCP builtin connects the servers in the repo's `.pi/mcp.json`
+(credentials given explicitly there) and never reads the agent directory's `mcp.json` or
+`mcp-auth.json`. A `direct` server's tools are declared to the model; the default `codemode`
+exposure turns on the worker's codemode, which reaches them from scripts. `-builtin:mcp` keeps MCP
+out of the worker (a project extension's `registerMcpServer` is then reported on stderr, not
+connected). The full rules are in
+[Models and compaction](../configuration/models-and-compaction.md#models). A project extension that brings its own
+MCP support replaces the builtin and connects servers on its own account.
 
 Pi owns its builtins (`read`, `edit`, `write`, `bash`, `grep`, `find`, and related host tools); this
 reference does not redefine them. Stage scoping is fail-open at compatibility boundaries: a bare

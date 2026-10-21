@@ -14,7 +14,7 @@
 // surface; the caller-side guarantee is the import-edge ban plus nominal minting, nothing
 // stronger.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // pi-ai's `ModelThinkingLevel` (`"off" | minimal | … | xhigh`) is the union `resolveCliModel`
@@ -22,14 +22,19 @@ import { join } from "node:path";
 // re-export a thinking-level type (only `ThinkingLevelChangeEntry`).
 import type { Api, Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 import {
+  CONFIG_DIR_NAME,
   type CreateAgentSessionRuntimeFactory,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
   createCodemodeExtension,
+  createMcpExtension,
   createToolSearchExtension,
+  type ExtensionAPI,
   type ExtensionError,
   type InlineExtension,
+  type McpExtensionOptions,
+  type McpServerConfig,
   ModelRuntime,
   resolveCliModel,
   SessionManager,
@@ -700,19 +705,24 @@ export function workerPolicyExtension(): InlineExtension {
  * builtin identity (`replaceable: true, builtin: true`): each loads as `builtin:<name>` with
  * `source: "builtin"` provenance (what perk's posture table and the discovery-cohort join key
  * on), a project `extensions: ["-builtin:<name>"]` entry disables it, and a project extension
- * registering the same tool name replaces it (Pi records a loader warning). Both register their
- * tool inactive: configuration alone (the resolved `defaultTools`) activates them.
+ * registering the same tool name (or, for `mcp`, the `/mcp` command) replaces it (Pi records a
+ * loader warning). `codemode` and `tool_search` register inactive: configuration alone (the
+ * resolved `defaultTools`) activates them; `mcp` registers server tools as servers connect.
  *
  * - `codemode` is built with `models: WORKER_CODEMODE_MODELS` (the model-call policy's hard
  *   layer); `mode`/`inlineBudget` are left to the merged `codemode.*` settings.
  * - `tool-search` takes no options.
+ * - `mcp` runs with factory-scoped isolation (`workerMcpOptions`): Pi's defaults would read the
+ *   GLOBAL agent dir's `mcp.json`/`mcp-auth.json` and write its `mcp.log`, so every one of those
+ *   resources is replaced through Pi's public options — project-only config, a stateless
+ *   credential shim, the log under `agentDir` (the throwaway dir, removed at dispose). Nothing
+ *   else in the process moves: no agent-dir env override, so the worker's model runtime, any
+ *   subagent child and the session store keep resolving the real agent dir.
  *
- * Deliberately absent: Pi's `mcp` builtin (its config, credential store and log default to the
- * GLOBAL agent dir), so within the worker-supplied set nothing reads `mcp.json`/`mcp-auth.json`
- * or writes `mcp.log`, and a project `registerMcpServer` is reported at bind, never connected;
- * and `llama.cpp` (the worker's providers come from its `ModelRuntime` and project extensions).
+ * Deliberately absent: `llama.cpp` (the worker's providers come from its `ModelRuntime` and
+ * project extensions).
  */
-export function workerBuiltinExtensions(): InlineExtension[] {
+export function workerBuiltinExtensions(agentDir: string): InlineExtension[] {
   return [
     {
       name: "codemode",
@@ -726,7 +736,203 @@ export function workerBuiltinExtensions(): InlineExtension[] {
       replaceable: true,
       builtin: true,
     },
+    {
+      name: "mcp",
+      factory: (pi) => createMcpExtension(workerMcpOptions(pi, agentDir))(pi),
+      replaceable: true,
+      builtin: true,
+    },
   ];
+}
+
+/** The project MCP config's keys whose absence makes an entry a (global-server) override. */
+const MCP_TRANSPORT_KEYS = ["command", "url", "type"] as const;
+
+/** Where the worker's MCP diagnostics point instead of a sign-in it cannot perform. */
+const MCP_HEADLESS_GUIDANCE =
+  "give the server an explicit Authorization header or env credential in the project's " +
+  ".pi/mcp.json, or run this stage interactively";
+
+/**
+ * A URL's origin only — userinfo, path, query and fragment never reach stderr (Pi admits
+ * credentials in MCP URLs, and worker stderr reaches remote job logs).
+ */
+function mcpUrlOrigin(url: string): string {
+  return URL.canParse(url) ? new URL(url).origin : "unparseable url";
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Pi's credential store class, reachable only through the options type (not a root export). */
+type McpCredentialStore = NonNullable<McpExtensionOptions["credentials"]>;
+
+/**
+ * The worker's `createMcpExtension` options — factory-scoped isolation: every resource Pi would
+ * take from the GLOBAL agent dir is replaced here, for this factory only.
+ *
+ * - `loadConfig` reads the trusted project's `.pi/mcp.json` only and registers each passing entry
+ *   through the public `pi.registerMcpServer` (Pi's own validator, ownership and namespace checks),
+ *   returning no file servers of its own. Entries a project file can only express against a global
+ *   server (an override without `command`/`url`/`type`, an `auth` provider token) are errors. It
+ *   never throws — a throw inside Pi's `session_start` handler would leave the builtin
+ *   uninitialized. Registry rule: the names this factory holds registered are exactly the entries
+ *   that passed the latest load; every other tracked name is unregistered. Each error prints one
+ *   `perk worker: mcp config error — …` stderr line (headless `ctx.ui.notify` is a no-op).
+ * - `credentials` is stateless: nothing is loaded or stored, so an OAuth server reaches Pi's own
+ *   sign-in-required decision on its first 401, where the shim prints headless guidance once.
+ * - `openUrl` and `updateConfig` refuse (unreachable headless; fail-closed guards).
+ * - `logPath` lives under `agentDir`, removed with it after Pi's `session_shutdown` closed every
+ *   connection.
+ *
+ * Exported as the adapter's test seam; `createTransport`/`startupWaitMs` keep Pi's defaults.
+ */
+export function workerMcpOptions(pi: ExtensionAPI, agentDir: string): McpExtensionOptions {
+  let registered = new Set<string>();
+  const reportedSignIns = new Set<string>();
+  const reportConfigError = (message: string): void => {
+    console.error(`perk worker: mcp config error — ${message}`);
+  };
+
+  const loadConfig: McpExtensionOptions["loadConfig"] = (ctx) => {
+    try {
+      if (!ctx.isProjectTrusted()) {
+        for (const name of registered) pi.unregisterMcpServer(name);
+        registered = new Set();
+        return { servers: [], errors: [] };
+      }
+      const path = join(ctx.cwd, CONFIG_DIR_NAME, "mcp.json");
+      const errors: string[] = [];
+      const candidates = new Map<string, Record<string, unknown>>();
+      let autoEnableCodemode: boolean | undefined;
+      let text: string | undefined;
+      try {
+        text = readFileSync(path, "utf8");
+      } catch (err) {
+        if ((err as { code?: unknown } | null)?.code !== "ENOENT") {
+          errors.push(`${path}: ${errorText(err)}`);
+        }
+      }
+      if (text !== undefined) {
+        let parsed: unknown;
+        let parseError: string | undefined;
+        try {
+          parsed = JSON.parse(text);
+        } catch (err) {
+          parseError = `${path}: ${errorText(err)}`;
+        }
+        if (parseError !== undefined) {
+          errors.push(parseError);
+        } else if (
+          !isPlainObject(parsed) ||
+          (parsed.mcpServers !== undefined && !isPlainObject(parsed.mcpServers))
+        ) {
+          errors.push(`${path}: expected an object with an "mcpServers" object`);
+        } else {
+          if (typeof parsed.autoEnableCodemode === "boolean") {
+            autoEnableCodemode = parsed.autoEnableCodemode;
+          } else if (parsed.autoEnableCodemode !== undefined) {
+            errors.push(`${path}: autoEnableCodemode must be a boolean`);
+          }
+          const servers = isPlainObject(parsed.mcpServers) ? parsed.mcpServers : {};
+          for (const [name, value] of Object.entries(servers)) {
+            if (!isPlainObject(value)) {
+              errors.push(`${path}: server "${name}" must be an object`);
+            } else if (MCP_TRANSPORT_KEYS.every((key) => value[key] === undefined)) {
+              errors.push(
+                `${path}: server "${name}" needs "command" or "url" — the worker reads no ` +
+                  "global mcp.json, so there is no global server to override",
+              );
+            } else if (value.auth !== undefined) {
+              errors.push(
+                `${path}: server "${name}": auth is only allowed in the global mcp.json, ` +
+                  "which the worker never reads",
+              );
+            } else {
+              candidates.set(name, value);
+            }
+          }
+        }
+      }
+      // Drop stale registrations first so a renamed entry never clashes with its old name.
+      for (const name of registered) {
+        if (!candidates.has(name)) pi.unregisterMcpServer(name);
+      }
+      const passed = new Set<string>();
+      for (const [name, value] of candidates) {
+        try {
+          pi.registerMcpServer(name, value as unknown as McpServerConfig);
+          passed.add(name);
+        } catch (err) {
+          errors.push(`${path}: ${errorText(err)}`);
+          // Pi refuses before touching the registry: a previous registration would survive.
+          if (registered.has(name)) pi.unregisterMcpServer(name);
+        }
+      }
+      registered = passed;
+      for (const message of errors) reportConfigError(message);
+      return {
+        servers: [],
+        errors,
+        ...(autoEnableCodemode !== undefined ? { autoEnableCodemode } : {}),
+      };
+    } catch (err) {
+      reportConfigError(`project MCP config not loaded: ${errorText(err)}`);
+      return { servers: [], errors: [] };
+    }
+  };
+
+  // Pi enters `withRefreshLock` only from its auth provider's refresh, which on this empty store
+  // runs after a 401 and decides "sign-in required" inside the lock — the one sign-in decision
+  // the store can observe. `forServer` itself runs for every OAuth-capable HTTP server,
+  // anonymous ones included, so it stays silent.
+  const store = {
+    forServer: (name: string, url: string) => ({
+      load: () => undefined,
+      save: (): never => {
+        throw new Error("the headless worker stores no MCP credentials");
+      },
+      withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
+        const key = `${name}|${url}`;
+        if (!reportedSignIns.has(key)) {
+          reportedSignIns.add(key);
+          console.error(
+            `perk worker: MCP server "${name}" (${mcpUrlOrigin(url)}) asked for an OAuth sign-in — ` +
+              "the headless worker holds no MCP credentials, never reads mcp-auth.json and opens " +
+              `no browser; ${MCP_HEADLESS_GUIDANCE}.`,
+          );
+        }
+        return fn();
+      },
+    }),
+    tokens: () => undefined,
+    remove: () => false,
+  } satisfies Pick<McpCredentialStore, keyof McpCredentialStore>;
+
+  return {
+    loadConfig,
+    // Only the nominal class boundary is crossed: `satisfies` above pins the public surface.
+    credentials: store as unknown as McpCredentialStore,
+    logPath: join(agentDir, "mcp.log"),
+    openUrl: (url) => {
+      console.error(
+        `perk worker: MCP sign-in refused — the headless worker opens no browser ` +
+          `(${mcpUrlOrigin(url)}); ${MCP_HEADLESS_GUIDANCE}.`,
+      );
+      throw new Error("the headless worker opens no browser");
+    },
+    updateConfig: (entry) => {
+      throw new Error(
+        `the headless worker never edits MCP configuration (server "${entry.name}" in ` +
+          `${entry.override ?? entry.source}); edit the project's .pi/mcp.json and re-run the stage`,
+      );
+    },
+  };
 }
 
 // --- the production runtime factory ---------------------------------------------------------------
@@ -759,7 +965,8 @@ export type RuntimeConstruction =
  * and `agentDir = throwaway` (user-global RESOURCES out — the throwaway dir carries exactly one
  * global setting, `cacheWarming: "off"` (Pi reads warming from global settings only; with it off,
  * every usage record the worker counts arrives at a boundary the seam's fold observes — a turn or
- * a compaction — and `session.abort()` never has a warmer to cancel), and no extensions or
+ * a compaction — and `session.abort()` never has a warmer to cancel), plus the worker MCP
+ * builtin's `mcp.log` once a server logs (`workerMcpOptions`), and no extensions or
  * skills, so the global resource tier is empty). Auth + `models.json` come from the
  * worker-minted `ModelRuntime` instead: `request.modelRuntime ?? ModelRuntime.create()` (the
  * global agent dir's `auth.json`/`models.json`, `PI_CODING_AGENT_DIR`-aware, plus env keys;
@@ -827,7 +1034,7 @@ export async function defaultCreateRuntime(
  * receive the worker-minted `modelRuntime`: left to itself, `createAgentSessionServices` would
  * derive a runtime from the throwaway `agentDir` — an empty auth store. The factory re-runs
  * identically on a session replacement (`/new`, `/resume`, fork). The worker's hidden policy
- * extension (`workerPolicyExtension`, always first) and Pi's builtin discovery + codemode
+ * extension (`workerPolicyExtension`, always first) and Pi's builtin codemode, discovery and MCP
  * factories (`workerBuiltinExtensions`) are fixed inputs to every services build; they ride
  * `resourceLoaderOptions.extensionFactories`, beside (never instead of) the project extensions.
  * Nothing here touches compaction or retry settings: Pi compacts and retries per the merged view
@@ -856,7 +1063,7 @@ async function constructRuntime(
       settingsManager,
       modelRuntime,
       resourceLoaderOptions: {
-        extensionFactories: [workerPolicyExtension(), ...workerBuiltinExtensions()],
+        extensionFactories: [workerPolicyExtension(), ...workerBuiltinExtensions(agentDir)],
       },
     });
     // 2. Loud construction diagnostics, before selection: extension load errors and
