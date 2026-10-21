@@ -813,7 +813,19 @@ test("workerMcpOptions loadConfig: every rejected file or entry prints one prefi
   const prefix = "perk worker: mcp config error ";
   const cases: { name: string; plant: (h: ReturnType<typeof mcpHarness>) => void; says: string }[] =
     [
-      { name: "malformed JSON", plant: (h) => h.plant("{ not json"), says: "JSON" },
+      {
+        name: "malformed JSON beside an inline credential",
+        plant: (h) =>
+          h.plant(
+            '{"mcpServers":{"s":{"url":"https://x.example/mcp","headers":{"Authorization": Bearer SECRET123}}}}',
+          ),
+        says: "invalid JSON",
+      },
+      {
+        name: "malformed JSON with a parser position",
+        plant: (h) => h.plant('{"mcpServers":{,}}'),
+        says: "invalid JSON at position 15 (line 1 column 16)",
+      },
       {
         name: "a directory at the path",
         plant: (h) => mkdirSync(h.configPath),
@@ -869,6 +881,7 @@ test("workerMcpOptions loadConfig: every rejected file or entry prints one prefi
     assert.ok(loaded.errors[0]?.includes(row.says), `${row.name}: ${loaded.errors[0]}`);
     const lines = h.stderr();
     assert.deepEqual(lines, [`${prefix}— ${loaded.errors[0]}`], `${row.name}: one stderr line`);
+    assert.ok(!lines.join("\n").includes("Bearer"), `${row.name}: no file content on stderr`);
   }
 });
 

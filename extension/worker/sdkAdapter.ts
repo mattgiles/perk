@@ -783,6 +783,15 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * A JSON parse failure without the parser's text: V8's messages can quote a slice of the input,
+ * and the project's MCP config carries inline credentials. Only a numeric position survives.
+ */
+function invalidJsonMessage(error: unknown): string {
+  const position = /at position \d+(?: \(line \d+ column \d+\))?/.exec(errorText(error));
+  return `invalid JSON${position ? ` ${position[0]}` : ""}`;
+}
+
 /** Pi's credential store class, reachable only through the options type (not a root export). */
 type McpCredentialStore = NonNullable<McpExtensionOptions["credentials"]>;
 
@@ -838,7 +847,7 @@ export function workerMcpOptions(pi: ExtensionAPI, agentDir: string): McpExtensi
         try {
           parsed = JSON.parse(text);
         } catch (err) {
-          parseError = `${path}: ${errorText(err)}`;
+          parseError = `${path}: ${invalidJsonMessage(err)}`;
         }
         if (parseError !== undefined) {
           errors.push(parseError);
