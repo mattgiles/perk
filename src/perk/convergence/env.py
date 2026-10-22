@@ -1,9 +1,11 @@
 """Environment verification for ``perk init`` and ``perk doctor``.
 
 Presence checks for the tools perk's workflow needs (``cloc`` counts every submitted PR's change
-stats), plus the two version gates — **node** and **pi** — read from the shared host floor
-(``shared/host-floor.yaml``, contracts.md §8.76) and compared with semver precedence. An
-installed-but-outdated or unverifiable Node/Pi is ``ok=False`` exactly like an absent one. Checks
+stats), plus the two version gates read from the shared host floor (``shared/host-floor.yaml``,
+contracts.md §8.76) and compared with semver precedence: **pi** against its single minimum, and
+**node** by supported-line admission — its major must be one of the floor's supported release
+lines and the version at or above that line's floor. An installed-but-outdated, unsupported-line
+or unverifiable Node/Pi is ``ok=False`` exactly like an absent one. Checks
 are side-effect-free probes; the caller decides fatality (init: missing/outdated required tool
 -> exit 2; doctor: ``fail``). The launch admission in ``perk.run.pi_exec`` shares the Pi probe
 (``perk.substrate.pi_host``) but never gates these checks.
@@ -13,7 +15,12 @@ import shutil
 from dataclasses import dataclass
 
 from perk.substrate import cloc
-from perk.substrate.host_floor import load_host_floor, required_node_version
+from perk.substrate.host_floor import (
+    describe_node_lines,
+    load_host_floor,
+    node_line_floor,
+    supported_node_lines,
+)
 from perk.substrate.pi_host import PI_INSTALL_COMMAND, probe_pi_host
 from perk.substrate.proc import ProcFailure, run_captured, which_absolute
 from perk.substrate.semver import parse_semver, satisfies_floor
@@ -41,25 +48,48 @@ def _node_version() -> str | None:
 
 
 def _check_node() -> EnvCheck:
-    """The full Node floor (not just the major): an unparsable version counts as outdated."""
-    floor = required_node_version(load_host_floor())
+    """Supported-line admission: a supported major at or above its line floor.
+
+    An unparsable version counts as outdated; a major outside the closed table is an
+    unsupported release line.
+    """
+    lines = supported_node_lines(load_host_floor())
+    described = describe_node_lines(lines)
     version = _node_version()
     if version is None:
         return EnvCheck(
             "node",
             False,
             "not found",
-            f"Install Node.js >= {floor}: brew install node / mise use -g node@{floor.major} "
-            "(https://nodejs.org).",
+            f"Install Node.js on a supported release line ({described}): brew install node / "
+            f"mise use -g node@{lines[0].major} (https://nodejs.org).",
         )
     observed = parse_semver(version)
-    if observed is None or not satisfies_floor(observed, floor):
+    if observed is None:
         return EnvCheck(
             "node",
             False,
             version,
-            f"Upgrade Node.js to >= {floor} (found {version}): "
-            f"brew upgrade node / mise use -g node@{floor.major} (https://nodejs.org).",
+            f"Upgrade Node.js to a supported release line ({described}) (found {version}): "
+            f"brew upgrade node / mise use -g node@{lines[0].major} (https://nodejs.org).",
+        )
+    line_floor = node_line_floor(lines, observed)
+    if line_floor is None:
+        return EnvCheck(
+            "node",
+            False,
+            f"{version} (unsupported release line)",
+            f"Node.js {observed.major}.x is not a supported release line; install one of "
+            f"{described}: brew install node / mise use -g node@{lines[-1].major} "
+            "(https://nodejs.org).",
+        )
+    if not satisfies_floor(observed, line_floor):
+        return EnvCheck(
+            "node",
+            False,
+            version,
+            f"Upgrade Node.js to >= {line_floor} (found {version}): "
+            f"brew upgrade node / mise use -g node@{line_floor} (https://nodejs.org).",
         )
     return EnvCheck("node", True, version, "")
 
@@ -69,14 +99,15 @@ def _check_pi() -> EnvCheck:
 
     Reads ``which_absolute`` / ``probe_pi_host`` as this module's globals (the test seams).
     """
-    floor = load_host_floor()
+    lines = supported_node_lines(load_host_floor())
     path = which_absolute("pi")
     if path is None:
         return EnvCheck(
             "pi",
             False,
             "not found",
-            f"Install Pi: {PI_INSTALL_COMMAND} (requires Node >= {floor.node_min_version}).",
+            f"Install Pi: {PI_INSTALL_COMMAND} (requires Node.js on a supported release line: "
+            f"{describe_node_lines(lines)}).",
         )
     host = probe_pi_host(path)
     if host.outcome == "admitted":

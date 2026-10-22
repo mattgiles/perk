@@ -25,7 +25,7 @@ from perk.run.pi_exec import _build_exec_env
 from perk.state import cache
 from perk.substrate import git as git_mod
 from perk.substrate.config import Config
-from perk.substrate.host_floor import load_host_floor
+from perk.substrate.host_floor import describe_node_lines, load_host_floor, supported_node_lines
 
 pytestmark = pytest.mark.usefixtures("stub_launch_extension_warm")
 
@@ -280,6 +280,8 @@ def test_exec_pi_which_miss_aborts_before_any_exec_phase_side_effect(
         launch._exec_pi(ctx)
     assert excinfo.value.error_type == "pi_cli_missing"
     assert "npm install -g @earendil-works/pi-coding-agent" in excinfo.value.format_message()
+    node_lines = describe_node_lines(supported_node_lines(load_host_floor()))
+    assert node_lines in excinfo.value.format_message()
     assert events == []  # neither chdir nor exec happened
     assert stale_lock.exists()  # the lock sweep never ran either
 

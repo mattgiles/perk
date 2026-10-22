@@ -608,8 +608,15 @@ _Avoid_: agent-dir override, MCP sandbox
 **Host floor**:
 The enforced minimum supported host version — Pi and Node — declared once in
 `shared/host-floor.yaml` and compared with semver precedence (`>=`; a prerelease of the floor
-triple is below it). Each host observation is admitted against it independently.
+triple is below it). Each host observation is admitted against it independently. Pi's floor is a
+single minimum; Node's is a closed table of supported release lines, each with its own line floor.
 _Avoid_: pin, requirement, gate (when the minimum is meant)
+
+**Supported release line / line floor**:
+One Node major perk admits, with the minimum release on that line (`node.min_version` for the
+lowest line, `node.line_floors` for the others); a major outside the table is refused as
+unsupported.
+_Avoid_: version range, LTS list
 
 **Admission**:
 The decision about one host observation against the host floor — the PATH `pi` at the launch

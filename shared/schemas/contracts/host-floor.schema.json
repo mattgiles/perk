@@ -18,6 +18,32 @@
       },
       "title": "_FloorEntry",
       "type": "object"
+    },
+    "_NodeFloorEntry": {
+      "description": "Node's entry: the lowest line's floor plus one floor per further supported release line.",
+      "properties": {
+        "min_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Version"
+        },
+        "line_floors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Line Floors",
+          "type": "array"
+        }
+      },
+      "title": "_NodeFloorEntry",
+      "type": "object"
     }
   },
   "description": "The lenient whole-file parse model.\n\n``schema_version`` is deliberately NOT a field: it stays a structural pre-check in\n``load_host_floor`` (it must run before generic validation and raise its own message).",
@@ -26,7 +52,7 @@
       "$ref": "#/$defs/_FloorEntry"
     },
     "node": {
-      "$ref": "#/$defs/_FloorEntry"
+      "$ref": "#/$defs/_NodeFloorEntry"
     }
   },
   "title": "HostFloorFile",

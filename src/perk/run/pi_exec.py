@@ -40,7 +40,7 @@ from perk.substrate.config import (
     launch_pi_agent_dir,
     load_local_linear_api_key,
 )
-from perk.substrate.host_floor import load_host_floor
+from perk.substrate.host_floor import describe_node_lines, load_host_floor, supported_node_lines
 from perk.substrate.output import log_warn, user_output
 from perk.substrate.pi_host import (
     PI_INSTALL_COMMAND,
@@ -191,9 +191,11 @@ def _resolve_pi_executable() -> str:
     candidate = which_absolute("pi")
     if candidate is None:
         floor = load_host_floor()
+        node_lines = describe_node_lines(supported_node_lines(floor))
         raise UserFacingCliError(
             f"pi CLI not found on PATH — install it: {PI_INSTALL_COMMAND} "
-            f"(perk requires Pi >= {floor.pi_min_version} and Node >= {floor.node_min_version}).",
+            f"(perk requires Pi >= {floor.pi_min_version} and Node.js on a supported release "
+            f"line: {node_lines}).",
             error_type="pi_cli_missing",
         )
     return candidate

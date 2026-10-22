@@ -30,7 +30,7 @@ from perk.substrate.config import (
     load_committed_issues_team,
     load_local_linear_api_key,
 )
-from perk.substrate.host_floor import load_host_floor
+from perk.substrate.host_floor import describe_node_lines, load_host_floor, supported_node_lines
 from perk.substrate.output import io_step, user_confirm, user_output, user_prompt
 from perk.substrate.pi_host import PI_NPM_SPEC as PI_NPM_SPEC
 
@@ -143,9 +143,10 @@ def guide_missing_tools(checks: list[EnvCheck]) -> tuple[list[str], list[str]]:
         installer = _resolve_installer(check.name, node_ok=node_ok)
         if installer is None:
             if check.name == "pi" and not node_ok:
-                node_floor = load_host_floor().node_min_version
+                node_lines = describe_node_lines(supported_node_lines(load_host_floor()))
                 warnings.append(
-                    f"pi: install Node >= {node_floor} first, then: npm install -g {PI_NPM_SPEC}"
+                    f"pi: install Node.js on a supported release line ({node_lines}) first, "
+                    f"then: npm install -g {PI_NPM_SPEC}"
                 )
             continue
         if not user_confirm(f"Install {check.name} via {installer.label}?", default=True):

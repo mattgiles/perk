@@ -4,6 +4,12 @@ from perk.convergence import env
 from perk.convergence.env import EnvCheck, check_environment, required_tools_ok
 from perk.substrate.pi_host import PiHost
 
+LINES = "22.x >= 22.23.4, 24.x >= 24.22.1, 26.x >= 26.12.1"
+PI_ABSENT_REMEDIATION = (
+    "Install Pi: npm install -g @earendil-works/pi-coding-agent "
+    f"(requires Node.js on a supported release line: {LINES})."
+)
+
 
 def test_check_environment_covers_required_tools():
     checks = check_environment()
@@ -29,11 +35,10 @@ def test_required_remediations_carry_the_exact_install_command(monkeypatch):
         "Install the GitHub CLI: brew install gh (or see https://cli.github.com)."
     )
     assert remediations["node"] == (
-        "Install Node.js >= 22.19.0: brew install node / mise use -g node@22 (https://nodejs.org)."
+        f"Install Node.js on a supported release line ({LINES}): brew install node / "
+        "mise use -g node@22 (https://nodejs.org)."
     )
-    assert remediations["pi"] == (
-        "Install Pi: npm install -g @earendil-works/pi-coding-agent (requires Node >= 22.19.0)."
-    )
+    assert remediations["pi"] == PI_ABSENT_REMEDIATION
     assert remediations["skills"] == (
         "Install the skills CLI: curl -fsSL "
         "https://raw.githubusercontent.com/mattgiles/skills/main/scripts/install.sh | sh "
@@ -47,12 +52,13 @@ def test_required_remediations_carry_the_exact_install_command(monkeypatch):
 
 def test_outdated_node_remediation_also_carries_commands(monkeypatch):
     """The installed-but-outdated arm carries actionable commands too, not just absent-node."""
-    monkeypatch.setattr(env, "_node_version", lambda: "v20.11.0")
+    monkeypatch.setattr(env, "_node_version", lambda: "v26.3.0")
     node = next(c for c in env.check_environment() if c.name == "node")
     assert not node.ok
+    # The remediation names the observed line's own floor, not the lowest line's.
     assert node.remediation == (
-        "Upgrade Node.js to >= 22.19.0 (found v20.11.0): "
-        "brew upgrade node / mise use -g node@22 (https://nodejs.org)."
+        "Upgrade Node.js to >= 26.12.1 (found v26.3.0): "
+        "brew upgrade node / mise use -g node@26.12.1 (https://nodejs.org)."
     )
 
 
@@ -76,13 +82,13 @@ def test_required_tools_ok():
 
 
 def test_node_version_gate(monkeypatch):
-    monkeypatch.setattr(env, "_node_version", lambda: "v18.20.0")
+    monkeypatch.setattr(env, "_node_version", lambda: "v22.19.0")
     node = next(c for c in env.check_environment() if c.name == "node")
     assert not node.ok and "Upgrade" in node.remediation
 
-    monkeypatch.setattr(env, "_node_version", lambda: "v22.19.0")
+    monkeypatch.setattr(env, "_node_version", lambda: "v22.23.4")
     node = next(c for c in env.check_environment() if c.name == "node")
-    assert node.ok and node.detail == "v22.19.0"
+    assert node.ok and node.detail == "v22.23.4"
 
 
 def test_node_absent(monkeypatch):
@@ -92,22 +98,56 @@ def test_node_absent(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "version",
-    ["v22.18.0", "v22.19.0-nightly20250101", "v22", "garbage", "v21.99.99"],
+    ("version", "line_floor"),
+    [
+        ("v22.23.3", "22.23.4"),
+        ("v24.22.0", "24.22.1"),
+        ("v26.3.0", "26.12.1"),
+        # A prerelease of the floor triple is below it.
+        ("v26.12.1-rc.1", "26.12.1"),
+    ],
 )
-def test_node_below_the_full_floor_or_unparsable_is_outdated(monkeypatch, version):
+def test_node_below_its_line_floor_is_outdated(monkeypatch, version, line_floor):
     monkeypatch.setattr(env, "_node_version", lambda: version)
     node = env._check_node()
     assert not node.ok
     assert node.detail == version
-    assert node.remediation.startswith(f"Upgrade Node.js to >= 22.19.0 (found {version}): ")
+    assert node.remediation == (
+        f"Upgrade Node.js to >= {line_floor} (found {version}): "
+        f"brew upgrade node / mise use -g node@{line_floor} (https://nodejs.org)."
+    )
+
+
+@pytest.mark.parametrize("version", ["garbage", "v22"])
+def test_unparsable_node_is_outdated(monkeypatch, version):
+    monkeypatch.setattr(env, "_node_version", lambda: version)
+    node = env._check_node()
+    assert not node.ok
+    assert node.detail == version
+    assert node.remediation == (
+        f"Upgrade Node.js to a supported release line ({LINES}) (found {version}): "
+        "brew upgrade node / mise use -g node@22 (https://nodejs.org)."
+    )
+
+
+@pytest.mark.parametrize("version", ["v20.19.0", "v23.11.0", "v25.9.0", "v27.0.0-alpha.0"])
+def test_node_on_an_unsupported_line_is_not_ok(monkeypatch, version):
+    monkeypatch.setattr(env, "_node_version", lambda: version)
+    node = env._check_node()
+    assert not node.ok
+    assert node.detail == f"{version} (unsupported release line)"
+    major = version.removeprefix("v").split(".")[0]
+    assert node.remediation == (
+        f"Node.js {major}.x is not a supported release line; install one of {LINES}: "
+        "brew install node / mise use -g node@26 (https://nodejs.org)."
+    )
 
 
 # A prerelease of a LATER triple is above the floor (semver precedence compares the triple first).
 @pytest.mark.parametrize(
-    "version", ["v22.19.0", "v22.20.1", "v23.0.0-nightly20250101abc", "v24.0.0", "v26.3.0"]
+    "version", ["v22.23.4", "v22.30.0", "v24.22.1", "v26.12.1", "v26.13.0", "v26.13.0-rc.1"]
 )
-def test_node_at_or_above_the_full_floor_is_ok(monkeypatch, version):
+def test_node_at_or_above_its_line_floor_is_ok(monkeypatch, version):
     monkeypatch.setattr(env, "_node_version", lambda: version)
     node = env._check_node()
     assert node.ok and node.detail == version and node.remediation == ""
@@ -125,9 +165,7 @@ def test_pi_absent(monkeypatch):
     monkeypatch.setattr(env, "probe_pi_host", _unreachable_probe)
     pi = env._check_pi()
     assert (pi.ok, pi.detail) == (False, "not found")
-    assert pi.remediation == (
-        "Install Pi: npm install -g @earendil-works/pi-coding-agent (requires Node >= 22.19.0)."
-    )
+    assert pi.remediation == PI_ABSENT_REMEDIATION
 
 
 def test_pi_admitted(monkeypatch):
