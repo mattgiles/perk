@@ -402,7 +402,7 @@ test("createDriveSession: abort is idempotent — repeated trips launch exactly 
   await handle.dispose();
 });
 
-test("createDriveSession: an abort latched before the agent run re-fires on agent_start, never otherwise", async () => {
+test("createDriveSession: an abort latched before the agent run re-fires on agent_start and compaction_start, never otherwise", async () => {
   let emit: (e: DriveEvent) => void = () => {};
   const session = new FakeSession((e) => {
     emit = e;
@@ -412,7 +412,12 @@ test("createDriveSession: an abort latched before the agent run re-fires on agen
   await handle.bind();
   await handle.prompt("go");
   emit({ type: "agent_start" });
-  assert.equal(session.abortCalls, 0, "no abort requested: agent_start is inert");
+  emit({ type: "compaction_start" });
+  assert.equal(
+    session.abortCalls,
+    0,
+    "no abort requested: agent_start and compaction_start are inert",
+  );
 
   handle.abort();
   assert.equal(session.abortCalls, 1, "the request fires at once");
@@ -420,16 +425,19 @@ test("createDriveSession: an abort latched before the agent run re-fires on agen
   assert.equal(session.abortCalls, 1, "a repeated trip is a no-op");
   emit({ type: "agent_start" });
   assert.equal(session.abortCalls, 2, "the run that starts after the request is aborted too");
+  emit({ type: "compaction_start" });
+  assert.equal(session.abortCalls, 3, "a compaction that starts after the request is aborted too");
   emit({ type: "turn_end", message: { role: "assistant" } });
-  assert.equal(session.abortCalls, 2, "only a run start re-fires");
+  assert.equal(session.abortCalls, 3, "only a run or compaction start re-fires");
   assert.deepEqual(
     seen.map((e) => e.kind),
     ["turn_ended"],
-    "agent_start itself never reaches the seam",
+    "agent_start and compaction_start themselves never reach the seam",
   );
   await handle.dispose();
   emit({ type: "agent_start" });
-  assert.equal(session.abortCalls, 2, "nothing fires after dispose (unsubscribed)");
+  emit({ type: "compaction_start" });
+  assert.equal(session.abortCalls, 3, "nothing fires after dispose (unsubscribed)");
 });
 
 // --- the turn-boundary gate over the agent's finishTurn ------------------------------------------

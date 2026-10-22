@@ -387,8 +387,13 @@ export function createDriveSession(
   const rawListener = (event: DriveEvent): void => {
     // An abort that landed before the agent run existed (Pi's prompt preflight — the MCP builtin
     // waits there for direct servers) had no run to stop. Pi delivers `agent_start` synchronously
-    // before the run's first request, so re-applying the abort here refuses that request.
-    if (abortRequested && event.type === "agent_start") fireAbort();
+    // before the run's first request, so re-applying the abort here refuses that request. Each
+    // auto-compaction gets a fresh controller Pi mints after any earlier abort, assigned before
+    // `compaction_start` and checked right after it, so re-applying the abort there cancels the
+    // compaction before its summarization request (a turn-1 compaction under a virtual route).
+    if (abortRequested && (event.type === "agent_start" || event.type === "compaction_start")) {
+      fireAbort();
+    }
     const translated = translateEvent(event);
     if (translated !== null) listener(translated);
   };
@@ -430,8 +435,10 @@ export function createDriveSession(
      * OWNED + LATCHED: the first call fires `session.abort()` on the runtime's live session and
      * latches the request — the drive can trip repeatedly (every post-trip `turn_ended` re-calls
      * this), but later calls are no-ops. The latch outlives a premature abort: `session.abort()`
-     * stops only a running agent, so every later `agent_start` re-fires it before that run's
-     * first request (an abort during Pi's prompt preflight is never lost). Each rejection has an
+     * stops only a running agent and the compaction already started, so every later
+     * `agent_start` re-fires it before that run's first request and every later
+     * `compaction_start` before that compaction's summarization request (an abort during Pi's
+     * prompt preflight is never lost). Each rejection has an
      * owner: the logging catch attaches immediately (never unhandled), and every caught chain is
      * retained so `dispose()` drains it before returning — no abort work outlives the drain.
      */

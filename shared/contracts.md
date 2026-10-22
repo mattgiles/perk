@@ -4175,13 +4175,18 @@ The drive terminates on the **first** of:
      drive-session handle latches the abort and re-fires `session.abort()` on every later
      `agent_start`, which Pi delivers synchronously before the run's first request, so pi-ai
      refuses that request before provider dispatch: **zero** provider requests and no tool
-     follow a preflight trip. The latch reaches run starts only — a compaction controller Pi
-     mints after the trip (`_runAutoCompaction`) is outside it — and that suffices because no
-     auto-compaction can precede the first request's refusal on the worker's fresh session: a
-     virtual model's routing `prepareRequest` is the only turn-1 compaction check (a physical
-     model compacts from turn 2 on), and `prepareCompaction` finds no history before the
-     branch's only user message, returning before `compaction_start` (source-derived at Pi
-     1.1.0, not measured).
+     follow a preflight trip. The latch also re-fires on every later `compaction_start`: Pi
+     mints each auto-compaction's abort controller after any earlier abort
+     (`_runAutoCompaction`), assigning it before emitting `compaction_start` and checking it right
+     after, and `session.abort()` aborts it synchronously — so a compaction Pi's turn preparation
+     starts after the trip ends aborted before its summarization request (no usage, no persisted
+     entry). That case is reachable on the first turn: the worker's own `before_agent_start`
+     messages (the run's scratch guidance; a skill binding's delivery when the prompt does not
+     already carry it) follow the user message and are compaction cut points, so when a virtual
+     model's routing `prepareRequest` finds the routed model over its threshold (a physical model
+     compacts from turn 2 on), `prepareCompaction` can summarize the initial prompt. The bound
+     holds over it: the request that follows is refused as above. Both arms — the run start and
+     the turn-1 compaction — are pinned end to end on the real runtime.
 4. **A post-acceptance provider error Pi does not recover from** → `failed`/`model_error`.
    Pi's `turn_end` carries the turn's assistant message for error turns too, and the seam's fold
    **replaces** its recorded error on every `turn_end` (that turn's error, or none) — so an error
