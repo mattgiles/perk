@@ -108,6 +108,7 @@ export const sidebar = [
     items: [
       "reference",
       "reference/requirements-and-compatibility",
+      "reference/security",
       "reference/cli",
       "reference/cli/setup-and-health",
       "reference/cli/plan",

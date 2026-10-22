@@ -25,6 +25,8 @@ described as it is and structured to mirror the product.
 
 - **[Requirements and compatibility](./requirements-and-compatibility.md)** — the required
   toolchain, installation floor, model credentials, optional surfaces, and version posture.
+- **[Security](./security.md)** — which trust store each path verifies TLS against, the floors
+  perk enforces versus the ones you own, and the advisories that moved them.
 - **[CLI commands](./cli.md)** — the command-map hub carrying the stage-launcher spine and
   shared conventions, with family references for setup and health, plan, objective, PR, learn
   and gist, and remote and utility commands; kept complete by a bi-directional guard against

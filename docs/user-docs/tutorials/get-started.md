@@ -26,7 +26,8 @@ same environment `perk init` checks for:
 - **`gh`** — the GitHub CLI, **authenticated**: `gh auth status`. The spine opens and merges
   real pull requests, so an authenticated `gh` (and a GitHub account) is required, not
   optional.
-- **`node` ≥ 22** — `node --version`
+- **`node`** on a supported release line — 22.23.4+, 24.22.1+ or 26.12.1+
+  (`shared/host-floor.yaml`): `node --version`
 - **`pi`** — the agent harness perk drives; confirm it is on your PATH: `pi --version`
 - **`skills`** — the skills CLI perk delivers its skills through: `skills --version`. Install it
   with the official installer, `curl -fsSL
@@ -35,7 +36,8 @@ same environment `perk init` checks for:
 - **`cloc`** — `cloc --version`; perk counts each PR's change stats (lines of code, tests,
   comments, learned docs) with it. Install it with `brew install cloc` (macOS),
   `npm install -g cloc`, or your distro package.
-- **`uv`** — `uv --version`; used to install perk in Step 1.
+- **`uv`** — `uv --version`, `0.13.4` or newer (`UV_SYSTEM_CERTS=true uv self update` if
+  older; see [Security](../reference/security.md)); used to install perk in Step 1.
 - **`ast-grep`** *(optional)* — `ast-grep --version`. perk sessions prefer it for structural
   (AST) code search; `init`/`doctor` only **warn** when it is absent, never block. Install it
   with `brew install ast-grep` / `cargo install ast-grep` (see https://ast-grep.github.io).

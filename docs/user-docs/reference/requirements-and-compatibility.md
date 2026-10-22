@@ -17,7 +17,7 @@ local or remote execution.
 |---|---|---|
 | `git` | Required | perk uses git repositories, branches, commits, and worktrees. No minimum git version is enforced. |
 | `gh` | Version 2.48.0 or newer, authenticated | A GitHub account is mandatory for the GitHub workflow. perk reaches GitHub only through the authenticated GitHub CLI; it does not make raw GitHub HTTPS requests. Exhaustive issue reads use `gh api --slurp` (gh 2.48.0); an older gh fails those reads loudly rather than silently truncating. |
-| `node` | Version 22.19.0 or newer | Pi's own `engines.node` floor; `perk init`/`perk doctor` compare the full version (not just the major), and an older or unreadable Node fails the environment check. The Pi extension relies on Node's native TypeScript type stripping. |
+| `node` | A supported release line — 22.23.4+, 24.22.1+ or 26.12.1+ (`shared/host-floor.yaml`) | `perk init`/`perk doctor` check the major against the supported lines and the full version against that line's floor. An older or unreadable Node fails the environment check, and so does a Node on an unsupported line (for example 23.x, 25.x or a 27.0.0 prerelease), reported as `(unsupported release line)`. `engines.node` mirrors the same lines, so `npm ci` refuses under `engine-strict`. The Pi extension relies on Node's native TypeScript type stripping. |
 | `pi` | Version 1.1.0 or newer | Pi is the agent harness perk launches. perk refuses to launch a session (plain, staged or resumed) on an older Pi, a 1.1.0 prerelease, or a `pi` whose `--version` cannot be read, naming the executable, the observed version, the required version and the upgrade command (`npm install -g @earendil-works/pi-coding-agent`). `perk init` and `perk doctor` report the same requirement. |
 | `skills` | Required | perk uses the skills CLI to synchronize its workflow skills. perk does not enforce a separate skills version gate. |
 | `cloc` | Required | `perk pr submit` and `perk pr stats` count the PR's change stats with it. No version gate is enforced. A missing `cloc` fails `perk init` / `perk doctor` like any required tool, but submit degrades to an "unavailable" note in the PR body rather than failing. |
@@ -35,6 +35,11 @@ uv tool install perk
 
 `uv` provisions a compatible Python interpreter when one is needed. It installs the `perk`
 executable into uv's tool bin, normally `~/.local/bin`; that directory must be on `PATH`.
+
+Install with uv 0.13.4 or newer (`UV_SYSTEM_CERTS=true uv self update` if yours is older). uv
+tool commands do not read a project's `[tool.uv] required-version`, so perk's own uv floor binds
+only its checkout and CI; the uv behind `uv tool install` and `uv tool upgrade` is yours to keep
+current. See [Security](./security.md) for every TLS floor and who enforces it.
 
 ## Model access
 
@@ -109,8 +114,9 @@ otherwise runs normally:
 ## Version compatibility
 
 **Host floor.** perk declares its minimum supported host versions once — Pi ≥ 1.1.0 and
-Node ≥ 22.19.0 — in the bundled `shared/host-floor.yaml`, and compares against them with semver
-precedence. Every local launch (bare `perk`, a stage launch such as `perk plan`, `perk resume`)
+Node.js on a supported release line — 22.23.4+, 24.22.1+ or 26.12.1+ — in the bundled
+`shared/host-floor.yaml`, and compares against them with semver precedence. A Node major outside
+the supported lines fails the environment check as an unsupported release line. Every local launch (bare `perk`, a stage launch such as `perk plan`, `perk resume`)
 runs `pi --version` once before anything else in the launch's exec phase and ends in one of three
 outcomes: *admitted* (the version is at or above the floor — later releases such as 1.1.1 or 1.10.0
 are admitted), *unsupported* (`pi_version_unsupported` —
@@ -120,7 +126,7 @@ is not a version). Both refusals exit 1 and there is no override. `--dry-run` pr
 probe, and `perk init`, `perk doctor` and `--help` are never gated by the launch check — the
 environment checks report the floor instead, so the repair path stays reachable. The managed
 remote runner installs exactly Pi 1.1.0 for both the global `pi` CLI and the consumer worker's
-SDK, and sets up exactly Node 22.19.0. Pi 1.1.0 is the enforced host floor and the remote install
+SDK, and sets up exactly Node 22.23.4, the lowest supported line's floor. Pi 1.1.0 is the enforced host floor and the remote install
 pin, **adopted** — not certified — on the characterization record
 `docs/design/archive/pi-1.1.0-characterization.md` plus the development-pin and pi-subagents-pin
 records (`pi-1.1.0-dev-pins.md`, `pi-subagents-0.76.1-pin.md`, same directory). Its live

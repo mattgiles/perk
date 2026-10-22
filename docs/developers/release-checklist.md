@@ -50,7 +50,8 @@ just --list
 Expected:
 
 - `gh` is authenticated as an account with admin access to `mattgiles/perk`.
-- Node meets the repo floor (`>=22.19.0`, `shared/host-floor.yaml`). CI uses exactly Node 22.19.0.
+- Node.js is on a supported release line — 22.23.4+, 24.22.1+ or 26.12.1+
+  (`shared/host-floor.yaml`). CI uses exactly Node 22.23.4.
 - `uv`, `npm`, and `just` are available.
 
 ### 1.2. Check the package names before claiming anything

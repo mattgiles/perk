@@ -169,10 +169,9 @@ so the site `check` script runs it after `astro build` with no extra wiring.
 
 The pins: `axe-core` and `jsdom` are exact, dev-only, plan-selected accessibility tooling
 (guarded with the rest of the `devDependencies` literal in `tests/test_packaging.py`). jsdom
-stays on **29.x** deliberately: 30.x declares an engines floor (`^22.22.2 || …`) above the
-repo's Node floor (>=22.19.0, below) and would be rejected under the root
-`.npmrc`'s `engine-strict=true`; 29.1.1's floor (`^22.13.0 || …`) fits with no manifest/README
-floor change.
+stays on **29.x** deliberately: 29.1.1's engines (`^20.19.0 || ^22.13.0 || >=24.0.0`) cover every
+supported Node line (below), and any move must keep jsdom's engines range covering them under the
+root `.npmrc`'s `engine-strict=true`.
 
 Because pages load with `runScripts: "outside-only"`, the axe gate exercises exactly the
 **unenhanced** core-flow state — details open, tooltips hidden — i.e. the no-JS/print-complete
@@ -309,11 +308,12 @@ the extension dev deps; there is no separate lockfile here.
 
 ## Node floors
 
-- The repo has one Node floor, **>=22.19.0** — declared once in `shared/host-floor.yaml` (Pi's
-  own `engines.node` floor) and mirrored as `engines.node` in both the root manifest (the
-  published extension's runtime floor) and this package. The root `.npmrc`'s
-  `engine-strict=true` enforces it at install time; it sits above `astro@7.2.1`'s own engines
-  floor (`>=22.12.0`), so the site toolchain fits.
+- The repo has one Node floor: Node.js on a supported release line — **22.23.4+, 24.22.1+ or
+  26.12.1+** — declared once in `shared/host-floor.yaml` and mirrored as `engines.node`
+  (`^22.23.4 || ^24.22.1 || ^26.12.1`) in both the root manifest (the published extension's
+  runtime floor) and this package. The root `.npmrc`'s `engine-strict=true` enforces it at
+  install time; every supported line sits above `astro@7.2.1`'s own engines floor (`>=22.12.0`),
+  so the site toolchain fits.
 
 ## Binding design records
 

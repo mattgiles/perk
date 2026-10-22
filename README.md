@@ -54,9 +54,12 @@ perk plan
 ```
 
 `perk init` is idempotent and safe to re-run. `perk doctor` reports health;
-`perk doctor --fix` repairs managed drift.
+`perk doctor --fix` repairs managed drift. Install with uv 0.13.4 or newer
+(`UV_SYSTEM_CERTS=true uv self update` if yours is older): uv tool commands do not read perk's
+own uv floor, so it is yours to keep — see [Security](docs/user-docs/reference/security.md).
 
-You need a git repo plus `git`, `gh`, `node >= 22.19.0`, `pi`, and `uv`. `ast-grep` is preferred
+You need a git repo plus `git`, `gh`, Node.js on a supported release line — 22.23.4+, 24.22.1+ or
+26.12.1+ (`shared/host-floor.yaml`) — `pi`, and `uv` 0.13.4 or newer. `ast-grep` is preferred
 for structural search and reported when absent, but it is advisory. GitHub auth is verified
 and reported by init; it becomes required when you drive real plans, PRs, and merges.
 
@@ -91,8 +94,9 @@ Two pinned toolchains:
 
 - **Python** — [uv](https://docs.astral.sh/uv/) (3.13, pinned in `.python-version`),
   [ruff](https://docs.astral.sh/ruff/) (lint/format), [ty](https://docs.astral.sh/ty/) (types).
-- **TypeScript** — npm (Node ≥ 22.19.0, `.npmrc`), [Biome](https://biomejs.dev/) (lint/format),
-  `tsc` (types).
+- **TypeScript** — npm (Node.js on a supported release line — 22.23.4+, 24.22.1+ or 26.12.1+
+  (`shared/host-floor.yaml`); `.npmrc`), [Biome](https://biomejs.dev/) (lint/format), `tsc`
+  (types).
 
 With [`just`](https://github.com/casey/just):
 

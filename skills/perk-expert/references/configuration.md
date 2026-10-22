@@ -92,7 +92,8 @@ machine-local store behind the one-line post-upgrade notice (the `perk release-n
 the max perk version this user has run interactively. Self-healing (missing/garbled content is
 silently re-recorded) and safe to delete; no doctor check or init convergence touches it.
 
-**The host floor (Pi ≥ 1.1.0, Node ≥ 22.19.0).** perk declares its minimum supported host
+**The host floor (Pi ≥ 1.1.0; Node.js on a supported release line — 22.23.4+, 24.22.1+ or
+26.12.1+).** perk declares its minimum supported host
 versions once in the bundled `shared/host-floor.yaml` and compares with semver precedence (a
 `1.1.0-rc.1` prerelease is below the floor; 1.1.1 or 1.10.0 is admitted). Every local launch (bare `perk`, a stage launch, `perk resume`) runs `pi --version`
 once (20 s timeout) as the first exec-phase step, before any lock sweep, chdir or exec, and refuses
@@ -101,10 +102,15 @@ timeout, spawn failure, or output that is not a version) — exit 1, naming the 
 observed version (or the reason), the required version and `npm install -g
 @earendil-works/pi-coding-agent`; no override. `--dry-run` never probes; `perk init`, `perk doctor`
 and `--help` are never gated by it. Instead the environment checks report the same floor: the `pi`
-row is presence + version and the `node` row compares the full version, and an outdated or
-unverifiable one is `ok=False` like a missing one (init exits 2 `missing_tool`; doctor `fail`). The
+row is presence + version and the `node` row checks the major against the supported lines
+(`node.min_version` plus `node.line_floors`) and the full version against that line's floor — a
+major outside the table is `<version> (unsupported release line)` — and an outdated, unsupported
+or unverifiable one is `ok=False` like a missing one (init exits 2 `missing_tool`; doctor `fail`).
+`engines.node` mirrors the lines as `^22.23.4 || ^24.22.1 || ^26.12.1`. The
 managed remote runner installs exactly Pi 1.1.0 (`REMOTE_PI_VERSION`) for both the global CLI and
-the consumer worker SDK and sets up exactly Node 22.19.0. Pi 1.1.0 is the enforced host floor and
+the consumer worker SDK, sets up exactly Node 22.23.4 (the lowest supported line) and pins
+`setup-uv` to `>=0.13.4` (`REMOTE_UV_VERSION_SPEC`, mirroring perk's own `[tool.uv]
+required-version`). Pi 1.1.0 is the enforced host floor and
 the remote install pin, **adopted** — not certified — on the characterization record
 (`docs/design/archive/pi-1.1.0-characterization.md`) plus the development-pin and pi-subagents-pin
 records (`pi-1.1.0-dev-pins.md`, `pi-subagents-0.76.1-pin.md`); its live certification on landed
@@ -120,6 +126,16 @@ admitted at the SDK boundary, independently of the PATH `pi`: the loaded extensi
 SDK it runs in and refuses to load (Pi reports a failed extension load carrying perk's refusal;
 nothing registers), and the headless worker checks the SDK it loaded and ends the run with a typed
 `pi_version_unsupported` / `pi_version_unverifiable` failure before any drive work.
+
+**The TLS trust floors.** Beside the Node lines, the wheel requires `certifi >= 2026.10.19` (the
+bundle `httpx` verifies against by default; `SSL_CERT_FILE`/`SSL_CERT_DIR` take precedence when
+set, so an operator-supplied bundle is the operator's to update), and perk's own checkout and CI
+require uv `>= 0.13.4` through `[tool.uv] required-version`. uv tool commands ignore project
+configuration, so the uv behind `uv tool install perk` / `uv tool upgrade perk` is
+operator-required, as are the OS stores behind `git`, `curl`, `gh` and `mise`, and restarting a
+running Pi after a Node upgrade (the `node` row probes a fresh `node --version`, never the running
+Pi). The user docs' Security reference (`docs/user-docs/reference/security.md`) records the
+enforced-versus-operator-required split and each advisory that moved a floor.
 
 **The perk-managed `.pi/settings.json` slice pins pi-subagents.** The borrowed set is unpinned
 except `npm:pi-subagents@0.76.1`, the release characterized against Pi 1.1.0: perk's report waves
