@@ -181,6 +181,11 @@ _PERK_INSTALL_CONSUMER = f"uv tool install perk=={__version__}"
 REMOTE_PI_VERSION = "1.1.0"
 _PI_GLOBAL_INSTALL = f"npm install -g {PI_NPM_SPEC}@{REMOTE_PI_VERSION}"
 
+# The first uv whose embedded trust store drops the compromised eMudhra/emSign chain. Mirrors
+# perk's own `[tool.uv] required-version` (a test pins the equality); explicit here because a
+# consumer repo has no perk `pyproject.toml` for `setup-uv` to discover the floor from.
+REMOTE_UV_VERSION_SPEC = ">=0.13.4"
+
 # The Node worker deps step differs by repo kind. The self-repo has the `package.json` + lockfile +
 # the `@earendil-works/*` devDeps the worker resolves, so `npm ci` works (the committed pins). A
 # consumer checkout installs the pinned `@mgiles/perk` into the project-scope `.pi/npm` root
@@ -215,6 +220,7 @@ runs:
     - name: Set up uv (+ Python 3.13)
       uses: astral-sh/setup-uv@v5
       with:
+        version: "{uv_version}"
         python-version: "3.13"
 
     - name: Set up Node {node_version}
@@ -261,8 +267,9 @@ runs:
 def remote_setup_action(self_repo: bool) -> str:
     """The composite setup action body for this repo kind (self-repo dogfoods the local code).
 
-    Node is set up at exactly the shared host floor's version, so every remote run exercises the
-    declared minimum; pi is installed at the exact ``REMOTE_PI_VERSION``.
+    Node is set up at exactly the shared host floor's lowest supported line, so every remote run
+    exercises the declared minimum; uv at ``REMOTE_UV_VERSION_SPEC``; pi at the exact
+    ``REMOTE_PI_VERSION``.
     """
     install = _PERK_INSTALL_SELF if self_repo else _PERK_INSTALL_CONSUMER
     worker_deps = _WORKER_DEPS_SELF if self_repo else _WORKER_DEPS_CONSUMER
@@ -270,6 +277,7 @@ def remote_setup_action(self_repo: bool) -> str:
         perk_install=install,
         worker_deps=worker_deps,
         node_version=load_host_floor().node_min_version,
+        uv_version=REMOTE_UV_VERSION_SPEC,
         pi_install=_PI_GLOBAL_INSTALL,
     )
 

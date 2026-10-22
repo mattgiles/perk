@@ -11,6 +11,8 @@ requires-python = ">=3.13"
 license = "MIT"
 authors = [{ name = "perk" }]
 dependencies = [
+    # TLS trust floor: the bundle without the compromised eMudhra/emSign chain (httpx's default verifier)
+    "certifi>=2026.10.19",
     "click>=8.1",
     "httpx>=0.28",
     "jinja2>=3.1",
@@ -80,6 +82,12 @@ only-include = [
 # Workspace root: `perk` (this [project]) is the root member; additional members
 # live under packages/*. The glob currently matches nothing (packages/ arrives with
 # a later node); a modern uv treats a zero-match member glob as "root is the sole member".
+[tool.uv]
+# The first uv whose embedded trust store drops the compromised eMudhra/emSign chain. Binds `uv`
+# project commands in this checkout and its worktrees, and `setup-uv`'s version discovery in CI —
+# NOT `uv tool install`, which ignores project configuration (that floor is operator-required).
+required-version = ">=0.13.4"
+
 [tool.uv.workspace]
 members = ["packages/*"]
 
