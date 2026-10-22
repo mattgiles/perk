@@ -32,6 +32,7 @@ from perk.substrate.config import (
 )
 from perk.substrate.host_floor import describe_node_lines, load_host_floor, supported_node_lines
 from perk.substrate.output import io_step, user_confirm, user_output, user_prompt
+from perk.substrate.pi_host import PI_ADOPTED_VERSION, PI_INSTALL_COMMAND, PI_INSTALL_SPECS
 from perk.substrate.pi_host import PI_NPM_SPEC as PI_NPM_SPEC
 
 SKILLS_INSTALL_SCRIPT = (
@@ -74,7 +75,8 @@ def _resolve_installer(name: str, *, node_ok: bool) -> _Installer | None:
     """The supported install path for a missing required tool, or ``None`` (guide-only).
 
     ``git``/``node`` are always guide-only (OS-owned — their remediation strings are the
-    guidance); ``pi`` needs a working node (npm); ``gh`` needs brew; ``skills`` uses the
+    guidance); ``pi`` needs a working node (npm) and installs the pinned install set (the adopted
+    Pi with its companions at the same exact version); ``gh`` needs brew; ``skills`` uses the
     official installer script on macOS and ``go install`` elsewhere (when go is present);
     ``cloc`` prefers brew and falls back to the npm package when node works.
     """
@@ -86,9 +88,9 @@ def _resolve_installer(name: str, *, node_ok: bool) -> _Installer | None:
         )
     if name == "pi" and node_ok:
         return _Installer(
-            label=f"npm install -g {PI_NPM_SPEC}",
-            detail=f"npm -g {PI_NPM_SPEC}",
-            run=lambda: npm.install_global(PI_NPM_SPEC, timeout=_INSTALL_TIMEOUT),
+            label=PI_INSTALL_COMMAND,
+            detail=f"npm -g {PI_NPM_SPEC}@{PI_ADOPTED_VERSION} + pinned companions",
+            run=lambda: npm.install_global(*PI_INSTALL_SPECS, timeout=_INSTALL_TIMEOUT),
         )
     if name == "cloc":
         if shutil.which("brew") is not None:
@@ -146,7 +148,7 @@ def guide_missing_tools(checks: list[EnvCheck]) -> tuple[list[str], list[str]]:
                 node_lines = describe_node_lines(supported_node_lines(load_host_floor()))
                 warnings.append(
                     f"pi: install Node.js on a supported release line ({node_lines}) first, "
-                    f"then: npm install -g {PI_NPM_SPEC}"
+                    f"then: {PI_INSTALL_COMMAND}"
                 )
             continue
         if not user_confirm(f"Install {check.name} via {installer.label}?", default=True):

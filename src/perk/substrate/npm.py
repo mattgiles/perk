@@ -44,11 +44,14 @@ def install(spec: str, *, prefix: Path, timeout: int = 300) -> None:
     _run(["install", spec, "--prefix", str(prefix), "--legacy-peer-deps"], timeout=timeout)
 
 
-def install_global(spec: str, *, timeout: int = 300) -> None:
-    """Install ``spec`` into npm's **global** root (a **network** op; ``NpmError``).
+def install_global(spec: str, *more: str, timeout: int = 300) -> None:
+    """Install one or more specs into npm's **global** root in one command (a **network** op;
+    ``NpmError``).
 
-    Runs ``npm install -g <spec>`` — for global CLI binaries (e.g. the review surface's
-    ``hunkdiff`` → ``hunk``), not Pi packages. The review-CLI gesture is the best-effort
-    caller: it swallows ``NpmError`` as a warning, never fatal.
+    Runs ``npm install -g <spec> [<more>…]`` — for global CLI binaries: the pinned Pi install set
+    (``perk.substrate.pi_host.PI_INSTALL_SPECS``) is the multi-spec caller, so the package and its
+    companions resolve together in one tree; the review surface's ``hunkdiff`` → ``hunk`` and
+    ``cloc`` are the single-spec ones. Callers are best-effort: they swallow ``NpmError`` as a
+    warning, never fatal.
     """
-    _run(["install", "-g", spec], timeout=timeout)
+    _run(["install", "-g", spec, *more], timeout=timeout)

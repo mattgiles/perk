@@ -26,7 +26,7 @@ runs:
 
     - name: Install pi
       shell: bash
-      run: npm install -g @earendil-works/pi-coding-agent@1.1.0
+      run: npm install -g @earendil-works/pi-coding-agent@1.1.0 @earendil-works/chord@1.1.0 @earendil-works/pi-agent-core@1.1.0 @earendil-works/pi-ai@1.1.0 @earendil-works/pi-codemode@1.1.0 @earendil-works/pi-mcp@1.1.0 @earendil-works/pi-telemetry@1.1.0 @earendil-works/pi-tui@1.1.0
 
     # The npm package wraps cloc's Perl script (the Ubuntu runner ships Perl). Non-fatal at
     # submit time — a missing cloc degrades the PR's change stats to a note — but installed so

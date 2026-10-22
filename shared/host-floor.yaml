@@ -6,7 +6,8 @@
 # A FLOOR is a minimum (>=), compared with semver precedence: a prerelease of the floor
 # triple is below it; a later release is admitted. It is NOT a dev pin (package.json
 # devDependencies, exact), NOT the pi-subagents supplier pin, NOT the doctor guidance stamp,
-# and NOT the remote install pin — those stay in their own homes. Every host observation
+# and NOT the adopted Pi pin / remote install pin (`perk/substrate/pi_host.py`, carried by
+# `perk/run/workflow_artifacts.py`) — those stay in their own homes. Every host observation
 # (the PATH `pi` CLI, a loaded SDK) is admitted independently against the same minimum;
 # equality between observations is never required.
 #

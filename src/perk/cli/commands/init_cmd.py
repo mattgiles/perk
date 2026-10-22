@@ -52,7 +52,10 @@ def _render_human(report: InitReport) -> None:
 
     user_output(click.style("✓", fg="green") + f" perk init ({report.mode})")
     for check in report.env:
-        if check.ok:
+        if check.ok and check.advisory:
+            # An admitted-with-a-caution row; the advisory itself rides `report.warnings`.
+            mark = click.style("⚠️", fg="yellow")
+        elif check.ok:
             mark = click.style("✓", fg="green")
         elif check.optional:
             mark = click.style("⚠️", fg="yellow")

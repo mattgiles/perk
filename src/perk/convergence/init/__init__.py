@@ -512,6 +512,12 @@ def run_init(
         linear_report = _linear_readiness(root)
     handoff = _write_post_init(root, self_repo)
     managed = tuple(cap.name for cap in capabilities.applicable(self_repo))
+    # An ok env row's advisory (an admitted Pi that is not the adopted pin) is a promise of the
+    # SUCCESS report only: every failure report names what blocked init instead — the
+    # `env_failure` exits carry no warnings and the `missing_tool` / `skills_sync_failed` reports
+    # preserve only the accumulated ones, so the line is added here, not at the env gate — and
+    # `perk doctor` reports the row regardless. The checks are final after the guided pass.
+    warnings.extend(f"{c.name}: {c.advisory}" for c in checks if c.ok and c.advisory)
 
     return InitReport(
         ok=True,
