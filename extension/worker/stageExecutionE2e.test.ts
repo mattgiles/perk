@@ -15,6 +15,9 @@
 // session on a real request: the worker's own `tool_search`/`codemode` builtins (activation,
 // opt-out, disable, replacement) and its `mcp` builtin (project-only config, a direct and a
 // codemode-reached server, the disable, global files untouched, children on the real agent dir).
+// The MCP matrix drives the rest of that seam against committed stdio and HTTP fixtures: header
+// credentials, registration collisions, OAuth and connection failures, `enabled: false` and trust,
+// a late registration and a lazy reconnect, in-flight cancellation, and the shutdown order.
 // The compaction and retry scenarios drive the settings-following behavior on real sessions: an
 // in-drive compaction counted at its boundary, a project opt-out, a compaction that trips the
 // token cap with no further provider request, and retried, exhausted and non-retryable provider
