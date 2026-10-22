@@ -550,7 +550,9 @@ keep a builtin out of the worker entirely, add `"extensions": ["-builtin:tool-se
 the worker is project-only:** Pi's MCP builtin connects the servers in the repo's `.pi/mcp.json`
 (credentials given explicitly there) and never reads the agent directory's `mcp.json` or
 `mcp-auth.json`. A `direct` server's tools are declared to the model; the default `codemode`
-exposure turns on the worker's codemode, which reaches them from scripts. A server that fails its
+exposure turns on the worker's codemode, which reaches them from scripts, and `deferred` exposure
+turns on `tool_search` — even under a committed `-tool_search`, so only `-builtin:tool-search`
+keeps search out of a worker whose `.pi/mcp.json` has a deferred server. A server that fails its
 first connection shows up as missing tools rather than a message (a plain OAuth 401 is the one
 exception, with a sign-in line on stderr); a server lost mid-stage keeps its tools and reconnects
 on the next call. `-builtin:mcp` keeps MCP out of the worker (a project extension's

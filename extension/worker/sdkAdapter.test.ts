@@ -402,6 +402,44 @@ test("createDriveSession: abort is idempotent — repeated trips launch exactly 
   await handle.dispose();
 });
 
+test("createDriveSession: an abort latched before the agent run re-fires on agent_start and compaction_start, never otherwise", async () => {
+  let emit: (e: DriveEvent) => void = () => {};
+  const session = new FakeSession((e) => {
+    emit = e;
+  });
+  const seen: StageEvent[] = [];
+  const handle = createDriveSession({ session, dispose() {} }, (e) => seen.push(e));
+  await handle.bind();
+  await handle.prompt("go");
+  emit({ type: "agent_start" });
+  emit({ type: "compaction_start" });
+  assert.equal(
+    session.abortCalls,
+    0,
+    "no abort requested: agent_start and compaction_start are inert",
+  );
+
+  handle.abort();
+  assert.equal(session.abortCalls, 1, "the request fires at once");
+  handle.abort();
+  assert.equal(session.abortCalls, 1, "a repeated trip is a no-op");
+  emit({ type: "agent_start" });
+  assert.equal(session.abortCalls, 2, "the run that starts after the request is aborted too");
+  emit({ type: "compaction_start" });
+  assert.equal(session.abortCalls, 3, "a compaction that starts after the request is aborted too");
+  emit({ type: "turn_end", message: { role: "assistant" } });
+  assert.equal(session.abortCalls, 3, "only a run or compaction start re-fires");
+  assert.deepEqual(
+    seen.map((e) => e.kind),
+    ["turn_ended"],
+    "agent_start and compaction_start themselves never reach the seam",
+  );
+  await handle.dispose();
+  emit({ type: "agent_start" });
+  emit({ type: "compaction_start" });
+  assert.equal(session.abortCalls, 3, "nothing fires after dispose (unsubscribed)");
+});
+
 // --- the turn-boundary gate over the agent's finishTurn ------------------------------------------
 
 /** A fake agent whose `finishTurn` is the session's own hook (records calls, returns `inner`). */
@@ -783,7 +821,19 @@ test("workerMcpOptions loadConfig: every rejected file or entry prints one prefi
   const prefix = "perk worker: mcp config error ";
   const cases: { name: string; plant: (h: ReturnType<typeof mcpHarness>) => void; says: string }[] =
     [
-      { name: "malformed JSON", plant: (h) => h.plant("{ not json"), says: "JSON" },
+      {
+        name: "malformed JSON beside an inline credential",
+        plant: (h) =>
+          h.plant(
+            '{"mcpServers":{"s":{"url":"https://x.example/mcp","headers":{"Authorization": Bearer SECRET123}}}}',
+          ),
+        says: "invalid JSON",
+      },
+      {
+        name: "malformed JSON with a parser position",
+        plant: (h) => h.plant('{"mcpServers":{,}}'),
+        says: "invalid JSON at position 15 (line 1 column 16)",
+      },
       {
         name: "a directory at the path",
         plant: (h) => mkdirSync(h.configPath),
@@ -839,6 +889,7 @@ test("workerMcpOptions loadConfig: every rejected file or entry prints one prefi
     assert.ok(loaded.errors[0]?.includes(row.says), `${row.name}: ${loaded.errors[0]}`);
     const lines = h.stderr();
     assert.deepEqual(lines, [`${prefix}— ${loaded.errors[0]}`], `${row.name}: one stderr line`);
+    assert.ok(!lines.join("\n").includes("Bearer"), `${row.name}: no file content on stderr`);
   }
 });
 

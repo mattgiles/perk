@@ -39,11 +39,13 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { type TestContext, test } from "node:test";
 import {
+  type Api,
   fauxAssistantMessage,
   fauxText,
   fauxToolCall,
   getCurrentTools,
   isRetryableAssistantError,
+  type Model,
 } from "@earendil-works/pi-ai";
 import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { agentScratchDir, type PlanRef, runEventsPath } from "../substrate/cache.ts";
@@ -2629,6 +2631,63 @@ test("e2e: MCP matrix — an external abort cancels an in-flight MCP call: notif
   assertAccounted(result, observed.runtime());
 });
 
+test("e2e: MCP matrix \u2014 an external abort during Pi's direct-server startup wait is never lost: the latched abort refuses the run's first request, so no provider request and no tool follow", async (t) => {
+  // Pi's first prompt waits (up to 10 s) for direct servers in `before_agent_start`, before the
+  // agent run exists, so an abort there finds no run to stop; the handle's latch re-fires it on
+  // `agent_start`. The slow fixture holds its `initialize` answer, so the wait is long.
+  const observed = observeAccounting();
+  const controller = new AbortController();
+  let marker = "";
+  let promptEntered = false;
+  let driveSettled = false;
+  const drive = runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [directCall("read", { path: ".pi/settings.json" }), submitCall(), idle()],
+    signal: controller.signal,
+    plant: (cwd) => {
+      marker = join(cwd, "mcp-fixture-marker");
+      plantProjectMcpConfig(cwd, {
+        slow: mcpFixtureServer({ token: "slow", exposure: "direct", marker, initDelayMs: 3_000 }),
+      });
+    },
+    onRuntime: (runtime) => {
+      observed.onRuntime(runtime);
+      // The handle prompts the bound session instance, so an own-property wrapper is what runs.
+      const original = runtime.session.prompt.bind(runtime.session);
+      runtime.session.prompt = (text) => {
+        promptEntered = true;
+        return original(text);
+      };
+    },
+  }).finally(() => {
+    driveSettled = true;
+  });
+  // Inside `prompt()` AND the server process exists: inside Pi's direct-server wait. An abort
+  // before `prompt()` would be absorbed by `runStage`'s pre-prompt sample and prove nothing.
+  const barrier = t.waitFor(
+    () => assert.ok(driveSettled || (promptEntered && existsSync(marker))),
+    { timeout: 10_000 },
+  );
+  const { reached, result } = await abortOnBarrier(drive, barrier, controller);
+  assert.equal(reached, true, "the abort fired inside prompt() once the server process existed");
+  assert.equal(result.outcome.status, "aborted");
+  assert.equal(result.outcome.terminal_signal, "external_abort");
+  assert.equal(result.providerCalls, 0, "the first request never reached the provider");
+  assert.equal(
+    result.outcome.budget.turns,
+    1,
+    "Pi records the refused first request as one zero-usage error turn: 0 means the abort landed " +
+      "before the prompt (vacuous), 2+ means the latch did not refuse the first request",
+  );
+  assert.deepEqual(
+    result.events.flatMap((e) => (e.kind === "tool_outcome" ? [e.tool] : [])),
+    [],
+    "no tool ran after the abort",
+  );
+  assertAccounted(result, observed.runtime());
+});
+
 test("e2e: MCP matrix — shutdown closes every transport before the throwaway dir is removed: the server exits while the dir still exists, and both are gone when runDrive returns", async (t) => {
   const privateTmp = mkdtempSync(join(tmpdir(), "perk-e2e-tmp-"));
   t.after(() => rmSync(privateTmp, { recursive: true, force: true }));
@@ -2996,6 +3055,89 @@ test("e2e: COMPACTION TRIPS THE TOKEN CAP — the run ends at the compaction bou
   ]);
   assert.equal(result.outcome.budget.turns, 2);
   assert.equal(result.outcome.budget.tokens, turn1 + compaction, "turn 1 plus the compaction");
+  assertAccounted(result, runtime);
+});
+
+test("e2e: PREFLIGHT ABORT CANCELS A TURN-1 COMPACTION \u2014 under a virtual route over its threshold, the compaction Pi starts after the trip is aborted before its summarization request", async (t) => {
+  // The worker's own `before_agent_start` messages (run scratch, skill binding) follow the user
+  // message and are compaction cut points, so turn 1 can compact: a virtual model's routing
+  // `prepareRequest` checks the routed model's threshold and Pi mints a fresh compaction
+  // controller \u2014 after the trip, outside the agent signal. The handle's latch re-fires on
+  // `compaction_start`. The trip lands in the direct-server wait, as in the MCP matrix row.
+  const observed = observeSessionEvents();
+  const router = summarizationRouter(compactionLane());
+  const reg = await fauxModelRuntime({ contextWindow: COMPACTION_WINDOW });
+  reg.setResponses(router.responses);
+  const target = reg.getModel() as Model<Api>;
+  reg.modelRuntime.registerVirtualModel({
+    provider: "e2e-router",
+    id: "auto",
+    name: "auto",
+    contextWindow: COMPACTION_WINDOW,
+    route: () => ({ model: target, thinkingLevel: "off" }),
+  });
+  const controller = new AbortController();
+  let marker = "";
+  let promptEntered = false;
+  let driveSettled = false;
+  const drive = runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    model: { runtime: reg.modelRuntime, pattern: "e2e-router/auto" },
+    initialPrompt: LONG_PROMPT,
+    // The prompt alone (no usage yet) must cross the routed model's threshold on turn 1.
+    extraSettings: { compaction: { reserveTokens: 100_000, keepRecentTokens: 0 } },
+    signal: controller.signal,
+    plant: (cwd) => {
+      marker = join(cwd, "mcp-fixture-marker");
+      plantProjectMcpConfig(cwd, {
+        slow: mcpFixtureServer({ token: "slow", exposure: "direct", marker, initDelayMs: 3_000 }),
+      });
+    },
+    onRuntime: (runtime) => {
+      observed.onRuntime(runtime);
+      const original = runtime.session.prompt.bind(runtime.session);
+      runtime.session.prompt = (text) => {
+        promptEntered = true;
+        return original(text);
+      };
+    },
+  }).finally(() => {
+    driveSettled = true;
+  });
+  const barrier = t.waitFor(
+    () => assert.ok(driveSettled || (promptEntered && existsSync(marker))),
+    { timeout: 10_000 },
+  );
+  const { reached, result } = await abortOnBarrier(drive, barrier, controller);
+  const runtime = observed.runtime();
+  assert.equal(reached, true, "the abort fired inside prompt() once the server process existed");
+  // Non-vacuity: the worker injected a cut point after the prompt, and Pi did start a compaction.
+  const branch = runtime.session.sessionManager.getBranch() as {
+    type?: string;
+    customType?: string;
+    message?: { role?: string };
+  }[];
+  const userAt = branch.findIndex((e) => e.type === "message" && e.message?.role === "user");
+  const injected = branch.slice(userAt + 1).filter((e) => e.type === "custom_message");
+  assert.ok(userAt !== -1 && injected.length > 0, "a custom message follows the user message");
+  assert.equal(observed.ofType("compaction_start").length, 1, "Pi started a turn-1 compaction");
+  assert.deepEqual(
+    observed.ofType("compaction_end").map((e) => e.aborted),
+    [true],
+    "the compaction ended aborted",
+  );
+  assert.equal(router.summaries(), 0, "no summarization request");
+  assert.equal(reg.callCount(), 0, "no provider request at all");
+  assert.deepEqual(compactionEntries(runtime), [], "Pi persisted no compaction");
+  assert.equal(result.outcome.status, "aborted");
+  assert.equal(result.outcome.terminal_signal, "external_abort");
+  assert.equal(result.outcome.budget.turns, 1, "the refused first request is the one turn");
+  assert.deepEqual(
+    result.events.flatMap((e) => (e.kind === "tool_outcome" ? [e.tool] : [])),
+    [],
+    "no tool ran after the abort",
+  );
   assertAccounted(result, runtime);
 });
 

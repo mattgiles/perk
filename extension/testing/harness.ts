@@ -854,6 +854,8 @@ export function mcpFixtureServer(opts: {
   token: string;
   exposure?: "codemode" | "deferred" | "direct" | "hidden";
   marker?: string;
+  /** Hold back the fixture's `initialize` answer this long (a slow-starting server). */
+  initDelayMs?: number;
   exitDelayMs?: number;
   exitLog?: string;
   watchDir?: string;
@@ -864,6 +866,9 @@ export function mcpFixtureServer(opts: {
     env: {
       PERK_MCP_FIXTURE_TOKEN: opts.token,
       ...(opts.marker !== undefined ? { PERK_MCP_FIXTURE_MARKER: opts.marker } : {}),
+      ...(opts.initDelayMs !== undefined
+        ? { PERK_MCP_FIXTURE_INIT_DELAY_MS: String(opts.initDelayMs) }
+        : {}),
       ...(opts.exitDelayMs !== undefined
         ? { PERK_MCP_FIXTURE_EXIT_DELAY_MS: String(opts.exitDelayMs) }
         : {}),

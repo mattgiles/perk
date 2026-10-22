@@ -3909,9 +3909,13 @@ statically, and links the seam only by a dynamic import after admission (guard-e
   true }`. Each loads as `builtin:<name>` with `sourceInfo.source === "builtin"` (the provenance
   §8.40's posture table and cohort join key on). `codemode` and `tool-search` register their tool
   **inactive** — **configuration alone activates them**: the resolved `defaultTools` (`perk
-  init`'s seeded `+tool_search`, a committed `-tool_search` opt-out, a `+codemode`), and Pi's MCP
-  `autoEnableCodemode` (default on) when a `codemode`-exposure server is configured. A project
-  `extensions: ["-builtin:<name>"]` entry disables one (it never loads; with `-builtin:mcp` a
+  init`'s seeded `+tool_search`, a committed `-tool_search` opt-out, a `+codemode`), and the
+  project's MCP config. Pi's MCP builtin activates the tool its servers' exposure needs at session
+  start, whatever `defaultTools` says: `codemode` for a `codemode`-exposure server (unless
+  `autoEnableCodemode: false`), `tool_search` for a `deferred` one — so a committed `-tool_search`
+  or `-codemode` does not keep that tool off when such a server is configured; only
+  `-builtin:<name>` keeps the builtin absent. A project `extensions: ["-builtin:<name>"]` entry
+  disables one (it never loads; with `-builtin:mcp` a
   project `pi.registerMcpServer()` is again reported by Pi at bind as a `register_mcp_server`
   extension error, printed — see `ctx.hasUI === false` — and never connected); a project extension
   that registers the same tool name (for `mcp`, the `/mcp` command) **replaces** it (Pi's loader
@@ -3928,8 +3932,10 @@ statically, and links the seam only by a dynamic import after admission (guard-e
       `mcp.json` is never read. Five guards, each printing one `perk worker: mcp config error —
       <path>: <message>` stderr line while the load continues: an untrusted project loads nothing
       (`ctx.isProjectTrusted()` is `true` by construction in the worker); a missing file is silent,
-      any other read failure (a directory, `EACCES`) is an error; a JSON failure, a non-object root,
-      a present-but-non-object `mcpServers` (an absent one is accepted — e.g. a file carrying only
+      any other read failure (a directory, `EACCES`) is an error; a JSON failure (printed as
+      `invalid JSON` plus the parser's numeric position when it gives one — never the parser's
+      text, which can quote the file's inline credentials), a non-object root, a
+      present-but-non-object `mcpServers` (an absent one is accepted — e.g. a file carrying only
       `autoEnableCodemode`) or a non-boolean `autoEnableCodemode` is an error, as in Pi's own
       loader; a non-object entry is an error; an override-only entry (no `command`, `url` or
       `type` — there is no global server to override) and an entry with `auth` (allowed only in the
@@ -4037,7 +4043,8 @@ statically, and links the seam only by a dynamic import after admission (guard-e
   no global token sent), settled connection failures (missing command, 5xx, rejected credential)
   with no stderr line, `enabled: false` and trust, a late registration declared after a barrier
   turn plus a lazy reconnect across an HTTP session expiry, an in-flight call cancelled by an
-  external abort, and transports closed before the throwaway dir is removed.
+  external abort, an abort during the direct-server startup wait refusing the run's first request
+  (zero provider requests), and transports closed before the throwaway dir is removed.
 - **Model-call policy (a constrained capability)** — `extension/worker/modelCallPolicy.ts`. Pi
   reports a codemode script's `models.*` usage only when the script ends (its mid-script
   `tool_execution_update` partials carry per-call rows with `cost` only, never tokens), and no
@@ -4162,6 +4169,24 @@ The drive terminates on the **first** of:
      `turn_end`; the budget verdict stands over it. A compaction's own summarization call is
      cancelled by the same abort when a trip (wall clock, external) lands while it runs; the
      aborted `compaction_end` carries no usage and Pi persists no entry.
+   - *Prompt-preflight boundary* — a trip can land inside the driving `prompt()` before Pi's
+     agent run exists (its `before_agent_start` handlers run first; the MCP builtin waits there
+     up to 10 s for `direct` servers), where `session.abort()` has no run to stop. The
+     drive-session handle latches the abort and re-fires `session.abort()` on every later
+     `agent_start`, which Pi delivers synchronously before the run's first request, so pi-ai
+     refuses that request before provider dispatch: **zero** provider requests and no tool
+     follow a preflight trip. The latch also re-fires on every later `compaction_start`: Pi
+     mints each auto-compaction's abort controller after any earlier abort
+     (`_runAutoCompaction`), assigning it before emitting `compaction_start` and checking it right
+     after, and `session.abort()` aborts it synchronously — so a compaction Pi's turn preparation
+     starts after the trip ends aborted before its summarization request (no usage, no persisted
+     entry). That case is reachable on the first turn: the worker's own `before_agent_start`
+     messages (the run's scratch guidance; a skill binding's delivery when the prompt does not
+     already carry it) follow the user message and are compaction cut points, so when a virtual
+     model's routing `prepareRequest` finds the routed model over its threshold (a physical model
+     compacts from turn 2 on), `prepareCompaction` can summarize the initial prompt. The bound
+     holds over it: the request that follows is refused as above. Both arms — the run start and
+     the turn-1 compaction — are pinned end to end on the real runtime.
 4. **A post-acceptance provider error Pi does not recover from** → `failed`/`model_error`.
    Pi's `turn_end` carries the turn's assistant message for error turns too, and the seam's fold
    **replaces** its recorded error on every `turn_end` (that turn's error, or none) — so an error

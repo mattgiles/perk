@@ -590,9 +590,11 @@ The three Pi builtin tool extensions the worker supplies beside its hidden polic
 the CLI's identity (`builtin:codemode` — built with `models: false` — `builtin:tool-search` and
 `builtin:mcp`): disabled by `-builtin:<name>`, replaced by a project registration of the same
 tool (for MCP, the `/mcp` command). Codemode and tool-search register inactive and are activated
-by configuration (the repo's `defaultTools`, MCP's `autoEnableCodemode`); MCP connects only the
-trusted project's `.pi/mcp.json` servers, under factory-scoped isolation. A project extension
-that brings its own MCP support is outside that guarantee.
+by configuration (the repo's `defaultTools`, and the project MCP config's server exposure —
+`codemode` under `autoEnableCodemode`, `deferred` for tool-search — which activates over a
+`defaultTools` opt-out); MCP connects only the trusted project's `.pi/mcp.json` servers, under
+factory-scoped isolation. A project extension that brings its own MCP support is outside that
+guarantee.
 _Avoid_: native factories, worker extensions
 
 **Factory-scoped isolation**:

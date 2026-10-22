@@ -422,7 +422,9 @@ worker refuses, and an interactive session gives a file entry precedence over a 
 extension registration (the worker: first registrar wins), so a server can succeed there — or
 reach a different server — and still fail in the worker. `direct` servers are
 declared to the model; the default `codemode` exposure turns on the worker's codemode (pi's
-`autoEnableCodemode`).
+`autoEnableCodemode`) and `deferred` exposure turns on `tool_search` — at session start,
+overriding a committed `-codemode`/`-tool_search`; only `"autoEnableCodemode": false` (codemode)
+or `-builtin:codemode`/`-builtin:tool-search` keeps them off.
 `-builtin:mcp` keeps MCP out (a project `registerMcpServer` is then reported on stderr as
 `perk worker: extension error — <path> (register_mcp_server): …`, never connected). A project
 extension that brings its own MCP support replaces the builtin and is the repo's choice, outside
