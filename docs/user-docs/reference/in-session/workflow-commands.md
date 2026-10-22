@@ -231,7 +231,9 @@ stacked-delivery plan before mutation; stacked layers land only as one atomic tr
 Investigate the landed change, capture durable learning when warranted, clear the pending-learn
 semaphore, and release the worktree. Bare interactive `/learn` gathers one session-grounded
 evidence bundle (planning and implementation sessions, saved plan, merged PR, existing-docs
-inventory), then runs 2–4 fresh `perk.learn-analyst` lanes through `run_learn_wave`. Missing
+inventory — the session chunks also show which prompt sections and tools changed during each
+session, from Pi's system messages and compaction snapshots, bounded, as context evidence), then
+runs 2–4 fresh `perk.learn-analyst` lanes through `run_learn_wave`. Missing
 evidence is surfaced rather than guessed; a failed analyst is a reported skipped angle, and a
 malformed or misattributed analyst report degrades to a skipped angle too (its body is never
 relayed). The parent

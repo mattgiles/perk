@@ -214,11 +214,15 @@ scripts and other `ctx.executeTool` callers) render inside their parent `<tool_r
 `<nested_calls>` element with each call's status and the record's completeness; the parent's own
 `error` flag is unchanged. Pi system messages (the leading prompt/tool snapshot and later
 prompt-section or tool-set deltas, Pi ≥ 0.99) are accepted as context evidence — their ancestry
-keeps the active branch intact, any instruction text renders as `<message role="system">` bounded
-like other payloads, and their `sections`/`toolsAdded`/`toolsRemoved` are tolerated but not
-interpreted. With `--json`, a stable normalization report (per-role counters + chunk
-paths) rides the envelope's `render` field (`null` unless `--render`); with the human summary, one
-`render:` line per role. `--render` and `--json` are independent.
+keeps the active branch intact and any instruction text renders as `<message role="system">`
+bounded like other payloads. Each system entry and each compaction's prompt snapshot also renders
+a `<system_state>` element naming the prompt sections that were set (their text bounded
+head+tail) or removed, the tool names added or removed (never descriptions or schemas), and
+`malformed`/`dropped` counts when the record could not be fully read — a malformed record degrades
+in place and never costs the entry. With `--json`, a stable normalization report (per-role
+counters, incl. `system_states` and `system_malformed`, + chunk paths) rides the envelope's
+`render` field (`null` unless `--render`); with the human summary, one `render:` line per role.
+`--render` and `--json` are independent.
 
 ### `perk learn docs-sync`
 

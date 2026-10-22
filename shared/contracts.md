@@ -7476,10 +7476,10 @@ the signature) and a duplicate's pointer stands for the whole payload; a toolRes
 evidence is its nested record survives the substantiveness prune; nested args truncate like
 tool-call args and a nested error head+tails at 500 chars (Pi's own cap), each counted in
 `truncations`; a transcript without the record renders byte-identically; the `render` envelope
-and its report fields are unchanged.
+and its report fields are unchanged (the system-state rows below are the one additive growth).
 
-**System entries.** Pi ≥ 0.99 (session format version 3; the grammar is identical at Pi `v0.99.2`
-and `v1.0.0`) persists the pi-ai `SystemMessage` grammar `{ role: "system", content: string |
+**System entries.** Pi ≥ 0.99 (session format version 3; the grammar is identical at Pi `v0.99.2`,
+`v1.0.0` and `1.1.0`) persists the pi-ai `SystemMessage` grammar `{ role: "system", content: string |
 TextContent[], sections?: Record<string, string | null>, toolsAdded?: Tool[], toolsRemoved?:
 ToolReference[], timestamp }` as ordinary `type:"message"` entries — the leading prompt/tool
 snapshot (`content: ""`, the prompt in `sections`, the tool set in `toolsAdded`) and later
@@ -7492,15 +7492,64 @@ prompt-section / tool-set deltas; a compaction entry also carries a `systemMessa
 | `content: [TextContent…]` | `text` = the joined text blocks (as before) |
 | `content: null` / absent | empty text; the entry is kept with its id/parentId |
 | any other `content` shape | the line is malformed (counted; its id/parent lost — unchanged posture) |
-| `sections` / `toolsAdded` / `toolsRemoved` / `timestamp`, a compaction's `systemMessage` | tolerated whatever their shape; never projected or interpreted |
+| `timestamp` | tolerated whatever its shape; never projected |
+
+**System-state evidence.** What the model was told projects into one bounded, lenient record —
+`SessionEntry.system_state` (`SystemState { content, sections: SectionChange{name, text|null}[],
+tools_added: name[], tools_removed: name[], malformed, dropped }`). Like the nested-call record,
+the grammar fields are typed `object` on the read edge, so no shape of them fails the line: a
+malformed part degrades inside the projection (an otherwise readable entry is never discarded;
+its ancestry is never cut). Keyed on entry kind + role — other carriers (`sections`/tool lists on
+a non-system role, a `systemMessage` on a non-compaction entry) are tolerated and dropped, so a
+`<user>` block never carries tool declarations:
+
+| Input | Projection |
+|---|---|
+| message arm: `role == "system"` with none of `sections` / `toolsAdded` / `toolsRemoved` (absent/`null`) | `None` — nothing rendered (a content-only system entry renders as before) |
+| message arm: `role == "system"` with any of them | a `SystemState` with `content = ""` (the message text stays `SessionEntry.text`) |
+| `sections` not an object | no sections, `malformed += 1` |
+| a section value that is a string / `null` | `SectionChange(name, text)` / `SectionChange(name, null)` = removed |
+| a section value of any other shape | that name counted in `malformed`; its siblings kept |
+| `toolsAdded` / `toolsRemoved` not a list | that list empty, `malformed += 1` each |
+| a tool record that is not an object with a string `name` | counted in `malformed`; its siblings kept |
+| tool records | the NAME only — descriptions and parameter schemas are never projected |
+| sections past 32 / tool references past 256 per list | counted in `dropped`, not projected (file order kept) |
+| compaction arm: `systemMessage` on a `compaction` entry, absent/`null` | `None` |
+| `systemMessage` not an object | an empty state, `malformed = 1` |
+| snapshot `content`: a string / absent / `null` | `content` = the string verbatim / `""` |
+| snapshot `content`: a list | its text blocks (`type == "text"`, string `text`) joined by blank lines; each other member counted in `malformed` (pi-ai's list arm is `TextContent[]`; an all-invalid list projects `""`) |
+| snapshot `content` of any other shape | `""`, `malformed += 1` |
+| snapshot `sections` / `toolsAdded` / `toolsRemoved` | the message-arm rules above |
+
+`normalize.py` renders the record as `<system_state[ malformed="N"][ dropped="N"]>` (the counts
+only when non-zero) holding, in order, `<content>…</content>` when `content` is non-empty, one
+`<section name="…">…</section>` per set section and `<section name="…" removed="true"/>` per
+removed one (projection order), and the newline-joined `<tools_added>` / `<tools_removed>` name
+lists when non-empty (no second cap — the projection cap bounds them); every value is
+XML-escaped. It sits inside `<message role="system" id="…">` after the message text, before the
+closing tag, and inside `<compaction>` after the file lists. **Bounding:** `content` and each
+section text head+tail at 1000 chars with the source-anchored truncation pointer; every section
+and tool name head+tail at 200 chars (the param cap); each hit counted in `truncations`;
+`malformed` / `dropped` never altered. The caps fix one element's **pre-escape** size at a known
+worst case (~160K chars, under the 200K chunk budget); XML escaping can still expand any payload
+(up to 6×) and the chunk splitter stays entry-level — the existing posture for every payload kind,
+not a new one; there is no intra-entry split. **Dedup/prune:** the record joins the dedup
+signature whole — its loss diagnostics distinguish payloads; a duplicate's pointer carries no
+state; a non-empty state (any content, section, tool name or loss count) is substantive and
+survives the prune; a state that projects empty beside an empty text is pruned and never a dedup
+candidate. **Report rows:** each `--render` session report gains two additive fields declared
+after `truncations` — `system_states` (kept entries carrying a state) and `system_malformed` (the
+sum of their `malformed` counts); a duplicate's pointer counts in neither.
 
 Pipeline rules: a system entry keeps its ancestry (the active-branch walk is unaffected); it
 renders only through the generic `<message role="system" id="…">` element, never `<user>`; its
-text is bounded by the payload truncation; an empty snapshot/delta is pruned as non-substantive;
+text is bounded by the payload truncation; a snapshot/delta whose projected state is empty (or
+absent) and whose text is empty is pruned as non-substantive;
 **an entry with no substantive payload is never a dedup candidate** (it is neither registered as
 a signature nor matched against one — which also retires the dangling `↑ duplicate` pointer a
-historical transcript with repeated empty evidence entries used to render); system entries are
-context/tool evidence — never user authorization, never a workflow terminal event.
+historical transcript with repeated empty evidence entries used to render); a transcript without
+system state renders byte-identically; system entries and their system state are context/tool
+evidence — never user authorization, never a workflow terminal event.
 
 The `--json` envelope (`OutputModel` serialize edge — the contract the warm orchestrator decodes):
 
