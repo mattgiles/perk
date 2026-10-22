@@ -1055,9 +1055,18 @@ def test_system_state_worst_case_is_bounded_before_escaping():
     n = _norm(_system_entry(0, _maximal_state("x"), entry_id="s1"))
     assert n.truncations == 1 + 32 + 32 + 512
     rendered = render_entry(n.entries[0])
-    # The constants alone fix the element's pre-escape size under one chunk budget (and the
-    # maximal state genuinely approaches it, so the pin is not vacuous).
+    # With a short entry id and source, the constants fix the element's retained pre-escape
+    # content under one chunk budget (and the maximal state genuinely approaches it, so the pin is
+    # not vacuous).
     assert _MAX_CHUNK_TOKENS * 2 < len(rendered) < _MAX_CHUNK_TOKENS * 4
+    # Not a total bound: each of the 33 source-anchored pointers (content + 32 section texts)
+    # repeats the uncapped entry id, so a long id alone pushes the element past the budget
+    # before any escaping (the documented pointer posture).
+    long_id = "i" * 10_000
+    long = _norm(_system_entry(0, _maximal_state("x"), entry_id=long_id))
+    long_rendered = render_entry(long.entries[0])
+    assert long_rendered.count(f"see entry {long_id} in s.jsonl") == 33
+    assert len(long_rendered) > _MAX_CHUNK_TOKENS * 4
     # Escaping can still expand it (`"` -> `&quot;`) and the splitter is entry-level: the entry
     # renders intact into exactly one chunk that exceeds the budget (the documented posture).
     quoted = _norm(_system_entry(0, _maximal_state('"'), entry_id="s1"))

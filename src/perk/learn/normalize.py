@@ -18,12 +18,13 @@ inside ``<compaction>`` (after the file lists, for a compaction's snapshot): the
 removed, the tool NAMES added/removed (never descriptions or schemas), the snapshot ``content``
 when non-empty, and ``malformed`` / ``dropped`` counts when non-zero. Section text and snapshot
 content bound head+tail at ``_MAX_SECTION_CHARS``; every section and tool name at
-``_MAX_PARAM_CHARS``. With the projection caps that fixes one element's pre-escape size at a known
-worst case under one chunk budget — escaping can still expand it and the splitter stays
-entry-level (the existing posture for every payload). A non-empty state is substantive (it survives
-the prune and its loss diagnostics distinguish dedup payloads); a system entry whose state projects
-empty and whose text is empty is pruned and never a dedup candidate. A system entry is never
-rendered as ``<user>`` — system state is context/tool evidence, never user authorization. A
+``_MAX_PARAM_CHARS``. With the projection caps that fixes one element's retained pre-escape
+content at a known worst case under one chunk budget — not its total size: each truncation pointer
+repeats the (uncapped) entry id and source path, escaping can still expand it, and the splitter
+stays entry-level (the existing posture for every payload). A non-empty state is substantive (it
+survives the prune and its loss diagnostics distinguish dedup payloads); a system entry whose state
+projects empty and whose text is empty is pruned and never a dedup candidate. A system entry is
+never rendered as ``<user>`` — system state is context/tool evidence, never user authorization. A
 transcript without system state renders byte-identically to one predating the projection.
 
 This is the **serialize-edge** companion to the lenient parser: the report shapes here are frozen
@@ -472,14 +473,16 @@ def _truncate_system_state(
     name → head+tail at ``_MAX_PARAM_CHARS`` (a name is an identifier, never a path, so the path
     heuristic is not used). ``malformed`` / ``dropped`` are kept as-is.
 
-    The stated worst case: after this step one ``<system_state>`` element's PRE-ESCAPE size is
-    bounded by the constants alone — one content + 32 (``_MAX_SECTIONS``) section texts at
-    ≤ 1000 chars + marker, 32 + 512 (twice ``_MAX_TOOL_REFS``) names at ≤ 200 chars + marker, plus
-    fixed tags — about 160K chars, under the 200K chunk budget (``_MAX_CHUNK_TOKENS * 4``).
-    ``escape_xml`` can still expand any payload up to 6x and :func:`split_to_chunks` splits only
-    between entries, so an adversarial entry can still exceed one chunk after escaping: the
-    EXISTING posture for every payload kind, not a new one. The claim is "a fixed, known worst
-    case", never "cannot exceed a chunk".
+    The stated worst case covers the RETAINED pre-escape content only: after this step one
+    ``<system_state>`` element keeps at most one content + 32 (``_MAX_SECTIONS``) section texts of
+    1000 chars, 32 + 512 (twice ``_MAX_TOOL_REFS``) names of 200 chars + the inline name marker,
+    plus fixed tags — about 160K chars, under the 200K chunk budget (``_MAX_CHUNK_TOKENS * 4``).
+    It is not a total size bound: each of the up to 33 source-anchored pointers (content + section
+    texts) also repeats ``entry_id`` and ``source``, neither capped, so the pre-escape total is
+    that bound plus 33 x (id + source length). That pointer overhead, ``escape_xml``'s up-to-6x
+    expansion and :func:`split_to_chunks` splitting only between entries mean an adversarial entry
+    can still exceed one chunk: the EXISTING posture for every payload kind, not a new one. The
+    claim is "a fixed, known worst case for the retained content", never "cannot exceed a chunk".
     """
     hits = 0
 

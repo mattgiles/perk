@@ -89,7 +89,8 @@ class ToolCall:
 _MAX_NESTED_CALLS = 256
 # System-state projection caps. Pi has no cap of its own (a real session has 8 sections and
 # <= ~70 tools; the tool-reference cap reuses Pi's nested-call cap). Together with the renderer's
-# text/name caps they fix the record's pre-escape rendered size at a known worst case — they do
+# text/name caps they fix the record's retained pre-escape content at a known worst case — not its
+# total size (each truncation pointer repeats the uncapped entry id and source path), and they do
 # NOT make a chunk unsplittable-proof: the chunk splitter is entry-level by design.
 _MAX_SECTIONS = 32
 _MAX_TOOL_REFS = 256

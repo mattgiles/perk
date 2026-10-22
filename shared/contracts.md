@@ -7530,10 +7530,14 @@ XML-escaped. It sits inside `<message role="system" id="…">` after the message
 closing tag, and inside `<compaction>` after the file lists. **Bounding:** `content` and each
 section text head+tail at 1000 chars with the source-anchored truncation pointer; every section
 and tool name head+tail at 200 chars (the param cap); each hit counted in `truncations`;
-`malformed` / `dropped` never altered. The caps fix one element's **pre-escape** size at a known
-worst case (~160K chars, under the 200K chunk budget); XML escaping can still expand any payload
-(up to 6×) and the chunk splitter stays entry-level — the existing posture for every payload kind,
-not a new one; there is no intra-entry split. **Dedup/prune:** the record joins the dedup
+`malformed` / `dropped` never altered. The caps fix one element's **retained pre-escape content**
+(kept text and names plus fixed tags) at a known worst case (~160K chars, under the 200K chunk
+budget). That is not a total size bound: each of the up to 33 source-anchored truncation pointers
+(the content plus 32 section texts) also repeats the entry id and the source path, neither of
+which is capped, so the pre-escape total is the retained bound plus 33 × (id + source length) — a
+long entry id alone can push one element past the chunk budget. That pointer overhead, the up-to-6×
+expansion of XML escaping, and the entry-level chunk splitter are the existing posture for every
+payload kind, not a new one; there is no intra-entry split and no pointer cap. **Dedup/prune:** the record joins the dedup
 signature whole — its loss diagnostics distinguish payloads; a duplicate's pointer carries no
 state; a non-empty state (any content, section, tool name or loss count) is substantive and
 survives the prune; a state that projects empty beside an empty text is pruned and never a dedup
