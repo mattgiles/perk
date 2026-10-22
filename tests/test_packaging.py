@@ -38,6 +38,7 @@ from _agent_defs import assert_descendant_ceiling
 
 from perk import __version__
 from perk.substrate.config import SubagentsTable
+from perk.substrate.host_floor import engines_node_range, load_host_floor, supported_node_lines
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -411,6 +412,15 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
     verify_tarball_files(paths)
 
 
+def test_package_engines_mirror_the_supported_node_lines():
+    # `engines.node` is the one package.json mirror of the host floor (contracts.md §8.76(b)):
+    # with the root .npmrc's engine-strict=true, `npm ci` refuses an outdated or unsupported Node.
+    expected = engines_node_range(supported_node_lines(load_host_floor()))
+    assert _package_json()["engines"]["node"] == expected
+    site = json.loads((REPO_ROOT / "docs/site/package.json").read_text(encoding="utf-8"))
+    assert site["engines"]["node"] == expected
+
+
 def test_docs_site_publish_isolation():
     # The docs-site workspace is dev-only tooling: private, zero runtime deps, exact-pinned.
     # Two pin classes share the literal below — either way, any drift fails here:
@@ -419,10 +429,10 @@ def test_docs_site_publish_isolation():
     #   moving one requires an explicit objective reconciliation (the records' shared rule).
     # - axe-core/jsdom are dev-only, plan-selected accessibility tooling (the static a11y gate
     #   in docs/site/checks/a11y.test.mjs) under the objective's "accessibility-test tool
-    #   selection may remain plan-time" allowance — still exact-pinned. jsdom stays on 29.x:
-    #   30.x's engines floor (^22.22.2 || …) exceeds the repo's Node floor (>=22.19.0,
-    #   shared/host-floor.yaml + docs/site/package.json engines) under the root .npmrc's
-    #   engine-strict=true.
+    #   selection may remain plan-time" allowance — still exact-pinned. jsdom stays on 29.x;
+    #   any move must keep jsdom's own engines range covering the repo's supported Node lines
+    #   (shared/host-floor.yaml, mirrored by docs/site/package.json engines) under the root
+    #   .npmrc's engine-strict=true.
     site = json.loads((REPO_ROOT / "docs/site/package.json").read_text(encoding="utf-8"))
     assert site["private"] is True
     assert "dependencies" not in site, site.get("dependencies")

@@ -4551,8 +4551,10 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   `GITHUB_TOKEN`-pushed commits do not. The
   `runner-workflow-permissions` check is advisory `info` because of this PAT-push model (§8.16).
 - **`.github/actions/perk-remote-setup/action.yml`** — the composite setup action: the two pinned
-  toolchains (uv + Node at exactly `22.19.0` — the shared host floor's `node.min_version`, rendered
-  from `shared/host-floor.yaml`, §8.76), then perk (the exterior CLI — `--from . perk` for the self-repo,
+  toolchains (uv `>=0.13.4` — `REMOTE_UV_VERSION_SPEC`, an explicit `setup-uv` `version` input
+  because a consumer repo has no perk `pyproject.toml` whose `required-version` it could discover
+  — and Node at exactly `node.min_version`, the lowest supported line, currently `22.23.4`,
+  rendered from `shared/host-floor.yaml`, §8.76), then perk (the exterior CLI — `--from . perk` for the self-repo,
   an exact-version-pinned PyPI install `uv tool install perk=={__version__}` for a consumer,
   baked in at `perk init` time so the runner reproduces the wiring perk version), pi (the interior the
   worker drives — `npm install -g @earendil-works/pi-coding-agent@<REMOTE_PI_VERSION>`, exactly
@@ -15682,7 +15684,10 @@ schema_version: 1
 pi:
   min_version: "1.1.0"
 node:
-  min_version: "22.19.0"
+  min_version: "22.23.4"
+  line_floors:
+    - "24.22.1"
+    - "26.12.1"
 ```
 
 A **floor** is a minimum (`>=`) compared with semver 2.0.0 precedence: a prerelease of the floor
@@ -15695,6 +15700,26 @@ The TS reader (`parseHostFloor` / `loadHostFloor`) is a structural parse only �
 non-mapping or a missing/non-string `min_version` — and is consumed by the two SDK-boundary
 bootstraps ((f) below) through `hostAdmission.ts`; the TS comparator is `semver.ts`, mirroring
 `semver.py`'s grammar (the 256-character cap, one leading `v`) and precedence.
+
+**Node's closed supported-line table.** The supported Node release lines are `node.min_version`'s
+major plus the major of each `node.line_floors` entry. An observed Node is admitted iff its major
+is a supported line **and** it satisfies that line's floor with the precedence above (a prerelease
+of the floor triple is below it; a later-triple prerelease such as `26.13.0-rc.1` is above it —
+npm's engine check, which passes `includePrerelease`, gives the same answer). A major in no
+supported line — an end-of-life line, a pre-fix alpha of the next major — is refused as an
+**unsupported release line**; adding a line is a perk release. `node.min_version` stays the lowest
+line's floor and keeps every existing consumer (the remote action's `node-version`, §8.14).
+`node.line_floors` defaults to empty; a wrong-typed present value (a string, a non-string item) is
+a structural `HostFloorError`. `validate()` adds three Node-line findings, computed only when
+`node.min_version` is itself a plain release: an entry that is not a plain release
+(`` `node.line_floors[<i>]` `` + the usual problem phrasing), and an entry whose major is not
+above `node.min_version`'s or collides with a sibling's (`` `node.line_floors[<i>]` '<text>' must
+name a release line above `node.min_version`'s and distinct from its siblings ``, one finding per
+offending entry). The consumer accessor `supported_node_lines` (lowest line first, then file
+order) raises `HostFloorError` whenever `validate()` would report a Node finding — one classifier
+backs both. Every Node-requirement message renders the table through `describe_node_lines`
+(`22.x >= 22.23.4, 24.x >= 24.22.1, 26.x >= 26.12.1`). The TS reader still reads only
+`min_version`; `node.line_floors` is consumed only by the Python environment rows.
 
 ### (b) Separate version facts
 
@@ -15710,7 +15735,9 @@ a loaded SDK — is admitted **independently** against the same floor; equality 
 observations is never required (a floor-satisfying CLI beside an older dev SDK pin is admitted on
 the CLI's own reading). The launch admission below reads no `package.json`, `node_modules` or
 loaded SDK; the SDK-boundary admissions ((f)) read no PATH `pi`, no `PERK_CLI_VERSION` and no
-`package.json`. Host libraries stay wildcard peers; only `engines.node` mirrors the Node floor.
+`package.json`. Host libraries stay wildcard peers; only `engines.node` mirrors the supported Node
+lines, as the caret-range union `engines_node_range` renders (`^22.23.4 || ^24.22.1 || ^26.12.1`,
+in both `package.json` and `docs/site/package.json` — a test pins the mirror).
 
 ### (c) The launch admission (`exec_pi`)
 
@@ -15732,7 +15759,10 @@ unverifiable reason), the required version, and the repair command (`npm install
 plain session, every staged launch (through `_exec_pi`) and `perk resume`; a refused host leaves
 no handoff record (§8.72(i)). `--dry-run` previews return before the exec phase and never probe.
 On a staged launch the worktree, handoff and setup hook may already have run — the same posture
-as `pi_cli_missing` (a re-run reuses the materialized worktree and mints a fresh run id).
+as `pi_cli_missing` (a re-run reuses the materialized worktree and mints a fresh run id). The
+`pi_cli_missing` message names the install command, the Pi floor and the supported Node lines
+(`perk requires Pi >= <pi floor> and Node.js on a supported release line: <lines>`); the admission
+itself still probes only `pi`.
 
 ### (d) What is not gated
 
@@ -15746,8 +15776,13 @@ against the SDK it loaded ((f)).
 The `pi` row is presence + version through the same probe (`probe_pi_host`): admitted →
 `ok=True` with detail `<observed> (floor >= <required>)`; unsupported → `ok=False`, the same detail
 and an upgrade remediation; unverifiable → `ok=False`, detail `version unverifiable (<reason>)`;
-absent → `ok=False`, `not found`. The `node` row compares the full `node --version` against
-`node.min_version` (an unparsable version is outdated). An outdated or unverifiable Node/Pi is
+absent → `ok=False`, `not found`, with a remediation naming the install command and the supported
+Node lines. The `node` row reads `node --version` against the supported-line table ((a)), with
+five arms: absent → `ok=False`, `not found`; unparsable → `ok=False`, detail the raw text (an
+outdated host); a parsed version whose major is no supported line → `ok=False`, detail
+`<version> (unsupported release line)`, the remediation naming every line; a supported line below
+its floor → `ok=False`, detail `<version>`, the remediation naming that line's floor; otherwise
+`ok=True`, detail `<version>`. An outdated, unsupported or unverifiable Node/Pi is
 `ok=False` exactly like an absent one — `missing_tool` exit 2 for `perk init` (the guided `pi`
 install, `npm install -g @earendil-works/pi-coding-agent`, also upgrades), `fail` for
 `perk doctor`. The row names, positions and envelope shapes are unchanged.

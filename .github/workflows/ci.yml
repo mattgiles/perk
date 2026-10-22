@@ -19,16 +19,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The uv version comes from pyproject.toml's `[tool.uv] required-version` (setup-uv
+      # discovers it from the checkout) — no `version` input, one declaration.
       - name: Set up uv (+ Python 3.13)
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
           python-version: "3.13"
 
-      - name: Set up Node 22.19.0
+      - name: Set up Node 22.23.4
         uses: actions/setup-node@v4
         with:
-          node-version: "22.19.0"
+          node-version: "22.23.4"
           cache: npm
 
       - name: Install just

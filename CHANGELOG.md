@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 10de81a -->
 
+### Security
+
+- Require Node.js on a supported release line (22.23.4+, 24.22.1+ or 26.12.1+) and `certifi` 2026.10.19 or newer after the eMudhra intermediate-CA compromise, and expect uv 0.13.4 or newer to install perk: `perk init` refuses and `perk doctor` fails on an outdated Node or one on an unsupported line, and CI, the `perk-remote-setup` action and `engines.node` move with the floor. Restart every running Pi session after upgrading Node; see the new [Security](docs/user-docs/reference/security.md) reference page. (cc1b049)
+
 ## [4.0.0] - 2026-10-08
 
 ### Major Changes

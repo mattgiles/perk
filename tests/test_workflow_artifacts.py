@@ -1,5 +1,6 @@
 """The managed GitHub Actions runner artifact (contracts.md §8.14)."""
 
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -141,8 +142,39 @@ def test_composite_action_pins_pi_and_node_for_both_repo_kinds():
         doc = yaml.safe_load(wa.remote_setup_action(self_repo=self_repo))
         steps = {step["name"]: step for step in doc["runs"]["steps"]}
         assert steps["Install pi"]["run"] == "npm install -g @earendil-works/pi-coding-agent@1.1.0"
-        node = steps["Set up Node 22.19.0"]
-        assert node["with"]["node-version"] == "22.19.0"  # exact: CI exercises the floor
+        node = steps["Set up Node 22.23.4"]
+        assert node["with"]["node-version"] == "22.23.4"  # exact: CI exercises the floor
+        uv = steps["Set up uv (+ Python 3.13)"]
+        assert uv["with"]["version"] == ">=0.13.4"
+
+
+def test_remote_uv_spec_mirrors_pyproject_required_version():
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["tool"]["uv"]["required-version"] == wa.REMOTE_UV_VERSION_SPEC
+
+
+def _workflow_steps(name: str) -> list[dict]:
+    doc = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8"))
+    return [step for job in doc["jobs"].values() for step in job.get("steps", [])]
+
+
+def test_ci_workflows_exercise_the_node_floor():
+    # perk's own CI + release pipelines run on the lowest supported Node line's floor, and take
+    # their uv from pyproject.toml's `required-version` (setup-uv discovery) — no second pin.
+    floor = load_host_floor().node_min_version
+    node_steps = 0
+    uv_steps = 0
+    for name in ("ci.yml", "release.yml"):
+        for step in _workflow_steps(name):
+            uses = step.get("uses", "")
+            if uses.startswith("actions/setup-node"):
+                node_steps += 1
+                assert step["with"]["node-version"] == floor, (name, step)
+            if uses.startswith("astral-sh/setup-uv"):
+                uv_steps += 1
+                assert "version" not in step.get("with", {}), (name, step)
+    assert node_steps >= 3
+    assert uv_steps >= 2
 
 
 def test_composite_action_node_version_renders_from_the_shared_floor():

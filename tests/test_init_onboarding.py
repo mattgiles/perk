@@ -218,7 +218,9 @@ def test_guide_pi_without_node_notes_node_first(monkeypatch):
     changes, warnings = onboarding.guide_missing_tools(_env("pi", "node"))
     assert changes == []
     assert warnings == [
-        f"pi: install Node >= 22.19.0 first, then: npm install -g {onboarding.PI_NPM_SPEC}"
+        "pi: install Node.js on a supported release line "
+        "(22.x >= 22.23.4, 24.x >= 24.22.1, 26.x >= 26.12.1) first, "
+        f"then: npm install -g {onboarding.PI_NPM_SPEC}"
     ]
 
 
