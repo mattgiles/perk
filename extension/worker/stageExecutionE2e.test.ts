@@ -25,13 +25,15 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { type TestContext, test } from "node:test";
 import {
   fauxAssistantMessage,
@@ -56,6 +58,11 @@ import {
   recordingClassifier,
   scaffoldWorkerWorktree,
 } from "../testing/harness.ts";
+import {
+  type McpHttpFixture,
+  type McpHttpRequest,
+  startMcpHttpFixture,
+} from "../testing/mcpHttpFixture.ts";
 import { MODEL_CALL_REFUSAL_PREFIX } from "./modelCallPolicy.ts";
 // Test-side adapter import: the E2E tier mints the nominal request deliberately (an injected
 // runtime + pattern ride the SAME production `defaultCreateRuntime` path).
@@ -286,7 +293,8 @@ interface LiveSnapshot {
 /**
  * Observe the live session from inside scripted replies: pass `liveSession` to `runDrive`, wrap a
  * reply with `at(reply)` to snapshot that request (declared tools, registered provenance, loaded
- * extension paths) before replying, and read the snapshots after the drive.
+ * extension paths) before replying (a function reply is then called with the request context),
+ * and read the snapshots after the drive.
  */
 function observeLive(): {
   liveSession: (session: LiveSession) => void;
@@ -294,6 +302,8 @@ function observeLive(): {
   snapshots: LiveSnapshot[];
   /** The first snapshot (asserts one was taken). */
   first: () => LiveSnapshot;
+  /** The live tool table's names right now (read only while the session lives). */
+  registered: () => string[];
 } {
   let live: LiveSession | undefined;
   const snapshots: LiveSnapshot[] = [];
@@ -312,13 +322,19 @@ function observeLive(): {
         ),
         extensionPaths: live.extensionRunner.getExtensionPaths(),
       });
-      return reply;
+      return typeof reply === "function"
+        ? (reply as (c: typeof context) => unknown)(context)
+        : reply;
     },
     snapshots,
     first: () => {
       const first = snapshots[0];
       assert.ok(first, "the first request was observed");
       return first;
+    },
+    registered: () => {
+      assert.ok(live, "the live session was observed");
+      return live.getAllTools().map((t) => t.name);
     },
   };
 }
@@ -338,10 +354,15 @@ const GLOBAL_MCP_GUARD_FILES = ["auth.json", "models.json", "mcp-auth.json", "mc
  * `mcp.json` declaring a direct `global_leak` fixture whose startup marker lives under the dir —
  * then snapshot the bytes. `assertUntouched` proves the worker's MCP builtin never connected the
  * global server and never wrote the dir: the four files byte-identical, no `mcp.log`, no marker.
+ *
+ * Extras: `http` adds a direct `global_http` entry for that (recording) HTTP fixture, asserted
+ * never contacted; `hostileToken` plants a `GLOBAL_MCP_TOKEN` access token for `{ name, url }`
+ * in `mcp-auth.json`, keyed the way Pi's `McpOAuthCredentialStore` would look it up.
  */
 function globalMcpLeak(
   auth: { provider: string; key: string },
   extraCredentials: Record<string, string> = {},
+  extras: { http?: McpHttpFixture; hostileToken?: { name: string; url: string } } = {},
 ): { plant: (dir: string) => void; assertUntouched: () => void } {
   const snapshot = new Map<string, Buffer>();
   let root: string | undefined;
@@ -359,15 +380,28 @@ function globalMcpLeak(
         }
         writeFileSync(join(dir, "auth.json"), `${JSON.stringify(stored, null, 2)}\n`, "utf8");
       }
-      writeFileSync(join(dir, "mcp-auth.json"), "{}\n", "utf8");
+      const hostile = extras.hostileToken;
+      const mcpAuth =
+        hostile === undefined
+          ? {}
+          : {
+              [`mcp__${hostile.name.replace(/-/g, "_")}|${String(new URL(hostile.url))}`]: {
+                tokens: { access_token: GLOBAL_MCP_TOKEN },
+              },
+            };
+      writeFileSync(join(dir, "mcp-auth.json"), `${JSON.stringify(mcpAuth)}\n`, "utf8");
       const leak = mcpFixtureServer({
         token: "global-leak",
         exposure: "direct",
         marker: join(dir, "global-leak-marker"),
       });
+      const servers: Record<string, unknown> = { global_leak: leak };
+      if (extras.http !== undefined) {
+        servers.global_http = { url: extras.http.url, exposure: "direct" };
+      }
       writeFileSync(
         join(dir, "mcp.json"),
-        `${JSON.stringify({ mcpServers: { global_leak: leak } }, null, 2)}\n`,
+        `${JSON.stringify({ mcpServers: servers }, null, 2)}\n`,
         "utf8",
       );
       for (const name of GLOBAL_MCP_GUARD_FILES) snapshot.set(name, readFileSync(join(dir, name)));
@@ -383,18 +417,30 @@ function globalMcpLeak(
         false,
         "the global mcp.json server was never spawned",
       );
+      if (extras.http !== undefined) {
+        assert.deepEqual(
+          extras.http.requests,
+          [],
+          "the global mcp.json HTTP server was never contacted",
+        );
+      }
     },
   };
 }
 
+/** The access token `globalMcpLeak` plants in the global `mcp-auth.json` (never to be sent). */
+const GLOBAL_MCP_TOKEN = "GLOBAL-TOKEN";
+
+/** One `tools/call` the stdio fixture recorded on receipt (`id` is the client's request id). */
+interface FixtureCall {
+  id?: number | string;
+  args: unknown;
+  token?: string;
+}
+
 /** The stdio fixture's recorded calls (`<cwd>/mcp-fixture-calls.log`, one JSON line per call). */
-function fixtureCalls(cwd: string): { args: unknown; token?: string }[] {
-  const path = join(cwd, "mcp-fixture-calls.log");
-  if (!existsSync(path)) return [];
-  return readFileSync(path, "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as { args: unknown; token?: string });
+function fixtureCalls(cwd: string): FixtureCall[] {
+  return jsonLines<FixtureCall>(join(cwd, "mcp-fixture-calls.log"));
 }
 
 // --- Scenario 1: implement HAPPY (the load-bearing assumption) ----------------------------------
@@ -419,16 +465,19 @@ const implementHappyResponses = () => [
   idle(),
 ];
 
-/** The throwaway agentDir prefix `defaultCreateRuntime` mints under tmpdir (dispose removes it). */
-function throwawayAgentDirs(): Set<string> {
-  return new Set(readdirSync(tmpdir()).filter((name) => name.startsWith("perk-worker-agent-")));
+/** The prefix of the throwaway agentDir `defaultCreateRuntime` mints under tmpdir. */
+const THROWAWAY_PREFIX = "perk-worker-agent-";
+
+/** The throwaway agentDirs under `root` (default: tmpdir at call time; dispose removes them). */
+function throwawayAgentDirs(root: string = tmpdir()): Set<string> {
+  return new Set(readdirSync(root).filter((name) => name.startsWith(THROWAWAY_PREFIX)));
 }
 
-/** The `perk-worker-agent-*` dirs that appeared since `before` (absolute paths). */
-function newThrowawayAgentDirs(before: Set<string>): string[] {
-  return [...throwawayAgentDirs()]
+/** The `perk-worker-agent-*` dirs under `root` that appeared since `before` (absolute paths). */
+function newThrowawayAgentDirs(before: Set<string>, root: string = tmpdir()): string[] {
+  return [...throwawayAgentDirs(root)]
     .filter((name) => !before.has(name))
-    .map((n) => join(tmpdir(), n));
+    .map((n) => join(root, n));
 }
 
 /**
@@ -1373,15 +1422,31 @@ test("e2e: CODEMODE classify across the cap (test-only models:true) — counted 
   assertAccounted(result, runtime);
 });
 
-/** Abort the drive once `barrier` resolves (never dangles: raced against the drive itself). */
+/**
+ * Abort the drive once `barrier` resolves (never dangles: raced against the drive itself). A
+ * rejected barrier (a `t.waitFor` timeout) counts as not reached but still aborts, so the drive is
+ * released and awaited before the barrier's error is rethrown — a drive never outlives its test.
+ */
 async function abortOnBarrier(
   drive: Promise<Awaited<ReturnType<typeof runDrive>>>,
-  barrier: Promise<void>,
+  barrier: Promise<unknown>,
   controller: AbortController,
 ): Promise<{ reached: boolean; result: Awaited<ReturnType<typeof runDrive>> }> {
-  const reached = await Promise.race([barrier.then(() => true), drive.then(() => false)]);
-  if (reached) controller.abort();
-  return { reached, result: await drive };
+  let failed: { error: unknown } | undefined;
+  const reached = await Promise.race([
+    barrier.then(
+      () => true,
+      (error: unknown) => {
+        failed = { error };
+        return false;
+      },
+    ),
+    drive.then(() => false),
+  ]);
+  if (reached || failed !== undefined) controller.abort();
+  const result = await drive;
+  if (failed !== undefined) throw failed.error;
+  return { reached, result };
 }
 
 test("e2e: mid-script EXTERNAL abort with a call in flight — the held call is aborted, no call starts after the abort", async () => {
@@ -1917,6 +1982,709 @@ test("e2e: -builtin:mcp disables the worker's MCP builtin — nothing connects a
   for (const name of ["mcp.log", "mcp-auth.json"]) {
     assert.equal(existsSync(join(result.globalAgentDir, name)), false, `no global ${name}`);
   }
+  assertAccounted(result, observed.runtime());
+});
+
+// --- The worker MCP matrix: transports, registrations, failures, lifecycle and shutdown --------
+//
+// Each row drives `implement` on the real runtime against committed fixtures — the stdio echo
+// server and the in-process streamable-HTTP one (`mcpHttpFixture.ts`) — and reads what the
+// fixtures recorded. A live-registry change seen inside a reply is declared from the NEXT request
+// on (Pi snapshots the active tools before each request), so a row that needs a tool that
+// appeared mid-drive spends one barrier turn first. Real-time waits use `t.waitFor`.
+
+/** A direct call of `name` with `args`. */
+const directCall = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
+  fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" as const });
+
+/** The `tool_outcome` events of `tool`, in order. */
+function toolOutcomes(events: RunEvent[], tool: string) {
+  return events.flatMap((e) => (e.kind === "tool_outcome" && e.tool === tool ? [e] : []));
+}
+
+/** Set `vars` on `process.env` for `run`'s whole lifetime; restored only once it settled. */
+async function withEnv<T>(vars: Record<string, string>, run: () => Promise<T>): Promise<T> {
+  const saved = new Map(Object.keys(vars).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, vars);
+  try {
+    return await run();
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+/** Plant `source` as the project extension `<cwd>/.pi/extensions/worker-mcp-matrix.ts` (its path). */
+function plantMatrixExtension(cwd: string, source: string): string {
+  const dir = join(cwd, ".pi", "extensions");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "worker-mcp-matrix.ts");
+  writeFileSync(path, `// Planted by the worker MCP matrix.\n${source}\n`, "utf8");
+  return path;
+}
+
+/** A JSON-lines file's records (none when it does not exist). */
+function jsonLines<T>(path: string): T[] {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as T);
+}
+
+/** The `text` argument a recorded stdio-fixture call carried. */
+const callText = (call: FixtureCall): unknown => (call.args as { text?: unknown } | null)?.text;
+
+/** The JSON-RPC method a recorded HTTP request carried (undefined for GET/DELETE). */
+const rpcMethod = (request: McpHttpRequest): unknown =>
+  (request.body as { method?: unknown } | undefined)?.method;
+
+/** The `initialize` POSTs an HTTP fixture received (one per connection attempt). */
+const initializeRequests = (fixture: McpHttpFixture): McpHttpRequest[] =>
+  fixture.requests.filter((r) => r.method === "POST" && rpcMethod(r) === "initialize");
+
+/** The pid the stdio fixture wrote to its startup marker. */
+function markerPid(marker: string): number {
+  const pid = Number(readFileSync(marker, "utf8").trim());
+  assert.ok(Number.isInteger(pid) && pid > 0, `a pid in ${marker}`);
+  return pid;
+}
+
+/** Whether `pid` is a live process (signal 0 probes without delivering anything). */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    if ((err as { code?: unknown }).code === "ESRCH") return false;
+    throw err;
+  }
+}
+
+/** Pi's MCP texts that reach only `ctx.ui.notify` — inert in the headless worker. */
+const PI_MCP_NOTICES = [
+  "MCP servers need attention",
+  "still connecting",
+  "failed to connect",
+  "requires authentication",
+  "requires sign-in",
+];
+
+test("e2e: MCP matrix — HTTP explicit header credentials ride every request with no OAuth sign-in; the transport's DELETE lands before the drive returns; the global HTTP server is never contacted", async (t) => {
+  const stderr = captureStderr(t);
+  const observed = observeAccounting();
+  const live = observeLive();
+  const http = await startMcpHttpFixture({
+    auth: { kind: "bearer", token: "s3cret-http" },
+    sessionId: "e2e-session",
+  });
+  t.after(() => http.close());
+  const globalHttp = await startMcpHttpFixture();
+  t.after(() => globalHttp.close());
+  const global = globalMcpLeak({ provider: "e2e-global", key: "g" }, {}, { http: globalHttp });
+  const result = await withEnv({ PERK_E2E_MCP_HEADER: "s3cret-http" }, () =>
+    runDrive({
+      stage: "implement",
+      routes: implementHappyRoutes,
+      responses: [live.at(directCall("mcp__http__echo", { text: "h" })), submitCall(), idle()],
+      plant: (cwd) => {
+        plantProjectMcpConfig(cwd, {
+          http: {
+            url: http.url,
+            headers: {
+              // biome-ignore lint/suspicious/noTemplateCurlyInString: Pi's `${VAR}` config rule is the point
+              Authorization: "Bearer ${PERK_E2E_MCP_HEADER}",
+              "x-perk-static": "static",
+            },
+            exposure: "direct",
+          },
+        });
+      },
+      plantGlobal: global.plant,
+      onRuntime: observed.onRuntime,
+      liveSession: live.liveSession,
+    }),
+  );
+  const first = live.first();
+  assert.ok(first.extensionPaths.includes("builtin:mcp"));
+  assert.ok(first.declared.includes("mcp__http__echo"), "direct: declared on request 1");
+  assert.deepEqual(
+    toolOutcomes(result.events, "mcp__http__echo").map((o) => o.ok),
+    [true],
+    "the HTTP call succeeded",
+  );
+  const seen = http.requests.map((r) => `${r.method} ${String(rpcMethod(r) ?? "")}`.trim());
+  for (const expected of [
+    "POST initialize",
+    "POST notifications/initialized",
+    "GET",
+    "POST tools/list",
+    "POST tools/call",
+    "DELETE",
+  ]) {
+    assert.ok(seen.includes(expected), `${expected} reached the server: ${JSON.stringify(seen)}`);
+  }
+  for (const request of http.requests) {
+    assert.equal(request.path, "/mcp");
+    assert.equal(request.headers.authorization, "Bearer s3cret-http", `${request.method} auth`);
+    assert.equal(request.headers["x-perk-static"], "static", `${request.method} static header`);
+  }
+  assert.ok(
+    !stderr().some((line) => line.includes("asked for an OAuth sign-in")),
+    "an Authorization header disables Pi's OAuth provider",
+  );
+  // The close is awaited by `session_shutdown`, which `dispose()` awaits before `runDrive` returns.
+  const last = http.requests.at(-1);
+  assert.equal(last?.method, "DELETE", "the transport's close is the last request");
+  assert.equal(last?.headers["mcp-session-id"], "e2e-session-1");
+  assert.equal(last?.status, 204);
+  global.assertUntouched();
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assertAccounted(result, observed.runtime());
+});
+
+test("e2e: MCP matrix — project-extension registrations beside and colliding with file entries: the first registrar wins in either order, and each collision is reported once", async (t) => {
+  const stderr = captureStderr(t);
+  const observed = observeAccounting();
+  const live = observeLive();
+  let configPath = "";
+  let extensionPath = "";
+  let fileSharedMarker = "";
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      live.at(directCall("mcp__shared__echo", { text: "s" })),
+      directCall("mcp__file_only__echo", { text: "f" }),
+      submitCall(),
+      idle(),
+    ],
+    plant: (cwd) => {
+      fileSharedMarker = join(cwd, "mcp-shared-file-marker");
+      configPath = plantProjectMcpConfig(cwd, {
+        shared: mcpFixtureServer({
+          token: "file-shared",
+          exposure: "direct",
+          marker: fileSharedMarker,
+        }),
+        file_only: mcpFixtureServer({ token: "file", exposure: "direct" }),
+      });
+      const server = (token: string) =>
+        JSON.stringify(mcpFixtureServer({ token, exposure: "direct" }));
+      // Load order: project extensions before the builtins, so these two register first; the
+      // late one runs after the builtin's session_start registered the file entries.
+      extensionPath = plantMatrixExtension(
+        cwd,
+        `export default function (pi) {
+  pi.registerMcpServer("ext_fixture", ${server("ext")});
+  pi.registerMcpServer("shared", ${server("ext-shared")});
+  let late = false;
+  pi.on("turn_end", () => {
+    if (late) return;
+    late = true;
+    pi.registerMcpServer("file_only", ${server("late-clash")});
+  });
+}`,
+      );
+    },
+    onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
+  });
+  const first = live.first();
+  for (const name of ["mcp__ext_fixture__echo", "mcp__shared__echo", "mcp__file_only__echo"]) {
+    assert.deepEqual(first.tools.get(name), BUILTIN_MCP, `${name} is registered`);
+  }
+  assert.deepEqual(
+    fixtureCalls(result.cwd).map((call) => [call.args, call.token]),
+    [
+      [{ text: "s" }, "ext-shared"],
+      [{ text: "f" }, "file"],
+    ],
+    "the extension owns `shared`, the file owns `file_only`",
+  );
+  assert.equal(existsSync(fileSharedMarker), false, "the file's `shared` entry never spawned");
+  assert.deepEqual(
+    stderr().filter((line) => line.startsWith("perk worker: mcp config error — ")),
+    [
+      `perk worker: mcp config error — ${configPath}: MCP server "shared" is already registered by extension "${extensionPath}"`,
+    ],
+    "the file entry that lost is reported once",
+  );
+  assert.deepEqual(
+    stderr().filter((line) => line.startsWith("perk worker: extension error — ")),
+    [
+      `perk worker: extension error — ${extensionPath} (turn_end): MCP server "file_only" is already registered by extension "builtin:mcp"`,
+    ],
+    "the late registration that lost is reported once",
+  );
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assertAccounted(result, observed.runtime());
+});
+
+test("e2e: MCP matrix — unavailable OAuth: a plain 401 prints the one sign-in line, an insufficient_scope challenge at 401 or 403 is silent; no retry, no discovery, no global token", async (t) => {
+  const stderr = captureStderr(t);
+  const observed = observeAccounting();
+  const live = observeLive();
+  const scope = 'Bearer error="insufficient_scope", scope="mcp:write"';
+  const fixtures = {
+    oauth: await startMcpHttpFixture({
+      auth: {
+        kind: "challenge",
+        status: 401,
+        wwwAuthenticate: (origin) =>
+          `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`,
+      },
+    }),
+    scope401: await startMcpHttpFixture({
+      auth: { kind: "challenge", status: 401, wwwAuthenticate: scope },
+    }),
+    scope403: await startMcpHttpFixture({
+      auth: { kind: "challenge", status: 403, wwwAuthenticate: scope },
+    }),
+  };
+  for (const fixture of Object.values(fixtures)) t.after(() => fixture.close());
+  const global = globalMcpLeak(
+    { provider: "e2e-global", key: "g" },
+    {},
+    { hostileToken: { name: "oauth", url: fixtures.oauth.url } },
+  );
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [live.at(submitCall()), idle()],
+    plant: (cwd) => {
+      plantProjectMcpConfig(
+        cwd,
+        Object.fromEntries(
+          Object.entries(fixtures).map(([name, f]) => [name, { url: f.url, exposure: "direct" }]),
+        ),
+      );
+    },
+    plantGlobal: global.plant,
+    onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
+  });
+  const signIns = stderr().filter((line) => line.includes("asked for an OAuth sign-in"));
+  assert.equal(signIns.length, 1, JSON.stringify(signIns));
+  assert.ok(
+    signIns[0]?.startsWith(
+      `perk worker: MCP server "oauth" (${fixtures.oauth.origin}) asked for an OAuth sign-in — `,
+    ),
+    signIns[0],
+  );
+  assert.ok(
+    !stderr().some((line) => line.includes("MCP sign-in refused")),
+    "openUrl is reached only from the interactive /mcp login",
+  );
+  const first = live.first();
+  for (const [name, fixture] of Object.entries(fixtures)) {
+    assert.equal(initializeRequests(fixture).length, 1, `${name}: one attempt, never retried`);
+    assert.deepEqual(
+      fixture.requests.filter((r) => r.path !== "/mcp"),
+      [],
+      `${name}: no discovery request on connect`,
+    );
+    assert.ok(
+      fixture.requests.every((r) => r.headers.authorization === undefined),
+      `${name}: no credential was sent (the global token never left mcp-auth.json)`,
+    );
+    assert.deepEqual(
+      [...first.tools.keys()].filter((tool) => tool.startsWith(`mcp__${name}__`)),
+      [],
+      `${name}: its only trace is the missing tool`,
+    );
+  }
+  assert.ok(
+    result.outcome.budget.elapsed_ms < 8_000,
+    `needs-auth settles at once, under Pi's 10 s direct-server wait (${result.outcome.budget.elapsed_ms} ms)`,
+  );
+  global.assertUntouched();
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assertAccounted(result, observed.runtime());
+});
+
+test("e2e: MCP matrix — connection failures are silent headless: a missing stdio command, a 5xx HTTP server (three attempts) and a rejected header credential leave no tools and no stderr line; the healthy server still serves", async (t) => {
+  const stderr = captureStderr(t);
+  const observed = observeAccounting();
+  const live = observeLive();
+  const five00 = await startMcpHttpFixture({ auth: { kind: "status", status: 500 } });
+  t.after(() => five00.close());
+  const badcred = await startMcpHttpFixture({ auth: { kind: "bearer", token: "right" } });
+  t.after(() => badcred.close());
+  let attemptsAtFirstRequest: { five00: number; badcred: number } | undefined;
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      live.at(() => {
+        attemptsAtFirstRequest = {
+          five00: initializeRequests(five00).length,
+          badcred: initializeRequests(badcred).length,
+        };
+        return mcpEchoCall("ok");
+      }),
+      live.at(submitCall()),
+      idle(),
+    ],
+    plant: (cwd) => {
+      // All direct: the first request waits until every attempt has settled.
+      plantProjectMcpConfig(cwd, {
+        enoent: { command: "/nonexistent/perk-mcp-missing", exposure: "direct" },
+        five00: { url: five00.url, exposure: "direct" },
+        badcred: {
+          url: badcred.url,
+          headers: { Authorization: "Bearer wrong" },
+          exposure: "direct",
+        },
+        fixture: mcpFixtureServer({ token: "healthy", exposure: "direct" }),
+      });
+    },
+    onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
+  });
+  assert.deepEqual(
+    attemptsAtFirstRequest,
+    { five00: 3, badcred: 1 },
+    "settled before the first request: 5xx is transient (0/250/1000 ms), a rejected credential is not",
+  );
+  assert.equal(initializeRequests(five00).length, 3, "no later attempt");
+  assert.equal(initializeRequests(badcred).length, 1, "no later attempt");
+  assert.ok(
+    result.outcome.budget.elapsed_ms < 8_000,
+    `settled, not timed out (${result.outcome.budget.elapsed_ms} ms)`,
+  );
+  assert.deepEqual(
+    stderr().filter((line) => line.startsWith("perk worker:") && /mcp/i.test(line)),
+    [],
+    "the worker prints no MCP line for a failed connection",
+  );
+  for (const notice of PI_MCP_NOTICES) {
+    assert.ok(!stderr().some((line) => line.includes(notice)), `no Pi text: ${notice}`);
+  }
+  for (const snapshot of live.snapshots) {
+    for (const name of ["enoent", "five00", "badcred"]) {
+      assert.deepEqual(
+        [...snapshot.tools.keys()].filter((tool) => tool.startsWith(`mcp__${name}__`)),
+        [],
+        `${name}: no tool`,
+      );
+    }
+  }
+  assert.deepEqual(
+    toolOutcomes(result.events, "mcp__fixture__echo").map((o) => o.ok),
+    [true],
+    "the healthy server served",
+  );
+  assert.deepEqual(
+    fixtureCalls(result.cwd).map((call) => [call.args, call.token]),
+    [[{ text: "ok" }, "healthy"]],
+  );
+  assert.equal(result.providerCalls, 2, "no extra request");
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assertAccounted(result, observed.runtime());
+});
+
+test("e2e: MCP matrix — enabled:false keeps a file entry and an extension registration from ever spawning; the worker's project is trusted by construction", async () => {
+  const observed = observeAccounting();
+  const live = observeLive();
+  let offMarker = "";
+  let extOffMarker = "";
+  let trustFile = "";
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [live.at(directCall("mcp__on__echo", { text: "on" })), submitCall(), idle()],
+    plant: (cwd) => {
+      offMarker = join(cwd, "mcp-off-marker");
+      extOffMarker = join(cwd, "mcp-ext-off-marker");
+      trustFile = join(cwd, "trust.txt");
+      plantProjectMcpConfig(cwd, {
+        off: {
+          ...mcpFixtureServer({ token: "off", exposure: "direct", marker: offMarker }),
+          enabled: false,
+        },
+        on: mcpFixtureServer({ token: "on", exposure: "direct" }),
+      });
+      const extOff = {
+        ...mcpFixtureServer({ token: "ext-off", exposure: "direct", marker: extOffMarker }),
+        enabled: false,
+      };
+      plantMatrixExtension(
+        cwd,
+        `import { writeFileSync } from "node:fs";
+
+export default function (pi) {
+  pi.registerMcpServer("ext_off", ${JSON.stringify(extOff)});
+  pi.on("session_start", (_event, ctx) => {
+    writeFileSync(${JSON.stringify(trustFile)}, String(ctx.isProjectTrusted()));
+  });
+}`,
+      );
+    },
+    onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
+  });
+  const first = live.first();
+  assert.equal(existsSync(offMarker), false, "the disabled file entry never spawned");
+  assert.equal(existsSync(extOffMarker), false, "the disabled registration never spawned");
+  assert.deepEqual(
+    [...first.tools.keys()].filter(
+      (tool) => tool.startsWith("mcp__off__") || tool.startsWith("mcp__ext_off__"),
+    ),
+    [],
+    "no tool from a disabled server",
+  );
+  assert.deepEqual(
+    toolOutcomes(result.events, "mcp__on__echo").map((o) => o.ok),
+    [true],
+    "the enabled server served",
+  );
+  assert.deepEqual(
+    fixtureCalls(result.cwd).map((call) => [call.args, call.token]),
+    [[{ text: "on" }, "on"]],
+  );
+  // `SettingsManager.create` with no trust resolver takes Pi's trusted default.
+  assert.equal(readFileSync(trustFile, "utf8"), "true", "the worker's project is trusted");
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assertAccounted(result, observed.runtime());
+});
+
+test("e2e: MCP matrix — a mid-drive registration is declared from the request after a barrier turn; an expired HTTP session reconnects lazily and the call succeeds on a fresh session", async (t) => {
+  const observed = observeAccounting();
+  const live = observeLive();
+  const http = await startMcpHttpFixture({ sessionId: "e2e-session" });
+  t.after(() => http.close());
+  let lateMarker = "";
+  let expiredAt = -1;
+  const result = await runDrive({
+    stage: "implement",
+    routes: implementHappyRoutes,
+    responses: [
+      // Its turn_end registers `late`; Pi connects it in the background.
+      live.at(directCall("mcp__http__echo", { text: "a" })),
+      // The barrier turn: the tool is in the live table, but this request was already snapshotted.
+      live.at(async () => {
+        await t.waitFor(() => assert.ok(live.registered().includes("mcp__late__echo")), {
+          timeout: 10_000,
+        });
+        return directCall("mcp__http__echo", { text: "barrier" });
+      }),
+      live.at(directCall("mcp__late__echo", { text: "b" })),
+      // A server restart: the held session is forgotten in-process, deterministically.
+      live.at(() => {
+        expiredAt = http.requests.length;
+        http.expireSession();
+        return directCall("mcp__http__echo", { text: "c" });
+      }),
+      live.at(submitCall()),
+      idle(),
+    ],
+    plant: (cwd) => {
+      lateMarker = join(cwd, "mcp-late-marker");
+      plantProjectMcpConfig(cwd, { http: { url: http.url, exposure: "direct" } });
+      const late = mcpFixtureServer({ token: "late", exposure: "direct", marker: lateMarker });
+      plantMatrixExtension(
+        cwd,
+        `export default function (pi) {
+  let registered = false;
+  pi.on("turn_end", () => {
+    if (registered) return;
+    registered = true;
+    pi.registerMcpServer("late", ${JSON.stringify(late)});
+  });
+}`,
+      );
+    },
+    onRuntime: observed.onRuntime,
+    liveSession: live.liveSession,
+  });
+  const [r1, r2, r3, r4, r5] = live.snapshots;
+  assert.ok(r1 && r2 && r3 && r4 && r5, "every request was observed");
+  assert.ok(!r1.declared.includes("mcp__late__echo"), "request 1: not yet registered");
+  assert.ok(!r2.declared.includes("mcp__late__echo"), "request 2 (barrier): snapshotted before");
+  assert.ok(r3.declared.includes("mcp__late__echo"), "request 3: declared after the barrier turn");
+  for (const [i, snapshot] of live.snapshots.entries()) {
+    assert.ok(
+      snapshot.declared.includes("mcp__http__echo"),
+      `request ${i + 1} declares the HTTP tool`,
+    );
+  }
+  assert.ok(existsSync(lateMarker), "the late server spawned");
+  assert.deepEqual(
+    fixtureCalls(result.cwd).map((call) => [call.args, call.token]),
+    [[{ text: "b" }, "late"]],
+  );
+  assert.deepEqual(
+    toolOutcomes(result.events, "mcp__http__echo").map((o) => o.ok),
+    [true, true, true],
+    "a, barrier and c all succeeded: the expiry never surfaced",
+  );
+  // After the expiry, in order (the GET stream opens concurrently, so only the order of these three
+  // is pinned): the call under the old session is refused, a fresh initialize opens a new session,
+  // and the call is retried once under it.
+  const after = http.requests.slice(expiredAt);
+  const isCall = (r: McpHttpRequest) => r.method === "POST" && rpcMethod(r) === "tools/call";
+  const refused = after.findIndex(
+    (r) => isCall(r) && r.headers["mcp-session-id"] === "e2e-session-1" && r.status === 404,
+  );
+  assert.ok(refused >= 0, `a call under the expired session was refused: ${JSON.stringify(after)}`);
+  const reinit = after.findIndex(
+    (r, i) =>
+      i > refused &&
+      r.method === "POST" &&
+      rpcMethod(r) === "initialize" &&
+      r.headers["mcp-session-id"] === undefined &&
+      r.status === 200,
+  );
+  assert.ok(reinit > refused, "a fresh initialize followed, with no session header");
+  const retried = after.findIndex(
+    (r, i) =>
+      i > reinit &&
+      isCall(r) &&
+      r.headers["mcp-session-id"] === "e2e-session-2" &&
+      r.status === 200,
+  );
+  assert.ok(retried > reinit, "the call was retried under the new session");
+  assert.equal(initializeRequests(http).length, 2, "the first connection and the one reconnect");
+  const last = http.requests.at(-1);
+  assert.equal(last?.method, "DELETE", "shutdown closed the new session's transport");
+  assert.equal(last?.headers["mcp-session-id"], "e2e-session-2");
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
+  assertAccounted(result, observed.runtime());
+});
+
+test("e2e: MCP matrix — an external abort cancels an in-flight MCP call: notifications/cancelled names it, the call errors, and the server and the throwaway dir are gone when runDrive returns", async (t) => {
+  // A private tmpdir: the throwaway-dir census sees only this drive's dirs.
+  const privateTmp = mkdtempSync(join(tmpdir(), "perk-e2e-tmp-"));
+  t.after(() => rmSync(privateTmp, { recursive: true, force: true }));
+  const observed = observeAccounting();
+  const before = throwawayAgentDirs(privateTmp);
+  const controller = new AbortController();
+  let cwd = "";
+  let marker = "";
+  let driveSettled = false;
+  const drive = withEnv({ TMPDIR: privateTmp }, () =>
+    runDrive({
+      stage: "implement",
+      routes: implementHappyRoutes,
+      responses: [
+        directCall("mcp__fixture__echo", { text: "held", delayMs: 20_000 }),
+        submitCall(),
+        idle(),
+      ],
+      signal: controller.signal,
+      plant: (dir) => {
+        cwd = dir;
+        marker = join(dir, "mcp-fixture-marker");
+        plantProjectMcpConfig(dir, {
+          fixture: mcpFixtureServer({ token: "held", exposure: "direct", marker }),
+        });
+      },
+      onRuntime: observed.onRuntime,
+    }),
+  ).finally(() => {
+    driveSettled = true;
+  });
+  const heldCall = () => fixtureCalls(cwd).find((call) => callText(call) === "held");
+  // The call is logged on receipt, before it is answered: logged means in flight.
+  const barrier = t.waitFor(
+    () => assert.ok(driveSettled || (cwd !== "" && heldCall() !== undefined)),
+    { timeout: 10_000 },
+  );
+  const { reached, result } = await abortOnBarrier(drive, barrier, controller);
+  assert.equal(reached, true, "the held call reached the server before the abort");
+  assert.equal(result.outcome.status, "aborted");
+  assert.equal(result.outcome.terminal_signal, "external_abort");
+  assert.ok(
+    result.outcome.budget.elapsed_ms < 10_000,
+    `released by the abort, not the 20 s hold (${result.outcome.budget.elapsed_ms} ms)`,
+  );
+  assert.deepEqual(
+    toolOutcomes(result.events, "mcp__fixture__echo").map((o) => o.ok),
+    [false],
+    "the held call errored",
+  );
+  const held = heldCall();
+  assert.ok(held?.id !== undefined, "the held call's request id was recorded");
+  assert.deepEqual(
+    jsonLines<{ requestId?: unknown }>(join(cwd, "mcp-fixture-cancelled.log")).map(
+      (line) => line.requestId,
+    ),
+    [held.id],
+    "notifications/cancelled named the held request",
+  );
+  assert.equal(isAlive(markerPid(marker)), false, "the server exited before runDrive returned");
+  assert.deepEqual(newThrowawayAgentDirs(before, privateTmp), [], "the throwaway dir is gone");
+  assertAccounted(result, observed.runtime());
+});
+
+test("e2e: MCP matrix — shutdown closes every transport before the throwaway dir is removed: the server exits while the dir still exists, and both are gone when runDrive returns", async (t) => {
+  const privateTmp = mkdtempSync(join(tmpdir(), "perk-e2e-tmp-"));
+  t.after(() => rmSync(privateTmp, { recursive: true, force: true }));
+  const observed = observeAccounting();
+  const before = throwawayAgentDirs(privateTmp);
+  let marker = "";
+  let exitLog = "";
+  let midDrive: { pidAlive: boolean; throwaway: string[] } | undefined;
+  const result = await withEnv({ TMPDIR: privateTmp }, () =>
+    runDrive({
+      stage: "implement",
+      routes: implementHappyRoutes,
+      responses: [
+        mcpEchoCall("x"),
+        () => {
+          midDrive = {
+            pidAlive: isAlive(markerPid(marker)),
+            throwaway: newThrowawayAgentDirs(before, privateTmp),
+          };
+          return submitCall();
+        },
+        idle(),
+      ],
+      plant: (cwd) => {
+        marker = join(cwd, "mcp-fixture-marker");
+        exitLog = join(cwd, "mcp-fixture-exit.json");
+        // The exit delay keeps the server alive past the point a non-awaited close would return.
+        plantProjectMcpConfig(cwd, {
+          fixture: mcpFixtureServer({
+            token: "exit",
+            exposure: "direct",
+            marker,
+            exitDelayMs: 300,
+            exitLog,
+            watchDir: privateTmp,
+          }),
+        });
+      },
+      onRuntime: observed.onRuntime,
+    }),
+  );
+  assert.ok(midDrive, "the mid-drive snapshot was taken");
+  assert.equal(midDrive.pidAlive, true, "positive control: the server ran mid-drive");
+  assert.equal(midDrive.throwaway.length, 1, "positive control: one throwaway dir mid-drive");
+  const agentDir = midDrive.throwaway[0] ?? "";
+  assert.ok(existsSync(exitLog), "the server recorded its exit");
+  const { entries } = JSON.parse(readFileSync(exitLog, "utf8")) as { entries: string[] };
+  // The tmpdir also holds the drive's worktree and global dir; the throwaway dirs are the oracle.
+  // Fails if `removeAgentDir()` is moved ahead of the awaited `inner.dispose()` in
+  // `constructRuntime`: the dir would be gone by the time the server exits.
+  assert.deepEqual(
+    entries.filter((name) => name.startsWith(THROWAWAY_PREFIX)),
+    [basename(agentDir)],
+    "the throwaway dir still existed when the server exited",
+  );
+  assert.equal(isAlive(markerPid(marker)), false, "the server exited before runDrive returned");
+  assert.deepEqual(newThrowawayAgentDirs(before, privateTmp), [], "the throwaway dir is gone");
+  assert.equal(result.outcome.status, "completed");
+  assert.equal(result.outcome.terminal_signal, "submit_tool");
   assertAccounted(result, observed.runtime());
 });
 
