@@ -3974,8 +3974,11 @@ statically, and links the seam only by a dynamic import after admission (guard-e
       the extension); a later registration of a file-owned name throws in the registering handler,
       printed as `perk worker: extension error — <path> (<event>): MCP server "<name>" is already
       registered by extension "builtin:mcp"`. A registration made mid-drive connects in the
-      background through Pi's `mcp_servers_change` and is declared from the **next** request on
-      (Pi snapshots the active tools before each request). `"enabled": false` is the switch — on a
+      background through Pi's `mcp_servers_change` (not awaited), and its direct tools are
+      declared from the first request whose tool snapshot is taken **after** that connection and
+      tool discovery completed — Pi snapshots the active tools before each request, so a request
+      already in flight never gains them, and no one-turn readiness is guaranteed (the matrix
+      waits for the tool, then spends a barrier turn). `"enabled": false` is the switch — on a
       file entry or a registration the server is never spawned; `disabled` is not a Pi key
       (unknown keys are ignored).
     - **Lifecycle** — after a transport loss the tool definitions stay registered and the next call
@@ -4004,7 +4007,13 @@ statically, and links the seam only by a dynamic import after admission (guard-e
       project is a separate connectivity check for **file-configured** servers under ordinary Pi
       trust and credential rules — it reads the global config and the persistent OAuth store the
       worker refuses, and never sees extension registrations — so it is not an inspection of the
-      worker's effective server set; an interactive run of the stage is the faithful check.
+      worker's effective server set. An interactive run of the stage is not one either: it shows
+      Pi's UI diagnostics and connects extension registrations, but under Pi's default loader — the
+      global `mcp.json` and persistent OAuth credentials are read, and a file entry takes
+      precedence over an extension registration of the same name (the worker's rule is first
+      registrar wins) — so it can succeed, or reach a different server, where the worker fails.
+      Each check diagnoses a server; neither reproduces the worker's configuration and credential
+      rules.
     - **Real agent dir everywhere else** — the isolation moves nothing outside the factory: no
       `PI_CODING_AGENT_DIR` override and no env toggling, so the worker's own `ModelRuntime.create()`,
       a subagent child (in-process `ModelRuntime.create()` + `getAgentDir()`, or a background

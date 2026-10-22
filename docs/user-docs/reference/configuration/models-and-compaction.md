@@ -87,9 +87,13 @@ worker, because Pi reports MCP problems only in its interactive UI: a missing co
 unreachable or failing server, a rejected credential, or a server asking for more OAuth scope
 simply leaves that server's tools absent, and the run goes on. A server that drops mid-stage keeps
 its tools, and the next call reconnects; the call fails only if the server is still unreachable.
-To check connectivity, run the stage interactively, or run `pi mcp list` in the project for the
-file-configured servers — it uses Pi's ordinary global config and saved OAuth credentials, which
-the worker does not, and it does not show servers that extensions register. Server logs go to the
+To check a server, run the stage interactively — it shows Pi's MCP messages and connects the
+servers extensions register — or run `pi mcp list` in the project for the file-configured servers
+(it does not show servers that extensions register). Neither check follows the worker's rules: both
+read your global `mcp.json` and saved OAuth credentials, which the worker does not, and an
+interactive session lets a file entry win over an extension that registers the same name, where
+the worker keeps whichever registered first — so a server can work there and still fail in the
+worker. Server logs go to the
 worker's temporary directory, removed when the run ends. A project extension that brings its own
 MCP support replaces the builtin and is the repo's own choice, outside that guarantee.
 

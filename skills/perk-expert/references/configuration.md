@@ -414,10 +414,13 @@ failed startup connection is silent in the worker — pi reports MCP problems on
 unreachable server, a rejected header credential or an `insufficient_scope` challenge (401 or 403)
 just leaves that server's tools absent, and the run goes on. A server lost mid-stage keeps its
 tools and the next call reconnects lazily (an HTTP session expiry is retried once on a fresh
-session); it fails only if the server is still unreachable. To check connectivity, run the stage
-interactively, or `pi mcp list` in the project for the file-configured servers — it uses pi's
-ordinary global config and saved OAuth credentials, which the worker refuses, and never sees
-extension registrations, so it is not the worker's effective server set. `direct` servers are
+session); it fails only if the server is still unreachable. To check a server, run the stage
+interactively (pi's UI diagnostics, extension registrations connected) or `pi mcp list` in the
+project (file-configured servers only, never extension registrations) — but neither reproduces the
+worker's effective server set: both read the global `mcp.json` and the persistent OAuth store the
+worker refuses, and an interactive session gives a file entry precedence over a same-named
+extension registration (the worker: first registrar wins), so a server can succeed there — or
+reach a different server — and still fail in the worker. `direct` servers are
 declared to the model; the default `codemode` exposure turns on the worker's codemode (pi's
 `autoEnableCodemode`).
 `-builtin:mcp` keeps MCP out (a project `registerMcpServer` is then reported on stderr as
