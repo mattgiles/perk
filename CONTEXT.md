@@ -598,7 +598,9 @@ _Avoid_: native factories, worker extensions
 **Factory-scoped isolation**:
 Confining the SDK worker's MCP resources (config, credentials, log, sign-in) through
 `McpExtensionOptions` adapters rather than the process environment, so model auth, supplier
-children and session persistence keep the real agent dir.
+children and session persistence keep the real agent dir. Headless MCP problem reporting is
+silence by design — Pi reports server problems only in its UI and offers no status hook — except
+the worker's empty-store OAuth sign-in line.
 _Avoid_: agent-dir override, MCP sandbox
 
 ### Host admission

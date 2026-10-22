@@ -845,14 +845,18 @@ export const MCP_STDIO_FIXTURE = resolve(import.meta.dirname, "mcpStdioFixture.t
 
 /**
  * One `mcpServers` entry launching the stdio fixture: `token` rides the entry's `env` (the
- * fixture records it on every call), `marker` is a path the fixture touches at startup (the
- * "was it ever spawned" oracle), `exposure` is Pi's per-server exposure (omitted ⇒ Pi's
- * `codemode` default).
+ * fixture records it on every call), `marker` is a path the fixture writes its pid to at startup
+ * (the "was it ever spawned" oracle), `exposure` is Pi's per-server exposure (omitted ⇒ Pi's
+ * `codemode` default). The shutdown oracles: `exitDelayMs` holds the fixture alive that long
+ * after stdin closes; `exitLog` + `watchDir` make it record `watchDir`'s listing as it exits.
  */
 export function mcpFixtureServer(opts: {
   token: string;
   exposure?: "codemode" | "deferred" | "direct" | "hidden";
   marker?: string;
+  exitDelayMs?: number;
+  exitLog?: string;
+  watchDir?: string;
 }): Record<string, unknown> {
   return {
     command: process.execPath,
@@ -860,6 +864,11 @@ export function mcpFixtureServer(opts: {
     env: {
       PERK_MCP_FIXTURE_TOKEN: opts.token,
       ...(opts.marker !== undefined ? { PERK_MCP_FIXTURE_MARKER: opts.marker } : {}),
+      ...(opts.exitDelayMs !== undefined
+        ? { PERK_MCP_FIXTURE_EXIT_DELAY_MS: String(opts.exitDelayMs) }
+        : {}),
+      ...(opts.exitLog !== undefined ? { PERK_MCP_FIXTURE_EXIT_LOG: opts.exitLog } : {}),
+      ...(opts.watchDir !== undefined ? { PERK_MCP_FIXTURE_WATCH_DIR: opts.watchDir } : {}),
     },
     ...(opts.exposure !== undefined ? { exposure: opts.exposure } : {}),
   };

@@ -1,25 +1,40 @@
 // A minimal stdio MCP server for the worker e2e tier, run as `node <this file>` (Node strips the
-// types). Newline-delimited JSON-RPC; one tool, `echo { text }`.
+// types). Newline-delimited JSON-RPC; one tool, `echo { text, delayMs? }`.
 //
 // Oracles it leaves behind (every path is the test's to read):
-// - startup touches `$PERK_MCP_FIXTURE_MARKER` when set — "was this server ever spawned";
-// - every `tools/call` appends one JSON line `{ at, pid, args, token }` to
-//   `<cwd>/mcp-fixture-calls.log` (Pi runs stdio servers in the session cwd); `token` is
-//   `$PERK_MCP_FIXTURE_TOKEN`, so a call proves which config `env` the client launched it with;
+// - startup writes the fixture's own pid to `$PERK_MCP_FIXTURE_MARKER` when set — "was this
+//   server ever spawned", and the pid a teardown assertion probes for liveness;
+// - every `tools/call` appends one JSON line `{ at, id, pid, args, token }` to
+//   `<cwd>/mcp-fixture-calls.log` (Pi runs stdio servers in the session cwd) on receipt, before
+//   it answers — so the line is also the "call in flight" barrier. `id` is the JSON-RPC request
+//   id the client allocated; `token` is `$PERK_MCP_FIXTURE_TOKEN`, so a call proves which config
+//   `env` the client launched it with;
+// - `echo` answers after `delayMs` when given (a held call), at once otherwise;
+// - every `notifications/cancelled` appends one JSON line `{ at, requestId }` to
+//   `<cwd>/mcp-fixture-cancelled.log` — `requestId` matches the cancelled call's `id`;
 // - before each call's response it writes a `notifications/message` on the same stdout. The client
 //   handles a notification (Pi's synchronous server-log append) before it resolves the response,
-//   so once the call returns its log line already exists.
+//   so once the call returns its log line already exists;
+// - with `$PERK_MCP_FIXTURE_EXIT_LOG` and `$PERK_MCP_FIXTURE_WATCH_DIR` both set, it writes
+//   `{ at, entries }` to the exit log immediately before exiting — `entries` is the watched
+//   directory's listing at the moment the server exits (a shutdown-ordering oracle).
 //
-// It exits when stdin closes (the client closed the transport).
+// It exits when stdin closes (the client closed the transport), after
+// `$PERK_MCP_FIXTURE_EXIT_DELAY_MS` (default 0) — a delay that keeps it alive through part of the
+// client's close sequence.
 
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 interface RpcMessage {
   id?: number | string;
   method?: string;
-  params?: { protocolVersion?: string; arguments?: { text?: unknown } };
+  params?: {
+    protocolVersion?: string;
+    arguments?: { text?: unknown; delayMs?: unknown };
+    requestId?: unknown;
+  };
 }
 
 const send = (message: Record<string, unknown>): void => {
@@ -34,7 +49,7 @@ const ECHO_TOOL = {
   description: "Echo the text back.",
   inputSchema: {
     type: "object",
-    properties: { text: { type: "string" } },
+    properties: { text: { type: "string" }, delayMs: { type: "number" } },
     required: ["text"],
   },
 };
@@ -47,7 +62,15 @@ lines.on("line", (line) => {
   } catch {
     return;
   }
-  // Notifications (`notifications/initialized`) carry no id and need no answer.
+  // A notification carries no id, so this one is handled before the id short-circuit below.
+  if (message.method === "notifications/cancelled") {
+    appendFileSync(
+      join(process.cwd(), "mcp-fixture-cancelled.log"),
+      `${JSON.stringify({ at: new Date().toISOString(), requestId: message.params?.requestId })}\n`,
+    );
+    return;
+  }
+  // Other notifications (`notifications/initialized`) need no answer.
   if (message.id === undefined) return;
   switch (message.method) {
     case "initialize":
@@ -69,16 +92,20 @@ lines.on("line", (line) => {
         join(process.cwd(), "mcp-fixture-calls.log"),
         `${JSON.stringify({
           at: new Date().toISOString(),
+          id: message.id,
           pid: process.ppid,
           args,
           token: process.env.PERK_MCP_FIXTURE_TOKEN,
         })}\n`,
       );
-      send({ method: "notifications/message", params: { level: "info", data: "echo" } });
-      send({
-        id: message.id,
-        result: { content: [{ type: "text", text: String(args?.text ?? "") }] },
-      });
+      const id = message.id;
+      const answer = (): void => {
+        send({ method: "notifications/message", params: { level: "info", data: "echo" } });
+        send({ id, result: { content: [{ type: "text", text: String(args?.text ?? "") }] } });
+      };
+      const delayMs = typeof args?.delayMs === "number" ? args.delayMs : 0;
+      if (delayMs > 0) setTimeout(answer, delayMs);
+      else answer();
       return;
     }
     case "ping":
@@ -88,4 +115,20 @@ lines.on("line", (line) => {
       send({ id: message.id, error: { code: -32601, message: "method not found" } });
   }
 });
-lines.on("close", () => process.exit(0));
+
+const exitDelayMs = Number(process.env.PERK_MCP_FIXTURE_EXIT_DELAY_MS ?? "0") || 0;
+const exitLog = process.env.PERK_MCP_FIXTURE_EXIT_LOG;
+const watchDir = process.env.PERK_MCP_FIXTURE_WATCH_DIR;
+
+lines.on("close", () => {
+  setTimeout(() => {
+    if (exitLog && watchDir) {
+      writeFileSync(
+        exitLog,
+        `${JSON.stringify({ at: new Date().toISOString(), entries: readdirSync(watchDir) })}\n`,
+        "utf8",
+      );
+    }
+    process.exit(0);
+  }, exitDelayMs);
+});

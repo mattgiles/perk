@@ -400,13 +400,29 @@ subagent children and the session store keep the real agent dir): the worker con
 trusted project's `.pi/mcp.json` servers, registering each through pi's own `registerMcpServer`
 checks, and never reads or writes the agent dir's `mcp.json` / `mcp-auth.json`; server logs go to
 `mcp.log` in the throwaway agent dir. Credentials must be explicit in the project file (`env` for
-stdio, an `Authorization` header for HTTP; `${VAR}` references resolve). Refused, each printed as
-`perk worker: mcp config error — <path>: …` while the rest load: an override-only entry (no
-`command`/`url`/`type` — there is no global server to override), an entry with `auth`, a name an
-extension already registered, anything pi's validator rejects. The worker holds no MCP sign-in: an
-OAuth server's first 401 prints `perk worker: MCP server "<name>" (<origin>) asked for an OAuth
-sign-in — …` (origin only, never path/query/userinfo). `direct` servers are declared to the model;
-the default `codemode` exposure turns on the worker's codemode (pi's `autoEnableCodemode`).
+stdio, an `Authorization` header for HTTP, sent on every request; `${VAR}` references resolve
+once, when the transport is built). `"enabled": false` turns a server off (`disabled` is not a pi
+key). Refused, each printed as `perk worker: mcp config error — <path>: …` while the rest load: an
+override-only entry (no `command`/`url`/`type` — there is no global server to override), an entry
+with `auth`, a name an extension already registered (the first registrar wins in either order; a
+later extension registration of a file-owned name is printed as `perk worker: extension error —
+<path> (<event>): …`), anything pi's validator rejects. The worker holds no MCP sign-in: an
+OAuth server's plain 401 (the empty-store refresh) prints `perk worker: MCP server "<name>"
+(<origin>) asked for an OAuth sign-in — …` (origin only, never path/query/userinfo). Every other
+failed startup connection is silent in the worker — pi reports MCP problems only through its UI
+(`ctx.ui.notify`, a no-op headless) and exposes no status hook — so a missing command, a 5xx or
+unreachable server, a rejected header credential or an `insufficient_scope` challenge (401 or 403)
+just leaves that server's tools absent, and the run goes on. A server lost mid-stage keeps its
+tools and the next call reconnects lazily (an HTTP session expiry is retried once on a fresh
+session); it fails only if the server is still unreachable. To check a server, run the stage
+interactively (pi's UI diagnostics, extension registrations connected) or `pi mcp list` in the
+project (file-configured servers only, never extension registrations) — but neither reproduces the
+worker's effective server set: both read the global `mcp.json` and the persistent OAuth store the
+worker refuses, and an interactive session gives a file entry precedence over a same-named
+extension registration (the worker: first registrar wins), so a server can succeed there — or
+reach a different server — and still fail in the worker. `direct` servers are
+declared to the model; the default `codemode` exposure turns on the worker's codemode (pi's
+`autoEnableCodemode`).
 `-builtin:mcp` keeps MCP out (a project `registerMcpServer` is then reported on stderr as
 `perk worker: extension error — <path> (register_mcp_server): …`, never connected). A project
 extension that brings its own MCP support replaces the builtin and is the repo's choice, outside

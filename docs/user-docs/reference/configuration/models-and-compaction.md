@@ -70,18 +70,32 @@ builtin, and the worker prints Pi's warning saying so.
 `.pi/mcp.json` and nothing from your agent directory: it never reads your global `mcp.json` or
 `mcp-auth.json`, and never writes either. Give each server its credentials explicitly in the
 project file — an `env` value for a stdio server, an `Authorization` header for an HTTP server
-(both accept Pi's `${VAR}` references, so the secret can stay in the environment). Exposure works
-as in an interactive session: a `direct` server's tools are offered to the model, and the default
-`codemode` exposure turns on the worker's codemode so scripts can call them. Servers that
-extensions register with `registerMcpServer` connect too. A few entries are refused, each with one
-`perk worker: mcp config error — <path>: …` line on stderr while the rest load: an entry with no
-`command` or `url` (there is no global server for it to override), an entry with `auth` (allowed
-only in the global file), a server name an extension already registered, and anything Pi's own
-validation rejects. The worker holds no MCP sign-in: a server that asks for OAuth fails to connect,
-and the worker prints `perk worker: MCP server "<name>" (<origin>) asked for an OAuth sign-in — …`
-— give it an explicit credential or run the stage interactively. Server logs go to the worker's
-temporary directory, removed when the run ends. A project extension that brings its own MCP
-support replaces the builtin and is the repo's own choice, outside that guarantee.
+(both accept Pi's `${VAR}` references, so the secret can stay in the environment). An HTTP
+server's headers are sent with every request. Exposure works as in an interactive session: a
+`direct` server's tools are offered to the model, and the default `codemode` exposure turns on the
+worker's codemode so scripts can call them. `"enabled": false` turns a server off (`disabled` is
+not a key Pi reads). Servers that extensions register with `registerMcpServer` connect too; when
+an extension and the file name the same server, whichever registered first keeps it. A few
+entries are refused, each with one `perk worker: mcp config error — <path>: …` line on stderr
+while the rest load: an entry with no `command` or `url` (there is no global server for it to
+override), an entry with `auth` (allowed only in the global file), a server name an extension
+already registered, and anything Pi's own validation rejects. The worker holds no MCP sign-in: a
+server that answers with a plain OAuth 401 fails to connect, and the worker prints `perk worker:
+MCP server "<name>" (<origin>) asked for an OAuth sign-in — …` — give it an explicit credential or
+run the stage interactively. Every other failed connection at startup prints nothing in the
+worker, because Pi reports MCP problems only in its interactive UI: a missing command, an
+unreachable or failing server, a rejected credential, or a server asking for more OAuth scope
+simply leaves that server's tools absent, and the run goes on. A server that drops mid-stage keeps
+its tools, and the next call reconnects; the call fails only if the server is still unreachable.
+To check a server, run the stage interactively — it shows Pi's MCP messages and connects the
+servers extensions register — or run `pi mcp list` in the project for the file-configured servers
+(it does not show servers that extensions register). Neither check follows the worker's rules: both
+read your global `mcp.json` and saved OAuth credentials, which the worker does not, and an
+interactive session lets a file entry win over an extension that registers the same name, where
+the worker keeps whichever registered first — so a server can work there and still fail in the
+worker. Server logs go to the
+worker's temporary directory, removed when the run ends. A project extension that brings its own
+MCP support replaces the builtin and is the repo's own choice, outside that guarantee.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
