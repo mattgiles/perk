@@ -3956,6 +3956,55 @@ statically, and links the seam only by a dynamic import after admission (guard-e
     - **Log** — `logPath = <throwaway agentDir>/mcp.log`, removed with the dir at dispose, after
       `AgentSessionRuntime.dispose()` awaited `session_shutdown`, where the builtin closes every
       connection.
+    - **Transports** — Pi's defaults. An HTTP entry's `headers` are resolved once, when the
+      transport is built (Pi's `${VAR}` rule against the worker's env), and re-sent on every
+      request — `initialize`, the notifications, the `GET` stream probe, `tools/list`,
+      `tools/call` and the closing `DELETE`. An `Authorization` header disables Pi's OAuth provider
+      for that server, so its 401 is a plain connection failure, never the sign-in line.
+    - **OAuth** — the empty-store refresh after a plain 401 (entered through the store's
+      `withRefreshLock`) is the one OAuth path the worker reports. An `insufficient_scope`
+      challenge, at 401 or 403, is decided in Pi's `onUnauthorized` before `withRefreshLock`:
+      measured silent (the store's `load()` still runs for the request token, so the silence is
+      about the refresh path, not the store). Either way the server settles `needs-auth` after one
+      connection attempt (not transient — no retry), with no browser, no callback server and no
+      discovery request on connect; a token in the global `mcp-auth.json` is never read nor sent.
+    - **Registrations** — project file entries are `builtin:mcp` registrations, so Pi's ownership
+      check decides a name clash: the **first registrar wins**, in either order. A project
+      extension registering at load beats the file entry (printed as the config-error line naming
+      the extension); a later registration of a file-owned name throws in the registering handler,
+      printed as `perk worker: extension error — <path> (<event>): MCP server "<name>" is already
+      registered by extension "builtin:mcp"`. A registration made mid-drive connects in the
+      background through Pi's `mcp_servers_change` and is declared from the **next** request on
+      (Pi snapshots the active tools before each request). `"enabled": false` is the switch — on a
+      file entry or a registration the server is never spawned; `disabled` is not a Pi key
+      (unknown keys are ignored).
+    - **Lifecycle** — after a transport loss the tool definitions stay registered and the next call
+      reconnects lazily: `getClient` reopens when the client is no longer connected, and an HTTP
+      `404` under a held session (`McpSessionExpiredError`) is retried once on a fresh session
+      inside `withClient`. So the call succeeds when the server is back and errors only when
+      reconnection or execution fails; a call already in flight when the transport closes fails. A
+      call in flight when the run signal aborts sends `notifications/cancelled` for its request id
+      and errors `MCP request aborted`. **Shutdown order:** `dispose()` awaits `session_shutdown`,
+      where the builtin awaits every connection's close — stdio: stdin end, SIGTERM at 500 ms,
+      SIGKILL at 2.5 s, awaiting the child's exit; HTTP: abort plus a best-effort `DELETE` within
+      1 s — and only then is the throwaway dir removed (`rmSync`).
+    - **Trust** — by construction: `SettingsManager.create(worktree, agentDir)` with no trust
+      resolver takes Pi's trusted default, so "untrusted" is not a reachable worker state; the
+      loader's fail-closed untrusted arm is pinned in the fast tier only.
+    - **Headless problem reporting — recorded silence.** Pi reports MCP problems ("MCP servers need
+      attention", "still connecting", connection failures, sign-in requirements) through
+      `ctx.ui.notify`, a no-op in the headless worker, and `McpExtensionOptions` exposes no status
+      hook. The worker's MCP stderr is exactly its two lines — the config-error line and the
+      empty-store OAuth sign-in line. A server that fails its **initial** connection — a missing
+      stdio command (never retried), a 5xx HTTP server (three attempts at 0/250/1000 ms), a
+      rejected header credential, a scope challenge — is simply absent from the tool table, and the
+      drive goes on. A reliable per-server failure diagnostic needs an upstream status hook; a
+      perk-side tool census was rejected (`connected · 0 tools` is a healthy state and definitions
+      survive a disconnect, so it would both over- and under-report). `pi mcp list` run in the
+      project is a separate connectivity check for **file-configured** servers under ordinary Pi
+      trust and credential rules — it reads the global config and the persistent OAuth store the
+      worker refuses, and never sees extension registrations — so it is not an inspection of the
+      worker's effective server set; an interactive run of the stage is the faithful check.
     - **Real agent dir everywhere else** — the isolation moves nothing outside the factory: no
       `PI_CODING_AGENT_DIR` override and no env toggling, so the worker's own `ModelRuntime.create()`,
       a subagent child (in-process `ModelRuntime.create()` + `getAgentDir()`, or a background
@@ -3972,7 +4021,14 @@ statically, and links the seam only by a dynamic import after admission (guard-e
   request; for MCP, a `direct` and a `codemode`-reached project server connected and called (the
   server log under the throwaway dir), the global `auth.json`/`models.json`/`mcp-auth.json`/
   `mcp.json` byte-identical with no global `mcp.log` and the global server never spawned, and
-  `-builtin:mcp`.
+  `-builtin:mcp`; and the MCP matrix over the committed stdio and in-process HTTP fixtures: HTTP
+  header credentials on every request with the closing `DELETE` before return and a global HTTP
+  server never contacted, file/extension registration collisions in both orders, the plain-401
+  sign-in line beside silent `insufficient_scope` 401/403 challenges (one attempt, no discovery,
+  no global token sent), settled connection failures (missing command, 5xx, rejected credential)
+  with no stderr line, `enabled: false` and trust, a late registration declared after a barrier
+  turn plus a lazy reconnect across an HTTP session expiry, an in-flight call cancelled by an
+  external abort, and transports closed before the throwaway dir is removed.
 - **Model-call policy (a constrained capability)** — `extension/worker/modelCallPolicy.ts`. Pi
   reports a codemode script's `models.*` usage only when the script ends (its mid-script
   `tool_execution_update` partials carry per-call rows with `cost` only, never tokens), and no
