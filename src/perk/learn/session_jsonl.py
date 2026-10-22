@@ -41,7 +41,25 @@ tool set in ``toolsAdded``) and later prompt-section / tool-set deltas; a compac
 carries a ``systemMessage`` snapshot. The parser accepts them as context/tool evidence with their
 ancestry intact (a rejected line would lose its ``id``/``parentId`` and cut the active branch
 short). The string ``content`` arm is role-agnostic — it is the message's display text verbatim
-for any role; the delta fields are tolerated, never projected.
+for any role. The grammar is identical at Pi 0.99.2, 1.0.0 and 1.1.0.
+
+**System-state evidence.** What the model was told projects into one bounded, lenient
+:class:`SystemState` on ``SessionEntry.system_state``: a system message's ``sections`` (each
+name → its new text, or ``None`` when the grammar's ``null`` removed it) and the tool NAMES of
+``toolsAdded`` / ``toolsRemoved`` (descriptions and parameter schemas are never projected), and a
+compaction entry's ``systemMessage`` snapshot — the same fields plus its instruction
+``content`` (a string verbatim, or the text blocks of a ``TextContent[]`` list joined by blank
+lines). The projection is keyed on entry kind + role: the message fields only when
+``role == "system"``, ``systemMessage`` only on a ``compaction`` entry — other carriers are
+tolerated and dropped, so a ``<user>`` block never carries tool declarations. Malformed optional
+metadata degrades LOCALLY (the nested-call precedent): the fields are typed ``object`` so no
+shape of them fails the line, and the projection counts what it could not read in ``malformed``
+(a non-object ``sections`` map, a non-string/non-null section value, a non-list tool list, a
+tool record without a string ``name``, a snapshot ``content`` of another shape, each member of a
+snapshot ``content`` list that is not a text block with a string ``text``, a non-object snapshot)
+and the entries past the caps in ``dropped`` — an otherwise readable entry is never discarded
+and branch ancestry is never cut. System state is context/tool evidence: never a user turn, never
+user authorization, never a workflow terminal event.
 """
 
 import json
@@ -69,6 +87,13 @@ class ToolCall:
 
 # Mirrors Pi's recorder cap (`NESTED_CALL_LIMITS.maxCalls`), so honest records never hit it.
 _MAX_NESTED_CALLS = 256
+# System-state projection caps. Pi has no cap of its own (a real session has 8 sections and
+# <= ~70 tools; the tool-reference cap reuses Pi's nested-call cap). Together with the renderer's
+# text/name caps they fix the record's retained pre-escape content at a known worst case — not its
+# total size (each truncation pointer repeats the uncapped entry id and source path), and they do
+# NOT make a chunk unsplittable-proof: the chunk splitter is entry-level by design.
+_MAX_SECTIONS = 32
+_MAX_TOOL_REFS = 256
 
 
 @dataclass(frozen=True)
@@ -103,13 +128,49 @@ class NestedCalls:
 
 
 @dataclass(frozen=True)
+class SectionChange:
+    """One ``sections`` entry of a system message: ``text`` is the section's new text verbatim,
+    ``None`` when the grammar's ``null`` removed it. A parsed projection, never invented."""
+
+    name: str
+    text: str | None
+
+
+@dataclass(frozen=True)
+class SystemState:
+    """The prompt/tool state a system message declares at one point of the transcript — a
+    snapshot on the leading entry and on a compaction, a delta elsewhere.
+
+    ``content`` is the snapshot's instruction text: always ``""`` for a message entry (whose text
+    is ``SessionEntry.text``); only a compaction snapshot's ``content`` lands here.
+    ``tools_added`` / ``tools_removed`` are tool NAMES only (descriptions and parameter schemas are
+    never projected). ``malformed`` counts the parts the projection could not read — a
+    non-object ``sections`` map (1), a non-string/non-null section value (1 each), a non-list tool
+    list (1 each), a tool record that is not an object with a string ``name`` (1 each), a snapshot
+    ``content`` that is neither a string nor a list nor absent (1), each member of a snapshot
+    ``content`` list that is not an object with ``type == "text"`` and a string ``text`` (1 each),
+    or a non-object snapshot as a whole (1); ``dropped`` counts section entries and tool
+    references past the caps. A frozen record of hashable fields, so it compares and hashes
+    field-wise (dedup relies on that)."""
+
+    content: str
+    sections: tuple[SectionChange, ...]
+    tools_added: tuple[str, ...]
+    tools_removed: tuple[str, ...]
+    malformed: int
+    dropped: int
+
+
+@dataclass(frozen=True)
 class SessionEntry:
     """One flat, frozen projection of a Pi session-log entry — the fields the normalization
     pipeline + renderer need, nothing more. ``index`` is the entry's position in file order
     (header excluded); ``kind`` is the JSONL ``type``. ``raw_chars`` is the entry's raw JSONL
     line size in code points (the decoded line, newline excluded) — complete by construction:
     unprojected fields (e.g. ``message.details``) are counted. ``nested_calls`` is a toolResult's
-    projected nested-call record (``None`` when the line carries none)."""
+    projected nested-call record (``None`` when the line carries none). ``system_state`` is a
+    system entry's / compaction's projected prompt-tool state (``None`` when the line carries
+    none)."""
 
     index: int
     kind: str
@@ -135,6 +196,7 @@ class SessionEntry:
     from_id: str | None
     raw_chars: int = 0
     nested_calls: NestedCalls | None = None
+    system_state: SystemState | None = None
 
 
 @dataclass(frozen=True)
@@ -177,10 +239,10 @@ class _ContentItem(LenientParseModel):
 class _MessageModel(LenientParseModel):
     """The nested ``AgentMessage`` of a ``message`` entry (role + content + tool-result fields).
 
-    A system message's ``sections`` / ``toolsAdded`` / ``toolsRemoved`` (and every message's
-    ``timestamp``) are deliberately undeclared: ``extra="ignore"`` drops them whatever their shape,
-    so no form of them can fail the line. They are tolerated, not projected — interpreting them is
-    follow-up work.
+    A system message's ``sections`` / ``toolsAdded`` / ``toolsRemoved`` are typed ``object`` so a
+    malformed form degrades inside the projection, never fails the line; they are projected only
+    for ``role == "system"``. Every message's ``timestamp`` stays undeclared (``extra="ignore"``
+    drops it; never projected).
     """
 
     role: str | None = None
@@ -195,6 +257,11 @@ class _MessageModel(LenientParseModel):
     # Typed `object` so NO shape of the record can fail the line's validation: a malformed block
     # must degrade inside the projection, never turn a readable toolResult into a malformed line.
     nested_calls: object | None = Field(default=None, alias="nestedCalls")
+    # The system-message grammar fields, typed `object` for the same reason; projected only for
+    # `role == "system"` (see `_project_system_message`).
+    sections: object | None = None
+    tools_added: object | None = Field(default=None, alias="toolsAdded")
+    tools_removed: object | None = Field(default=None, alias="toolsRemoved")
 
     def blocks(self) -> tuple[_ContentItem, ...]:
         """The block-form content, or ``()`` for the string / ``None`` arms."""
@@ -214,7 +281,8 @@ class SessionEntryModel(LenientParseModel):
     """The untrusted read-edge over one session-log line. Only ``type`` is required; every other
     field is optional so a quirky entry degrades gracefully rather than raising. Camel-cased
     grammar keys map through ``Field(alias=…)`` (the base sets ``populate_by_name``). A compaction
-    entry's ``systemMessage`` snapshot is deliberately undeclared — dropped, never projected."""
+    entry's ``systemMessage`` snapshot is typed ``object`` (no shape of it can fail the line) and
+    projected only on a ``compaction`` entry."""
 
     type: str
     id: str | None = None
@@ -230,6 +298,7 @@ class SessionEntryModel(LenientParseModel):
     command: str | None = None
     output: str | None = None
     exit_code: int | None = Field(default=None, alias="exitCode")
+    system_message: object | None = Field(default=None, alias="systemMessage")
 
     def to_domain(self, *, index: int, raw_chars: int = 0) -> SessionEntry:
         """Project this validated line into a frozen :class:`SessionEntry` at file position
@@ -273,7 +342,19 @@ class SessionEntryModel(LenientParseModel):
             from_id=self.from_id,
             raw_chars=raw_chars,
             nested_calls=nested_calls,
+            system_state=self._system_state(),
         )
+
+    def _system_state(self) -> SystemState | None:
+        """The projected prompt/tool state, keyed on entry kind + role on purpose: a
+        ``systemMessage`` on a non-compaction entry and ``sections``/tool lists on a non-system
+        role are tolerated and dropped (the grammar never writes them; a ``<user>`` block must
+        never carry tool declarations that could read as user authorization)."""
+        if self.type == "compaction":
+            return _project_system_snapshot(self.system_message)
+        if self.message is not None:
+            return _project_system_message(self.message)
+        return None
 
     def _joined_text(self) -> str:
         """The message's display text — the string ``content`` verbatim, else every ``text``
@@ -444,3 +525,124 @@ def _project_nested_calls(raw: object) -> NestedCalls | None:
             calls.append(call)
     dropped = max(len(records) - _MAX_NESTED_CALLS, 0)
     return NestedCalls(calls=tuple(calls), complete=complete, malformed=malformed, dropped=dropped)
+
+
+def _project_tool_names(raw: object) -> tuple[tuple[str, ...], int, int]:
+    """A ``toolsAdded`` / ``toolsRemoved`` list as ``(names, malformed, dropped)``: ``None`` →
+    nothing; a non-list → ``malformed=1``; over the first ``_MAX_TOOL_REFS`` records, an object
+    whose ``name`` is a string → the name, anything else → counted; records past the cap →
+    ``dropped``."""
+    if raw is None:
+        return (), 0, 0
+    if not isinstance(raw, list):
+        return (), 1, 0
+    names: list[str] = []
+    malformed = 0
+    for record in raw[:_MAX_TOOL_REFS]:
+        obj = _json_object(record)
+        name = obj.get("name") if obj is not None else None
+        if isinstance(name, str):
+            names.append(name)
+        else:
+            malformed += 1
+    return tuple(names), malformed, max(len(raw) - _MAX_TOOL_REFS, 0)
+
+
+def _project_system_state(
+    *,
+    content: str,
+    sections: object,
+    tools_added: object,
+    tools_removed: object,
+    malformed: int = 0,
+) -> SystemState:
+    """Project the three system-message grammar fields (see the module docstring). Total by
+    construction — it runs outside the parser's per-line ``except`` arm, so it never raises:
+    ``sections`` absent → none, a non-object → counted, an object → its first
+    ``_MAX_SECTIONS`` items in file order (a ``str``/``None`` value kept, any other value counted
+    with its siblings kept; the excess → ``dropped``); each tool list via
+    :func:`_project_tool_names`."""
+    changes: list[SectionChange] = []
+    dropped = 0
+    if sections is not None:
+        section_map = _json_object(sections)
+        if section_map is None:
+            malformed += 1
+        else:
+            items = list(section_map.items())
+            for name, value in items[:_MAX_SECTIONS]:
+                if value is None or isinstance(value, str):
+                    changes.append(SectionChange(name=name, text=value))
+                else:
+                    malformed += 1
+            dropped += max(len(items) - _MAX_SECTIONS, 0)
+    added, added_malformed, added_dropped = _project_tool_names(tools_added)
+    removed, removed_malformed, removed_dropped = _project_tool_names(tools_removed)
+    return SystemState(
+        content=content,
+        sections=tuple(changes),
+        tools_added=added,
+        tools_removed=removed,
+        malformed=malformed + added_malformed + removed_malformed,
+        dropped=dropped + added_dropped + removed_dropped,
+    )
+
+
+def _project_system_message(message: _MessageModel) -> SystemState | None:
+    """The message-entry arm: ``None`` unless the role is ``system`` AND at least one grammar
+    field is present — so a content-only system entry, and every other role, projects nothing
+    (and renders byte-identically to a transcript predating the projection)."""
+    if message.role != "system":
+        return None
+    if message.sections is None and message.tools_added is None and message.tools_removed is None:
+        return None
+    return _project_system_state(
+        content="",
+        sections=message.sections,
+        tools_added=message.tools_added,
+        tools_removed=message.tools_removed,
+    )
+
+
+def _snapshot_content(raw_content: object) -> tuple[str, int]:
+    """A snapshot's ``content`` as ``(text, malformed)``: a string verbatim; absent/``None`` →
+    ``""``; a list → its text blocks (an object with ``type == "text"`` and a string ``text``)
+    joined by blank lines, every other member counted (pi-ai's list arm is ``TextContent[]``, so
+    there is no valid non-text member to ignore); any other shape → ``("", 1)``."""
+    if raw_content is None:
+        return "", 0
+    if isinstance(raw_content, str):
+        return raw_content, 0
+    if not isinstance(raw_content, list):
+        return "", 1
+    parts: list[str] = []
+    malformed = 0
+    for member in raw_content:
+        block = _json_object(member)
+        text = block.get("text") if block is not None else None
+        if block is not None and block.get("type") == "text" and isinstance(text, str):
+            parts.append(text)
+        else:
+            malformed += 1
+    return "\n\n".join(parts), malformed
+
+
+def _project_system_snapshot(raw: object) -> SystemState | None:
+    """The compaction arm: absent/``None`` → ``None``; a non-object snapshot → an empty state
+    with ``malformed=1``; an object → its ``content`` (:func:`_snapshot_content`) plus its
+    ``sections`` / ``toolsAdded`` / ``toolsRemoved`` through :func:`_project_system_state`."""
+    if raw is None:
+        return None
+    snapshot = _json_object(raw)
+    if snapshot is None:
+        return SystemState(
+            content="", sections=(), tools_added=(), tools_removed=(), malformed=1, dropped=0
+        )
+    content, malformed = _snapshot_content(snapshot.get("content"))
+    return _project_system_state(
+        content=content,
+        sections=snapshot.get("sections"),
+        tools_added=snapshot.get("toolsAdded"),
+        tools_removed=snapshot.get("toolsRemoved"),
+        malformed=malformed,
+    )

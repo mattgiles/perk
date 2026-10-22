@@ -12,9 +12,20 @@ outer result's own flag, never derived from its children, and omitted arguments 
 invented. A transcript without the record renders byte-identically to one predating it.
 
 System entries (Pi's persisted system prompt/tool snapshot and its deltas) render through the
-generic ``<message role="system">`` arm with their text bounded like any payload; an empty
-snapshot/delta is pruned as non-substantive (its ``sections``/tool deltas are not projected); a
-system entry is never rendered as ``<user>``.
+generic ``<message role="system">`` arm with their text bounded like any payload; their projected
+``SystemState`` renders as a ``<system_state>`` element inside that message (after the text) and
+inside ``<compaction>`` (after the file lists, for a compaction's snapshot): the sections set or
+removed, the tool NAMES added/removed (never descriptions or schemas), the snapshot ``content``
+when non-empty, and ``malformed`` / ``dropped`` counts when non-zero. Section text and snapshot
+content bound head+tail at ``_MAX_SECTION_CHARS``; every section and tool name at
+``_MAX_PARAM_CHARS``. With the projection caps that fixes one element's retained pre-escape
+content at a known worst case under one chunk budget — not its total size: each truncation pointer
+repeats the (uncapped) entry id and source path, escaping can still expand it, and the splitter
+stays entry-level (the existing posture for every payload). A non-empty state is substantive (it
+survives the prune and its loss diagnostics distinguish dedup payloads); a system entry whose state
+projects empty and whose text is empty is pruned and never a dedup candidate. A system entry is
+never rendered as ``<user>`` — system state is context/tool evidence, never user authorization. A
+transcript without system state renders byte-identically to one predating the projection.
 
 This is the **serialize-edge** companion to the lenient parser: the report shapes here are frozen
 domain dataclasses; their ``OutputModel`` projection lives in the command file
@@ -34,7 +45,9 @@ from perk.learn.session_jsonl import (
     NestedCall,
     NestedCalls,
     ParsedSession,
+    SectionChange,
     SessionEntry,
+    SystemState,
     ToolCall,
     parse_session_jsonl,
 )
@@ -51,6 +64,11 @@ _MAX_FILE_LIST = 50
 # A nested call's error caps at Pi's own recorder cap (`NESTED_CALL_LIMITS.maxErrorChars`), so an
 # honest record is never clipped; its args share the tool-call param cap.
 _MAX_NESTED_ERROR_CHARS = 500
+# A prompt section's (and a snapshot `content`'s) head+tail cap. A leading snapshot carries ~8
+# sections of up to tens of KB and every compaction repeats it; 1000 keeps a real snapshot at ~6K
+# rendered chars (a delta ~3K) while the raw JSONL in the bundle keeps the full text behind the
+# truncation pointer.
+_MAX_SECTION_CHARS = 1000
 
 # The error-keyword set: a line matching any of these survives the tool-result head-line prune.
 _ERROR_RE = re.compile(r"error|exception|failed|failure|fatal|warning", re.IGNORECASE)
@@ -93,6 +111,8 @@ class SessionReport:
     malformed_lines: int
     duplicate_groups: int
     truncations: int
+    system_states: int
+    system_malformed: int
     boilerplate: tuple[BoilerplateDigest, ...]
     chunk_paths: tuple[str, ...]
 
@@ -108,7 +128,8 @@ class RenderReport:
 class NormalizedSession:
     """The pipeline output for one role: the kept entries (file order) + the role's counters +
     the boilerplate digest. Splitting consumes ``entries``; the counters ride straight into
-    the role's :class:`SessionReport`."""
+    the role's :class:`SessionReport`. ``system_states`` counts the kept entries carrying a
+    projected system state; ``system_malformed`` sums their ``malformed`` counts."""
 
     entries: tuple[SessionEntry, ...]
     entries_read: int
@@ -117,6 +138,8 @@ class NormalizedSession:
     malformed_lines: int
     duplicate_groups: int
     truncations: int
+    system_states: int
+    system_malformed: int
     boilerplate: tuple[BoilerplateDigest, ...]
 
 
@@ -155,6 +178,8 @@ def normalize_session(parsed: ParsedSession, *, source: str) -> NormalizedSessio
     deduped = _drop_repeated_assistant_text(deduped)
     pruned = [e for e in deduped if _is_substantive(e)]
     final, truncations = truncate_payloads(pruned, source=source)
+    # Counted over the kept entries: a duplicate's pointer, having no state, counts in neither.
+    states = [e.system_state for e in final if e.system_state is not None]
 
     return NormalizedSession(
         entries=tuple(final),
@@ -164,6 +189,8 @@ def normalize_session(parsed: ParsedSession, *, source: str) -> NormalizedSessio
         malformed_lines=parsed.malformed_lines,
         duplicate_groups=duplicate_groups,
         truncations=truncations,
+        system_states=len(states),
+        system_malformed=sum(s.malformed for s in states),
         boilerplate=boilerplate,
     )
 
@@ -210,7 +237,11 @@ def _drop_boilerplate(
 
 
 def _signature(entry: SessionEntry) -> tuple[object, ...]:
-    """The dedup key — the render-payload identity (same kind/role + byte-identical payload)."""
+    """The dedup key — the render-payload identity (same kind/role + byte-identical payload).
+
+    The frozen ``SystemState`` joins the key as-is (it hashes and compares field-wise): its loss
+    diagnostics (``malformed`` / ``dropped``) DISTINGUISH payloads (the nested-call rule) and
+    nothing is excluded (a system state carries no ids or durations)."""
     calls = tuple((c.name, c.args_text) for c in entry.tool_calls)
     return (
         entry.kind,
@@ -221,6 +252,7 @@ def _signature(entry: SessionEntry) -> tuple[object, ...]:
         entry.output,
         entry.command,
         _nested_signature(entry.nested_calls),
+        entry.system_state,
     )
 
 
@@ -238,14 +270,15 @@ def _nested_signature(nested: NestedCalls | None) -> tuple[object, ...] | None:
 def _dedup(entries: list[SessionEntry]) -> tuple[list[SessionEntry], int]:
     """Step 4a — collapse byte-identical EVIDENCE payloads: keep the first, replace each later
     occurrence with a one-line ``↑ duplicate of entry <id>`` pointer (which stands for the whole
-    payload, nested calls included). One duplicate-group is counted per collapsed set. PRESERVED
-    entries are exempt.
+    payload, nested calls and system state included). One duplicate-group is counted per collapsed
+    set. PRESERVED entries are exempt.
 
     An entry :func:`_is_substantive` would drop is never a dedup candidate — it is appended
     untouched, neither registered as a signature nor matched against one. Dedup runs before the
-    substantiveness prune, so an empty entry (a system delta with ``content: ""``, an empty
-    toolResult) that matched an earlier empty entry would otherwise become a ``↑ duplicate``
-    pointer that survives the prune as a dangling reference to an entry that was itself pruned.
+    substantiveness prune, so an empty entry (a system delta whose state projects empty beside an
+    empty ``content``, an empty toolResult) that matched an earlier empty entry would otherwise
+    become a ``↑ duplicate`` pointer that survives the prune as a dangling reference to an entry
+    that was itself pruned.
     """
     seen: dict[tuple[object, ...], str | None] = {}
     collapsed: set[tuple[object, ...]] = set()
@@ -268,6 +301,7 @@ def _dedup(entries: list[SessionEntry]) -> tuple[list[SessionEntry], int]:
                     command=None,
                     summary=None,
                     nested_calls=None,
+                    system_state=None,
                 )
             )
             if sig not in collapsed:
@@ -304,7 +338,11 @@ def _drop_repeated_assistant_text(entries: list[SessionEntry]) -> list[SessionEn
 def _is_substantive(entry: SessionEntry) -> bool:
     """Step 5 — PRESERVED entries always survive; an EVIDENCE entry survives only with substantive
     content (any of text / thinking / tool calls / output / command / a nested-call record — whose
-    calls or loss diagnostics are evidence even beside an empty text)."""
+    calls or loss diagnostics are evidence even beside an empty text / a non-empty system state).
+
+    Consequence: a leading system snapshot and every non-empty delta are substantive and survive
+    the prune; a system entry whose state projects empty (e.g. ``sections: {}``) and whose text is
+    empty is still pruned — and, unchanged, is never a dedup candidate."""
     if _is_preserved(entry):
         return True
     return bool(
@@ -314,6 +352,20 @@ def _is_substantive(entry: SessionEntry) -> bool:
         or entry.output
         or entry.command
         or entry.nested_calls is not None
+        or _carries_system_evidence(entry.system_state)
+    )
+
+
+def _carries_system_evidence(state: SystemState | None) -> bool:
+    """Whether a projected system state carries anything to render (content, a section, a tool
+    name, or a loss diagnostic)."""
+    return state is not None and bool(
+        state.content
+        or state.sections
+        or state.tools_added
+        or state.tools_removed
+        or state.malformed
+        or state.dropped
     )
 
 
@@ -327,7 +379,9 @@ def truncate_payloads(
     assistant/user text, thinking, preserved summary → head+tail (``_MAX_PAYLOAD_CHARS``); a nested
     call's args → like tool-call args, its error → head+tail (``_MAX_NESTED_ERROR_CHARS``) — the
     nested record's ``complete`` / ``malformed`` / ``dropped`` / ``arguments_bytes`` are never
-    altered. A PRESERVED summary truncates but the entry is never dropped.
+    altered; a system state's section text and content → head+tail (``_MAX_SECTION_CHARS``), its
+    section and tool names → head+tail (``_MAX_PARAM_CHARS``) — its ``malformed`` / ``dropped``
+    are never altered. A PRESERVED summary truncates but the entry is never dropped.
 
     Public seam: besides being step 6 of :func:`normalize_session`, this is the per-payload
     bounding step the session-audit evidence bundler (``perk_dev.audit.bounding``) reuses over
@@ -382,6 +436,11 @@ def truncate_payloads(
             count += hits
             changes["nested_calls"] = nested
 
+        if entry.system_state is not None:
+            state, hits = _truncate_system_state(entry.system_state, entry.entry_id, source)
+            count += hits
+            changes["system_state"] = state
+
         out.append(replace(entry, **changes) if changes else entry)
     return out, count
 
@@ -406,6 +465,58 @@ def _truncate_nested_calls(nested: NestedCalls) -> tuple[NestedCalls, int]:
     return replace(nested, calls=tuple(calls)), hits
 
 
+def _truncate_system_state(
+    state: SystemState, entry_id: str | None, source: str
+) -> tuple[SystemState, int]:
+    """Bound a system state, counting each hit: ``content`` and each set section's text →
+    head+tail at ``_MAX_SECTION_CHARS`` with the source-anchored pointer; every section and tool
+    name → head+tail at ``_MAX_PARAM_CHARS`` (a name is an identifier, never a path, so the path
+    heuristic is not used). ``malformed`` / ``dropped`` are kept as-is.
+
+    The stated worst case covers the RETAINED pre-escape content only: after this step one
+    ``<system_state>`` element keeps at most one content + 32 (``_MAX_SECTIONS``) section texts of
+    1000 chars, 32 + 512 (twice ``_MAX_TOOL_REFS``) names of 200 chars + the inline name marker,
+    plus fixed tags — about 160K chars, under the 200K chunk budget (``_MAX_CHUNK_TOKENS * 4``).
+    It is not a total size bound: each of the up to 33 source-anchored pointers (content + section
+    texts) also repeats ``entry_id`` and ``source``, neither capped, so the pre-escape total is
+    that bound plus 33 x (id + source length). That pointer overhead, ``escape_xml``'s up-to-6x
+    expansion and :func:`split_to_chunks` splitting only between entries mean an adversarial entry
+    can still exceed one chunk: the EXISTING posture for every payload kind, not a new one. The
+    claim is "a fixed, known worst case for the retained content", never "cannot exceed a chunk".
+    """
+    hits = 0
+
+    def text_cap(value: str) -> str:
+        nonlocal hits
+        bounded, hit = _truncate_payload(value, entry_id, source, max_chars=_MAX_SECTION_CHARS)
+        if hit:
+            hits += 1
+        return bounded
+
+    def name_cap(value: str) -> str:
+        nonlocal hits
+        bounded, hit = _head_tail(value, _MAX_PARAM_CHARS)
+        if hit:
+            hits += 1
+        return bounded
+
+    sections = tuple(
+        SectionChange(
+            name=name_cap(change.name),
+            text=None if change.text is None else text_cap(change.text),
+        )
+        for change in state.sections
+    )
+    bounded = replace(
+        state,
+        content=text_cap(state.content),
+        sections=sections,
+        tools_added=tuple(name_cap(name) for name in state.tools_added),
+        tools_removed=tuple(name_cap(name) for name in state.tools_removed),
+    )
+    return bounded, hits
+
+
 def _truncate_value(value: str, max_chars: int) -> tuple[str, bool]:
     """Head+tail char truncation for a param/args payload; path-aware (a path keeps its first two +
     last two segments). Returns ``(value, False)`` when already within budget."""
@@ -426,12 +537,14 @@ def _head_tail(value: str, max_chars: int) -> tuple[str, bool]:
     return f"{value[:keep]}…[truncated {removed} chars]…{value[-keep:]}", True
 
 
-def _truncate_payload(value: str, entry_id: str | None, source: str) -> tuple[str, bool]:
+def _truncate_payload(
+    value: str, entry_id: str | None, source: str, *, max_chars: int = _MAX_PAYLOAD_CHARS
+) -> tuple[str, bool]:
     """Head+tail char truncation for a text/thinking/summary payload, with a visible source-anchored
-    pointer. Returns ``(value, False)`` when already within ``_MAX_PAYLOAD_CHARS``."""
-    if len(value) <= _MAX_PAYLOAD_CHARS:
+    pointer. Returns ``(value, False)`` when already within ``max_chars``."""
+    if len(value) <= max_chars:
         return value, False
-    keep = _MAX_PAYLOAD_CHARS // 2
+    keep = max_chars // 2
     removed = len(value) - 2 * keep
     marker = f"… [truncated {removed} chars; see entry {entry_id} in {source}] …"
     return f"{value[:keep]}{marker}{value[-keep:]}", True
@@ -502,9 +615,13 @@ def _render_message(entry: SessionEntry) -> str:
         return _render_tool_result(entry)
     if entry.role == "assistant":
         return _render_assistant(entry)
-    # `system` lands here on purpose: context evidence, never a `<user>` turn.
+    # `system` lands here on purpose: context evidence, never a `<user>` turn. Its system state
+    # renders after the body, before the closing tag (the nested-call placement).
     role = escape_xml(entry.role or "unknown")
-    return f'<message role="{role}" id="{eid}">{escape_xml(entry.text)}</message>'
+    head = f'<message role="{role}" id="{eid}">{escape_xml(entry.text)}'
+    if entry.system_state is None:
+        return f"{head}</message>"
+    return f"{head}\n{_render_system_state(entry.system_state)}</message>"
 
 
 def _render_tool_result(entry: SessionEntry) -> str:
@@ -582,8 +699,43 @@ def _render_compaction(entry: SessionEntry) -> str:
     modified_block = _render_file_list("modified_files", entry.modified_files)
     if modified_block is not None:
         lines.append(modified_block)
+    if entry.system_state is not None:
+        lines.append(_render_system_state(entry.system_state))
     lines.append("</compaction>")
     return "\n".join(lines)
+
+
+def _render_system_state(state: SystemState) -> str:
+    """The ``<system_state>`` element: ``malformed`` / ``dropped`` attributes only when non-zero;
+    then ``<content>`` when non-empty, one ``<section name="…">`` per set section and
+    ``<section name="…" removed="true"/>`` per removed one (projection order), and the
+    ``<tools_added>`` / ``<tools_removed>`` name lists when non-empty. Every value is escaped."""
+    attrs = ""
+    if state.malformed > 0:
+        attrs += f' malformed="{state.malformed}"'
+    if state.dropped > 0:
+        attrs += f' dropped="{state.dropped}"'
+    lines = [f"<system_state{attrs}>"]
+    if state.content:
+        lines.append(f"<content>{escape_xml(state.content)}</content>")
+    for change in state.sections:
+        name = escape_xml(change.name)
+        if change.text is None:
+            lines.append(f'<section name="{name}" removed="true"/>')
+        else:
+            lines.append(f'<section name="{name}">{escape_xml(change.text)}</section>')
+    for tag, names in (("tools_added", state.tools_added), ("tools_removed", state.tools_removed)):
+        if names:
+            lines.append(_render_name_list(tag, names))
+    lines.append("</system_state>")
+    return "\n".join(lines)
+
+
+def _render_name_list(tag: str, names: tuple[str, ...]) -> str:
+    """A newline-joined, escaped ``<tag>`` name list. No second cap: the projection cap already
+    bounds it, so a leading snapshot's full tool set stays visible (unlike a file list's
+    ``(+K more)`` rule)."""
+    return f"<{tag}>\n" + "\n".join(escape_xml(n) for n in names) + f"\n</{tag}>"
 
 
 def _render_branch_summary(entry: SessionEntry) -> str:
@@ -706,6 +858,8 @@ def render_evidence(
                 malformed_lines=normalized.malformed_lines,
                 duplicate_groups=normalized.duplicate_groups,
                 truncations=normalized.truncations,
+                system_states=normalized.system_states,
+                system_malformed=normalized.system_malformed,
                 boilerplate=normalized.boilerplate,
                 chunk_paths=tuple(chunk_paths),
             )

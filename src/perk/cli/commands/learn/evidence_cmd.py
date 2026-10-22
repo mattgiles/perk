@@ -212,6 +212,8 @@ class SessionReportOut(OutputModel):
     malformed_lines: int
     duplicate_groups: int
     truncations: int
+    system_states: int
+    system_malformed: int
     boilerplate: tuple[BoilerplateDigestOut, ...]
     chunk_paths: tuple[str, ...]
 
@@ -226,6 +228,8 @@ class SessionReportOut(OutputModel):
             malformed_lines=report.malformed_lines,
             duplicate_groups=report.duplicate_groups,
             truncations=report.truncations,
+            system_states=report.system_states,
+            system_malformed=report.system_malformed,
             boilerplate=tuple(BoilerplateDigestOut.from_domain(b) for b in report.boilerplate),
             chunk_paths=report.chunk_paths,
         )
@@ -311,7 +315,8 @@ def _render_human(bundle: EvidenceBundle, render: RenderReport | None = None) ->
         for report in render.sessions:
             user_output(
                 f"render: {report.role} kept {report.entries_kept}/{report.entries_read} "
-                f"({report.duplicate_groups} dup, {report.truncations} trunc) → "
+                f"({report.duplicate_groups} dup, {report.truncations} trunc, "
+                f"{report.system_states} system-state) → "
                 f"{len(report.chunk_paths)} chunk(s)"
             )
 

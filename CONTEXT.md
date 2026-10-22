@@ -531,6 +531,12 @@ A report-only code-improvement lead surfaced during a dream, citing a **survivin
 a minted issue.
 _Avoid_: code TODO, side quest
 
+**System-state evidence**:
+The bounded projection of a Pi system message's prompt sections and tool-name deltas (and a
+compaction's prompt snapshot) that `/learn` renders as `<system_state>` in its session chunks;
+context about what the model was told — never a user turn, user authorization, or workflow event.
+_Avoid_: system prompt dump, tool manifest, user instruction
+
 **Execution lock**:
 The per-worktree `perk-submit-conflict.lock` (`worktreeResolverLock.ts`) that serializes
 participating conflict resolvers on one canonical Git directory; busy for any incumbent, never

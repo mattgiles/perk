@@ -270,7 +270,8 @@ def test_render_json_arm(monkeypatch):
     sessions = data["render"]["sessions"]
     assert len(sessions) == 1
     report = sessions[0]
-    assert set(report) == {
+    # Field order is JSON key order: the system-state rows are additive, after `truncations`.
+    assert list(report) == [
         "role",
         "source",
         "entries_read",
@@ -279,9 +280,12 @@ def test_render_json_arm(monkeypatch):
         "malformed_lines",
         "duplicate_groups",
         "truncations",
+        "system_states",
+        "system_malformed",
         "boilerplate",
         "chunk_paths",
-    }
+    ]
+    assert report["system_states"] == 0 and report["system_malformed"] == 0
     assert report["role"] == "planning-session/main"
     assert report["chunk_paths"] == [
         ".perk/workflow/scratch/learn-evidence/chunks/planning-main.md"
@@ -293,6 +297,7 @@ def test_render_human_arm(monkeypatch):
     result, _ = _run_render(monkeypatch, bundle_factory=_bundle_with_session, as_json=False)
     assert result.exit_code == 0
     assert "render: planning-session/main" in result.output
+    assert "0 system-state) " in result.output
 
 
 def test_evidence_writes_manifest_matching_json_stdout(monkeypatch):
