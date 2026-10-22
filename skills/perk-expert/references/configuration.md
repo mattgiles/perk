@@ -99,16 +99,29 @@ versions once in the bundled `shared/host-floor.yaml` and compares with semver p
 once (20 s timeout) as the first exec-phase step, before any lock sweep, chdir or exec, and refuses
 `pi_version_unsupported` (older or a floor prerelease) or `pi_version_unverifiable` (non-zero exit,
 timeout, spawn failure, or output that is not a version) — exit 1, naming the executable, the
-observed version (or the reason), the required version and `npm install -g
-@earendil-works/pi-coding-agent`; no override. `--dry-run` never probes; `perk init`, `perk doctor`
+observed version (or the reason), the required version and the pinned install command; no
+override. **The adopted Pi pin and its pinned install set** (`PI_ADOPTED_VERSION`,
+`PI_INSTALL_COMMAND` in `perk/substrate/pi_host.py`): perk adopts exactly Pi 1.1.0, and every
+install-guidance string names one command installing Pi and its seven `@earendil-works/*`
+companions at exactly that version — `npm install -g @earendil-works/pi-coding-agent@1.1.0
+@earendil-works/chord@1.1.0 @earendil-works/pi-agent-core@1.1.0 @earendil-works/pi-ai@1.1.0
+@earendil-works/pi-codemode@1.1.0 @earendil-works/pi-mcp@1.1.0 @earendil-works/pi-telemetry@1.1.0
+@earendil-works/pi-tui@1.1.0` — because Pi ships no shrinkwrap and declares its companions at
+`^1.1.0`, so a lockfile-free install of the package alone floats them to the newest releases
+(`pi-codemode` ≥ 1.2.0 breaks Pi 1.1.0's codemode extension at module link; Pi 1.4.0 itself no
+longer ships `chord`, which pi-subagents 0.76.1 refuses). `--dry-run` never probes; `perk init`, `perk doctor`
 and `--help` are never gated by it. Instead the environment checks report the same floor: the `pi`
 row is presence + version and the `node` row checks the major against the supported lines
 (`node.min_version` plus `node.line_floors`) and the full version against that line's floor — a
 major outside the table is `<version> (unsupported release line)` — and an outdated, unsupported
 or unverifiable one is `ok=False` like a missing one (init exits 2 `missing_tool`; doctor `fail`).
-`engines.node` mirrors the lines as `^22.23.4 || ^24.22.1 || ^26.12.1`. The
-managed remote runner installs exactly Pi 1.1.0 (`REMOTE_PI_VERSION`) for both the global CLI and
-the consumer worker SDK, sets up exactly Node 22.23.4 (the lowest supported line) and pins
+An admitted PATH `pi` at a version other than the adopted pin stays `ok` but carries an advisory
+naming the pinned command: a successful `perk init` adds it as a `pi:` warning (failure reports
+never do; the env `--json` row is unchanged) and `perk doctor` reports the row `warn` (`pi ok,
+with a caution`), never `fail`. `engines.node` mirrors the lines as `^22.23.4 || ^24.22.1 || ^26.12.1`. The
+managed remote runner installs the pinned install set (`REMOTE_PI_VERSION`, the adopted pin under
+its remote name) for both the global CLI and the consumer worker SDK (the worker install adds
+`--save-exact`, recording exact pins in `.pi/npm/package.json`), sets up exactly Node 22.23.4 (the lowest supported line) and pins
 `setup-uv` to `>=0.13.4` (`REMOTE_UV_VERSION_SPEC`, mirroring perk's own `[tool.uv]
 required-version`). Pi 1.1.0 is the enforced host floor and
 the remote install pin, **adopted** — not certified — on the characterization record
@@ -117,14 +130,15 @@ records (`pi-1.1.0-dev-pins.md`, `pi-subagents-0.76.1-pin.md`); its live certifi
 code is a later, separate record, still pending. The earlier 1.0.0 certification record
 (`docs/design/archive/pi-1.0.0-certification.md`, verdict PENDING — its three PR-door rows X5b, S7,
 I7b's launch proof were deferred by an operator decision and 4.0.0 shipped with that verdict) is
-historical and certifies nothing about 1.1.0. Only the pinned package is exact: its `^1.1.0`
-`@earendil-works/*` companions are resolved by npm at remote install time (Pi ships no shrinkwrap,
-and the remote installs use no lockfile). The unpinned upgrade command installs the newest Pi,
-admitted when at or above the floor but uncertified at 1.1.0 and after. The floor is a minimum,
+historical and certifies nothing about 1.1.0. A newer Pi is admitted when at or above the floor
+but is uncertified at 1.1.0 and after (and warned about, above). The floor is a minimum,
 separate from the development pins, the pi-subagents pin below, and that remote install pin. The same floor is
 admitted at the SDK boundary, independently of the PATH `pi`: the loaded extension checks the Pi
 SDK it runs in and refuses to load (Pi reports a failed extension load carrying perk's refusal;
-nothing registers), and the headless worker checks the SDK it loaded and ends the run with a typed
+nothing registers — the refusal names the adopted-pin-plus-pinned-set shape and links the public
+requirements reference, `https://github.com/mattgiles/perk/blob/main/docs/user-docs/reference/requirements-and-compatibility.md#version-compatibility`,
+rather than printing the command, because the session's Pi need not be the PATH `pi` and the docs
+tree ships in no distribution), and the headless worker checks the SDK it loaded and ends the run with a typed
 `pi_version_unsupported` / `pi_version_unverifiable` failure before any drive work.
 
 **The TLS trust floors.** Beside the Node lines, the wheel requires `certifi >= 2026.10.19` (the

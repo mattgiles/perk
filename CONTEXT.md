@@ -633,10 +633,25 @@ boundary, the loaded Pi SDK at the extension entry and at the worker entry — `
 before any workflow, resource or provider work on that path.
 _Avoid_: version check, gate
 
+**Adopted Pi pin**:
+The exact Pi version perk adopted (`PI_ADOPTED_VERSION`, `perk/substrate/pi_host.py`), named by
+every install-guidance string and carried by the remote install pin; never below the host floor;
+an exact pin, not a minimum. A PATH `pi` admitted at another version is not refused, only reported
+(an environment-row advisory).
+_Avoid_: floor, latest
+
+**Pinned install set**:
+The eight `@earendil-works/*` packages — `pi-coding-agent` plus its seven caret-floating
+companions — named as exact specs at the adopted Pi pin in one install command
+(`PI_INSTALL_COMMAND`), because Pi ships no shrinkwrap and a lockfile-free install would float the
+companions to the newest `^` satisfier.
+_Avoid_: companions alone, dependencies
+
 **Remote install pin**:
 The exact Pi the managed remote artifacts install (`REMOTE_PI_VERSION`) for both the global CLI
-and the consumer worker SDK; never below the host floor; an exact pin, not a minimum (it may equal
-the floor's version).
+and the consumer worker SDK — the adopted Pi pin under its remote name; both remote installs name
+the pinned install set. Never below the host floor; an exact pin, not a minimum (it may equal the
+floor's version).
 _Avoid_: floor
 
 **Dev pins**:

@@ -394,7 +394,7 @@ parallel dependency-update service or silently refresh version stamps.
 
 ## Deviations recorded by Objective #2707
 
-Items 1–3 recorded by node 1.1 ([characterization record][characterization-1.1.0]); item 4 by node 1.2 ([dev-pins record][dev-pins-1.1.0]); the prose above is the seed as written and is not rewritten here.
+Items 1–3 recorded by node 1.1 ([characterization record][characterization-1.1.0]); item 4 by node 1.2 ([dev-pins record][dev-pins-1.1.0]); item 10 by node 1.5 ([install-pins record][install-pins-1.1.0]); the prose above is the seed as written and is not rewritten here.
 
 1. **Phase 5 mechanism (WP5).** Factory-scoped isolation through Pi's public `McpExtensionOptions` (`loadConfig`, `credentials`, `logPath`, `openUrl`, `updateConfig`) replaces the process-wide `PI_CODING_AGENT_DIR` override and the explicit `ModelRuntime.create({authPath, modelsPath})` — the seed assumed those options were private; they are public, and the override would break supplier-child model auth (pi-subagents' child factory calls a bare `ModelRuntime.create()` and `getAgentDir()`; background children inherit the process env) and worker session persistence (`SessionManager.create(worktree)` places the transcript under the directory the worker deletes at disposal).
 2. **Lockfile rule in node 1.2 (WP1).** Pi ≥ 1.0.1 ships no `npm-shrinkwrap.json` (1.1.0 `_hasShrinkwrap: false`; the current lock's `hasShrinkwrap: true` describes the installed 1.0.0): the nested pi-coding-agent tree's removal/dedup is an intentional upgrade change to keep, not churn to revert; the learned pin-bump mechanics' "keep the shrinkwrapped tree" clause is 1.0.0-era and is corrected through `/learn`.
@@ -404,6 +404,10 @@ Items 1–3 recorded by node 1.1 ([characterization record][characterization-1.1
 Item 5 (node 2.2's live legs, deferred to node 7.1) is recorded in the objective; its entry here is owed by node 7.2's ledger reconciliation.
 
 6. **Codemode lift scope and live leg in node 4.3 (WP4).** Two operator decisions, 2026-10-21: (a) the node text's "proven useful through codemode scripts in real sessions" leg is deferred to node 7.1's "planning composition per enabled codemode mode" row — 4.3 lands on offline real-Pi-1.1.0 session-harness evidence, and the live leg stays an explicit, dated 7.1 obligation, never reported as met; (b) the lift family is every registry read-only stage (`READ_ONLY_STAGES`: `gist-author`, `objective-author`, `objective-plan`, `plan`, `audit`, `objective-refine`), wider than the node text's "planning/refinement" sessions — `audit` included, whose draft loop runs through the mode-over-stage `plan_draft` (reachable there, unsaveable — the `objective-refine` precedent), so the draft/review/revision acceptance holds in all six stages.
+
+Items 7–9 are recorded in the objective; their entries here are owed by node 7.2's ledger reconciliation.
+
+10. **The 1.1.0 install float in node 1.5.** The seed and node 1.4 assumed an exact `@1.1.0` spec pinned the remote installs. Pi's shrinkwrap-free packaging (its companions declared at `^1.1.0`) plus the 1.2.0–1.4.0 releases falsified that: every lockfile-free install of `pi-coding-agent@1.1.0` resolved the 1.4.0 companions, where `pi-codemode` no longer exports a symbol 1.1.0's codemode extension imports, and a bare `npm install -g @earendil-works/pi-coding-agent` — what every guidance string named — installed Pi 1.4.0, which dropped `chord` and so fails pi-subagents 0.76.1's background children. Both remote installs and every guidance string now name the **pinned install set** (the package and its seven companions at exactly 1.1.0, declared once as the adopted Pi pin in `perk/substrate/pi_host.py`). Guidance decision (operator, 2026-10-22): the pinned command everywhere, plus an advisory on an admitted PATH `pi` that is not the adopted pin — a `perk doctor` `warn` and a successful-`perk init` warning, never a refusal — and the extension's SDK-boundary refusal links the public requirements reference rather than a PATH-dependent surface. Measured offline under the operator's toolchain and the remote Node line: [`docs/design/archive/pi-1.1.0-install-pins.md`][install-pins-1.1.0]. A later Pi pair stays node 7.2's procedure.
 
 ### Dispositions the characterization falsified
 
@@ -488,5 +492,6 @@ pi-durable program is a separate planning decision.
 [characterization-1.1.0]: ../design/archive/pi-1.1.0-characterization.md
 [dev-pins-1.1.0]: ../design/archive/pi-1.1.0-dev-pins.md
 [codemode-lift-1.1.0]: ../design/archive/pi-1.1.0-codemode-lift.md
+[install-pins-1.1.0]: ../design/archive/pi-1.1.0-install-pins.md
 [certification]: ../design/archive/pi-1.0.0-certification.md
 [mcp-restoration]: ../design/archive/pi-1.0.0-mcp-restoration.md
