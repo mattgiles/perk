@@ -2,21 +2,42 @@
 // plus the precondition pin: the SDK this suite runs on is itself admitted by the shipped floor.
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   admitHostSdk,
   formatHostSdkRefusal,
   HOST_SDK_PACKAGE,
   type HostSdkAdmission,
   hostSdkErrorType,
-  PI_INSTALL_COMMAND,
+  REQUIREMENTS_DOC_URL,
 } from "./hostAdmission.ts";
 import { loadHostFloor } from "./hostFloor.ts";
 import { loadedHostSdkVersion } from "./hostSdkVersion.ts";
 
-test("constants mirror the Python plane's install command", () => {
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const DOC_URL =
+  "https://github.com/mattgiles/perk/blob/main/docs/user-docs/reference/requirements-and-compatibility.md#version-compatibility";
+
+test("constants: the SDK package and the public requirements reference", () => {
   assert.equal(HOST_SDK_PACKAGE, "@earendil-works/pi-coding-agent");
-  assert.equal(PI_INSTALL_COMMAND, "npm install -g @earendil-works/pi-coding-agent");
+  assert.equal(REQUIREMENTS_DOC_URL, DOC_URL);
+});
+
+test("the refusal's public URL points at a file and heading that exist in this checkout", () => {
+  // The URL is the always-available repair source (the docs tree ships in no distribution), so a
+  // moved or re-headed page must fail here, not on a user.
+  const [, afterBlob] = REQUIREMENTS_DOC_URL.split("/blob/main/");
+  assert.ok(afterBlob, REQUIREMENTS_DOC_URL);
+  const [relative, anchor] = afterBlob.split("#");
+  assert.ok(relative, REQUIREMENTS_DOC_URL);
+  assert.equal(anchor, "version-compatibility");
+  const doc = path.join(REPO_ROOT, relative);
+  assert.ok(fs.existsSync(doc), doc);
+  const headings = fs.readFileSync(doc, "utf8").split("\n");
+  assert.ok(headings.includes("## Version compatibility"), doc);
 });
 
 for (const [observed, canonical] of [
@@ -102,15 +123,21 @@ test("formatHostSdkRefusal: extension texts", () => {
   assert.equal(
     formatHostSdkRefusal(UNSUPPORTED, "extension"),
     "perk requires Pi >= 1.0.0; the Pi running this session is 0.99.2 " +
-      "(@earendil-works/pi-coding-agent VERSION). Upgrade it: " +
-      "npm install -g @earendil-works/pi-coding-agent — perk init and perk doctor report the " +
-      "same requirement.",
+      "(@earendil-works/pi-coding-agent VERSION). Upgrade that Pi to perk's adopted Pi version " +
+      "with its pinned companion set — the exact npm command is in perk's \"Requirements and " +
+      'compatibility" reference (https://github.com/mattgiles/perk/blob/main/docs/user-docs/' +
+      "reference/requirements-and-compatibility.md#version-compatibility), and perk init / " +
+      "perk doctor print it when the PATH pi is not the adopted one.",
   );
   assert.equal(
     formatHostSdkRefusal(UNVERIFIABLE, "extension"),
     "perk requires Pi >= 1.0.0 and could not verify this Pi's version " +
       "(@earendil-works/pi-coding-agent exports no VERSION string (got undefined)). " +
-      "Reinstall it: npm install -g @earendil-works/pi-coding-agent.",
+      "Reinstall that Pi to perk's adopted Pi version with its pinned companion set — the " +
+      'exact npm command is in perk\'s "Requirements and compatibility" reference ' +
+      "(https://github.com/mattgiles/perk/blob/main/docs/user-docs/reference/" +
+      "requirements-and-compatibility.md#version-compatibility), and perk init / perk doctor " +
+      "print it when the PATH pi is not the adopted one.",
   );
 });
 

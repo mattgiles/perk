@@ -44,6 +44,7 @@ from perk.convergence.doctor.checks import _SUBAGENTS_GUIDANCE_VERIFIED_VERSION
 from perk.convergence.init import run_init
 from perk.convergence.init.settings import _npm_version
 from perk.substrate import git, paths
+from perk.substrate.pi_host import PI_ADOPTED_VERSION, PI_INSTALL_COMMAND
 
 
 def _check(name="x", group="g", status="ok", **kw):
@@ -105,11 +106,46 @@ def test_outdated_pi_env_check_maps_to_fail_with_the_floor(monkeypatch):
     assert (pi.name, pi.group, pi.status) == ("pi", "environment", "fail")
     assert pi.message == "pi missing/outdated"
     assert pi.detail == "0.99.2 (floor >= 1.0.0)"
-    assert pi.remediation == (
-        "Upgrade Pi to >= 1.0.0 (found 0.99.2): npm install -g @earendil-works/pi-coding-agent."
-    )
+    assert pi.remediation == f"Upgrade Pi to >= 1.0.0 (found 0.99.2): {PI_INSTALL_COMMAND}."
     report = DoctorReport(checks=[pi], fixed=[], self_repo=False)
     assert not report.healthy
+
+
+def test_admitted_pi_other_than_the_adopted_pin_maps_to_warn(monkeypatch):
+    # An admitted PATH pi at a version other than the adopted pin stays admitted (the floor is a
+    # minimum) but doctor reports the row `warn` with the advisory as its remediation, on every
+    # run — never `fail`, so `healthy` and the exit code are untouched.
+    from perk.convergence import env
+    from perk.substrate.pi_host import PiHost
+
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
+    monkeypatch.setattr(
+        env, "probe_pi_host", lambda path: PiHost(path, "admitted", "1.4.0", "1.1.0", "")
+    )
+    monkeypatch.setattr(doctor_mod.env, "check_environment", lambda: [env._check_pi()])
+    (pi,) = doctor_mod._env_checks()
+    assert (pi.name, pi.group, pi.status) == ("pi", "environment", "warn")
+    assert pi.message == "pi ok, with a caution"
+    assert pi.detail == "1.4.0 (floor >= 1.1.0)"
+    assert pi.remediation == env._check_pi().advisory
+    assert pi.remediation.endswith(f"Install the adopted set: {PI_INSTALL_COMMAND}.")
+    report = DoctorReport(checks=[pi], fixed=[], self_repo=False)
+    assert report.healthy and report.exit_code == 0
+
+
+def test_admitted_pi_at_the_adopted_pin_maps_to_ok(monkeypatch):
+    from perk.convergence import env
+    from perk.substrate.pi_host import PiHost
+
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
+    monkeypatch.setattr(
+        env,
+        "probe_pi_host",
+        lambda path: PiHost(path, "admitted", PI_ADOPTED_VERSION, "1.1.0", ""),
+    )
+    monkeypatch.setattr(doctor_mod.env, "check_environment", lambda: [env._check_pi()])
+    (pi,) = doctor_mod._env_checks()
+    assert (pi.status, pi.message, pi.remediation) == ("ok", "pi ok", "")
 
 
 def test_report_to_dict_shape():

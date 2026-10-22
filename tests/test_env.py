@@ -2,12 +2,11 @@ import pytest
 
 from perk.convergence import env
 from perk.convergence.env import EnvCheck, check_environment, required_tools_ok
-from perk.substrate.pi_host import PiHost
+from perk.substrate.pi_host import PI_ADOPTED_VERSION, PI_INSTALL_COMMAND, PiHost
 
 LINES = "22.x >= 22.23.4, 24.x >= 24.22.1, 26.x >= 26.12.1"
 PI_ABSENT_REMEDIATION = (
-    "Install Pi: npm install -g @earendil-works/pi-coding-agent "
-    f"(requires Node.js on a supported release line: {LINES})."
+    f"Install Pi: {PI_INSTALL_COMMAND} (requires Node.js on a supported release line: {LINES})."
 )
 
 
@@ -177,6 +176,30 @@ def test_pi_admitted(monkeypatch):
     pi = env._check_pi()
     assert probed == ["/opt/bin/pi"]
     assert (pi.ok, pi.detail, pi.remediation) == (True, "1.0.3 (floor >= 1.0.0)", "")
+    assert pi.advisory  # admitted, but not the adopted pin
+
+
+def test_pi_admitted_at_the_adopted_pin_carries_no_advisory(monkeypatch):
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
+    monkeypatch.setattr(env, "probe_pi_host", lambda path: _pi_host("admitted", PI_ADOPTED_VERSION))
+    pi = env._check_pi()
+    assert (pi.ok, pi.remediation, pi.advisory) == (True, "", "")
+    assert pi.detail == f"{PI_ADOPTED_VERSION} (floor >= 1.0.0)"
+
+
+def test_pi_admitted_at_another_version_carries_the_advisory(monkeypatch):
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
+    monkeypatch.setattr(
+        env, "probe_pi_host", lambda path: PiHost("/opt/bin/pi", "admitted", "1.4.0", "1.1.0", "")
+    )
+    pi = env._check_pi()
+    assert (pi.ok, pi.detail, pi.remediation) == (True, "1.4.0 (floor >= 1.1.0)", "")
+    assert pi.advisory == (
+        "Pi 1.4.0 is admitted (floor >= 1.1.0) but is not the adopted Pi 1.1.0: perk's subagent "
+        "waves are characterized only on the adopted Pi with its pinned companions and can be "
+        f"refused on another. Install the adopted set: {PI_INSTALL_COMMAND}."
+    )
+    assert required_tools_ok([pi])  # a caution, never a gate
 
 
 def test_pi_outdated_is_not_ok(monkeypatch):
@@ -185,9 +208,8 @@ def test_pi_outdated_is_not_ok(monkeypatch):
     pi = env._check_pi()
     assert not pi.ok
     assert pi.detail == "0.99.2 (floor >= 1.0.0)"
-    assert pi.remediation == (
-        "Upgrade Pi to >= 1.0.0 (found 0.99.2): npm install -g @earendil-works/pi-coding-agent."
-    )
+    assert pi.remediation == f"Upgrade Pi to >= 1.0.0 (found 0.99.2): {PI_INSTALL_COMMAND}."
+    assert pi.advisory == ""
     assert not required_tools_ok([pi])
 
 
@@ -201,9 +223,8 @@ def test_pi_unverifiable_is_not_ok(monkeypatch):
     pi = env._check_pi()
     assert not pi.ok
     assert pi.detail == "version unverifiable (pi --version timed out after 20 s)"
-    assert pi.remediation == (
-        "Reinstall Pi (>= 1.0.0 required): npm install -g @earendil-works/pi-coding-agent."
-    )
+    assert pi.remediation == f"Reinstall Pi (>= 1.0.0 required): {PI_INSTALL_COMMAND}."
+    assert pi.advisory == ""
 
 
 def test_pi_with_undecodable_output_is_an_unverifiable_row_not_a_crash(monkeypatch, tmp_path):
