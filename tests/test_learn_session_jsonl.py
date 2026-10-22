@@ -6,7 +6,9 @@ from pathlib import Path
 from perk.learn.session_jsonl import (
     NestedCall,
     NestedCalls,
+    SectionChange,
     SessionEntryModel,
+    SystemState,
     parse_session_jsonl,
 )
 
@@ -624,6 +626,103 @@ def test_parse_system_snapshot_projects_ancestry_and_empty_text():
     assert e.content is None and e.data is None and e.tool_name is None
 
 
+def _state(
+    *,
+    content: str = "",
+    sections: tuple[SectionChange, ...] = (),
+    tools_added: tuple[str, ...] = (),
+    tools_removed: tuple[str, ...] = (),
+    malformed: int = 0,
+    dropped: int = 0,
+) -> SystemState:
+    return SystemState(
+        content=content,
+        sections=sections,
+        tools_added=tools_added,
+        tools_removed=tools_removed,
+        malformed=malformed,
+        dropped=dropped,
+    )
+
+
+def test_system_snapshot_projects_sections_and_tool_names():
+    e = _entry(json.dumps(_SYSTEM_SNAPSHOT_FIXTURE))
+    assert e.system_state == _state(
+        sections=(
+            SectionChange("preamble", "You are an expert coding assistant."),
+            SectionChange("rules", "Be concise."),
+        ),
+        tools_added=("read",),
+    )
+    assert e.text == "" and e.entry_id == "s1" and e.parent_id == "c0"
+    # Modelled on the real mid-session delta: changed sections plus full `Tool` records, of which
+    # only the names are projected (descriptions and parameter schemas never are).
+    delta = _entry(
+        _system_delta(
+            "s2",
+            "s1",
+            sections={
+                "tools": "<tools>\n- push_annotations\n</tools>",
+                "rules": "<rules>r</rules>",
+            },
+            toolsAdded=[
+                {
+                    "name": "collect_draft_review_wave",
+                    "description": "Collect the wave.",
+                    "parameters": {"type": "object", "properties": {"id": {"type": "string"}}},
+                },
+                {
+                    "name": "push_annotations",
+                    "description": "Push annotations.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            ],
+            timestamp=2,
+        )
+    )
+    assert delta.system_state == _state(
+        sections=(
+            SectionChange("tools", "<tools>\n- push_annotations\n</tools>"),
+            SectionChange("rules", "<rules>r</rules>"),
+        ),
+        tools_added=("collect_draft_review_wave", "push_annotations"),
+    )
+    removal = _entry(
+        _system_delta("s3", "s2", sections={"rules": None}, toolsRemoved=[{"name": "edit"}])
+    )
+    assert removal.system_state == _state(
+        sections=(SectionChange("rules", None),), tools_removed=("edit",)
+    )
+
+
+def test_system_state_is_none_without_the_grammar_fields():
+    content_only = _entry(_message_line("s1", None, {"role": "system", "content": "You are."}))
+    assert content_only.system_state is None and content_only.text == "You are."
+    # A non-system role carrying the grammar fields is tolerated, never projected: a `<user>`
+    # block must never carry tool declarations.
+    user = _entry(
+        _message_line(
+            "u1",
+            "s1",
+            {
+                "role": "user",
+                "content": "hi",
+                "sections": {"rules": "obey"},
+                "toolsAdded": [{"name": "bash"}],
+            },
+        )
+    )
+    assert user.system_state is None and user.text == "hi"
+    messages: tuple[dict[str, object], ...] = (
+        {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+        {"role": "toolResult", "toolName": "ls", "toolCallId": "c1", "content": []},
+    )
+    for message in messages:
+        assert _entry(_message_line("m1", None, message)).system_state is None
+    assert _entry(json.dumps({"type": "custom", "id": "x1"})).system_state is None
+
+
 def test_parse_system_delta_tolerates_section_and_tool_deltas():
     e = _entry(
         _system_delta(
@@ -636,11 +735,60 @@ def test_parse_system_delta_tolerates_section_and_tool_deltas():
         )
     )
     assert e.role == "system" and e.text == "" and e.entry_id == "s2" and e.parent_id == "s1"
-    # Hostile shapes of the tolerated-not-projected fields never fail the line.
+    # Hostile shapes of the grammar fields never fail the line: they degrade inside the
+    # projection into explicit `malformed` counts.
     hostile = _entry(
         _system_delta("s3", "s2", sections=42, toolsAdded="x", toolsRemoved={}, timestamp="t")
     )
     assert hostile.role == "system" and hostile.entry_id == "s3" and hostile.parent_id == "s2"
+    assert hostile.system_state == _state(malformed=3)
+
+
+def test_system_state_unreadable_parts_counted_siblings_kept():
+    sections = _entry(_system_delta("s2", "s1", sections={"rules": 7, "tools": "ok", "docs": None}))
+    assert sections.system_state == _state(
+        sections=(SectionChange("tools", "ok"), SectionChange("docs", None)), malformed=1
+    )
+    tools = _entry(
+        _system_delta(
+            "s3",
+            "s2",
+            toolsAdded=[{"name": 3}, "bash", {"description": "no name"}, {"name": "ok"}],
+        )
+    )
+    assert tools.system_state == _state(tools_added=("ok",), malformed=3)
+    assert tools.entry_id == "s3" and tools.parent_id == "s2"
+
+
+def test_system_state_caps_drop_the_excess():
+    sections = {f"s{i:02d}": f"text {i}" for i in range(40)}
+    capped = _entry(_system_delta("s1", None, sections=sections))
+    assert capped.system_state is not None
+    assert [c.name for c in capped.system_state.sections] == [f"s{i:02d}" for i in range(32)]
+    assert capped.system_state.dropped == 8 and capped.system_state.malformed == 0
+    tools = _entry(
+        _system_delta(
+            "s2",
+            "s1",
+            sections=sections,
+            toolsAdded=[{"name": f"t{i}"} for i in range(300)],
+            toolsRemoved=[{"name": f"r{i}"} for i in range(10)],
+        )
+    )
+    state = tools.system_state
+    assert state is not None
+    assert state.tools_added == tuple(f"t{i}" for i in range(256))
+    assert state.tools_removed == tuple(f"r{i}" for i in range(10))
+    assert state.dropped == 8 + 44
+    # Oversized text and names are projected verbatim: bounding is the renderer's step.
+    big = _entry(
+        _system_delta(
+            "s3", "s2", sections={"rules": "r" * 50_000}, toolsAdded=[{"name": "n" * 5000}]
+        )
+    )
+    assert big.system_state == _state(
+        sections=(SectionChange("rules", "r" * 50_000),), tools_added=("n" * 5000,)
+    )
 
 
 def test_parse_string_content_is_the_text_for_any_role():
@@ -738,6 +886,12 @@ def test_parse_file_mixed_historical_and_system_entries(tmp_path: Path):
     assert parsed.entries[0].text == "hi"
     assert parsed.entries[1].tool_calls[0].name == "ls"
     assert parsed.entries[2].text == "a.py" and parsed.entries[2].tool_call_id == "c1"
+    assert [e.system_state for e in parsed.entries[:3]] == [None, None, None]
+    snapshot, delta, removal = (e.system_state for e in parsed.entries[3:])
+    assert snapshot is not None and snapshot.tools_added == ("read",)
+    assert [c.name for c in snapshot.sections] == ["preamble", "rules"]
+    assert delta == _state(sections=(SectionChange("rules", "Be terse."),))
+    assert removal == _state(tools_removed=("read",))
 
 
 def test_parse_file_resume_tree_compaction_with_system_entries(tmp_path: Path):
@@ -795,8 +949,127 @@ def test_parse_file_resume_tree_compaction_with_system_entries(tmp_path: Path):
     compaction = by_id["k0"]
     assert compaction.kind == "compaction"
     assert compaction.summary == "compacted so far" and compaction.tokens_before == 4321
-    # The compaction's system snapshot is dropped, never projected.
-    assert not hasattr(compaction, "system_message")
+    # The compaction's system snapshot projects through the same record, `content` included.
+    assert compaction.system_state == _state(
+        content="snapshot prompt",
+        sections=(SectionChange("preamble", "You are an expert coding assistant."),),
+    )
     assert compaction.text == ""
+    assert by_id["s2"].system_state == _state(tools_removed=("edit",))
     assert by_id["s1"].parent_id == "c0" and by_id["s2"].parent_id == "k0"
     assert by_id["a2"].text == "abandoned" and by_id["a3"].text == "kept"
+
+
+def _compaction_line(entry_id: str, parent_id: str | None, system_message: object) -> str:
+    return json.dumps(
+        {
+            "type": "compaction",
+            "id": entry_id,
+            "parentId": parent_id,
+            "summary": "compacted",
+            "tokensBefore": 99,
+            "systemMessage": system_message,
+        }
+    )
+
+
+def test_compaction_system_snapshot_degrades_locally():
+    not_an_object = _entry(_compaction_line("k1", "a1", "nope"))
+    assert not_an_object.system_state == _state(malformed=1)
+    assert not_an_object.summary == "compacted" and not_an_object.tokens_before == 99
+    assert not_an_object.entry_id == "k1" and not_an_object.parent_id == "a1"
+
+    bad_content = _entry(
+        _compaction_line("k2", "k1", {"content": 5, "toolsAdded": [{"name": "read"}]})
+    )
+    assert bad_content.system_state == _state(tools_added=("read",), malformed=1)
+
+    text_blocks = _entry(
+        _compaction_line(
+            "k3", "k2", {"content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}
+        )
+    )
+    assert text_blocks.system_state == _state(content="a\n\nb")
+
+    # pi-ai's list arm is `TextContent[]`: every other member is a malformed instruction record,
+    # counted one each, with the readable siblings kept.
+    mixed = _entry(
+        _compaction_line(
+            "k4",
+            "k3",
+            {
+                "content": [
+                    {"type": "text", "text": 7},
+                    "x",
+                    {"type": "image"},
+                    {"type": "text", "text": "kept"},
+                ]
+            },
+        )
+    )
+    assert mixed.system_state == _state(content="kept", malformed=3)
+
+    all_invalid = _entry(_compaction_line("k5", "k4", {"content": [{"type": "text", "text": 7}]}))
+    assert all_invalid.system_state == _state(malformed=1)
+
+    absent = _entry(_compaction_line("k6", "k5", None))
+    assert absent.system_state is None
+
+    # A `systemMessage` on a non-compaction entry is tolerated, never projected.
+    on_message = _entry(
+        json.dumps(
+            {
+                "type": "message",
+                "id": "m1",
+                "message": {"role": "assistant", "content": "ok"},
+                "systemMessage": {"content": "prompt", "toolsAdded": [{"name": "bash"}]},
+            }
+        )
+    )
+    assert on_message.system_state is None and on_message.text == "ok"
+
+
+def test_parse_file_system_state_never_makes_the_line_malformed(tmp_path: Path):
+    # A full-file regression: the projection runs outside the parser's per-line except arm, so
+    # every hostile shape must degrade inside it — never raise, never cost the line, its ancestry
+    # or the entries after it.
+    system_lines = [
+        _system_delta("s1", None, sections=42, toolsAdded="x", toolsRemoved={}),
+        _system_delta(
+            "s2",
+            "s1",
+            sections={"rules": 7, "tools": "ok", "docs": None},
+            toolsAdded=[{"name": 3}, "bash", {"description": "no name"}, {"name": "ok"}],
+        ),
+        _compaction_line("k1", "s2", "nope"),
+        _compaction_line(
+            "k2",
+            "k1",
+            {
+                "content": [{"type": "text", "text": 7}, "x", {"type": "text", "text": "kept"}],
+                "sections": [1, 2],
+                "toolsRemoved": [None],
+            },
+        ),
+    ]
+    lines = [
+        json.dumps({"type": "session", "id": "S", "version": 3}),
+        *system_lines,
+        _message_line("u1", "k2", {"role": "user", "content": "next"}),
+    ]
+    log = tmp_path / "s.jsonl"
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    parsed = parse_session_jsonl(log)
+    assert parsed.malformed_lines == 0
+    assert [(e.entry_id, e.parent_id) for e in parsed.entries] == [
+        ("s1", None),
+        ("s2", "s1"),
+        ("k1", "s2"),
+        ("k2", "k1"),
+        ("u1", "k2"),
+    ]
+    assert [e.raw_chars for e in parsed.entries[:4]] == [len(line) for line in system_lines]
+    assert [e.system_state.malformed for e in parsed.entries[:4] if e.system_state] == [3, 4, 1, 4]
+    assert parsed.entries[3].system_state is not None
+    assert parsed.entries[3].system_state.content == "kept"
+    assert parsed.entries[4].text == "next" and parsed.entries[4].system_state is None
