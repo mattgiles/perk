@@ -4043,7 +4043,8 @@ statically, and links the seam only by a dynamic import after admission (guard-e
   no global token sent), settled connection failures (missing command, 5xx, rejected credential)
   with no stderr line, `enabled: false` and trust, a late registration declared after a barrier
   turn plus a lazy reconnect across an HTTP session expiry, an in-flight call cancelled by an
-  external abort, and transports closed before the throwaway dir is removed.
+  external abort, an abort during the direct-server startup wait refusing the run's first request
+  (zero provider requests), and transports closed before the throwaway dir is removed.
 - **Model-call policy (a constrained capability)** — `extension/worker/modelCallPolicy.ts`. Pi
   reports a codemode script's `models.*` usage only when the script ends (its mid-script
   `tool_execution_update` partials carry per-call rows with `cost` only, never tokens), and no
@@ -4174,7 +4175,13 @@ The drive terminates on the **first** of:
      drive-session handle latches the abort and re-fires `session.abort()` on every later
      `agent_start`, which Pi delivers synchronously before the run's first request, so pi-ai
      refuses that request before provider dispatch: **zero** provider requests and no tool
-     follow a preflight trip.
+     follow a preflight trip. The latch reaches run starts only — a compaction controller Pi
+     mints after the trip (`_runAutoCompaction`) is outside it — and that suffices because no
+     auto-compaction can precede the first request's refusal on the worker's fresh session: a
+     virtual model's routing `prepareRequest` is the only turn-1 compaction check (a physical
+     model compacts from turn 2 on), and `prepareCompaction` finds no history before the
+     branch's only user message, returning before `compaction_start` (source-derived at Pi
+     1.1.0, not measured).
 4. **A post-acceptance provider error Pi does not recover from** → `failed`/`model_error`.
    Pi's `turn_end` carries the turn's assistant message for error turns too, and the seam's fold
    **replaces** its recorded error on every `turn_end` (that turn's error, or none) — so an error
