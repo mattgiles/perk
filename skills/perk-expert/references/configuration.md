@@ -411,6 +411,23 @@ options (their codemode's `models` setting, their tools' direct model calls). Mo
 past the refusal (an aliased `models` in a project-registered codemode, a project tool calling a
 classifier itself) is counted at turn end and bounded by the turn, token and wall-clock limits.
 
+The worker's `RunOutcome` additionally carries **`model`** and **`usage`** (additive fields; a
+remote run's plan-issue comment and job summary render them as `Model:` / `Usage:` lines after the
+budget, and an older outcome without the keys renders neither). `model` = `{selected, dispatched}`
+— the session's selection as `provider/id` (a virtual model names the router) beside the
+successful responses per physical model (`provider/model`, `→<responseModel>` when the provider
+reported another id; failed/aborted responses never count); `model: null` (`Model: unavailable`)
+means no session was constructed (the entry sample, a factory failure, a `--model` selection
+refusal), while a bind failure, the terminating-tool preflight or a pre-prompt abort report
+`dispatched: []`. `usage` = the same records the budget counts, once each (`records`, `input`,
+`output`, `cacheRead`, `cacheWrite`, `cost` = Σ pi's recorded `cost.total`); `budget.tokens` always
+equals `input + output`, and cache reads/writes and cost are **reported, never budgeted**.
+`usage: null` (`Usage: unavailable`) means no usage record exists — never zero; an unpriced model's
+recorded cost is `0`. Classifier and image calls have no separate counter (only the token-shaped
+usage a provider reports on the tool result). `perk objective run`'s cumulative budget does not sum
+cost, and report-wave children's cost is `unavailable` everywhere (perk reads no pi-subagents
+accounting field).
+
 The worker's own codemode is **pi's builtin `codemode`**, loaded beside pi's builtin
 `tool_search` and pi's MCP builtin with the CLI's builtin identity (`builtin:codemode` /
 `builtin:tool-search` / `builtin:mcp`). Codemode and `tool_search` register inactive; the repo's

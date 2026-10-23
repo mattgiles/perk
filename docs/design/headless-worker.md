@@ -331,6 +331,10 @@ Lock now; 1.3 builds the event stream that carries it, 4.1 asserts it.
                     | "budget" | "external_abort" | "model_error",
   "pr": { "number": 0, "url": "" } | null,   // populated on a completed implement; from SubmitDetails
   "budget": { "turns": 0, "tokens": 0, "elapsed_ms": 0 },
+  "model": { "selected": "provider/id" | null,                  // additive; null = no session
+             "dispatched": [{ "model": "provider/model", "responses": 0 }] } | null,
+  "usage": { "records": 0, "input": 0, "output": 0,             // additive; null = no record
+             "cacheRead": 0, "cacheWrite": 0, "cost": 0 } | null,
   "error": { "type": "string", "message": "string", "summary": "string" } | null
 }
 ```
@@ -340,6 +344,11 @@ Lock now; 1.3 builds the event stream that carries it, 4.1 asserts it.
   discipline; the full detail stays in the 1.3 structured event channel, not in the model-visible
   surface).
 - The shape is **additive-stable**: 1.3 may add fields; existing fields keep their meaning.
+- `model` and `usage` are such additive fields: the session's selection beside the physical models
+  that answered (`null` before a session was constructed), and the once-counted usage ledger over
+  the budget's own records (`budget.tokens === usage.input + usage.output`; cache reads/writes and
+  Pi's recorded cost carried, never budgeted; `null` when no usage record exists — never zero).
+  `shared/contracts.md` §8.11 owns the exact rules.
 
 ### Construction recipe (the shape 1.2 instantiates — pins the resolved choices)
 

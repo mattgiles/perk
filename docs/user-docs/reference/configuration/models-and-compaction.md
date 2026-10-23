@@ -57,6 +57,24 @@ directly. Model usage that gets past the refusal — a script that reaches `mode
 another name, or a project tool that calls a classifier itself — is counted at the end of each
 turn and bounded by the worker's turn, token, and wall-clock limits.
 
+The worker's run outcome also reports **which model ran and what the run consumed**, and a remote
+run's plan-issue comment and job summary show both as two lines after the budget:
+
+- `Model: selected=<provider/id>; dispatched=<provider/model> ×<n>, …` — the model the session
+  selected (with a virtual model, the router) beside each model that actually answered and how many
+  successful responses it gave. Failed and aborted responses are not listed. `Model: unavailable`
+  means the worker refused or failed before it created a session (an unknown or unauthenticated
+  `--model`, for example); `selected=none` / `dispatched=none` mean a session existed but exposed no
+  selection or never answered.
+- `Usage: records=<n>; fresh=<n> (in=<n> out=<n>); cache read=<n> write=<n>; cost=$<amount>` —
+  the same usage records the budget counts, once each. Fresh tokens always equal the budget's
+  token count. Cache reads and writes and the cost (Pi's recorded cost; a model without a price
+  table records `$0.0000`) are **reported, not budgeted**. `Usage: unavailable` means no usage
+  record exists — not zero. Classifier and image calls have no separate counter: their usage
+  appears only when the provider reports it on the tool's result.
+
+Runs recorded before this release carry neither line.
+
 The worker's own codemode is **Pi's builtin `codemode`**, which the worker loads together with
 Pi's builtin `tool_search` and Pi's builtin MCP support. Codemode and `tool_search` start switched
 off; the repo's `defaultTools` decides, exactly as in an interactive session (`+codemode` turns
