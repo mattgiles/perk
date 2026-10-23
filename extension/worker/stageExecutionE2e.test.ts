@@ -718,6 +718,12 @@ test("e2e: NO-EXTENSION-TOOLS — empty packages list → zero-turn failed/no_ex
   assert.equal(outcome.error?.type, "no_extension_tools");
   assert.ok(outcome.error?.message.includes("submit"), "names the missing terminating tool");
   assert.equal(outcome.budget.turns, 0, "zero turns — the model never ran");
+  // Post-construction: the session exists, so its selection is reported; nothing was dispatched
+  // and no usage record exists.
+  assert.ok(outcome.model !== null, "a constructed session reports its model identity");
+  assert.equal(typeof outcome.model.selected, "string");
+  assert.deepEqual(outcome.model.dispatched, []);
+  assert.equal(outcome.usage, null);
 
   assert.deepEqual(
     events.map((e) => e.kind),
@@ -863,6 +869,9 @@ function assertZeroTurnRefusal(
   assert.equal(outcome.error?.type, errorType);
   assert.ok((outcome.error?.summary.length ?? 0) > 0, "a non-empty capped summary");
   assert.equal(outcome.budget.turns, 0, "zero turns — the model never ran");
+  // Pre-construction: no session existed, so model identity and usage are unavailable.
+  assert.equal(outcome.model, null, "no session was constructed");
+  assert.equal(outcome.usage, null, "no usage record exists");
   assert.deepEqual(
     events.map((e) => e.kind),
     ["run_started", "run_finished"],
@@ -1111,6 +1120,14 @@ test("e2e: a virtual model routes to a physical target with a different identity
     { provider: EXT_PROVIDER, model: "m-1" },
     "the assistant message records the physical target",
   );
+  // The outcome keeps the two identities apart: the selection names the router, the dispatch
+  // census the physical model that answered every response.
+  assert.equal(outcome.model?.selected, "router/auto");
+  assert.deepEqual(
+    outcome.model?.dispatched.map((d) => d.model),
+    [`${EXT_PROVIDER}/m-1`],
+  );
+  assert.equal(outcome.model?.dispatched[0]?.responses, recorded.length);
 });
 
 test("e2e: a `:thinking` suffix on --model survives the reorder → session thinking level applied", async () => {
@@ -1128,6 +1145,7 @@ test("e2e: a `:thinking` suffix on --model survives the reorder → session thin
   assert.equal(outcome.status, "completed");
   assert.equal(observed.model, `${EXT_PROVIDER}/m-1`);
   assert.equal(observed.thinkingLevel, "high");
+  assert.equal(outcome.model?.selected, `${EXT_PROVIDER}/m-1`, "the suffix is not part of the id");
 });
 
 // --- Tool-driven model usage: counted once, bounded at the worker's own boundaries --------------
@@ -1144,7 +1162,10 @@ const CTX =
 
 /** The session surfaces the accounting scenarios read (structural; Pi's `AgentSession`). */
 interface CensusSession {
-  getSessionStats(): { tokens: { input: number; output: number } };
+  getSessionStats(): {
+    tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
+    cost: number;
+  };
   readonly cacheWarmingStatus: unknown;
   readonly autoCompactionEnabled: boolean;
   readonly autoRetryEnabled: boolean;
@@ -1262,7 +1283,21 @@ function assertAccounted(
     piCensus(runtime),
     "budget.tokens equals Pi's own census (getSessionStats input + output)",
   );
+  // The usage ledger folds the same records: equal to Pi's census on every field it carries.
+  const usage = result.outcome.usage;
+  assert.ok(usage !== null, "a drive that ran records usage");
+  assert.equal(usage.input + usage.output, result.outcome.budget.tokens, "fresh = budget");
+  const stats = censusSession(runtime).getSessionStats();
+  assert.equal(usage.cacheRead, stats.tokens.cacheRead, "cacheRead equals Pi's census");
+  assert.equal(usage.cacheWrite, stats.tokens.cacheWrite, "cacheWrite equals Pi's census");
+  assert.ok(
+    Math.abs(usage.cost - stats.cost) < 1e-9,
+    `cost ${usage.cost} equals Pi's census ${stats.cost}`,
+  );
 }
+
+/** The classifier's priced usage for the MODEL-TOOL rows (the faux chat model records cost 0). */
+const PRICED_CLASSIFIER_USAGE = { input: 700, output: 300, cacheRead: 40, cost: 0.0125 };
 
 /** A codemode tool call carrying `code`. */
 const codemodeCall = (code: string) =>
@@ -1277,7 +1312,7 @@ const codemodeOutcomes = (events: RunEvent[]) =>
 test("e2e: MODEL-TOOL direct — a model-using tool's reported usage is counted once; warming off, compaction and retry on Pi's defaults", async () => {
   const classifier = await recordingClassifier({
     ...CLASSIFIER,
-    usage: { input: 700, output: 300 },
+    usage: PRICED_CLASSIFIER_USAGE,
   });
   const observed = observeAccounting();
   const result = await runDrive({
@@ -1297,7 +1332,7 @@ test("e2e: MODEL-TOOL direct — a model-using tool's reported usage is counted 
   assert.equal(result.outcome.terminal_signal, "submit_tool");
   assert.deepEqual(
     classifier.calls,
-    [{ seq: 1, abortedAtStart: false, stopReason: "stop", usage: { input: 700, output: 300 } }],
+    [{ seq: 1, abortedAtStart: false, stopReason: "stop", usage: PRICED_CLASSIFIER_USAGE }],
     "exactly one classifier request",
   );
   assert.equal(toolResultUsageSum(runtime), 1_000, "the tool result carries the classifier usage");
@@ -1305,6 +1340,10 @@ test("e2e: MODEL-TOOL direct — a model-using tool's reported usage is counted 
     result.outcome.budget.tokens - assistantUsageSum(runtime),
     1_000,
     "the budget counted the tool usage exactly once",
+  );
+  assert.ok(
+    Math.abs((result.outcome.usage?.cost ?? 0) - 0.0125) < 1e-9,
+    "the classifier's cost is counted once (the faux chat model records 0)",
   );
   // No project compaction/retry keys in the scaffold: Pi's defaults, honoured by the worker.
   assertWorkerKnobs(runtime, { compaction: true, retry: true });
@@ -1314,7 +1353,7 @@ test("e2e: MODEL-TOOL direct — a model-using tool's reported usage is counted 
 test("e2e: MODEL-TOOL nested — a model-using tool called from a codemode script is counted once", async () => {
   const classifier = await recordingClassifier({
     ...CLASSIFIER,
-    usage: { input: 700, output: 300 },
+    usage: PRICED_CLASSIFIER_USAGE,
   });
   const observed = observeAccounting();
   const result = await runDrive({
@@ -1349,6 +1388,10 @@ test("e2e: MODEL-TOOL nested — a model-using tool called from a codemode scrip
     result.outcome.budget.tokens - assistantUsageSum(runtime),
     1_000,
     "counted once — the nested end is never summed",
+  );
+  assert.ok(
+    Math.abs((result.outcome.usage?.cost ?? 0) - 0.0125) < 1e-9,
+    "the nested cost is counted once, never doubled",
   );
   assertAccounted(result, runtime);
 });

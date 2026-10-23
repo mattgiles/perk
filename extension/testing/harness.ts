@@ -650,7 +650,20 @@ export interface ClassifyCall {
   /** The request's signal was already aborted when it reached the provider. */
   abortedAtStart: boolean;
   stopReason?: "stop" | "error" | "aborted";
-  usage?: { input: number; output: number };
+  usage?: ClassifierUsage;
+}
+
+/**
+ * The fixed usage a recording classifier reports per request. `cacheRead` / `cacheWrite` default
+ * to 0; `cost` is the request's USD total, recorded as Pi's `cost.input` and `cost.total` (0 when
+ * omitted — the non-vacuous cost leg, since Pi's faux chat provider always records a zero).
+ */
+export interface ClassifierUsage {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  cost?: number;
 }
 
 /** Resolve after `ms`, or as soon as `signal` aborts (an abort resolves; it never rejects). */
@@ -671,14 +684,14 @@ async function waitOrAbort(ms: number, signal: AbortSignal | undefined): Promise
  * race it against the drive so it can never dangle.
  *
  * Auth resolves unconditionally (configured against any credential store). Each request reports
- * the fixed `usage`, waits (`delayMs`, default 0; or — for `seq >= hold.from` — until its signal
+ * the fixed `usage` (`ClassifierUsage`), waits (`delayMs`, default 0; or — for `seq >= hold.from` — until its signal
  * aborts, `hold.maxMs` being only a hang guard), then ends `aborted` without usage when its signal
  * aborted during the wait, `error` WITH usage when `seq === failCall`, else `stop` with usage.
  */
 export async function recordingClassifier(opts: {
   provider: string;
   id: string;
-  usage: { input: number; output: number };
+  usage: ClassifierUsage;
   delayMs?: number;
   failCall?: number;
   hold?: { from: number; maxMs: number };
@@ -692,13 +705,16 @@ export async function recordingClassifier(opts: {
   const api = "faux-classify";
   const calls: ClassifyCall[] = [];
   const waiters = new Map<number, (() => void)[]>();
+  const cacheRead = opts.usage.cacheRead ?? 0;
+  const cacheWrite = opts.usage.cacheWrite ?? 0;
+  const cost = opts.usage.cost ?? 0;
   const usage = {
     input: opts.usage.input,
     output: opts.usage.output,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: opts.usage.input + opts.usage.output,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cacheRead,
+    cacheWrite,
+    totalTokens: opts.usage.input + opts.usage.output + cacheRead + cacheWrite,
+    cost: { input: cost, output: 0, cacheRead: 0, cacheWrite: 0, total: cost },
   };
   const classify = async (
     model: { provider: string; id: string },
