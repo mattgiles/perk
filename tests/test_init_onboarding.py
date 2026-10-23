@@ -255,6 +255,66 @@ def test_guide_pi_without_node_notes_node_first(monkeypatch):
     ]
 
 
+def _advisory_pi_env() -> list[EnvCheck]:
+    return [
+        EnvCheck("pi", True, "1.4.0 (floor >= 1.1.0)", "", advisory="not the adopted Pi")
+        if c.name == "pi"
+        else c
+        for c in _ALL_OK
+    ]
+
+
+def test_guide_offers_the_adopted_set_on_the_advisory_row(monkeypatch):
+    confirms: list[str] = []
+    monkeypatch.setattr(
+        onboarding, "user_confirm", lambda prompt, *, default: confirms.append(prompt) or True
+    )
+    installed: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        npm_mod, "install_global", lambda spec, *more, timeout: installed.append((spec, *more))
+    )
+    monkeypatch.setattr(
+        onboarding.shutil, "which", lambda name: "/usr/local/bin/pi" if name == "pi" else None
+    )
+    changes, warnings = onboarding.guide_missing_tools(_advisory_pi_env())
+    assert confirms == [f"Install the adopted Pi set via {PI_INSTALL_COMMAND}?"]
+    assert installed == [PI_INSTALL_SPECS]
+    assert changes == [
+        "tool pi: installed (npm -g "
+        f"@earendil-works/pi-coding-agent@{PI_ADOPTED_VERSION} + pinned companions)"
+    ]
+    assert warnings == []
+
+
+def test_guide_advisory_decline_appends_no_warning(monkeypatch):
+    monkeypatch.setattr(onboarding, "user_confirm", lambda prompt, *, default: False)
+    monkeypatch.setattr(npm_mod, "install_global", _never)
+    assert onboarding.guide_missing_tools(_advisory_pi_env()) == ([], [])
+
+
+def test_guide_advisory_install_failure_names_the_pinned_command(monkeypatch):
+    monkeypatch.setattr(onboarding, "user_confirm", lambda prompt, *, default: True)
+
+    def _boom(spec, *more, timeout):
+        raise npm_mod.NpmError("registry down")
+
+    monkeypatch.setattr(npm_mod, "install_global", _boom)
+    changes, warnings = onboarding.guide_missing_tools(_advisory_pi_env())
+    assert changes == []
+    assert warnings == [
+        f"pi install failed (registry down); install manually: {PI_INSTALL_COMMAND}"
+    ]
+
+
+def test_guide_advisory_on_another_row_is_not_offered(monkeypatch):
+    monkeypatch.setattr(onboarding, "user_confirm", _never)
+    checks = [
+        EnvCheck("cloc", True, "ok", "", advisory="caution") if c.name == "cloc" else c
+        for c in _ALL_OK
+    ]
+    assert onboarding.guide_missing_tools(checks) == ([], [])
+
+
 # --- offer_gh_login ---------------------------------------------------------------------------
 
 
@@ -643,6 +703,61 @@ def test_init_warns_on_an_admitted_pi_that_is_not_the_adopted_pin(git_repo, stub
         "detail": "1.4.0 (floor >= 1.1.0)",
         "remediation": "",
     }
+
+
+def _real_guide_with_pi_on_path(monkeypatch) -> None:
+    # stub_env stubs the guided pass for everyone; these tests drive the real one end to end.
+    monkeypatch.setattr(init_mod, "guide_missing_tools", onboarding.guide_missing_tools)
+    real_which = onboarding.shutil.which
+    monkeypatch.setattr(
+        onboarding.shutil,
+        "which",
+        lambda name, *a, **kw: "/usr/local/bin/pi" if name == "pi" else real_which(name, *a, **kw),
+    )
+
+
+def _pi_warnings(report: InitReport) -> list[str]:
+    return [w for w in report.warnings if w.startswith("pi")]
+
+
+def test_interactive_init_installs_the_adopted_set_on_the_advisory(git_repo, stub_env, monkeypatch):
+    _real_guide_with_pi_on_path(monkeypatch)
+    probes = iter([_env_with_pi_advisory(), list(_ALL_OK)])  # the re-probe is advisory-free
+    monkeypatch.setattr(env_mod, "check_environment", lambda: next(probes))
+    monkeypatch.setattr(onboarding, "user_confirm", lambda prompt, *, default: True)
+    installed: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        npm_mod, "install_global", lambda spec, *more, timeout: installed.append((spec, *more))
+    )
+    report = run_init(git_repo, verify=True)
+    assert report.ok
+    assert installed == [PI_INSTALL_SPECS]
+    assert any(c.startswith("tool pi: installed (") for c in report.changes)
+    assert _pi_warnings(report) == []
+
+
+def test_interactive_init_advisory_decline_warns_exactly_once(git_repo, stub_env, monkeypatch):
+    _real_guide_with_pi_on_path(monkeypatch)
+    monkeypatch.setattr(env_mod, "check_environment", _env_with_pi_advisory)
+    confirms: list[str] = []
+    monkeypatch.setattr(
+        onboarding, "user_confirm", lambda prompt, *, default: confirms.append(prompt) or False
+    )
+    monkeypatch.setattr(npm_mod, "install_global", _never)
+    report = run_init(git_repo, verify=True)
+    assert report.ok
+    assert confirms == [f"Install the adopted Pi set via {PI_INSTALL_COMMAND}?"]
+    assert _pi_warnings(report) == [f"pi: {_PI_ADVISORY}"]
+
+
+def test_non_interactive_init_never_offers_on_the_advisory(git_repo, stub_env, monkeypatch):
+    _real_guide_with_pi_on_path(monkeypatch)
+    monkeypatch.setattr(env_mod, "check_environment", _env_with_pi_advisory)
+    monkeypatch.setattr(onboarding, "user_confirm", _never)
+    monkeypatch.setattr(npm_mod, "install_global", _never)
+    report = run_init(git_repo, verify=True, interactive=False)
+    assert report.ok
+    assert _pi_warnings(report) == [f"pi: {_PI_ADVISORY}"]
 
 
 def test_init_at_the_adopted_pin_adds_no_pi_warning(git_repo, stub_env, monkeypatch):

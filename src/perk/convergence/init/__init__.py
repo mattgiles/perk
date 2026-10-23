@@ -380,8 +380,11 @@ def run_init(
         checks = env.check_environment()
         # The interactive guided-install pass runs ONCE, before any git shell-out (git itself
         # may be the missing tool), then the environment is re-probed. Gap-driven: with every
-        # required tool present it prompts for nothing and returns `([], [])`.
-        if interactive and not env.required_tools_ok(checks):
+        # required tool present and no advisory (an admitted Pi that is not the adopted one) it
+        # prompts for nothing and returns `([], [])`.
+        if interactive and (
+            not env.required_tools_ok(checks) or any(c.ok and c.advisory for c in checks)
+        ):
             guided_changes, guided_warnings = guide_missing_tools(checks)
             changes.extend(guided_changes)
             warnings.extend(guided_warnings)

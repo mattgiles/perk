@@ -1023,6 +1023,53 @@ def test_fix_linear_label_failure_lands_on_fix_errors(scaffolded_perk_repo, stub
     assert any("rate limited" in e for e in report.fix_errors)
 
 
+def test_fix_runs_the_pi_repair_gesture_once(scaffolded_perk_repo, stub_env, monkeypatch):
+    # The verify-gated Pi repair: called once with the env rows; its lines land on the report.
+    from perk.convergence import env
+
+    seen: list[list[str]] = []
+
+    def fake_repair(checks):
+        seen.append([c.name for c in checks])
+        return (["pi: installed the adopted Pi set"], ["pi: residue"])
+
+    monkeypatch.setattr(env, "repair_pi", fake_repair)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=True)
+    assert seen == [["git", "gh", "node", "pi", "cloc"]]
+    assert "pi: installed the adopted Pi set" in report.fixed
+    assert "pi: residue" in report.fix_errors
+
+
+def test_fix_without_verify_never_runs_the_pi_repair(scaffolded_perk_repo, monkeypatch):
+    from perk.convergence import env
+
+    monkeypatch.setattr(env, "repair_pi", lambda checks: pytest.fail("repair_pi ran unverified"))
+    run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+
+
+def test_bare_doctor_never_runs_the_pi_repair(scaffolded_perk_repo, stub_env, monkeypatch):
+    from perk.convergence import env
+
+    monkeypatch.setattr(env, "repair_pi", lambda checks: pytest.fail("repair_pi ran without --fix"))
+    run_doctor(scaffolded_perk_repo, verify=True)
+
+
+def test_incoherent_pi_env_check_maps_to_fail_naming_doctor_fix(monkeypatch):
+    from perk.convergence import env
+    from perk.substrate.pi_host import PiHost
+
+    detail = "@earendil-works/pi-codemode does not resolve"
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
+    monkeypatch.setattr(
+        env, "probe_pi_host", lambda path: PiHost(path, "incoherent", "1.1.0", "1.1.0", detail)
+    )
+    monkeypatch.setattr(doctor_mod.env, "check_environment", lambda: [env._check_pi()])
+    (pi,) = doctor_mod._env_checks()
+    assert (pi.name, pi.status, pi.message) == ("pi", "fail", "pi missing/outdated")
+    assert pi.detail == f"1.1.0 (floor >= 1.1.0) — companions: {detail}"
+    assert pi.remediation == f"Run `perk doctor --fix` (it runs: {PI_INSTALL_COMMAND})."
+
+
 def test_fix_skips_linear_repair_without_selection(scaffolded_perk_repo, stub_env, monkeypatch):
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     called = []

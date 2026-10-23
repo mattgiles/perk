@@ -281,6 +281,12 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
         # tests; a sync that links missing skills clears the `bindings`/`skills-delivery`
         # findings on the post-fix re-verify.
         if verify:
+            # The Pi host repair gesture (verify-gated network I/O, never a ManagedConvergence):
+            # any non-green `pi` row takes the pinned eight-spec install, re-probed. First, so the
+            # steps below run on a repaired host; the post-fix re-verify re-runs `_env_checks`.
+            pi_fixed, pi_errors = env.repair_pi(env.check_environment())
+            fixed.extend(pi_fixed)
+            fix_errors.extend(pi_errors)
             # Re-converge the repo-authored-skills fragment BEFORE the sync (so the skills CLI
             # sees the declared `.perk/skills/` source), mirroring init's order. Structural errors
             # ride loudly on `fix_errors`; the post-fix re-verify re-runs `_repo_skills_check` so
