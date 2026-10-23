@@ -155,6 +155,26 @@ def test_guide_installs_pi_happy_path(monkeypatch):
     assert warnings == []
 
 
+def test_guide_pi_install_reaches_npm_with_the_pinned_set(monkeypatch):
+    # The happy path above stubs the gateway; this one keeps the real `npm.install_global` and
+    # stubs only the subprocess boundary, so the guided install is pinned down to the npm argv.
+    monkeypatch.setattr(onboarding, "user_confirm", lambda prompt, *, default: True)
+    spawned: list[tuple[list[str], object]] = []
+
+    def fake_run(argv, **kwargs):
+        spawned.append((list(argv), kwargs["timeout"]))
+        return subprocess.CompletedProcess(list(argv), 0, "", "")
+
+    monkeypatch.setattr(proc_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        onboarding.shutil, "which", lambda name: "/usr/local/bin/pi" if name == "pi" else None
+    )
+    changes, warnings = onboarding.guide_missing_tools(_env("pi"))
+    assert spawned == [(["npm", "install", "-g", *PI_INSTALL_SPECS], 600)]
+    assert len(changes) == 1 and changes[0].startswith("tool pi: installed (")
+    assert warnings == []
+
+
 def test_guide_decline_warns_with_the_remediation(monkeypatch):
     monkeypatch.setattr(onboarding, "user_confirm", lambda prompt, *, default: False)
     monkeypatch.setattr(npm_mod, "install_global", _never)
