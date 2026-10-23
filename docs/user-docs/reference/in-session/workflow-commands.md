@@ -203,12 +203,22 @@ terminal) re-enters the pass.
 Classify review feedback in an isolated child, fix only actionable items yourself, then publish and
 resolve. `--preview` classifies only. Paired tools:
 
-- **`classify_review_feedback`** — run the read-only `perk.review-classifier` through the wave
-  module and return an engine-validated report. Raw GitHub text never enters the parent session;
-  on failure, surface the error and stop. *Non-terminating.*
+- **`classify_review_feedback`** — perk fetches the PR's feedback snapshot itself (`perk pr
+  feedback`), hands the read-only `perk.review-classifier` (through the wave module) exactly the
+  open review threads and discussion comments under a size budget, validates the returned
+  classification against that snapshot, and derives the counts (path/line anchors come from the
+  snapshot too). Resolved threads and PR-level review bodies are excluded and only counted; a
+  snapshot too large to list every item even at the minimum body length is refused
+  (`snapshot_too_large`) rather than partially classified, and a report that does not match the
+  snapshot is refused (`invalid_classification`). Raw GitHub text never enters the parent
+  session; on failure, surface the error and stop. *Non-terminating.*
 - **`finalize_address`** — after fixes are committed, publish through the normal submit operation
-  (including a stacked suffix cascade), then reply to and resolve addressed threads. Full success
-  records `last_review_batch` and terminates. A structured partial resolve returns a reduced
+  (including a stacked suffix cascade), then reply to and resolve addressed threads. Takes
+  `threads` only, and binds to the last classification in this session: it refuses before
+  publishing when nothing was classified (`no_classification`) or a thread id is outside the
+  classification (`unknown_threads`), and resolves nothing when the publish lands on a different
+  PR than the one classified (`pr_mismatch` — re-classify and finalize again). Full success
+  records `last_review_batch` (with the PR and counts perk derived) and terminates. A structured partial resolve returns a reduced
   `retry_threads` batch; unstructured failure requires inspection. Never push manually.
   *Terminating on full success.* Full success ends with a delivery-keyed `Hand-off` line:
   incremental → `/land` once approved; stacked layer → `/ready` records the post-review handoff

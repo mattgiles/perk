@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -10,6 +10,9 @@ import {
   fakeConflictResolver,
 } from "../../../testing/fakeConflictResolver.ts";
 import {
+  addressClassifyFixture,
+  classifierResponder,
+  classifyThenFinalize,
   fakePerkRouter,
   gitInit,
   loadPerkSession,
@@ -30,6 +33,8 @@ const threads = {
   results: [{ thread_id: "thread", success: true, comment_added: false, error: null }],
 };
 const input = { threads: [{ thread_id: "thread" }] };
+/** The snapshot the finalize leg classifies first (the finalizer binds to the held classification). */
+const feedback = addressClassifyFixture({ pr: 42, threadIds: ["thread"] });
 function details(result: { details: unknown }) {
   return result.details as {
     ok: boolean;
@@ -48,6 +53,7 @@ async function setup(script?: Parameters<typeof fakeConflictResolver>[1], native
   // Planted BEFORE the session loads: the engine reads the file once at activation.
   if (nativeConfig !== undefined) writeFileSync(engine.resolverEngine.configPath, nativeConfig);
   const bin = fakePerkRouter(cwd, {
+    "pr feedback": { json: feedback.feedback },
     "pr submit": { json: publication },
     "pr resolve-threads": { json: threads },
   });
@@ -55,7 +61,7 @@ async function setup(script?: Parameters<typeof fakeConflictResolver>[1], native
     cwd,
     env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
     resolverEngine: engine.resolverEngine,
-    extraExtensions: [engine.extension],
+    extraExtensions: [engine.extension, classifierResponder(feedback.report).extension],
   });
   spyInjections(h);
   return { cwd, engine, bin, h };
@@ -114,12 +120,29 @@ test("single-use authorization: parameterless/sequential; bound to counter and i
     await w.h.invokeTool("submit", {});
     assert.equal(details(await w.h.invokeTool("resolve_submit_conflicts", {})).ok, false);
     assert.equal(w.engine.requests.length, 1);
-    fakePerkRouter(w.cwd, {
-      "pr submit": { json: publication },
-      "pr resolve-threads": { json: { success: false, message: "failed" }, code: 1 },
-    });
+    const argvFile = join(w.cwd, "finalize-argv.txt");
+    fakePerkRouter(
+      w.cwd,
+      {
+        "pr feedback": { json: feedback.feedback },
+        "pr submit": { json: publication },
+        "pr resolve-threads": { json: { success: false, message: "failed" }, code: 1 },
+      },
+      { argvFile },
+    );
     await w.h.invokeTool("submit", {});
-    await w.h.invokeTool("finalize_address", input);
+    const finalized = await classifyThenFinalize(w.h, input);
+    // The failed finalization is the POST-publication resolve failure — it must reach the
+    // resolve step (never short-circuit on a missing classification).
+    const finalizedDetails = finalized.details as { ok: boolean; submit?: unknown };
+    assert.equal(finalizedDetails.ok, false);
+    assert.ok(finalizedDetails.submit, "a published-but-unresolved arm (submit facts carried)");
+    assert.deepEqual(readFileSync(argvFile, "utf8").trim().split("\n"), [
+      "pr submit",
+      "pr feedback",
+      "pr submit",
+      "pr resolve-threads",
+    ]);
     assert.equal(details(await w.h.invokeTool("resolve_submit_conflicts", {})).ok, false);
     assert.equal(w.engine.requests.length, 1);
     await w.h.invokeTool("submit", {});

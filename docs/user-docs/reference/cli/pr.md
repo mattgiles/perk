@@ -198,7 +198,9 @@ Validate the active plan's PR checkout footer (the deterministic `pr check`).
 
 ### `perk pr feedback`
 
-Fetch the active plan's PR review feedback (read-only; the classify child runs this).
+Fetch the active plan's PR review feedback (read-only; the `/address` parent runs it to prepare
+the classifier's snapshot). Refuses a payload that repeats a review-thread id or a discussion
+comment id (`duplicate_feedback_id`, exit 1) rather than emitting an ambiguous snapshot.
 
 ### `perk pr resolve-threads`
 

@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **247** canonical source units
-- **1289** logical fragments
+- **244** canonical source units
+- **1284** logical fragments
 - **16** session shapes and **12** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -864,16 +864,14 @@ Human and agent review surfaces for gists, objectives, and plans.
 | `markdown:prompts/stages/plan-review-browser.md` | `adapter` | `shipped` | [`prompts/stages/plan-review-browser.md`](../../prompts/stages/plan-review-browser.md) · `file` | — |
 | `markdown:prompts/stages/simplify.md` | `launch` | `shipped` | [`prompts/stages/simplify.md`](../../prompts/stages/simplify.md) · `file` | — |
 | `markdown:skills/perk-simplify/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-simplify/SKILL.md`](../../skills/perk-simplify/SKILL.md) · `file` | — |
+| `typescript-model-call:extension/pi/v1/browserOperation.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/browserOperation.ts`](../../extension/pi/v1/browserOperation.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/browserOperation.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/browserOperation.ts`](../../extension/pi/v1/browserOperation.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/draftReview.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/draftReview.ts`](../../extension/pi/v1/draftReview.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/draftReview.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/draftReview.ts`](../../extension/pi/v1/draftReview.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/2` | — |
 | `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/planReview.ts`](../../extension/pi/v1/planReview.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/planReview.ts`](../../extension/pi/v1/planReview.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/2` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/2` | — |
@@ -916,26 +914,22 @@ Human and agent review surfaces for gists, objectives, and plans.
   - `section:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/an-ultra-requirement-challenge` — An `ultra` requirement challenge (`heading:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/an-ultra-requirement-challenge`)
   - `section:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/objective-roadmap-mechanics` — Objective roadmap mechanics (`heading:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/objective-roadmap-mechanics`)
   - `section:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/trust` — Trust (`heading:behind-the-simplify-fold-in-the-simplify-plan-and-simplify-objective-doors/trust`)
+- `typescript-model-call:extension/pi/v1/browserOperation.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/pi/v1/browserOperation.ts:module:sendUserMessage:1`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/pi/v1/draftReview.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/draftReview.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:1`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:2`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
 - `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:1`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:2`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
 - `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:1`
@@ -996,8 +990,7 @@ Automated, terminal, and browser PR-review families.
 | `markdown:skills/perk-pr-review/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-pr-review/SKILL.md`](../../skills/perk-pr-review/SKILL.md) · `file` | pr-review.warm |
 | `typescript-model-call:extension/pi/v1/codeReview/automated.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/automated.ts`](../../extension/pi/v1/codeReview/automated.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/browser.ts`](../../extension/pi/v1/codeReview/browser.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/browser.ts`](../../extension/pi/v1/codeReview/browser.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/browser.ts`](../../extension/pi/v1/codeReview/browser.ts) · `symbol:module/call:sendUserMessage/2` | — |
+| `typescript-model-call:extension/pi/v1/codeReview/stack.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/stack.ts`](../../extension/pi/v1/codeReview/stack.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/terminal.ts`](../../extension/pi/v1/codeReview/terminal.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/terminal.ts`](../../extension/pi/v1/codeReview/terminal.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/providers/annotations.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/annotations.ts`](../../extension/pi/v1/providers/annotations.ts) · `symbol:module/call:sendUserMessage/0` | — |
@@ -1095,10 +1088,8 @@ Automated, terminal, and browser PR-review families.
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:1`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:2`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
+- `typescript-model-call:extension/pi/v1/codeReview/stack.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:1`
@@ -1233,8 +1224,6 @@ Classify review feedback, fix actionable items, publish, and resolve.
   - `parameters.properties.threads.description` — parameters.properties.threads.description (`tool:finalize_address.parameters.properties.threads.description`)
   - `parameters.properties.threads.items.properties.thread_id.description` — parameters.properties.threads.items.properties.thread_id.description (`tool:finalize_address.parameters.properties.threads.items.properties.thread_id.description`)
   - `parameters.properties.threads.items.properties.comment.description` — parameters.properties.threads.items.properties.comment.description (`tool:finalize_address.parameters.properties.threads.items.properties.comment.description`)
-  - `parameters.properties.pr.description` — parameters.properties.pr.description (`tool:finalize_address.parameters.properties.pr.description`)
-  - `parameters.properties.counts.description` — parameters.properties.counts.description (`tool:finalize_address.parameters.properties.counts.description`)
 
 </details>
 

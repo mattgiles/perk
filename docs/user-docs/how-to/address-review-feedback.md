@@ -28,8 +28,10 @@ the spine — you only enter it when there is feedback.)
    worktree to address that worktree's own plan. Arguments for `pi` go after a bare `--`, e.g.
    `perk address 1699 -- --model provider/model`.
 2. **Run the address door.** Run warm [`/address`](../reference/in-session/workflow-commands.md#address). perk
-   classifies the feedback in an isolated child session, then the parent fixes the actionable
-   items and batch-resolves the threads.
+   prepares the PR's feedback snapshot itself and has an isolated child session classify exactly
+   the open threads and discussion comments in it, then the parent fixes the actionable items and
+   batch-resolves the threads. If the PR gains new feedback mid-pass, classify again before
+   finalizing — only classified threads can be resolved.
 3. **Classify only, take no action (optional).** Run `/address --preview` to see the classification
    without fixing or resolving anything — useful to triage before committing to changes.
 4. **Review and let perk resolve.** Confirm the classification, let perk apply the fixes and resolve

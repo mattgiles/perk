@@ -569,7 +569,7 @@ end of the section).
 | `stage` | string | the registry stage id this run is acting on, recorded at cold **claim** from the handoff — or, for the TWO warm exceptions, appended by a stage-only change: `enter-refinement-stage` when `/objective-refine` enters a refinement pass in an unbound session (§8.68), and `enter-objective-plan-stage` when the warm `/objective-plan` factory starts (it refuses a worktree-stage session first — a stage claim would hijack that session's plan binding); lets the interior distinguish read-only stages (e.g. `objective-author` vs `plan` vs `objective-refine`) and inject the right authoring context |
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (`/objective <id>` sets it, `/objective clear` nulls it) |
-| `last_review_batch` | object \| null | the last fully processed review batch, appended by `finalize_address` only after publication and thread resolution succeed: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
+| `last_review_batch` | object \| null | the last fully processed review batch, appended by `finalize_address` only after publication and thread resolution succeed: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }`. `pr` and `counts` are **code-derived from the bound classification** the session holds (§8.35 prepared-snapshot binding) — never model-supplied; the finalizer refuses without a held classification and records nothing when the published PR is not the bound PR (§8.52) |
 | `last_pr_review` | object \| null | the last `/pr-review` outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, covered_angles, comment_count, mode, at:ISO }`; a recorded wave is PR-bound and single-use, and supplies authoritative ordered `angles` / completed schema-valid assessment `covered_angles` (blocked lanes are uncovered failures); standalone posting before any valid wave uses caller-supplied angles for both (or `[]`); best-effort tier (the PR review is the canonical record) |
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
 | `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list; the append-path pre-read FAILS CLOSED and is STRICT-DECODED: an unrebuildable branch OR a malformed persisted ledger — a non-array, or any row that is not `{pr: integer, event: string, at: string}` — refuses the append rather than LWW-erasing possibly-real earlier rows (an absent field is the normal empty first-append ledger; extra row fields are narrowed out), while the plain ledger READ stays fail-open/tolerant); best-effort tier with an asymmetric trust rule — a row can be MISSING spuriously (append failed after a real post) but never PRESENT spuriously, so `submit_pr_review` enforces skip-on-resume on presence (`already_posted` refusal; `allow_repost: true` is the deliberate override) while a missing row means verify posted-vs-pending against GitHub before re-posting |
@@ -1540,7 +1540,9 @@ get_pr_feedback{ pr_number }                        -> PrFeedback{ pr_number, re
     # review threads + PR-level reviews via `gh api graphql`; discussion comments via REST
     # GET .../issues/{n}/comments. The three sources are kept SEPARATE (counted apart) — review
     # threads (inline, with a resolvable thread_id) are a distinct API from discussion comments.
-    # Read-only; what the spawned `perk.review-classifier` child runs (via `perk pr feedback`).
+    # Read-only; what the `/address` parent runs (`perk pr feedback --json`) to prepare the
+    # classifier's snapshot (§8.35); the command refuses duplicate thread/discussion-comment ids
+    # (`duplicate_feedback_id`, exit 1) — the gateway read itself does not.
 resolve_review_threads{ batch:[{thread_id, comment?}] } -> BatchResolveResult{ success, results[] }
     # for each item: optional reply (addPullRequestReviewThreadReply) THEN resolveReviewThread,
     # both GraphQL. results[] is per-item {thread_id, success, comment_added, error}; top-level
@@ -4340,20 +4342,23 @@ stream surfaces this outcome as its terminal `run_finished` event (§8.12) — t
 object, carried in the structured channel.
 
 > **Current unverified dependency.** The `address` drive's seeded prompt instructs the model to
-> classify via ONE call to the flow-scoped **`classify_review_feedback`** tool, which runs the
-> `perk.review-classifier` child through the report-wave module (§8.35) over the pi-subagents v1
-> extension RPC — the report schema is a module constant (`REVIEW_CLASSIFIER_REPORT_SCHEMA`, the
-> engine-validated workflow `outputSchema`), and the tool reads the configured
+> classify via ONE call to the flow-scoped **`classify_review_feedback`** tool, which prepares the
+> feedback snapshot in the parent process (`perk pr feedback --json` as a cold door) and binds the
+> `perk.review-classifier` child to exactly its subjects through the report-wave module (§8.35,
+> prepared-snapshot binding) over the pi-subagents v1 extension RPC — the report schema is a
+> module constant (`REVIEW_CLASSIFIER_REPORT_SCHEMA`, the engine-validated workflow
+> `outputSchema`, re-checked by the parent's compiled decoder), and the tool reads the configured
 > `[models.subagents] review-classifier` model at execute time (the worktree's committed
 > `.perk/config.toml`, with the gitignored `.perk/local.toml` overlay anchored to the MAIN
 > checkout — a per-user override survives the cold worktree launch; nothing schema- or
 > model-shaped is prompt-transcribed). `pi-subagents` loads in the
 > worker from the managed settings `packages` list (the isolation invariant above) — the tool's
 > RPC adapter rides
-> it. The **subagent-under-worker live smoke** remains unproven: the fake-RPC e2e validates
-> perk's adapter, not the real pi-subagents
-> workflow host under the headless worker, and `classify_review_feedback` is
-> mandatory before a worker `/address` can reach `finalize_address`.
+> it. The **subagent-under-worker live smoke** remains unproven: the fake-RPC e2e (a planted
+> project extension wrapping the shared fake responder) validates perk's snapshot preparation,
+> binding and adapter glue, not the real pi-subagents workflow host under the headless worker,
+> and `classify_review_feedback` is mandatory before a worker `/address` can reach
+> `finalize_address` (the finalizer refuses `no_classification` without a held classification).
 
 ## §8.12 · The structured run-event stream
 
@@ -7964,6 +7969,40 @@ receipts are write-only correlation telemetry. The flow tools (`run_learn_wave`,
 tool-result details only (never the model-facing prose); a wave-level soft-failure retains any
 receipt known before the failure in its fail details.
 
+**Prepared-snapshot binding (the `/address` classifier).** The `classify_review_feedback` flow
+tool (`extension/pi/v1/delivery/address.ts` over `extension/waves/reviewClassifierWave.ts`) owns
+the facts its single lane classifies:
+
+1. **Prepare.** The parent runs `perk pr feedback --json` as a cold door (no `--pr`: the PR
+   resolves from the worktree's plan-ref) and strictly decodes it (`decodeFeedbackSnapshot`, a
+   compiled TypeBox wire schema plus uniqueness checks — a duplicate `thread_id` or discussion
+   `comment_id` is `bad_output`, the consumer twin of the command's `duplicate_feedback_id`). A
+   fetch failure soft-fails with the envelope's `error_type` verbatim and spawns nothing. The
+   snapshot bytes never enter the model's context.
+2. **Subjects.** The classification subjects — the pinned coverage set — are the **unresolved**
+   review threads (outdated-but-unresolved stay subjects) and **every** discussion comment.
+   Resolved threads and PR-level review bodies are excluded by decision; only their counts are
+   reported (`excluded: {resolved_threads, reviews}`). An empty subject set spawns nothing: the
+   tool returns ok with an empty bound classification (zero counts, `attempts: []`).
+3. **Render.** The lane task is a code-rendered digest of exactly the subjects inside an
+   `<untrusted_feedback_snapshot>` fence (attribute values JSON-quoted; deterministic, snapshot
+   order). Complete-coverage bounded rendering: every subject is always listed; the per-body cap
+   shrinks adaptively from `SNAPSHOT_BODY_CAP_CHARS` (4,000) toward `SNAPSHOT_BODY_FLOOR_CHARS`
+   (200) so the whole task fits `SNAPSHOT_DIGEST_BUDGET_CHARS` (240,000; an elided body keeps its
+   head plus `[… N chars elided]`); only when the floor itself overflows is the task refused
+   `snapshot_too_large` — **before any spawn**, never partially classified.
+4. **Bind.** The lane reports judgment only — `{pr, review_threads:[{thread_id, classification,
+   summary}], discussion_comments:[{comment_id, classification, summary}]}` (closed shapes; no
+   `counts`, no `path`/`line`). The parent checks the report against the compiled schema first
+   (every validator error a `schema` fault), then collects every correlation fault: PR identity,
+   per-item membership (a resolved or foreign id is unknown), uniqueness, and exactly-once
+   coverage. Any fault soft-fails `invalid_classification` naming every fault (the launch receipt
+   kept) — never a fabricated classification. A bound result lists items in snapshot order with
+   `path`/`line`/`is_outdated` attached from the snapshot and `counts` derived in code.
+5. **Hold.** The bound classification is held **per activation** (never module-scoped, never
+   persisted; a reload re-classifies) and **cleared at entry of every classify call** — only a
+   bound success sets it. `finalize_address` binds to it (§8.52).
+
 **The `learn` tool's classification params.** The warm `learn` tool carries `decision` (a
 JSON-schema enum of the five captured tokens) + `target` (string), threaded to `perk learn
 capture --decision/--target`. The tool-boundary decode mirrors the `summary` strictness: a
@@ -8132,7 +8171,7 @@ identity).
 | 1 | next-action resolution | `resume.resolve_next_action` (§8.37) — consumed by `plan resume` and the `objective run` supervisor (incl. its remote dispatch arm) | `tests/test_next_action_parity.py` (verdict **and** stage-selection equality across both dry-runs), `tests/test_resume.py` |
 | 2 | prompt generation (local vs worker) | canonical templates `prompts/stages/*` via the §8.31 render seam; `_implement_prompt`/`_address_prompt` ↔ `initialPromptFor` ↔ `implementHandoffPrompt`/`addressGuidance` | `tests/test_prompt_parity.py` (live cross-engine byte parity) + goldens; reciprocal substring suites `tests/test_worker_prompt_parity.py` ↔ `extension/worker/stageExecution.test.ts`; binding-content byte parity `tests/test_binding_render_parity.py` (via `extension/testing/renderBindingsLive.ts`) |
 | 3 | submit side effects | one Python door, `perk pr submit --json`; the warm `submit` tool/`/submit` command delegate via `extension/delivery/submit.ts::submitChange` behind `extension/pi/v1/delivery/submit.ts`, and the remote worker drives that same registered tool | `extension/worker/stageExecutionE2e.test.ts` (implement HAPPY drives the real tool through the real extension into a stubbed `PERK_BIN` router), `extension/pi/v1/delivery/submit.test.ts`, `tests/test_pr_submit.py` |
-| 4 | address terminal criteria | `finalize_address` (`extension/delivery/address.ts::finalizeAddress` behind `extension/pi/v1/delivery/address.ts`) runs submit first, delegates its resolve half to `perk pr resolve-threads --json`, and appends `last_review_batch`; the worker requires finalizer success + that write + successful effective submit evidence with `mergeable !== false` | `stageExecutionE2e.test.ts` (address HAPPY binds both real door writes to classification), the `stageExecution.test.ts` runStage terminal-classification matrix; post-address the supervisor re-classifies via row 1 |
+| 4 | address terminal criteria | `finalize_address` (`extension/delivery/address.ts::finalizeAddress` behind `extension/pi/v1/delivery/address.ts`) runs submit first, delegates its resolve half to `perk pr resolve-threads --json`, and appends `last_review_batch`; the worker requires finalizer success + that write + successful effective submit evidence with `mergeable !== false` | `stageExecutionE2e.test.ts` (address HAPPY drives classify → finalize through a planted fake classifier lane and binds both real door writes to classification; the no-classify row refuses before any cold door), the `stageExecution.test.ts` runStage terminal-classification matrix; post-address the supervisor re-classifies via row 1 |
 | 5 | plan-ref reconstruction + positioning | one function, `resume.reconstruct_plan_ref` — all reconstruction sites converge on it; one validating selector/positioner, `launch.resolve_worktree` (the positioning semantics below), used by every cold door needing a plan checkout; `run_worker.position_worktree` mirrors `launch_stage`'s positioning, and fresh stacked starts independently call the same execution `Delivery.prepare` boundary (§8.46) from `resolve_worktree` and `run_worker.position_branch` | `tests/test_plan_ref_parity.py` (the save→reconstruct round trip + the `PlanRef` field census), `tests/test_plan_selection.py`, `tests/test_resume.py`, `tests/test_launch_restore.py` (the non-destructive restore matrix), `tests/test_run_worker.py::test_positioning_parity_local_launch_vs_remote_worker` (plan-ref/plan-body byte parity + handoff stage/mode, `run_id` minted per path; the explicit-ref twin pins the direct-ref arm), `tests/test_run_worker.py::test_positioning_parity_stacked_local_create_vs_remote_position` (same start SHA + `layer-context.json` parity, timestamps excepted) |
 | 6 | run reporting | **remote-only by design**: `perk/run/run_report.py` derives the §8.15 plan-issue comments + job summary solely from the §8.12 events stream + exit code | `tests/test_run_report.py` (incl. the `RunOutcome` lockstep literals) ↔ `stageExecution.test.ts` ("runStage: the frozen completed RunOutcome (lockstep with tests/test_run_report.py)" / "runStage: the frozen failed RunOutcome (lockstep with tests/test_run_report.py)") |
 
@@ -11521,8 +11560,20 @@ eager config validation and `invalid_config` envelope but passes no worktree roo
 the private runtime may read config again only when sync candidate/continuation work needs it.
 Incremental submit remains independent of config.
 
-**`finalize_address` is the only model-facing address finalizer.** Parameters remain
-`{threads:[{thread_id, comment?}], pr?, counts?}`. After the parent commits its own fixes, the tool
+**`finalize_address` is the only model-facing address finalizer.** Parameters are
+`{threads:[{thread_id, comment?}]}`; a present `pr` or `counts` key is a stale caller, refused
+`bad_input` (never silently dropped). The finalizer binds to the session's held classification
+(§8.35 prepared-snapshot binding), with two **pre-effect** refusals after the empty-batch check:
+`no_classification` when none is held, and `unknown_threads` (carrying `unknown_thread_ids`) when
+a requested id is outside the classified thread set — no publish, no resolve, no record, no
+counter activity. After a successful publish and **before any resolve**, the published PR must be
+the bound PR: otherwise `pr_mismatch` (the feature's `published_pr_mismatch`) — published, the
+resolve step **never called** (no thread touched, so a re-classify + re-finalize is safe) and
+nothing recorded, the submit facts carried. Only the submit facts are shared with
+`published_unverified`: there the resolve step *was* called and its effects are unknown (replies
+or resolutions may have landed), so a retry requires inspection first. The check is post-publish because the publish mutation's response is the one authoritative target
+identity. `last_review_batch` records the held classification's `pr` and derived `counts`. After
+the parent commits its own fixes, the tool
 runs the shared publish operation (`extension/delivery/submit.ts` composed by
 `extension/pi/v1/delivery/address.ts`) first for both incremental and stacked plans; only success
 enters the resolve step (`extension/delivery/address.ts::finalizeAddress`) and its Python

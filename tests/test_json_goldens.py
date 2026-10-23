@@ -11,6 +11,8 @@ Regen all snapshots with ``PERK_UPDATE_GOLDEN=1 uv run pytest tests/test_json_go
 The ``plan_save*.json`` goldens are also the TypeScript consumer's cross-plane fixture:
 ``extension/pi/v1/plan.test.ts`` decodes every ``plan_save*.json`` through ``decodePlanSave``,
 so a producer shape change fails that suite too — regenerate them here, never hand-edit them.
+Likewise ``pr_feedback*.json``: ``extension/waves/reviewClassifierWave.test.ts`` decodes both
+through ``decodeFeedbackSnapshot`` (the ``/address`` parent's prepared snapshot).
 """
 
 from typing import TYPE_CHECKING
@@ -433,6 +435,15 @@ def test_golden_pr_feedback() -> None:
     from perk.cli.commands.pr.feedback_cmd import _result_to_dict
 
     assert_golden("pr_feedback", _result_to_dict(_pr_feedback_result()))
+
+
+def test_golden_pr_feedback_mixed() -> None:
+    from _pr_feedback_fixtures import mixed_feedback
+
+    from perk.cli.commands.pr.feedback_cmd import PrFeedbackResult, _result_to_dict
+
+    result = PrFeedbackResult(feedback=mixed_feedback(), branch="plan-42")
+    assert_golden("pr_feedback_mixed", _result_to_dict(result))
 
 
 def test_golden_pr_review_context() -> None:
