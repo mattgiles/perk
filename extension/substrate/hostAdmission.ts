@@ -11,8 +11,10 @@
 // host SDK and the worker's SDK are three independent observations against one minimum; equality
 // between them is never required.
 //
-// Vocabulary mirrors perk/substrate/pi_host.py: the same three outcomes, the same refusal error
-// codes, the same 80-character unverifiable preview.
+// Vocabulary mirrors perk/substrate/pi_host.py: the same three version outcomes, the same refusal
+// error codes, the same 80-character unverifiable preview. The PATH probe's fourth outcome
+// (`incoherent`, a broken companion family under the PATH `pi`) has no twin here: this plane
+// admits only the SDK version it loaded.
 //
 // The repair pointer deliberately names no version-specific command: the adopted Pi pin and its
 // pinned install set live in the Python substrate (perk/substrate/pi_host.py), so this plane names

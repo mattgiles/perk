@@ -8,13 +8,15 @@ floor; ``pi_version_unsupported`` / ``pi_version_unverifiable``) → the ``LINEA
 from the main checkout, only when the operator env lacks a non-blank value →
 :func:`_build_exec_env` (merge order ``_NPM_QUIET_ENV`` < operator env < perk stamps;
 ``run_id=None`` removes an inherited ``PERK_RUN_ID``; a blank ``PI_CODING_AGENT_DIR`` is
-scrubbed) → the stale-lock sweep → the ``PERK_PROFILE_HANDOFF`` arm → ``chdir`` + ``execvpe``
+scrubbed) → the stale-lock sweep → the extension-install detach (the checkout's ``.pi/npm``
+metadata gets its own inodes) → the ``PERK_PROFILE_HANDOFF`` arm → ``chdir`` + ``execvpe``
 inside the ``launch_failed`` ``OSError`` arm.
 
 **The test seam.** ``exec_pi`` reads :func:`_resolve_pi_executable` / :func:`_admit_pi_host` /
-:func:`_build_exec_env` / :func:`_sweep_stale_pi_agent_locks` / :func:`_record_profile_handoff`
-and ``os.chdir`` / ``os.execvpe`` as THIS module's globals, so tests patch ``pi_exec.<name>`` /
-``pi_exec.os`` — never a re-export on another module (a patch there would be a silent no-op
+:func:`_build_exec_env` / :func:`_sweep_stale_pi_agent_locks` /
+:func:`_detach_extension_install` / :func:`_record_profile_handoff` and ``os.chdir`` /
+``os.execvpe`` as THIS module's globals, so tests patch ``pi_exec.<name>`` / ``pi_exec.os`` —
+never a re-export on another module (a patch there would be a silent no-op
 against this pipeline).
 
 **Import tier.** This module sits on the bare-``perk`` path (python-cli-guidelines §8.3): it
@@ -33,6 +35,7 @@ from pathlib import Path
 
 from perk import __version__
 from perk.cli.ensure import UserFacingCliError
+from perk.substrate import fsclone
 from perk.substrate.config import (
     ConfigError,
     PiAgentDir,
@@ -41,7 +44,7 @@ from perk.substrate.config import (
     load_local_linear_api_key,
 )
 from perk.substrate.host_floor import describe_node_lines, load_host_floor, supported_node_lines
-from perk.substrate.output import log_warn, user_output
+from perk.substrate.output import log_done, log_warn, user_output
 from perk.substrate.pi_host import (
     PI_INSTALL_COMMAND,
     PiHost,
@@ -206,14 +209,37 @@ def _admit_pi_host(pi_path: str) -> PiHost:
 
     One bounded ``pi --version`` spawn (:func:`perk.substrate.pi_host.probe_pi_host`); an
     ``unsupported`` host refuses ``pi_version_unsupported``, an ``unverifiable`` one
-    ``pi_version_unverifiable`` — no operator override. Module-level on purpose: ``exec_pi``
-    reads it as this module's global, so tests patch ``pi_exec._admit_pi_host`` (the same rule
-    as :func:`_resolve_pi_executable`).
+    ``pi_version_unverifiable``, an ``incoherent`` one (the adopted Pi with a broken companion
+    family) ``pi_companions_incoherent`` — no operator override. Module-level on purpose:
+    ``exec_pi`` reads it as this module's global, so tests patch ``pi_exec._admit_pi_host`` (the
+    same rule as :func:`_resolve_pi_executable`).
     """
     host = probe_pi_host(pi_path)
     if host.outcome != "admitted":
         raise UserFacingCliError(format_pi_refusal(host), error_type=pi_refusal_error_type(host))
     return host
+
+
+def _detach_extension_install(checkout: Path) -> None:
+    """Give the checkout's ``.pi/npm`` install-root metadata its own inodes before Pi starts.
+
+    Worktrees staged by the former all-hardlink layout share ``package.json``, the lockfiles and
+    ``node_modules/.package-lock.json`` with the main checkout and every sibling, and Pi / the
+    package manager rewrite those in place — so an install in one tree rewrote all of them. Run on
+    every launch (plain, staged, resumed) because every launch reaches here; a no-op once
+    detached or when the install root is absent. Loud-but-non-fatal: an ``OSError`` warns and the
+    launch continues.
+    """
+    root = checkout / ".pi" / "npm"
+    if not root.is_dir():
+        return
+    try:
+        detached = fsclone.detach_shared_files(root)
+    except OSError as exc:
+        log_warn(f"extensions: could not detach shared .pi/npm files — {exc}")
+        return
+    if detached:
+        log_done(f"detached {detached} shared extension file(s)")
 
 
 def _record_profile_handoff(
@@ -297,8 +323,9 @@ def exec_pi(
     only (not run-control data, unlike ``PERK_RUN_ID``); set at this single local-launch seam.
 
     Reads ``_resolve_pi_executable`` / ``_admit_pi_host`` / ``_build_exec_env`` /
-    ``_sweep_stale_pi_agent_locks`` as this module's globals, and ``os.chdir`` / ``os.execvpe``
-    off the shared ``os`` module object the exec recorders patch.
+    ``_sweep_stale_pi_agent_locks`` / ``_detach_extension_install`` as this module's globals,
+    and ``os.chdir`` / ``os.execvpe`` off the shared ``os`` module object the exec recorders
+    patch.
 
     Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execvpe`` and control returns.
     """
@@ -315,6 +342,7 @@ def exec_pi(
     )
     if agent_dir.resolution is not None:
         _sweep_stale_pi_agent_locks(agent_dir.resolution.path)
+    _detach_extension_install(checkout)
     handoff_target = os.environ.get(PROFILE_HANDOFF_ENV, "").strip()
     if handoff_target:
         _record_profile_handoff(

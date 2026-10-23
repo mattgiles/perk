@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 10de81a -->
 
+### Changed
+
+- `perk doctor --fix` now repairs the `pi` row itself: whenever the PATH `pi` is missing, below the floor, unverifiable, has a broken companion family or is not the adopted Pi 1.1.0 (and Node passes), it runs the pinned eight-package `npm install -g` and re-checks the `pi` on your PATH, reporting a PATH-order problem when the `pi` it finds is not the one npm wrote; interactive `perk init` also offers that install when your Pi is admitted but not the adopted one. (0899296)
+- `perk init` and `perk doctor --fix` refuse, with exit 2 and before writing anything, to converge a repo from a perk older than its `.perk/required-perk-version` (`perk_outdated`) or, in perk's own repository, from a perk installed in a different checkout (`foreign_perk`), so a stale perk can no longer rewrite managed files backward; bare `perk doctor` and every other command still only warn. (e974828)
+
+### Fixed
+
+- Verify the adopted Pi's companion packages: a `pi` answering 1.1.0 whose seven `@earendil-works/*` companions do not all resolve at 1.1.0 the way Node loads them (a dangling link, a nested newer copy) is now refused at launch (`pi_companions_incoherent`) and fails `perk doctor`'s `pi` row, instead of passing and crashing pi-subagents' background children later. (a3e6bc1)
+- Stage each worktree's `.pi/npm` without shared metadata — a copy-on-write clone on macOS, else hardlinks whose install-root metadata files get their own copies — so an extension install in one worktree no longer rewrites the `package.json` and lockfiles of every other worktree and the main checkout; every launch (including `perk resume`) detaches metadata a worktree staged by an older perk still shares, and a stage launch warns when a staged extension does not match the worktree's own `.pi/settings.json`. (8fdd8f9)
+
 ### Security
 
 - Require Node.js on a supported release line (22.23.4+, 24.22.1+ or 26.12.1+) and `certifi` 2026.10.19 or newer after the eMudhra intermediate-CA compromise, and expect uv 0.13.4 or newer to install perk: `perk init` refuses and `perk doctor` fails on an outdated Node or one on an unsupported line, and CI, the `perk-remote-setup` action and `engines.node` move with the floor. Restart every running Pi session after upgrading Node; see the new [Security](docs/user-docs/reference/security.md) reference page. (cc1b049)

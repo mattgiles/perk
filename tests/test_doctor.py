@@ -1023,6 +1023,119 @@ def test_fix_linear_label_failure_lands_on_fix_errors(scaffolded_perk_repo, stub
     assert any("rate limited" in e for e in report.fix_errors)
 
 
+def test_fix_runs_the_pi_repair_gesture_once(scaffolded_perk_repo, stub_env, monkeypatch):
+    # The verify-gated Pi repair: called once with the env rows; its lines land on the report.
+    from perk.convergence import env
+
+    seen: list[list[str]] = []
+
+    def fake_repair(checks):
+        seen.append([c.name for c in checks])
+        return (["pi: installed the adopted Pi set"], ["pi: residue"])
+
+    monkeypatch.setattr(env, "repair_pi", fake_repair)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=True)
+    assert seen == [["git", "gh", "node", "pi", "cloc"]]
+    assert "pi: installed the adopted Pi set" in report.fixed
+    assert "pi: residue" in report.fix_errors
+
+
+def test_fix_without_verify_never_runs_the_pi_repair(scaffolded_perk_repo, monkeypatch):
+    from perk.convergence import env
+
+    monkeypatch.setattr(env, "repair_pi", lambda checks: pytest.fail("repair_pi ran unverified"))
+    run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+
+
+def test_bare_doctor_never_runs_the_pi_repair(scaffolded_perk_repo, stub_env, monkeypatch):
+    from perk.convergence import env
+
+    monkeypatch.setattr(env, "repair_pi", lambda checks: pytest.fail("repair_pi ran without --fix"))
+    run_doctor(scaffolded_perk_repo, verify=True)
+
+
+def test_incoherent_pi_env_check_maps_to_fail_naming_doctor_fix(monkeypatch):
+    from perk.convergence import env
+    from perk.substrate.pi_host import PiHost
+
+    detail = "@earendil-works/pi-codemode does not resolve"
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
+    monkeypatch.setattr(
+        env, "probe_pi_host", lambda path: PiHost(path, "incoherent", "1.1.0", "1.1.0", detail)
+    )
+    monkeypatch.setattr(doctor_mod.env, "check_environment", lambda: [env._check_pi()])
+    (pi,) = doctor_mod._env_checks()
+    assert (pi.name, pi.status, pi.message) == ("pi", "fail", "pi missing/outdated")
+    assert pi.detail == f"1.1.0 (floor >= 1.1.0) — companions: {detail}"
+    assert pi.remediation == f"Run `perk doctor --fix` (it runs: {PI_INSTALL_COMMAND})."
+
+
+# --- the write admission (`--fix` refuses a foreign / outdated perk before any write) ---------
+
+
+def _porcelain(repo):
+    return subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def _write_pin(repo, text):
+    pin = repo / ".perk" / "required-perk-version"
+    pin.write_text(text, encoding="utf-8")
+    return pin
+
+
+def test_fix_refuses_an_outdated_perk_before_any_write(scaffolded_perk_repo, stub_env, monkeypatch):
+    from perk.convergence import write_admission
+
+    monkeypatch.setattr(init, "write_refusal", write_admission.write_refusal)
+    pin = _write_pin(scaffolded_perk_repo, "99.0.0\n")
+    status_before = _porcelain(scaffolded_perk_repo)
+    report = run_doctor(scaffolded_perk_repo, fix=True)
+    assert report.error_type == "perk_outdated" and report.exit_code == 2
+    assert report.checks == [] and report.fixed == [] and not report.healthy
+    assert report.message is not None and "99.0.0" in report.message
+    assert pin.read_bytes() == b"99.0.0\n"
+    assert _porcelain(scaffolded_perk_repo) == status_before
+    data = report_to_dict(report)
+    assert data["success"] is False
+    assert (data["error_type"], data["message"]) == ("perk_outdated", report.message)
+
+
+def test_fix_refuses_a_foreign_perk_in_a_self_repo(scaffolded_perk_repo, stub_env, monkeypatch):
+    from perk.convergence import write_admission
+
+    monkeypatch.setattr(init, "write_refusal", write_admission.write_refusal)
+    monkeypatch.setattr(init, "is_self_repo", lambda root: True)
+    report = run_doctor(scaffolded_perk_repo, fix=True)
+    assert report.error_type == "foreign_perk" and report.exit_code == 2
+    assert report.self_repo is True and report.checks == []
+
+
+def test_bare_doctor_reports_under_an_outdated_pin(scaffolded_perk_repo, stub_env, monkeypatch):
+    from perk.convergence import write_admission
+
+    monkeypatch.setattr(init, "write_refusal", write_admission.write_refusal)
+    _write_pin(scaffolded_perk_repo, "99.0.0\n")
+    report = run_doctor(scaffolded_perk_repo, verify=True)
+    assert report.error_type is None and report.checks
+    pin_check = next(c for c in report.checks if c.name == "required-perk-version")
+    assert pin_check.status == "fail"
+
+
+def test_render_carries_the_write_refusal_message(capsys):
+    report = DoctorReport(
+        checks=[], fixed=[], self_repo=False, error_type="perk_outdated", message="too old"
+    )
+    assert report.exit_code == 2
+    render.render_report(report, verbose=False)
+    assert "too old" in capsys.readouterr().err
+
+
 def test_fix_skips_linear_repair_without_selection(scaffolded_perk_repo, stub_env, monkeypatch):
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     called = []

@@ -16,12 +16,12 @@ graph sits at the >= 1 s serial-median rule.
 
 import json
 import os
-import stat
 import sys
 from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
+from _pi_layout import install_fake_pi
 from perk_dev.profile_startup.handoff import parse_importtime
 from perk_dev.profile_startup.pty_session import PtySize, spawn_pty
 
@@ -60,9 +60,6 @@ _ROOT_MODULE = "perk.cli.cli"
 # The bare rows record the Pi handoff instead of exec'ing pi (the stop-before-exec arm), so the
 # matrix proves the plain session reached the shared exec seam without ever launching pi.
 _HANDOFF_ENV = "PERK_PROFILE_HANDOFF"
-# The `pi` stub answers `pi --version` with the bundled Pi floor so the launch host admission
-# (contracts.md §8.76) admits it and the bare rows still reach the handoff arm.
-_PI_STUB_TEMPLATE = "#!/bin/sh\necho {version}\n"
 
 
 def _loaded(modules: Iterable[str], prefix: str) -> set[str]:
@@ -75,13 +72,10 @@ def tier_env(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, dict[str, 
     """A hermetic child environment: a `pi` stub on PATH, a scratch HOME, an env-arm agent dir,
     and the version surfaces suppressed. Returns ``(scratch_dir, env)``."""
     scratch = tmp_path_factory.mktemp("import-tiers")
-    bin_dir = scratch / "bin"
-    bin_dir.mkdir()
-    pi_stub = bin_dir / "pi"
-    pi_stub.write_text(
-        _PI_STUB_TEMPLATE.format(version=load_host_floor().pi_min_version), encoding="utf-8"
-    )
-    pi_stub.chmod(pi_stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    # The `pi` stub answers `pi --version` with the bundled Pi floor so the launch host admission
+    # (contracts.md §8.76) admits it and the bare rows still reach the handoff arm; it is a full
+    # fake install because the probe family-checks a Pi at the adopted version.
+    bin_dir = install_fake_pi(scratch, body=f"echo {load_host_floor().pi_min_version}").parent
     home = scratch / "home"
     home.mkdir()
     agent = scratch / "agent"

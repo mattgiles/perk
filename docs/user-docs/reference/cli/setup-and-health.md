@@ -59,10 +59,28 @@ or `--json` (a machine surface — nothing may interleave with the stdout JSON);
 report warning carrying the manual `git config` commands.
 
 When the `pi` on your PATH is admitted (at or above the floor) but is not the adopted Pi 1.1.0,
-a successful `perk init` still converges, marks the `pi` line `⚠️` and adds one warning naming
-the pinned install command (also in the `--json` report's `warnings`; the `env` row itself is
-unchanged). A failed init does not add it — the failure report names what blocked init, and
-`perk doctor` reports the `pi` row regardless.
+an interactive `perk init` offers to install the adopted set (`Install the adopted Pi set via
+npm install -g …?`); declining is fine. A successful `perk init` that still finds a non-adopted Pi
+converges, marks the `pi` line `⚠️` and adds one warning naming the pinned install command (also
+in the `--json` report's `warnings`; the `env` row itself is unchanged). A failed init does not
+add it — the failure report names what blocked init, and `perk doctor` reports the `pi` row
+regardless.
+
+**When init refuses to write.** `perk init` refuses — exit 2, before writing anything to the
+repository (an interactive tool install you accepted may already have run) — when the running perk
+would converge the repo's managed files backward:
+
+- `perk_outdated` — the running perk is older than the repo's `.perk/required-perk-version`:
+  `perk <version> is older than this repo's required perk version <pin>
+  (.perk/required-perk-version) — upgrade perk before running init or doctor --fix; a newer perk
+  converges the pin forward.` Upgrade perk, then re-run. An equal version converges; a newer perk
+  moves the pin forward. A missing or unreadable pin never refuses.
+- `foreign_perk` — in perk's own repository only: the running perk was not installed from this
+  checkout (another worktree's, the main checkout's, or a tool install). Run `uv run perk init`
+  from the checkout you are converging.
+
+Every other command only *warns* about a version mismatch (the soft stderr line above and
+doctor's `cli-version` check); the refusal is the write-capable arm of the same check.
 
 `--force` re-seeds
 the user-editable config to defaults; `--no-interactive`
@@ -108,7 +126,10 @@ The `package` group also carries the report-only `cli-version` check: it compare
 upgrade perk (e.g. `uv tool upgrade perk`) to match the repo, or — if the *pin* is the stale
 side — re-run `perk init` / `perk doctor --fix`, which reconverges the pin to this CLI (the
 `required-perk-version` managed check owns that file drift and fails alongside the warn on a
-mismatch, deliberately).
+mismatch, deliberately). `perk doctor --fix` itself **refuses** — exit 2, `checks` empty, nothing
+written — when the running perk is older than the pin (`perk_outdated`) or, in perk's own
+repository, was not installed from this checkout (`foreign_perk`), with the same messages as
+[`perk init`](#perk-init); bare `perk doctor` never refuses, it reports.
 The `package` group also carries the report-only `resource-overrides` check: it warns (never
 fails, and `--fix` never touches it) when a pi resource override reaches perk's own resources —
 either perk's `packages` entry rewritten to object form with filter keys (filtering perk's own
@@ -205,9 +226,22 @@ The
 [Requirements and compatibility](../requirements-and-compatibility.md)), so an outdated,
 unverifiable or unsupported-line Node/Pi is a `fail` whose remediation names the floor to reach,
 exactly like a missing one (and a `missing_tool` exit 2 for `perk init`). A Node major outside
-the supported lines reports `<version> (unsupported release line)`. An admitted Pi that is not
+the supported lines reports `<version> (unsupported release line)`. The `pi` row also checks the
+**companion family** of the adopted Pi 1.1.0: each of its seven `@earendil-works/*` companion
+packages must resolve from the installed `pi` — the way Node loads them — at exactly 1.1.0. A
+missing companion, a dangling link or a mismatched copy is a `fail` whose detail reads
+`1.1.0 (floor >= 1.1.0) — companions: <offenders>` and whose remediation tells you to run
+`perk doctor --fix` (a `pi` outside any installed Pi package fails as unverifiable with the same
+remediation). An admitted Pi that is not
 the adopted Pi 1.1.0 is a `warn` (`pi ok, with a caution`) whose remediation names the pinned
-install command — never a `fail`, so the report stays healthy and the exit code is unchanged. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.
+install command — never a `fail`, so the report stays healthy and the exit code is unchanged.
+**`perk doctor --fix` repairs the `pi` row** whenever it is not green — absent, below the floor,
+unverifiable, a broken companion family, or the not-adopted caution — by running the pinned
+eight-package `npm install -g` itself, then re-probing: success lands on the fixed list
+(`pi: installed the adopted Pi 1.1.0 set (npm -g, 8 packages)`); an npm failure, or a `pi` on PATH
+that still is not the install npm wrote (a PATH-order problem — fix the order or remove the other
+`pi`), lands on the fix errors. A failing `node` row stops it: install Node.js on a supported line
+first. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.
 This is a group whose bare invocation runs the health report.
 
 ### `perk doctor workflow`

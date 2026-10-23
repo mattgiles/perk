@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from _launch_helpers import _PLAN_REF, _PLAN_REF_MODEL, _config, _request, _stage
+from _pi_layout import install_fake_pi
 
 from perk import __version__
 from perk.backends.issue_backend import IssueBackendError, PlanState
@@ -15,6 +16,7 @@ from perk.github import GitHubError
 from perk.run import launch, pi_exec
 from perk.run.launch import (
     launch_stage,
+    materialize,
     materialize_extensions,
     materialize_skills,
     print_launch_banner,
@@ -368,7 +370,9 @@ def test_exec_pi_admits_a_pi_at_the_floor_and_execs_its_absolute_path(
 ):
     events: list[object] = []
     floor = load_host_floor().pi_min_version
-    script = _pi_script(tmp_path, monkeypatch, f"echo {floor}")
+    # A full fake install: the probe family-checks a Pi answering the adopted version.
+    script = install_fake_pi(tmp_path / "prefix", body=f"echo {floor}")
+    monkeypatch.setenv("PATH", f"{script.parent}{os.pathsep}{os.environ.get('PATH', '')}")
     monkeypatch.setattr(pi_exec.os, "chdir", lambda path: events.append("chdir"))
     monkeypatch.setattr(
         pi_exec.os, "execvpe", lambda program, argv, env: events.append(("exec", program))
@@ -1366,6 +1370,23 @@ def _seed_npm_install(repo_root: Path, *packages: str) -> None:
         )
 
 
+def _seed_npm_metadata(repo_root: Path) -> Path:
+    """The install root's own metadata files (what Pi / npm rewrite in place)."""
+    root = repo_root / ".pi" / "npm"
+    (root / "node_modules").mkdir(parents=True, exist_ok=True)
+    (root / "package.json").write_text('{"name": "pi-extensions"}\n', encoding="utf-8")
+    (root / "package-lock.json").write_text('{"lockfileVersion": 3}\n', encoding="utf-8")
+    (root / ".gitignore").write_text("*\n", encoding="utf-8")
+    (root / "node_modules" / ".package-lock.json").write_text("{}\n", encoding="utf-8")
+    return root
+
+
+def _write_wt_settings(worktree: Path, packages: list[object]) -> None:
+    settings = worktree / ".pi" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({"packages": packages}), encoding="utf-8")
+
+
 def test_materialize_extensions_stages_populated_source(tmp_path, capsys):
     repo_root = tmp_path / "repo"
     worktree = tmp_path / "wt"
@@ -1376,7 +1397,41 @@ def test_materialize_extensions_stages_populated_source(tmp_path, capsys):
     staged = worktree / ".pi" / "npm" / "node_modules" / "ext-a" / "package.json"
     assert staged.is_file()
     assert json.loads(staged.read_text(encoding="utf-8"))["name"] == "ext-a"
-    assert "staged extensions" in capsys.readouterr().err  # the success milestone
+    assert "staged extensions (" in capsys.readouterr().err  # the success milestone + tier
+
+
+def test_materialize_extensions_stages_isolated_metadata(tmp_path):
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "wt"
+    _seed_npm_install(repo_root, "ext-a")
+    src = _seed_npm_metadata(repo_root)
+
+    materialize_extensions(repo_root, worktree)
+
+    dst = worktree / ".pi" / "npm"
+    for relative in ("package.json", "package-lock.json", "node_modules/.package-lock.json"):
+        assert (dst / relative).stat().st_nlink == 1, relative
+        assert (dst / relative).stat().st_ino != (src / relative).stat().st_ino, relative
+    before = (src / "package.json").read_bytes()
+    (dst / "package.json").write_text("{}\n", encoding="utf-8")
+    assert (src / "package.json").read_bytes() == before
+
+
+def test_materialize_extensions_replaces_an_unpopulated_install_root(tmp_path, capsys):
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "wt"
+    _seed_npm_install(repo_root, "ext-a")
+    stale_root = worktree / ".pi" / "npm"
+    (stale_root / "node_modules").mkdir(parents=True)
+    (stale_root / "package.json").write_text('{"name": "regenerable"}\n', encoding="utf-8")
+
+    materialize_extensions(repo_root, worktree)
+
+    assert (stale_root / "node_modules" / "ext-a" / "package.json").is_file()
+    assert not (stale_root / "package.json").exists()  # the repo root carries none to stage
+    err = capsys.readouterr().err
+    assert "staged extensions (" in err
+    assert "could not stage" not in err
 
 
 def test_materialize_extensions_idempotent_resume(tmp_path):
@@ -1393,6 +1448,84 @@ def test_materialize_extensions_idempotent_resume(tmp_path):
 
     assert sentinel.read_text(encoding="utf-8") == "keep me\n"
     assert not (dst_modules / "ext-a").exists()  # resume left the install untouched
+
+
+def _legacy_hardlinked_worktree(repo_root: Path, worktree: Path) -> tuple[Path, Path]:
+    """A worktree staged by the former all-hardlink layout: every file shares main's inode."""
+    _seed_npm_install(repo_root, "ext-a", "ext-b")
+    src = _seed_npm_metadata(repo_root)
+    dst = worktree / ".pi" / "npm"
+    shutil.copytree(src, dst, copy_function=os.link)
+    assert (dst / "package.json").stat().st_nlink == 2
+    return src, dst
+
+
+def test_detach_extension_install_migrates_a_legacy_hardlinked_install(tmp_path, capsys):
+    src, dst = _legacy_hardlinked_worktree(tmp_path / "repo", tmp_path / "wt")
+
+    pi_exec._detach_extension_install(tmp_path / "wt")
+
+    for pkg in ("ext-a", "ext-b"):
+        staged = dst / "node_modules" / pkg / "package.json"
+        assert staged.stat().st_ino == (src / "node_modules" / pkg / "package.json").stat().st_ino
+    assert (dst / "package.json").stat().st_nlink == 1
+    assert (dst / "node_modules" / ".package-lock.json").stat().st_nlink == 1
+    before = (src / "package.json").read_bytes()
+    (dst / "package.json").write_text("{}\n", encoding="utf-8")
+    assert (src / "package.json").read_bytes() == before
+    assert "detached 4 shared extension file(s)" in capsys.readouterr().err
+
+
+def test_detach_extension_install_is_quiet_when_isolated_or_absent(tmp_path, capsys):
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "wt"
+    _seed_npm_install(repo_root, "ext-a")
+    _seed_npm_metadata(repo_root)
+    materialize_extensions(repo_root, worktree)  # an isolated staging
+    capsys.readouterr()
+
+    pi_exec._detach_extension_install(worktree)
+    pi_exec._detach_extension_install(tmp_path / "no-install")
+    materialize_extensions(repo_root, worktree)  # a resume never re-stages
+
+    err = capsys.readouterr().err
+    assert "detached" not in err
+    assert "staged extensions" not in err
+
+
+def test_detach_extension_install_failure_is_non_fatal(tmp_path, capsys, monkeypatch):
+    _seed_npm_install(tmp_path / "wt", "ext-a")
+
+    def _boom(root):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(pi_exec.fsclone, "detach_shared_files", _boom)
+    pi_exec._detach_extension_install(tmp_path / "wt")
+    assert "could not detach shared .pi/npm files — read-only file system" in (
+        capsys.readouterr().err
+    )
+
+
+def test_resume_without_a_main_install_still_verifies_and_detaches(tmp_path, capsys):
+    """A populated worktree needs no repo-root install: main's node_modules being gone must not
+    skip the worktree's verification, nor the exec pipeline's detach of its shared metadata."""
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "wt"
+    src, dst = _legacy_hardlinked_worktree(repo_root, worktree)
+    shutil.rmtree(src / "node_modules")  # main's install is gone; its root metadata remains
+    _write_wt_settings(worktree, ["npm:ext-a@1.0.0", "npm:ext-b@2.0.0"])
+
+    materialize_extensions(repo_root, worktree)
+    pi_exec._detach_extension_install(worktree)
+
+    err = capsys.readouterr().err
+    assert "not staged" not in err
+    assert "extensions: 1 staged extension(s) do not match" in err and "(ext-b@2.0.0)" in err
+    # main's node_modules/.package-lock.json went with its node_modules: three still shared.
+    assert "detached 3 shared extension file(s)" in err
+    before = (src / "package.json").read_bytes()
+    (dst / "package.json").write_text("{}\n", encoding="utf-8")
+    assert (src / "package.json").read_bytes() == before
 
 
 def test_materialize_extensions_missing_source_is_non_fatal(tmp_path, capsys):
@@ -1414,8 +1547,8 @@ def test_materialize_extensions_clone_failure_is_non_fatal(tmp_path, capsys, mon
     def _boom(*_a, **_k):
         raise OSError("disk full")
 
-    # both arms of the clone ladder fail → the warning, launch not blocked
-    monkeypatch.setattr("perk.run.launch.materialize.shutil.copytree", _boom)
+    # both tiers of the staging fail → the warning, launch not blocked
+    monkeypatch.setattr("perk.run.launch.materialize.fsclone.clone_tree", _boom)
 
     materialize_extensions(repo_root, worktree)
 
@@ -1423,19 +1556,19 @@ def test_materialize_extensions_clone_failure_is_non_fatal(tmp_path, capsys, mon
 
 
 def test_materialize_extensions_clone_failure_cleans_up_partial_tree(tmp_path, capsys, monkeypatch):
-    """A clone that fails mid-copy leaves a partial tree; the outer handler removes it so the
-    presence-only resume guard never permanently caches a half-copied (corrupt) install."""
+    """A staging that fails mid-way leaves a partial tree; the outer handler removes it so the
+    presence-only resume guard never permanently caches a half-staged (corrupt) install."""
     repo_root = tmp_path / "repo"
     worktree = tmp_path / "wt"
     _seed_npm_install(repo_root, "ext-a")
     dst = worktree / ".pi" / "npm"
 
-    def _partial_then_boom(src, dest, **_k):
-        # simulate a copy that wrote some files before failing partway through
+    def _partial_then_boom(src, dest):
+        # simulate a staging that wrote some entries before failing partway through
         (Path(dest) / "node_modules" / "half").mkdir(parents=True, exist_ok=True)
         raise OSError("disk full")
 
-    monkeypatch.setattr("perk.run.launch.materialize.shutil.copytree", _partial_then_boom)
+    monkeypatch.setattr("perk.run.launch.materialize.fsclone.clone_tree", _partial_then_boom)
 
     materialize_extensions(repo_root, worktree)
 
@@ -1443,17 +1576,80 @@ def test_materialize_extensions_clone_failure_cleans_up_partial_tree(tmp_path, c
     assert not dst.exists()  # partial tree removed → next launch re-stages / pi installs fresh
 
 
-def test_materialize_extensions_hardlink_fallback_deep_copies(tmp_path, monkeypatch):
+# --- the post-staging verification ----------------------------------------------------------
+
+
+def test_stale_extension_specs_mirrors_needs_install(tmp_path):
+    worktree = tmp_path / "wt"
+    _seed_npm_install(worktree, "exact-ok", "exact-bumped", "bare", "ranged", "@scope/obj")
+    _write_wt_settings(
+        worktree,
+        [
+            "..",
+            "git:github.com/o/r@v1",
+            "npm:exact-ok@1.0.0",
+            "npm:exact-bumped@2.0.0",
+            "npm:bare",
+            "npm:ranged@^3.0.0",
+            "npm:absent@1.0.0",
+            "npm:absent-bare",
+            {"source": "npm:@scope/obj@1.0.0", "extensions": []},
+            {"source": "npm:@scope/obj-gone"},
+            {"extensions": []},
+        ],
+    )
+    assert materialize._stale_extension_specs(worktree) == [
+        "exact-bumped@2.0.0",
+        "absent@1.0.0",
+        "absent-bare",
+        "@scope/obj-gone",
+    ]
+
+
+@pytest.mark.parametrize(
+    "settings", ["{not json", '{"packages": "npm:x"}', "[]", '{"packages": null}', None]
+)
+def test_stale_extension_specs_unreadable_settings_is_empty(tmp_path, settings):
+    worktree = tmp_path / "wt"
+    if settings is not None:
+        path = worktree / ".pi" / "settings.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(settings, encoding="utf-8")
+    assert materialize._stale_extension_specs(worktree) == []
+
+
+def test_stale_extension_specs_unreadable_manifest_is_stale(tmp_path):
+    worktree = tmp_path / "wt"
+    _seed_npm_install(worktree, "ext-a")
+    manifest = worktree / ".pi" / "npm" / "node_modules" / "ext-a" / "package.json"
+    manifest.write_text("[]", encoding="utf-8")
+    _write_wt_settings(worktree, ["npm:ext-a"])
+    assert materialize._stale_extension_specs(worktree) == ["ext-a"]
+
+
+def test_materialize_extensions_warns_once_on_a_bumped_pin(tmp_path, capsys):
     repo_root = tmp_path / "repo"
     worktree = tmp_path / "wt"
-    _seed_npm_install(repo_root, "ext-a")
-
-    def _no_hardlink(*_a, **_k):
-        raise OSError("EXDEV")
-
-    # the hardlink arm fails (e.g. cross-device); the deep-copy fallback still stages the files
-    monkeypatch.setattr("perk.run.launch.materialize.os.link", _no_hardlink)
+    _seed_npm_install(repo_root, "ext-a", "ext-b")
+    _seed_npm_install(worktree, "ext-a", "ext-b")  # a resume
+    _write_wt_settings(worktree, ["npm:ext-a@1.0.0", "npm:ext-b@1.1.0"])
 
     materialize_extensions(repo_root, worktree)
 
-    assert (worktree / ".pi" / "npm" / "node_modules" / "ext-a" / "package.json").is_file()
+    err = capsys.readouterr().err
+    assert err.count("do not match") == 1
+    assert (
+        "extensions: 1 staged extension(s) do not match this worktree's .pi/settings.json "
+        "(ext-b@1.1.0) — pi will install them in-session"
+    ) in err
+
+
+def test_materialize_extensions_matching_worktree_is_quiet(tmp_path, capsys):
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "wt"
+    _seed_npm_install(repo_root, "ext-a")
+    _write_wt_settings(worktree, ["..", "npm:ext-a@1.0.0", {"source": "npm:ext-a"}])
+
+    materialize_extensions(repo_root, worktree)
+
+    assert "do not match" not in capsys.readouterr().err

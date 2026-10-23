@@ -22,7 +22,7 @@ from typing import Literal
 
 from perk.backends import linear
 from perk.backends.linear.client import LinearClient
-from perk.convergence.env import EnvCheck
+from perk.convergence.env import EnvCheck, pi_needs_node_warning
 from perk.substrate import config, git, npm, proc
 from perk.substrate.config import (
     ConfigError,
@@ -30,7 +30,6 @@ from perk.substrate.config import (
     load_committed_issues_team,
     load_local_linear_api_key,
 )
-from perk.substrate.host_floor import describe_node_lines, load_host_floor, supported_node_lines
 from perk.substrate.output import io_step, user_confirm, user_output, user_prompt
 from perk.substrate.pi_host import PI_ADOPTED_VERSION, PI_INSTALL_COMMAND, PI_INSTALL_SPECS
 from perk.substrate.pi_host import PI_NPM_SPEC as PI_NPM_SPEC
@@ -127,12 +126,15 @@ def _run_install(argv: list[str]) -> None:
 
 
 def guide_missing_tools(checks: list[EnvCheck]) -> tuple[list[str], list[str]]:
-    """The confirm-then-install pass over the failing **required** checks.
+    """The confirm-then-install pass over the failing **required** checks (and ``pi``'s advisory).
 
     Per tool with a supported installer: confirm (default yes) → run under an ``io_step``
     narration → re-probe just that tool. Success → one change line; a decline, an install
     failure, or a still-absent binary → one warning carrying the manual remediation. A missing
-    ``pi`` whose ``node`` gate fails gets the "install Node first" note instead of an offer.
+    ``pi`` whose ``node`` gate fails gets the "install Node first" note instead of an offer. An
+    ok ``pi`` row carrying the advisory (admitted, not the adopted Pi) is offered the adopted
+    set too; its decline appends nothing — the row keeps its advisory, which ``run_init``
+    reports as the one warning.
     Guide-only tools (``git``/``node``) produce nothing here — their remediation strings in the
     failure report are the guidance. Never raises; never prompts on a healthy host.
     """
@@ -140,20 +142,28 @@ def guide_missing_tools(checks: list[EnvCheck]) -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     node_ok = any(c.name == "node" and c.ok for c in checks)
     for check in checks:
-        if check.ok or check.optional:
+        advisory_only = check.name == "pi" and check.ok and bool(check.advisory)
+        if (check.ok and not advisory_only) or check.optional:
             continue
         installer = _resolve_installer(check.name, node_ok=node_ok)
         if installer is None:
-            if check.name == "pi" and not node_ok:
-                node_lines = describe_node_lines(supported_node_lines(load_host_floor()))
+            if check.name == "pi" and not node_ok and not advisory_only:
+                warnings.append(pi_needs_node_warning())
+            continue
+        prompt = (
+            f"Install the adopted Pi set via {installer.label}?"
+            if advisory_only
+            else f"Install {check.name} via {installer.label}?"
+        )
+        if not user_confirm(prompt, default=True):
+            # The advisory row keeps its advisory, so `run_init`'s advisory→warnings line
+            # reports the decline once; only a not-ok row's decline is recorded here.
+            if not advisory_only:
                 warnings.append(
-                    f"pi: install Node.js on a supported release line ({node_lines}) first, "
-                    f"then: {PI_INSTALL_COMMAND}"
+                    f"{check.name} not installed; install manually: {check.remediation}"
                 )
             continue
-        if not user_confirm(f"Install {check.name} via {installer.label}?", default=True):
-            warnings.append(f"{check.name} not installed; install manually: {check.remediation}")
-            continue
+        manual = check.remediation or installer.label
         failure: str | None = None
         with io_step(f"Installing {check.name} ({installer.label})") as step:
             try:
@@ -164,12 +174,10 @@ def guide_missing_tools(checks: list[EnvCheck]) -> tuple[list[str], list[str]]:
             else:
                 step.done(f"{check.name} installed")
         if failure is not None:
-            warnings.append(
-                f"{check.name} install failed ({failure}); install manually: {check.remediation}"
-            )
+            warnings.append(f"{check.name} install failed ({failure}); install manually: {manual}")
             continue
         if shutil.which(check.name) is None:
-            hint = check.remediation
+            hint = manual
             if check.name == "skills" and installer.detail.startswith("go install"):
                 hint = "add $(go env GOPATH)/bin to your PATH"
             warnings.append(f"{check.name} installed but not on PATH; {hint}")

@@ -264,7 +264,7 @@ def test_exec_pi_refused_host_never_chdirs_or_execs(tmp_path, monkeypatch, launc
 def test_exec_pi_admission_precedes_every_other_exec_phase_step(
     tmp_path, monkeypatch, launch_exec_recorder
 ):
-    """Resolve → admit → Linear-key read → env build → lock sweep → chdir → exec."""
+    """Resolve → admit → Linear-key read → env build → lock sweep → detach → chdir → exec."""
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
     events: list[str] = []
     real_build = pi_exec._build_exec_env
@@ -282,10 +282,13 @@ def test_exec_pi_admission_precedes_every_other_exec_phase_step(
 
     monkeypatch.setattr(pi_exec, "_build_exec_env", _build)
     monkeypatch.setattr(pi_exec, "_sweep_stale_pi_agent_locks", lambda d: events.append("sweep"))
+    monkeypatch.setattr(
+        pi_exec, "_detach_extension_install", lambda checkout: events.append("detach")
+    )
     monkeypatch.setattr(pi_exec.os, "chdir", lambda path: events.append("chdir"))
     monkeypatch.setattr(pi_exec.os, "execvpe", lambda program, argv, env: events.append("exec"))
     _exec_pi_direct(tmp_path, launch_exec_recorder, run_id="01X")
-    assert events == ["resolve", "admit", "linear-key", "env", "sweep", "chdir", "exec"]
+    assert events == ["resolve", "admit", "linear-key", "env", "sweep", "detach", "chdir", "exec"]
 
 
 def test_exec_pi_refused_host_runs_no_later_phase(tmp_path, monkeypatch, launch_exec_recorder):
@@ -297,6 +300,9 @@ def test_exec_pi_refused_host_runs_no_later_phase(tmp_path, monkeypatch, launch_
     )
     monkeypatch.setattr(pi_exec, "_build_exec_env", lambda **kw: events.append("env") or {})
     monkeypatch.setattr(pi_exec, "_sweep_stale_pi_agent_locks", lambda d: events.append("sweep"))
+    monkeypatch.setattr(
+        pi_exec, "_detach_extension_install", lambda checkout: events.append("detach")
+    )
     with pytest.raises(UserFacingCliError):
         _exec_pi_direct(tmp_path, launch_exec_recorder, run_id="01X")
     assert events == ["admit"]

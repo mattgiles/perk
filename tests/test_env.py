@@ -2,9 +2,16 @@ import pytest
 
 from perk.convergence import env
 from perk.convergence.env import EnvCheck, check_environment, required_tools_ok
-from perk.substrate.pi_host import PI_ADOPTED_VERSION, PI_INSTALL_COMMAND, PiHost
+from perk.substrate import npm
+from perk.substrate.pi_host import (
+    PI_ADOPTED_VERSION,
+    PI_INSTALL_COMMAND,
+    PI_INSTALL_SPECS,
+    PiHost,
+)
 
 LINES = "22.x >= 22.23.4, 24.x >= 24.22.1, 26.x >= 26.12.1"
+PI_FIX_REMEDIATION = f"Run `perk doctor --fix` (it runs: {PI_INSTALL_COMMAND})."
 PI_ABSENT_REMEDIATION = (
     f"Install Pi: {PI_INSTALL_COMMAND} (requires Node.js on a supported release line: {LINES})."
 )
@@ -223,7 +230,7 @@ def test_pi_unverifiable_is_not_ok(monkeypatch):
     pi = env._check_pi()
     assert not pi.ok
     assert pi.detail == "version unverifiable (pi --version timed out after 20 s)"
-    assert pi.remediation == f"Reinstall Pi (>= 1.0.0 required): {PI_INSTALL_COMMAND}."
+    assert pi.remediation == PI_FIX_REMEDIATION
     assert pi.advisory == ""
 
 
@@ -235,7 +242,7 @@ def test_pi_with_undecodable_output_is_an_unverifiable_row_not_a_crash(monkeypat
     pi = env._check_pi()  # the REAL probe, against the shipped floor
     assert not pi.ok
     assert pi.detail == "version unverifiable (pi --version printed output that is not UTF-8)"
-    assert pi.remediation.startswith("Reinstall Pi (>= 1.1.0 required): ")
+    assert pi.remediation == PI_FIX_REMEDIATION
 
 
 def test_check_environment_carries_the_pi_row_in_place(monkeypatch):
@@ -249,3 +256,95 @@ def test_check_environment_carries_the_pi_row_in_place(monkeypatch):
 
 def _unreachable_probe(path):
     raise AssertionError(f"probe ran for an absent pi: {path}")
+
+
+def test_pi_incoherent_is_not_ok(monkeypatch):
+    detail = (
+        "@earendil-works/pi-codemode does not resolve, @earendil-works/pi-mcp resolves to 1.4.0"
+    )
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
+    monkeypatch.setattr(env, "probe_pi_host", lambda path: _pi_host("incoherent", "1.1.0", detail))
+    pi = env._check_pi()
+    assert not pi.ok
+    assert pi.detail == f"1.1.0 (floor >= 1.0.0) — companions: {detail}"
+    assert pi.remediation == PI_FIX_REMEDIATION
+    assert "perk doctor --fix" in pi.remediation
+    assert pi.advisory == ""
+    assert not required_tools_ok([pi])
+
+
+# --- repair_pi: the `perk doctor --fix` gesture ----------------------------------------------
+
+_NODE_OK = EnvCheck("node", True, "v26.12.1", "")
+_PI_GREEN = EnvCheck("pi", True, "1.1.0 (floor >= 1.1.0)", "")
+_PI_ADVISORY = EnvCheck("pi", True, "1.4.0 (floor >= 1.1.0)", "", advisory="caution")
+_PI_INCOHERENT = EnvCheck("pi", False, "1.1.0 (floor >= 1.1.0) — companions: x", PI_FIX_REMEDIATION)
+_PI_ABSENT = EnvCheck("pi", False, "not found", PI_ABSENT_REMEDIATION)
+
+
+@pytest.fixture
+def install_recorder(monkeypatch):
+    calls: list[tuple[tuple[str, ...], int]] = []
+
+    def fake_install(*specs: str, timeout: int) -> None:
+        calls.append((specs, timeout))
+
+    monkeypatch.setattr(npm, "install_global", fake_install)
+    return calls
+
+
+def test_repair_pi_is_a_noop_on_a_green_row(monkeypatch, install_recorder):
+    monkeypatch.setattr(env, "_check_pi", lambda: pytest.fail("no re-probe on a green row"))
+    assert env.repair_pi([_NODE_OK, _PI_GREEN]) == ([], [])
+    assert env.repair_pi([_NODE_OK]) == ([], [])
+    assert install_recorder == []
+
+
+@pytest.mark.parametrize("row", [_PI_ADVISORY, _PI_INCOHERENT, _PI_ABSENT])
+def test_repair_pi_installs_the_set_and_reports_the_green_reprobe(
+    monkeypatch, install_recorder, row
+):
+    monkeypatch.setattr(env, "_check_pi", lambda: _PI_GREEN)
+    fixed, errors = env.repair_pi([_NODE_OK, row])
+    assert install_recorder == [(PI_INSTALL_SPECS, 600)]
+    assert fixed == [f"pi: installed the adopted Pi {PI_ADOPTED_VERSION} set (npm -g, 8 packages)"]
+    assert errors == []
+
+
+def test_repair_pi_install_failure_names_the_manual_command(monkeypatch):
+    def failing(*specs: str, timeout: int) -> None:
+        raise npm.NpmError("npm exited 1")
+
+    monkeypatch.setattr(npm, "install_global", failing)
+    monkeypatch.setattr(env, "_check_pi", lambda: pytest.fail("no re-probe after a failed install"))
+    assert env.repair_pi([_NODE_OK, _PI_INCOHERENT]) == (
+        [],
+        [f"pi: adopted-set install failed (npm exited 1); run manually: {PI_INSTALL_COMMAND}"],
+    )
+
+
+@pytest.mark.parametrize(
+    "after", [_PI_ADVISORY, EnvCheck("pi", False, "1.1.0 (floor >= 1.1.0) — companions: y", "")]
+)
+def test_repair_pi_still_not_green_names_the_path_order(monkeypatch, install_recorder, after):
+    monkeypatch.setattr(env, "_check_pi", lambda: after)
+    monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/other/bin/pi")
+    fixed, errors = env.repair_pi([_NODE_OK, _PI_INCOHERENT])
+    assert install_recorder == [(PI_INSTALL_SPECS, 600)]
+    assert fixed == []
+    assert errors == [
+        f"pi: still {after.detail} after installing the adopted set — the pi on PATH "
+        "(/opt/other/bin/pi) is not the install npm wrote; fix PATH order or remove the other pi"
+    ]
+
+
+def test_repair_pi_under_a_failing_node_installs_nothing(install_recorder):
+    node_bad = EnvCheck("node", False, "not found", "install node")
+    fixed, errors = env.repair_pi([node_bad, _PI_ABSENT])
+    assert install_recorder == []
+    assert fixed == []
+    assert errors == [
+        f"pi: install Node.js on a supported release line ({LINES}) first, then: "
+        f"{PI_INSTALL_COMMAND}"
+    ]
+    assert errors == [env.pi_needs_node_warning()]

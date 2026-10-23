@@ -324,6 +324,13 @@ def stub_env(monkeypatch):
     # The review-seam hunk-CLI gesture probes PATH + shells `npm install -g` (verify-gated);
     # stub it so verified inits/doctor-fixes in tests stay offline and host-independent.
     monkeypatch.setattr(init_mod, "ensure_review_cli", lambda root: ([], []))
+    # `doctor --fix`'s Pi repair gesture shells `npm install -g` (verify-gated); stub it so
+    # verified doctor fixes in tests never touch the host's global npm root.
+    monkeypatch.setattr(env_mod, "repair_pi", lambda checks: ([], []))
+    # The write admission compares the running perk's own checkout against the converged root —
+    # a fake self-repo in tmp_path is never the running checkout. Admit everywhere; the gate's
+    # own tests restore `write_admission.write_refusal` explicitly.
+    monkeypatch.setattr(init_mod, "write_refusal", lambda root, *, self_repo: None)
     # The interactive onboarding gestures (guided installs / gh login / git identity / the
     # Linear key prompt) prompt on stderr and shell externals; stub them so verified inits
     # (default interactive=True) stay prompt-free and host-independent. Defensive for

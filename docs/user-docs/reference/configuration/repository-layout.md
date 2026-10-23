@@ -40,6 +40,28 @@ perk-owned: it is Pi's directory with a perk-managed slice.
 | `docs/library/` | perk (`perk librarian`) | gitignored cache (main checkout only) | no |
 | `docs/library/README.md` | perk-generated (`perk init` / `doctor --fix`, only when the directory exists) | committed | yes |
 
+### Worktree extension staging
+
+When a stage launches in a worktree whose `.pi/npm/` is empty, perk stages the main checkout's
+converged `.pi/npm/` into it so Pi installs nothing at startup. On macOS perk clones the directory
+copy-on-write (`staged extensions (clonefile)` — fully independent, no extra disk until a file
+changes). Elsewhere it hardlinks the files and gives the install root's own metadata files
+(`package.json`, lockfiles, `node_modules/.package-lock.json` and the like) their own copies
+(`staged extensions (hardlink)`): an extension install in the worktree then never rewrites another
+tree's metadata, but the installed package files stay shared — package managers replace a package
+directory rather than editing it, so only a tool that patches installed package files in place
+would reach the other trees. perk never byte-copies the whole tree; if staging fails, the launch
+continues and Pi installs the extensions in-session. A populated install is never replaced.
+
+**Every launch** — bare `perk`, a stage launch, `perk resume` — first gives the checkout's
+`.pi/npm/` metadata files their own copies if they are still shared with another tree
+(`detached <n> shared extension file(s)`; worktrees staged by older perk versions shared them with
+the main checkout and every sibling). After staging (or on a stage launch into a populated
+worktree), perk checks the install against the worktree's own `.pi/settings.json` and warns once
+when an extension is missing or not at its exact pinned version (`extensions: <n> staged
+extension(s) do not match this worktree's .pi/settings.json (…) — pi will install them
+in-session`); Pi then installs it in-session. `perk resume` skips that check.
+
 ### Agent scratch
 
 For each eligible write-capable model turn, perk creates

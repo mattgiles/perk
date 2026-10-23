@@ -10,26 +10,44 @@ are side-effect-free probes; the caller decides fatality (init: missing/outdated
 -> exit 2; doctor: ``fail``). The launch admission in ``perk.run.pi_exec`` shares the Pi probe
 (``perk.substrate.pi_host``) but never gates these checks.
 
+The adopted Pi whose companion packages do not resolve as the adopted family (contracts.md
+§8.76(c), ``incoherent``) is ``ok=False`` with the offenders in the detail, repaired by
+``perk doctor --fix``.
+
 A Pi admitted at a version other than the adopted Pi pin stays ``ok`` (the floor is a minimum) but
 carries an **advisory** naming the pinned install command — a successful init renders it as a
 warning, doctor as a ``warn`` check. The ``pi`` row reads the PATH ``pi`` only: the Pi a session
 actually runs may be a different install (contracts.md §8.76(f)), which is why the extension's
 SDK-boundary refusal names the public requirements reference rather than this row.
+
+``repair_pi`` is the one Pi repair gesture (``perk doctor --fix``): gap-driven over the ``pi``
+row, it runs the pinned eight-spec install as an argument list, then re-probes — the only
+function here with a side effect, and never called by a check.
 """
 
 import shutil
 from dataclasses import dataclass
 
-from perk.substrate import cloc
+from perk.substrate import cloc, npm
 from perk.substrate.host_floor import (
     describe_node_lines,
     load_host_floor,
     node_line_floor,
     supported_node_lines,
 )
-from perk.substrate.pi_host import PI_ADOPTED_VERSION, PI_INSTALL_COMMAND, probe_pi_host
+from perk.substrate.output import io_step
+from perk.substrate.pi_host import (
+    PI_ADOPTED_VERSION,
+    PI_INSTALL_COMMAND,
+    PI_INSTALL_SPECS,
+    probe_pi_host,
+)
 from perk.substrate.proc import ProcFailure, run_captured, which_absolute
 from perk.substrate.semver import parse_semver, satisfies_floor
+
+# The pinned install downloads eight packages over the network.
+_PI_INSTALL_TIMEOUT = 600
+_PI_FIX_REMEDIATION = f"Run `perk doctor --fix` (it runs: {PI_INSTALL_COMMAND})."
 
 
 @dataclass(frozen=True)
@@ -147,11 +165,67 @@ def _check_pi() -> EnvCheck:
             f"{host.observed} (floor >= {host.required})",
             f"Upgrade Pi to >= {host.required} (found {host.observed}): {PI_INSTALL_COMMAND}.",
         )
+    if host.outcome == "incoherent":
+        return EnvCheck(
+            "pi",
+            False,
+            f"{host.observed} (floor >= {host.required}) — companions: {host.detail}",
+            _PI_FIX_REMEDIATION,
+        )
     return EnvCheck(
         "pi",
         False,
         f"version unverifiable ({host.detail})",
-        f"Reinstall Pi (>= {host.required} required): {PI_INSTALL_COMMAND}.",
+        _PI_FIX_REMEDIATION,
+    )
+
+
+def pi_needs_node_warning() -> str:
+    """The one "install Node first" sentence (the guided install pass emits the same text)."""
+    node_lines = describe_node_lines(supported_node_lines(load_host_floor()))
+    return (
+        f"pi: install Node.js on a supported release line ({node_lines}) first, "
+        f"then: {PI_INSTALL_COMMAND}"
+    )
+
+
+def repair_pi(checks: list[EnvCheck]) -> tuple[list[str], list[str]]:
+    """The ``perk doctor --fix`` Pi repair gesture — gap-driven, never raises.
+
+    A no-op ``([], [])`` unless the ``pi`` row is not ok (absent / unsupported / unverifiable /
+    incoherent) or carries the advisory (admitted, not the adopted Pi). A failing ``node`` row
+    stops it with the install-Node-first warning (nothing installed). Otherwise one
+    ``npm install -g`` of the pinned eight-spec set (an argument list), then a re-probe: green →
+    one fixed line; an ``NpmError`` → the manual-command error; still not green → the PATH-order
+    error (the ``pi`` PATH finds is not the install npm wrote). Reads ``_check_pi`` /
+    ``which_absolute`` / ``npm`` as module globals (the test seams).
+    """
+    pi = next((c for c in checks if c.name == "pi"), None)
+    if pi is None or (pi.ok and not pi.advisory):
+        return ([], [])
+    if not any(c.name == "node" and c.ok for c in checks):
+        return ([], [pi_needs_node_warning()])
+    try:
+        with io_step("installing the adopted Pi set"):
+            npm.install_global(*PI_INSTALL_SPECS, timeout=_PI_INSTALL_TIMEOUT)
+    except npm.NpmError as exc:
+        return ([], [f"pi: adopted-set install failed ({exc}); run manually: {PI_INSTALL_COMMAND}"])
+    after = _check_pi()
+    if after.ok and not after.advisory:
+        return (
+            [
+                f"pi: installed the adopted Pi {PI_ADOPTED_VERSION} set "
+                f"(npm -g, {len(PI_INSTALL_SPECS)} packages)"
+            ],
+            [],
+        )
+    on_path = which_absolute("pi") or "not on PATH"
+    return (
+        [],
+        [
+            f"pi: still {after.detail} after installing the adopted set — the pi on PATH "
+            f"({on_path}) is not the install npm wrote; fix PATH order or remove the other pi"
+        ],
     )
 
 

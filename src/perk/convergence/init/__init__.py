@@ -129,6 +129,7 @@ from perk.convergence.version_pin import (
     read_version_pin,
     render_version_pin,
 )
+from perk.convergence.write_admission import write_refusal
 from perk.github import AuthStatus, GitHubError, RepoAccess
 from perk.run import workflow_artifacts
 from perk.state import cache
@@ -235,6 +236,7 @@ __all__ = [
     "skills_conflict_paths",
     "subprocess",
     "sync_skills",
+    "write_refusal",
 ]
 
 
@@ -376,12 +378,16 @@ def run_init(
     checks: list[EnvCheck] = []
     changes: list[str] = []
     warnings: list[str] = []
+    self_repo = is_self_repo(root)
     if verify:
         checks = env.check_environment()
         # The interactive guided-install pass runs ONCE, before any git shell-out (git itself
         # may be the missing tool), then the environment is re-probed. Gap-driven: with every
-        # required tool present it prompts for nothing and returns `([], [])`.
-        if interactive and not env.required_tools_ok(checks):
+        # required tool present and no advisory (an admitted Pi that is not the adopted one) it
+        # prompts for nothing and returns `([], [])`.
+        if interactive and (
+            not env.required_tools_ok(checks) or any(c.ok and c.advisory for c in checks)
+        ):
             guided_changes, guided_warnings = guide_missing_tools(checks)
             changes.extend(guided_changes)
             warnings.extend(guided_warnings)
@@ -398,6 +404,11 @@ def run_init(
                 "Not a git repository — run 'perk init' inside a git repository.",
                 checks,
             )
+        # Write admission, before any repo write: a foreign perk (perk's own repo) or one older
+        # than the committed pin (a consumer) would converge the managed files backward.
+        refusal = write_refusal(root, self_repo=self_repo)
+        if refusal is not None:
+            return InitReport.env_failure(refusal.error_type, refusal.message, checks)
         if not env.required_tools_ok(checks):
             return _missing_tool_failure(checks, changes, warnings, interactive=interactive)
         # Pre-flight the skills-CLI tracked-content conflict BEFORE any convergence: `skills
@@ -413,7 +424,6 @@ def run_init(
                 "skills_conflict", _skills_conflict_message(conflicts), checks
             )
 
-    self_repo = is_self_repo(root)
     # Legacy-only refusal: a repo carrying the legacy committed config (`.pi/perk.toml`) but not
     # the new marker (`.perk/config.toml`) must be migrated by `doctor --fix` before init will
     # converge it — never warn-and-seed a fresh template over an unmigrated legacy config. Keyed
