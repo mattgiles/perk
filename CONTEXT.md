@@ -376,6 +376,25 @@ in the tab's `perk:wave` slot after draining any admitted decision; nothing is p
 resumed, and Plannotator's server is never stopped.
 _Avoid_: superseded review (that is the slot's term), stopped review, closed server
 
+**Prepared snapshot**:
+The parent-fetched, code-owned feedback set a classifier lane is bound to (`/address`: the
+strictly decoded `perk pr feedback --json` payload); membership, uniqueness, coverage and counts
+are derived from it, never from the lane.
+_Avoid_: the child fetches, lane counts, raw feedback (for the decoded snapshot)
+
+**Classification subjects**:
+Exactly the items of a prepared snapshot the lane must classify, once each: the unresolved review
+threads (outdated-but-unresolved included) and every discussion comment. Resolved threads and
+PR-level review bodies are excluded by decision — only counted.
+_Avoid_: feedback items (for the unfiltered set), review comments (ambiguous with inline comments)
+
+**Bound classification**:
+The parent-validated result of binding a lane's judgment-only report to the classification
+subjects — snapshot order, anchors (`path`/`line`/`is_outdated`) attached from the snapshot,
+counts derived in code. Held per activation; it is what `finalize_address` binds to (the thread
+ids it may resolve and the PR it may resolve them on).
+_Avoid_: lane report (for the bound result), lane counts, classifier output
+
 ### Objective delivery
 
 **Incremental delivery**:
