@@ -15,13 +15,17 @@
 //
 // The same report additionally carries a per-surface payload CENSUS — derived counts/chars for
 // `appendSystemPrompt`, `contextFiles`, the skills catalog section, the active tool definitions,
-// and perk-injected `custom_message` branch context, plus the admitted host SDK (§8.76(f)) and the
-// host-SDK bridge state (§8.73).
+// and perk-injected `custom_message` branch context; the session's model SELECTION beside the
+// physical models that answered on the selected branch (DISPATCH); the branch's once-counted
+// usage ledger (`substrate/usageLedger.ts`); the context projection's size beside Pi's context
+// limits; the report-wave children's usage (a constant `unavailable`); plus the admitted host SDK
+// (§8.76(f)) and the host-SDK bridge state (§8.73).
 // Report-only: the census never affects the ok/level verdict (contracts.md §8.7).
 //
 // Sensitivity: `getSystemPromptOptions()` exposes the full system-prompt construction inputs. This
 // module logs ONLY derived output — identifiers (paths, skill/tool names, source strings,
-// customTypes) and counts/chars; never prompt/content text. See docs/learned/pi/.
+// customTypes, model/provider/api ids) and counts/chars/costs; never prompt/content text. See
+// docs/learned/pi/.
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -35,6 +39,14 @@ import { BINDING_HEADER } from "../../substrate/bindingDelivery.ts";
 import { registerPerkCommand } from "../../substrate/command.ts";
 import type { HostSdkAdmission } from "../../substrate/hostAdmission.ts";
 import { type BridgeStatus, describeBridge } from "../../substrate/nativeSdkBridge.ts";
+import {
+  branchModelCensus,
+  branchUsageCensus,
+  formatUsd,
+  freshTokens,
+  type UsageSources,
+  type UsageTotals,
+} from "../../substrate/usageLedger.ts";
 import { branchOf } from "../../substrate/workflowState.ts";
 import { report as reportTo } from "../../surfaces/report.ts";
 import { activeContextMessages, type ContextProjectionSource } from "./contextEvidence.ts";
@@ -283,9 +295,10 @@ export interface BranchContextCensus {
    * is HISTORICAL (every copy on the branch, compacted or context-edited ones included); `live` is
    * the count of that customType in Pi's current context projection (`null` = the read failed).
    * The projection is read BEFORE extension `context` filters run, so `live` is an upper bound on
-   * what the next model request carries: a filter can still drop a projected copy (perk's own
-   * gate strips every `perk:mode-context` once the gate is off, and agent-scratch keeps one
-   * current copy). A command cannot run that filter chain, so the census does not simulate it.
+   * THAT OWNED COPY: a filter can drop a projected copy (perk's own gate strips every
+   * `perk:mode-context` once the gate is off, and agent-scratch keeps one current copy) and
+   * nothing re-adds it before the request. It is no bound on the request as a whole (see
+   * `ContextCensus`). A command cannot run that filter chain, so the census does not simulate it.
    */
   perkContexts: { customType: string; copies: number; totalChars: number; live: number | null }[];
   /** `custom_message` entries without the `perk:` prefix (borrowed packages). */
@@ -365,25 +378,177 @@ export function branchContextCensus(
   };
 }
 
+/** The session's selection beside the branch's dispatch census (`usageLedger.ts`). */
+export interface ModelIdentityCensus {
+  /** `ctx.model` as `provider/id` plus Pi's public `Model.api`; `null` = no selection. */
+  selected: { key: string; api: string } | null;
+  /** The latest successful response's physical identity; `null` = none on the branch. */
+  dispatched: string | null;
+  /**
+   * The selection's `provider/id` against the dispatched response's REQUESTED `provider/model`
+   * (before any `→responseModel` suffix); `n/a` when either side is absent.
+   */
+  relation: "same" | "differs" | "n/a";
+  responses: { model: string; count: number }[];
+  errors: number;
+  aborted: number;
+}
+
+/**
+ * Census the model identity: the selection (`ctx.model`, a virtual model names the router) and
+ * the physical models that answered on `entries` (failed/aborted responses counted, never
+ * dispatched). Pure.
+ */
+export function modelIdentityCensus(
+  selected: { provider: string; id: string; api: string } | undefined,
+  entries: readonly unknown[],
+): ModelIdentityCensus {
+  const branch = branchModelCensus(entries);
+  const identity =
+    selected === undefined
+      ? null
+      : { key: `${selected.provider}/${selected.id}`, api: selected.api };
+  return {
+    selected: identity,
+    dispatched: branch.dispatched,
+    relation:
+      identity === null || branch.requested === null
+        ? "n/a"
+        : identity.key === branch.requested
+          ? "same"
+          : "differs",
+    responses: branch.responses,
+    errors: branch.errors,
+    aborted: branch.aborted,
+  };
+}
+
+/** The branch's once-counted usage ledger with its per-boundary record counts. */
+export interface UsageCensus {
+  totals: UsageTotals;
+  bySource: UsageSources;
+}
+
+/**
+ * The context projection's size beside Pi's context limits. `projected` is the message count of
+ * the pre-filter projection the `live=` tokens already read (`null` = the read failed). That
+ * total is the PRE-TRANSFORM context, never a bound on the outgoing request: Pi's
+ * `context` / `context_with_system` handlers return replacement message arrays (they may add
+ * messages or enlarge content) and perk itself injects on the next `before_agent_start` after
+ * this command-time snapshot. The outgoing request is not observed. `window` is
+ * `ctx.getContextUsage()` (`null` = undefined or the read threw).
+ */
+export interface ContextCensus {
+  projected: number | null;
+  window: { contextWindow: number; tokens: number | null; percent: number | null } | null;
+}
+
+export function contextCensus(
+  projected: number | null,
+  usage: { tokens: number | null; contextWindow: number; percent: number | null } | null,
+): ContextCensus {
+  return {
+    projected,
+    window:
+      usage === null
+        ? null
+        : { contextWindow: usage.contextWindow, tokens: usage.tokens, percent: usage.percent },
+  };
+}
+
+/** `ctx.getContextUsage()`, or `null` when Pi has none or the read throws (report-only). */
+export function readContextUsage(source: {
+  getContextUsage():
+    | { tokens: number | null; contextWindow: number; percent: number | null }
+    | undefined;
+}): { tokens: number | null; contextWindow: number; percent: number | null } | null {
+  try {
+    return source.getContextUsage() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** The five identity/usage rows (between the branch rows and the host-SDK block). */
+function identityLines(
+  model: ModelIdentityCensus,
+  usage: UsageCensus,
+  context: ContextCensus,
+): string[] {
+  const selected =
+    model.selected === null ? "none" : `${model.selected.key} (api=${model.selected.api})`;
+  const lines = [
+    `  model: selected=${selected}; dispatched=${model.dispatched ?? "none"}; ${model.relation}`,
+  ];
+  const counted = model.responses.map((r) => `${r.model} ×${r.count}`);
+  lines.push(
+    counted.length === 0 && model.errors === 0 && model.aborted === 0
+      ? "    responses: none"
+      : `    responses: ${[...counted, `errors=${model.errors}`, `aborted=${model.aborted}`].join("; ")}`,
+  );
+  const { totals, bySource } = usage;
+  lines.push(
+    totals.records === 0
+      ? "  usage: unavailable (no usage records on the branch)"
+      : `  usage: records=${totals.records} (assistant=${bySource.assistant}, ` +
+          `tool=${bySource.toolResult}, compaction=${bySource.compaction}, ` +
+          `branch-summary=${bySource.branchSummary}, usage-entry=${bySource.usageEntry}); ` +
+          `fresh=${freshTokens(totals)} (in=${totals.input} out=${totals.output}); ` +
+          `cache read=${totals.cacheRead} write=${totals.cacheWrite}; cost=${formatUsd(totals.cost)}`,
+  );
+  const window = context.window;
+  const limits =
+    window === null
+      ? "limits=unavailable"
+      : `window=${window.contextWindow} used=${window.tokens ?? "?"} ` +
+        `(${window.percent === null ? "?" : Math.round(window.percent)}%)`;
+  lines.push(
+    `  context: projection=${context.projected ?? "?"} messages ` +
+      `(pre-transform; the outgoing request is not observed); ${limits}`,
+  );
+  lines.push(
+    "  wave children: usage=unavailable (separate sessions; no owned-run attribution read)",
+  );
+  return lines;
+}
+
 /**
  * Render the census as a fixed multi-line block. The line grammar (the `census:` /
  * `append-system-prompt:` / `context-files:` / `skills:` / `tools:` / `per source:` /
- * `discovery:` / `branch:` / `perk contexts:` / `host sdk:` / `native sdk bridge:` keys) is stable — the closing audit diffs against these
- * exact keys; each `perk contexts:` row appends a `live=<n>` token — the pre-filter projection
- * count (`?` when the projection read failed) — after its historical `×copies (chars)`. `host sdk:`
- * is the loaded SDK version the entry admitted against the floor (`?` when unobserved — an
- * activation is only ever reached admitted). The bridge block carries `describeBridge`, the
- * host entry (or `-`) and the root paths — identifiers only. `discovery:` reports the session's
- * discovery-cohort membership and, in the cohort, the whole pilot family in catalog order.
+ * `discovery:` / `branch:` / `perk contexts:` / `model:` / `responses:` / `usage:` / `context:` /
+ * `wave children:` / `host sdk:` / `native sdk bridge:` keys) is stable — the closing audit diffs
+ * against these exact keys.
+ *
+ * - each `perk contexts:` row appends a `live=<n>` token — the pre-filter projection count (`?`
+ *   when the projection read failed) — after its historical `×copies (chars)`. `live` is an upper
+ *   bound on THAT owned copy only (a `context` filter can drop it);
+ * - `model:` — `selected=<provider/id> (api=<api>)` or `none`, `dispatched=<physical>` or `none`,
+ *   then `same` / `differs` / `n/a`; `responses:` — the successful-response census then
+ *   `errors=<n>; aborted=<n>`, or `none` when the branch holds no assistant response;
+ * - `usage:` — the selected branch's once-counted ledger, or `unavailable (…)` when it holds no
+ *   record (a recorded zero cost renders `$0.0000`);
+ * - `context:` — `projection=<n> messages` (the PRE-TRANSFORM total, never a bound on the
+ *   outgoing request, which is not observed; `?` when the read failed), then
+ *   `window=<w> used=<t> (<p>%)` (`?` for Pi's unknown tokens/percent) or `limits=unavailable`;
+ * - `wave children:` — a constant `usage=unavailable`: perk reads no supplier accounting field;
+ * - `host sdk:` is the loaded SDK version the entry admitted against the floor (`?` when
+ *   unobserved — an activation is only ever reached admitted). The bridge block carries
+ *   `describeBridge`, the host entry (or `-`) and the root paths — identifiers only.
+ *   `discovery:` reports the session's discovery-cohort membership and, in the cohort, the whole
+ *   pilot family in catalog order.
  */
-export function renderCensus(
-  prompt: PromptCensus,
-  tools: ToolsCensus,
-  branch: BranchContextCensus,
-  bridge: BridgeStatus,
-  discovery: { cohort: boolean; family: readonly string[] },
-  hostSdk: HostSdkAdmission,
-): string {
+export function renderCensus(census: {
+  prompt: PromptCensus;
+  tools: ToolsCensus;
+  branch: BranchContextCensus;
+  model: ModelIdentityCensus;
+  usage: UsageCensus;
+  context: ContextCensus;
+  bridge: BridgeStatus;
+  discovery: { cohort: boolean; family: readonly string[] };
+  hostSdk: HostSdkAdmission;
+}): string {
+  const { prompt, tools, branch, bridge, discovery, hostSdk } = census;
   const lines: string[] = ["census:"];
   lines.push(
     prompt.basePromptChars === null
@@ -426,6 +591,7 @@ export function renderCensus(
     `    perk contexts: ${perkSegment}; other custom_message ` +
       `×${branch.otherCustomMessages.copies} (${branch.otherCustomMessages.totalChars}c)`,
   );
+  lines.push(...identityLines(census.model, census.usage, census.context));
   lines.push(`  host sdk: ${hostSdk.observed ?? "?"} (floor >= ${hostSdk.required})`);
   lines.push(`  native sdk bridge: ${describeBridge(bridge)}`);
   lines.push(`    host: ${bridge.hostEntry ?? "-"}`);
@@ -466,14 +632,21 @@ export function registerSelfcheck(
       });
       // The census is report-only: it rides the same report but never affects ok/level. A command
       // doesn't fire `before_agent_start`, so the branch reads as of the last completed turn.
-      const census = renderCensus(
-        promptCensus(options),
-        toolsCensus(pi.getAllTools(), pi.getActiveTools()),
-        branchContextCensus(branchOf(ctx), readLiveProjection(ctx)),
-        opts.bridge,
-        opts.discovery(),
-        opts.hostSdk,
-      );
+      // Model, usage and context are read here at invocation over the SELECTED branch (Pi's own
+      // `/session` sums the whole tree).
+      const branch = branchOf(ctx);
+      const live = readLiveProjection(ctx);
+      const census = renderCensus({
+        prompt: promptCensus(options),
+        tools: toolsCensus(pi.getAllTools(), pi.getActiveTools()),
+        branch: branchContextCensus(branch, live),
+        model: modelIdentityCensus(ctx.model, branch),
+        usage: branchUsageCensus(branch),
+        context: contextCensus(live === null ? null : live.length, readContextUsage(ctx)),
+        bridge: opts.bridge,
+        discovery: opts.discovery(),
+        hostSdk: opts.hostSdk,
+      });
       // Headless-safe: report() surfaces the derived counts/identifiers (never raw prompt content).
       reportTo(ctx, "selfcheck", report.level, `${report.summary}\n${census}`);
     },
