@@ -1,14 +1,17 @@
 // Direct feature tests for the review-feedback finalization operation (delivery/address.ts):
 // call-order recorders over fake ports + the memory session pin the ordering policy
-// (publish → resolve → corroborate → record → decide), the atomicity negatives (no resolve
-// after a failed publish; no record on any non-completed arm; no attempt burn on a resolve
-// failure), the fates/retry matrix, and the ok-arm corroboration guard. OFFLINE — no Pi.
+// (pre-effect refusals → publish → PR identity → resolve → corroborate → record → decide), the
+// atomicity negatives (no resolve after a failed or mismatched publish; no record on any
+// non-completed arm; no attempt burn on a resolve failure), the classification binding (the
+// record's PR/counts come from the bound classification), the fates/retry matrix, and the ok-arm
+// corroboration guard. OFFLINE — no Pi.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openMemoryWorkflowSession } from "../testing/memoryWorkflowSession.ts";
 import {
   type AddressFinalization,
+  type BoundThreads,
   type FinalizeAddressDeps,
   finalizeAddress,
   type ResolveThreadsAttempt,
@@ -78,8 +81,15 @@ function world(opts: {
   return { deps, calls, writes, session };
 }
 
+/** The held classification every batch binds to — its PR matches the publish fixture's. */
+const BOUND: BoundThreads = {
+  pr: 42,
+  counts: { actionable: 1, informational: 0, praise: 0, question: 0 },
+  thread_ids: ["PRRT_1", "PRRT_2", "A", "B", "C", "D"],
+};
+
 function batch(...threads: AddressFinalization["threads"]): AddressFinalization {
-  return { threads, pr: 42, counts: { actionable: 1 } };
+  return { threads, bound: BOUND };
 }
 
 // --- ordering + atomicity -------------------------------------------------------------------
@@ -97,7 +107,7 @@ async function quietly<T>(fn: () => Promise<T>): Promise<T> {
 
 test("empty batch refuses before any port with the exact text", async () => {
   const { deps, calls } = world({});
-  const outcome = await finalizeAddress(deps, { threads: [] });
+  const outcome = await finalizeAddress(deps, { threads: [], bound: BOUND });
   assert.deepEqual(outcome, {
     kind: "empty_batch",
     message: "no threads to finalize (pass { threads: [{thread_id, comment?}] })",
@@ -112,8 +122,73 @@ test("empty batch refuses even when the run-id read would throw (pre-effect orde
   deps.readRunId = () => {
     throw new Error("branch unreadable");
   };
-  const outcome = await finalizeAddress(deps, { threads: [] });
+  const outcome = await finalizeAddress(deps, { threads: [], bound: BOUND });
   assert.equal(outcome.kind, "empty_batch");
+});
+
+test("the empty-batch refusal precedes the classification refusal (order pin)", async () => {
+  const { deps, calls } = world({});
+  const outcome = await finalizeAddress(deps, { threads: [], bound: null });
+  assert.equal(outcome.kind, "empty_batch");
+  assert.deepEqual(calls, []);
+});
+
+test("no held classification ⇒ no_classification before any port (no publish, resolve, write, counter)", async () => {
+  const { deps, calls, writes, session } = world({ attemptsValue: 1 });
+  const outcome = await finalizeAddress(deps, { threads: [{ thread_id: "PRRT_1" }], bound: null });
+  assert.deepEqual(outcome, {
+    kind: "no_classification",
+    message:
+      "no bound classification in this session — call classify_review_feedback first " +
+      "(finalize_address resolves only threads from the last classification)",
+  });
+  assert.deepEqual(calls, [], "no ports invoked");
+  assert.deepEqual(writes, []);
+  assert.equal(session.lastReviewBatchRecord(), null);
+});
+
+test("ids outside the bound classification ⇒ unknown_threads before any port (deduped, request order)", async () => {
+  const { deps, calls, writes, session } = world({ attemptsValue: 1 });
+  const outcome = await finalizeAddress(deps, {
+    threads: [
+      { thread_id: "PRRT_x" },
+      { thread_id: "PRRT_1" },
+      { thread_id: "PRRT_y", comment: "c" },
+      { thread_id: "PRRT_x" },
+    ],
+    bound: BOUND,
+  });
+  assert.deepEqual(outcome, {
+    kind: "unknown_threads",
+    unknownIds: ["PRRT_x", "PRRT_y"],
+    message:
+      "2 requested thread(s) are outside the bound classification: PRRT_x, PRRT_y — re-run " +
+      "classify_review_feedback if the PR gained feedback, and pass only classified thread_ids",
+  });
+  assert.deepEqual(calls, [], "no ports invoked");
+  assert.deepEqual(writes, []);
+  assert.equal(session.lastReviewBatchRecord(), null);
+});
+
+test("a publish to a different PR than the bound one ⇒ published_pr_mismatch: no resolve, no record, no counter", async () => {
+  const change = { ...CHANGE, pr: { ...CHANGE.pr, number: 43 }, mergeable: false as const };
+  const { deps, calls, writes, session } = world({ publish: { ok: true, change } });
+  const outcome = await finalizeAddress(deps, batch({ thread_id: "PRRT_1", comment: "Fixed" }));
+  assert.deepEqual(outcome, {
+    kind: "published_pr_mismatch",
+    change,
+    expected: 42,
+    actual: 43,
+    message:
+      "propagation succeeded to PR #43, but the classification is bound to PR #42; threads " +
+      "were NOT resolved and nothing was recorded. The submit already succeeded. Re-run " +
+      "classify_review_feedback (it binds to the PR the worktree now resolves) and finalize again.",
+  });
+  // The publish's own verified-success updates ran (pointer; a conflicted change skips the
+  // reset read) — then nothing: no resolve, no apply, no conflict decision.
+  assert.deepEqual(calls, ["publish", "pointer"]);
+  assert.deepEqual(writes, [], "no counter activity");
+  assert.equal(session.lastReviewBatchRecord(), null);
 });
 
 test("publish failure ⇒ not_published with both messages; resolver NEVER invoked, no session/counter activity", async () => {
@@ -156,9 +231,10 @@ test("corroborated success: publish → resolve → apply → decide order pin �
   ]);
   assert.deepEqual(outcome.resolvedThreadIds, ["PRRT_1", "PRRT_2"]);
   assert.deepEqual(outcome.conflict, { kind: "none" });
+  // The record's PR and counts are the bound classification's — never caller-supplied.
   const record = session.lastReviewBatchRecord();
   assert.equal(record?.pr, 42);
-  assert.deepEqual(record?.counts, { actionable: 1 });
+  assert.deepEqual(record?.counts, { actionable: 1, informational: 0, praise: 0, question: 0 });
   assert.deepEqual(record?.resolved_thread_ids, ["PRRT_1", "PRRT_2"]);
   assert.ok(!Number.isNaN(Date.parse(record?.at ?? "")));
 });

@@ -1,9 +1,12 @@
 // The review-feedback finalization feature (the address half of the delivery pair), Pi-free.
 //
 // One entry point — `finalizeAddress` — owns the ordering and failure semantics of the
-// submit-then-resolve loop: pre-effect refusal (empty batch) → publish (composing the sibling
-// submit feature's `publishVerified` — one-way import, no cycle) → resolve → request↔row
-// correlation → verified-success session record → the bounded conflict decision. The decision
+// submit-then-resolve loop: pre-effect refusals → publish (composing the sibling submit feature's
+// `publishVerified` — one-way import, no cycle) → published-PR identity check → resolve →
+// request↔row correlation → verified-success session record → the bounded conflict decision. The
+// finalizer is bound to the session's held classification (`BoundThreads`, projected by the
+// adapter): it resolves only classified thread ids, only on the classified PR, and records the
+// PR + counts perk derived — never model-supplied facts. The decision
 // timing is deliberately DIFFERENT from `/submit`'s: it runs only after full corroborated
 // resolve success — a resolve failure never burns an attempt.
 //
@@ -15,8 +18,11 @@
 // requested thread is `published_partial`, never recorded/terminated — contracts §8.52: "full
 // success" = corroborated per-thread success). The two unresolved states are DISTINCT
 // discriminants — `published_partial` (rows known, retry derivable) and `published_unverified`
-// (no per-thread claim) — so retry-without-rows is unrepresentable. Refusals (`bad_input`,
-// `planning_session`) are adapter shapes — they never enter the outcome union.
+// (no per-thread claim) — so retry-without-rows is unrepresentable. `empty_batch`,
+// `no_classification` and `unknown_threads` are the feature's pre-effect refusals;
+// `published_pr_mismatch` joins `published_unverified` as a post-publish, nothing-resolved arm
+// (the push happened and is not undone). `bad_input`/`planning_session` stay adapter shapes —
+// they never enter the outcome union.
 
 import type {
   ReviewBatchCounts,
@@ -53,11 +59,22 @@ export type ResolveThreadsAttempt =
 /** The resolve port — production = `perk pr resolve-threads --json --batch`. */
 export type ResolveThreads = (threads: ThreadInput[]) => Promise<ResolveThreadsAttempt>;
 
-/** The finalization input (the adapter's decoded tool params). */
+/**
+ * The slice of the held classification the finalizer binds to (projected by the adapter —
+ * delivery/ stays independent of waves/): the PR the snapshot was fetched for, the counts perk
+ * derived, and the classified thread ids.
+ */
+export interface BoundThreads {
+  pr: number;
+  counts: ReviewBatchCounts;
+  thread_ids: readonly string[];
+}
+
+/** The finalization input: the decoded tool params + the session's held classification. */
 export interface AddressFinalization {
   threads: ThreadInput[];
-  pr?: number;
-  counts?: ReviewBatchCounts;
+  /** Null when no classification is held in this activation (refused before any effect). */
+  bound: BoundThreads | null;
 }
 
 export interface FinalizeAddressDeps extends PublishDeps {
@@ -67,6 +84,8 @@ export interface FinalizeAddressDeps extends PublishDeps {
 
 export type FinalizeAddressOutcome =
   | { kind: "empty_batch"; message: string }
+  | { kind: "no_classification"; message: string }
+  | { kind: "unknown_threads"; unknownIds: string[]; message: string }
   | {
       kind: "not_published";
       /** The raw publisher failure — the adapter reproduces today's scope-"submit" report. */
@@ -91,6 +110,14 @@ export type FinalizeAddressOutcome =
       resolveMessage: string;
       message: string;
       errorType: string;
+    }
+  | {
+      /** The publish landed on a different PR than the classification is bound to. */
+      kind: "published_pr_mismatch";
+      change: PublishedChange;
+      expected: number;
+      actual: number;
+      message: string;
     }
   | {
       kind: "completed";
@@ -178,6 +205,27 @@ function retryFromFates(
 
 const EMPTY_BATCH_MESSAGE = "no threads to finalize (pass { threads: [{thread_id, comment?}] })";
 
+const NO_CLASSIFICATION_MESSAGE =
+  "no bound classification in this session — call classify_review_feedback first " +
+  "(finalize_address resolves only threads from the last classification)";
+
+function unknownThreadsMessage(ids: string[]): string {
+  return (
+    `${ids.length} requested thread(s) are outside the bound classification: ` +
+    `${ids.join(", ")} — re-run classify_review_feedback if the PR gained feedback, and pass ` +
+    "only classified thread_ids"
+  );
+}
+
+function prMismatchMessage(expected: number, actual: number): string {
+  return (
+    `propagation succeeded to PR #${actual}, but the classification is bound to PR ` +
+    `#${expected}; threads were NOT resolved and nothing was recorded. The submit already ` +
+    "succeeded. Re-run classify_review_feedback (it binds to the PR the worktree now resolves) " +
+    "and finalize again."
+  );
+}
+
 const INSPECT_GUIDANCE =
   "Inspect the resolution failure before retrying; omit any reply that may already have posted.";
 const RETRY_GUIDANCE =
@@ -198,10 +246,13 @@ function resolvedIdsOf(rows: ThreadResultRow[]): string[] {
 
 /**
  * Publish committed address fixes, then resolve their review threads. Ordering policy: the
- * empty refusal fires before any port; a failed publish returns with no resolve call, no
- * session writes, and no counter activity; the batch record and the conflict decision happen
- * ONLY after corroborated full resolve success (never-burn-an-attempt). The record's
- * classification is ignored — the session seam owns loudness.
+ * pre-effect refusals (empty batch → no held classification → ids outside it) fire before any
+ * port; a failed publish returns with no resolve call, no session writes, and no counter
+ * activity; a publish that landed on a PR other than the bound one resolves nothing and records
+ * nothing (the mutation response is the one authoritative target identity, so this check is
+ * necessarily post-publish); the batch record and the conflict decision happen ONLY after
+ * corroborated full resolve success (never-burn-an-attempt). The record's classification is
+ * ignored — the session seam owns loudness.
  */
 export async function finalizeAddress(
   deps: FinalizeAddressDeps,
@@ -209,6 +260,17 @@ export async function finalizeAddress(
 ): Promise<FinalizeAddressOutcome> {
   if (input.threads.length === 0) {
     return { kind: "empty_batch", message: EMPTY_BATCH_MESSAGE };
+  }
+  const bound = input.bound;
+  if (bound === null) {
+    return { kind: "no_classification", message: NO_CLASSIFICATION_MESSAGE };
+  }
+  const classified = new Set(bound.thread_ids);
+  const unknownIds = [
+    ...new Set(input.threads.map((t) => t.thread_id).filter((id) => !classified.has(id))),
+  ];
+  if (unknownIds.length > 0) {
+    return { kind: "unknown_threads", unknownIds, message: unknownThreadsMessage(unknownIds) };
   }
 
   const published = await publishVerified(deps);
@@ -223,6 +285,15 @@ export async function finalizeAddress(
     };
   }
   const change = published.change;
+  if (change.pr.number !== bound.pr) {
+    return {
+      kind: "published_pr_mismatch",
+      change,
+      expected: bound.pr,
+      actual: change.pr.number,
+      message: prMismatchMessage(bound.pr, change.pr.number),
+    };
+  }
 
   const resolved = await deps.resolve(input.threads);
   if (!resolved.ok && resolved.kind === "failed") {
@@ -275,9 +346,10 @@ export async function finalizeAddress(
     };
   }
 
+  // The mismatch arm already returned, so `bound.pr === change.pr.number` holds here.
   const record: ReviewBatchRecord = {
-    pr: input.pr ?? null,
-    counts: input.counts ?? null,
+    pr: bound.pr,
+    counts: bound.counts,
     resolved_thread_ids: resolvedThreadIds,
     at: new Date().toISOString(),
   };

@@ -59,6 +59,7 @@ import {
   WORKFLOW_STATE_TYPE,
   type WorkflowState,
 } from "../substrate/workflowState.ts";
+import { createFakeSubagents, type FakeSubagents, waveScriptItems } from "./fakeSubagents.ts";
 
 /**
  * Pi's run-mode union. Mirrors `@earendil-works/pi-coding-agent`'s `ExtensionMode` (which the
@@ -851,6 +852,123 @@ export function plantMcpRegistrar(cwd: string): string {
 export default function (pi) {
   pi.registerMcpServer("inert", ${JSON.stringify(server)});
 }
+`;
+  writeFileSync(path, source, "utf8");
+  return path;
+}
+
+/**
+ * The `/address` classify fixture pair: a `perk pr feedback --json` success payload whose
+ * UNRESOLVED review threads are `threadIds` on PR `pr` (no discussion comments, no reviews), and
+ * the lane report that binds to it exactly (every thread `actionable`). Route the payload as
+ * `"pr feedback"` and answer the classifier lane with the report (`classifierResponder` in-process,
+ * `plantFakeSubagentsResponder` for a worker drive) so `classify_review_feedback` holds a bound
+ * classification before `finalize_address` runs.
+ */
+export function addressClassifyFixture(opts: { pr: number; threadIds: string[] }): {
+  feedback: Record<string, unknown>;
+  report: Record<string, unknown>;
+} {
+  return {
+    feedback: {
+      success: true,
+      error_type: null,
+      message: null,
+      branch: "plan-7",
+      pr: opts.pr,
+      review_threads: opts.threadIds.map((thread_id, i) => ({
+        thread_id,
+        is_resolved: false,
+        is_outdated: false,
+        path: "a.ts",
+        line: i + 1,
+        comments: [
+          {
+            comment_id: i + 1,
+            body: `please fix ${thread_id}`,
+            author: "rev",
+            path: "a.ts",
+            line: i + 1,
+            created_at: null,
+          },
+        ],
+      })),
+      discussion_comments: [],
+      reviews: [],
+      counts: {
+        review_threads: opts.threadIds.length,
+        unresolved_threads: opts.threadIds.length,
+        discussion_comments: 0,
+        reviews: 0,
+      },
+    },
+    report: {
+      pr: opts.pr,
+      review_threads: opts.threadIds.map((thread_id) => ({
+        thread_id,
+        classification: "actionable",
+        summary: `fix ${thread_id}`,
+      })),
+      discussion_comments: [],
+    },
+  };
+}
+
+/**
+ * The shared fake pi-subagents responder answering EVERY lane of a received wave script with
+ * `report` (a schema-shaped classifier report) — bind `.extension` via `extraExtensions`.
+ */
+export function classifierResponder(report: unknown): FakeSubagents {
+  return createFakeSubagents([
+    {
+      executeScript: async (script) =>
+        waveScriptItems(script).map(({ key }) => ({ key, ok: true, error: null, report })),
+    },
+  ]);
+}
+
+/**
+ * Classify (seeding the session's per-activation classification holder) and then finalize: the
+ * order every `finalize_address` integration test needs now that the finalizer binds to the held
+ * classification. Fails loudly when the classify step does not bind — a finalize test must never
+ * stay green by short-circuiting on `no_classification`.
+ */
+export async function classifyThenFinalize(
+  h: PerkSession,
+  params: Record<string, unknown>,
+): ReturnType<PerkSession["invokeTool"]> {
+  const classified = await h.invokeTool("classify_review_feedback", {});
+  assert.equal(
+    (classified.details as { ok?: unknown }).ok,
+    true,
+    `classify_review_feedback must bind first: ${classified.content[0]?.text ?? ""}`,
+  );
+  return h.invokeTool("finalize_address", params);
+}
+
+/**
+ * Plant `<cwd>/.pi/extensions/worker-fake-subagents.ts` (returns the path): a thin project
+ * extension over the ONE shared fake responder (`fakeSubagents.ts`, imported by absolute path) that
+ * answers every lane of a received wave script with `report`. The RPC envelope, `status.json`
+ * creation and completion ordering stay in the shared responder — this file only wires it into a
+ * worker drive through Pi's own loader.
+ */
+export function plantFakeSubagentsResponder(cwd: string, opts: { report: unknown }): string {
+  const dir = join(cwd, ".pi", "extensions");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "worker-fake-subagents.ts");
+  const responder = resolve(import.meta.dirname, "fakeSubagents.ts");
+  const source = `// Planted by the worker e2e tier (extension/testing/harness.ts).
+import { createFakeSubagents, waveScriptItems } from ${JSON.stringify(responder)};
+
+const report = ${JSON.stringify(opts.report)};
+
+export default createFakeSubagents([
+  {
+    executeScript: async (script) =>
+      waveScriptItems(script).map(({ key }) => ({ key, ok: true, error: null, report })),
+  },
+]).extension;
 `;
   writeFileSync(path, source, "utf8");
   return path;

@@ -1,0 +1,97 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "branch": "plan-42",
+  "pr": 42,
+  "review_threads": [
+    {
+      "thread_id": "PRRT_open",
+      "is_resolved": false,
+      "is_outdated": false,
+      "path": "perk/github.py",
+      "line": 12,
+      "comments": [
+        {
+          "comment_id": 101,
+          "body": "rename this",
+          "author": "rev",
+          "path": "perk/github.py",
+          "line": 12,
+          "created_at": "2026-01-01T00:00:00Z"
+        },
+        {
+          "comment_id": 102,
+          "body": "agreed",
+          "author": "other",
+          "path": "perk/github.py",
+          "line": 12,
+          "created_at": "2026-01-02T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "thread_id": "PRRT_resolved",
+      "is_resolved": true,
+      "is_outdated": false,
+      "path": "perk/cli.py",
+      "line": 3,
+      "comments": [
+        {
+          "comment_id": 103,
+          "body": "done already",
+          "author": "rev",
+          "path": "perk/cli.py",
+          "line": 3,
+          "created_at": "2026-01-01T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "thread_id": "PRRT_outdated",
+      "is_resolved": false,
+      "is_outdated": true,
+      "path": null,
+      "line": null,
+      "comments": [
+        {
+          "comment_id": null,
+          "body": "is this still needed?",
+          "author": null,
+          "path": null,
+          "line": null,
+          "created_at": null
+        }
+      ]
+    }
+  ],
+  "discussion_comments": [
+    {
+      "comment_id": 7,
+      "body": "nice work",
+      "author": "rev",
+      "created_at": "2026-01-03T00:00:00Z"
+    },
+    {
+      "comment_id": 8,
+      "body": "please add a test",
+      "author": null,
+      "created_at": null
+    }
+  ],
+  "reviews": [
+    {
+      "review_id": "PRR_1",
+      "author": "rev",
+      "body": "changes please",
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-01-03T00:00:00Z"
+    }
+  ],
+  "counts": {
+    "review_threads": 3,
+    "unresolved_threads": 2,
+    "discussion_comments": 2,
+    "reviews": 1
+  }
+}

@@ -1,9 +1,12 @@
-"""`perk pr feedback` — the read-only PR-feedback fetch (the classify child runs this).
+"""`perk pr feedback` — the read-only PR-feedback fetch (the `/address` parent's prepared snapshot).
 
 Resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr land` does), fetches
 its reviewer feedback (review threads + PR-level reviews via GraphQL, discussion comments via REST),
-and emits `--json`. Read-only — no GitHub mutation; the verbose payload is consumed by the spawned
-`perk.review-classifier` child so it never transits the parent session (route-don't-relay).
+and emits `--json`. Read-only — no GitHub mutation. The `/address` parent runs this in its own
+process and binds the `perk.review-classifier` lane to the result, so the verbose payload never
+enters the model's context (route-don't-relay). The snapshot is the classification's identity
+basis: a payload repeating a ``thread_id`` or a discussion ``comment_id`` is refused
+(``duplicate_feedback_id``) rather than emitted ambiguous.
 
 Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-repo.
@@ -35,7 +38,7 @@ class PrFeedbackResult:
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def feedback_pr(ctx: click.Context, *, as_json: bool) -> None:
-    """Fetch the active plan's PR review feedback (read-only; the classify child runs this).
+    """Fetch the active plan's PR review feedback (read-only; /address binds its classifier to it).
 
     \b
     Run from inside the plan's worktree (it reads the local cache.plan-ref).
@@ -72,7 +75,36 @@ def _pr_feedback_impl(*, repo_root: Path) -> PrFeedbackResult:
             f"No PR found for branch {branch!r}\nRun /submit first.", error_type="no_pr"
         )
     feedback = github.get_pr_feedback(pr_number=pr.number, repo_root=repo_root)
+    _require_unique_ids(feedback)
     return PrFeedbackResult(feedback=feedback, branch=branch)
+
+
+def _duplicates[T](values: list[T]) -> list[T]:
+    """Each value that occurs more than once, in first-occurrence order."""
+    seen: set[T] = set()
+    repeated: list[T] = []
+    for value in values:
+        if value in seen and value not in repeated:
+            repeated.append(value)
+        seen.add(value)
+    return repeated
+
+
+def _require_unique_ids(feedback: github.PrFeedback) -> None:
+    """Refuse a snapshot whose coverage collections repeat an id.
+
+    The classifier is bound per id (one classification per unresolved thread / discussion
+    comment), so a repeated id makes the snapshot ambiguous. Scoped to this command: the gateway
+    read and its other callers are untouched. Review ids are outside the coverage set.
+    """
+    threads = _duplicates([t.thread_id for t in feedback.review_threads])
+    comments = _duplicates([c.comment_id for c in feedback.discussion_comments])
+    if threads or comments:
+        raise UserFacingCliError(
+            f"PR feedback carries duplicate ids: threads {threads} comments {comments}\n"
+            "The snapshot is ambiguous; retry, and report the PR if it persists.",
+            error_type="duplicate_feedback_id",
+        )
 
 
 class FeedbackCommentOut(OutputModel):
