@@ -297,8 +297,8 @@ async function executeFinalizeAddress(
       report(ctx, "address", "error", outcome.resolveMessage, { alsoLog: true });
       return fail(outcome.message, outcome.errorType, { submit: { ...outcome.change } });
     case "published_pr_mismatch":
-      // Published but nothing resolved: the submit facts ride along like the other
-      // published-but-unresolved arms (the push happened and is not undone).
+      // Published, resolve never called (no thread touched): the submit facts ride along like
+      // the other published arms (the push happened and is not undone).
       return fail(outcome.message, "pr_mismatch", { submit: { ...outcome.change } });
     case "completed": {
       driveConflictFollowUp(pi, ctx, outcome.conflict, controller);

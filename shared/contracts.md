@@ -11567,9 +11567,11 @@ Incremental submit remains independent of config.
 `no_classification` when none is held, and `unknown_threads` (carrying `unknown_thread_ids`) when
 a requested id is outside the classified thread set — no publish, no resolve, no record, no
 counter activity. After a successful publish and **before any resolve**, the published PR must be
-the bound PR: otherwise `pr_mismatch` (the feature's `published_pr_mismatch`) — published but
-nothing resolved and nothing recorded, the submit facts carried, like `published_unverified`. The
-check is post-publish because the publish mutation's response is the one authoritative target
+the bound PR: otherwise `pr_mismatch` (the feature's `published_pr_mismatch`) — published, the
+resolve step **never called** (no thread touched, so a re-classify + re-finalize is safe) and
+nothing recorded, the submit facts carried. Only the submit facts are shared with
+`published_unverified`: there the resolve step *was* called and its effects are unknown (replies
+or resolutions may have landed), so a retry requires inspection first. The check is post-publish because the publish mutation's response is the one authoritative target
 identity. `last_review_batch` records the held classification's `pr` and derived `counts`. After
 the parent commits its own fixes, the tool
 runs the shared publish operation (`extension/delivery/submit.ts` composed by

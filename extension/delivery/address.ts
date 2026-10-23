@@ -19,9 +19,11 @@
 // success" = corroborated per-thread success). The two unresolved states are DISTINCT
 // discriminants — `published_partial` (rows known, retry derivable) and `published_unverified`
 // (no per-thread claim) — so retry-without-rows is unrepresentable. `empty_batch`,
-// `no_classification` and `unknown_threads` are the feature's pre-effect refusals;
-// `published_pr_mismatch` joins `published_unverified` as a post-publish, nothing-resolved arm
-// (the push happened and is not undone). `bad_input`/`planning_session` stay adapter shapes —
+// `no_classification` and `unknown_threads` are the feature's pre-effect refusals.
+// `published_pr_mismatch` is the post-publish arm where resolve is NEVER CALLED (no thread was
+// touched; the push happened and is not undone), distinct from `published_unverified`, where
+// resolve WAS called and its effects are unknown (replies/resolutions may have landed before the
+// report was lost), so a retry needs inspection first. `bad_input`/`planning_session` stay adapter shapes —
 // they never enter the outcome union.
 
 import type {

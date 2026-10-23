@@ -450,7 +450,9 @@ routes:
     role: tool-contract
     priority: 75
   - id: ts-plan-review
-    match: { paths: ["extension/pi/v1/planReview.ts", "extension/pi/v1/objectiveReview.ts", "extension/pi/v1/review.ts", "extension/pi/v1/planReviewBrowser.ts", "extension/pi/v1/objectiveReviewBrowser.ts", "extension/pi/v1/providers/plannotatorHandoff.ts", "extension/pi/v1/draftReview.ts", "extension/pi/v1/draftReviewWaveTools.ts", "extension/pi/v1/simplify.ts"] }
+    # The browser-operation owner serves all four browser doors (draft and PR/stack); its one
+    # model-facing injection (the degrade notice) is placed with the draft review family.
+    match: { paths: ["extension/pi/v1/browserOperation.ts", "extension/pi/v1/planReview.ts", "extension/pi/v1/objectiveReview.ts", "extension/pi/v1/review.ts", "extension/pi/v1/planReviewBrowser.ts", "extension/pi/v1/objectiveReviewBrowser.ts", "extension/pi/v1/providers/plannotatorHandoff.ts", "extension/pi/v1/draftReview.ts", "extension/pi/v1/draftReviewWaveTools.ts", "extension/pi/v1/simplify.ts"] }
     capability: review.drafts
     audience: shipped
     role: tool-contract
