@@ -510,10 +510,32 @@ for the append prompt, context files, skill catalog, active tool definitions gro
 perk branch context — each injected context type's historical copies on the branch beside a
 `live=<n>` count of the copies in Pi's current context projection (after compaction and context
 edits; `?` if that read fails). `live=` is counted before extension `context` filters run, so it
-is an upper bound on what the next model request carries — a filter can still drop a projected
-copy (perk drops its read-only mode guidance once `/plan` is off, for instance). `perk doctor` checks disk; `/perk-selfcheck` checks prompt delivery. It also
-reports the host SDK bridge state — `bridge=<state>` in the summary line and a `native sdk bridge:`
-census block naming the SDK entry and the bridged package roots (see
+is an upper bound on that one owned copy — a filter can still drop a projected copy (perk drops its
+read-only mode guidance once `/plan` is off, for instance). `perk doctor` checks disk;
+`/perk-selfcheck` checks prompt delivery.
+
+Five more rows report what the session ran on and consumed, over the **selected branch** (Pi's own
+`/session` sums the whole session tree, so its totals can be larger):
+
+- `model:` — the **selected** model (`provider/id` and its API; with one of Pi's virtual models
+  this names the router) beside the **dispatched** model that actually answered the latest
+  successful response (`provider/model`, plus `→<id>` when the provider reported a different model
+  id), then `same`, `differs`, or `n/a` when either side is missing. The indented `responses:` row counts successful responses per
+  physical model, then failed (`errors=`) and aborted responses, which never count as dispatched.
+- `usage:` — every usage record Pi stored on the branch, each counted once: fresh tokens (input +
+  output), cache reads and writes, and cost (Pi's recorded cost; a model without a price table
+  records `$0.0000`). `unavailable` means no usage record exists yet — it is not the same as zero.
+- `context:` — the size of the context projection in messages, beside Pi's context window and
+  usage (`?` when Pi does not know yet, `limits=unavailable` when it reports none). The projection
+  is the context **before** extension transforms run; transforms can drop *and add* messages, and
+  perk injects context on the next turn, so this is not the size of the next model request — that
+  request is not observed.
+- `wave children:` — always `usage=unavailable`: perk's report-wave children run in separate
+  sessions, and perk does not read the subagent package's accounting, which cannot attribute cost
+  to one wave's own children.
+
+It also reports the host SDK bridge state — `bridge=<state>` in the summary line and a
+`native sdk bridge:` census block naming the SDK entry and the bridged package roots (see
 [Host SDK bridge](../requirements-and-compatibility.md#host-sdk-bridge)). It is report-only and
 never reveals prompt or message text. No paired tool.
 

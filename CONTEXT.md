@@ -579,6 +579,25 @@ usage; never cache reads/writes, reasoning breakdowns, branch summaries or repor
 Equal to Pi's `getSessionStats()` input + output for a worker session.
 _Avoid_: total tokens, context tokens, cost
 
+**Selected model**:
+The session's model selection — `ctx.model` / `AgentSession.model`, recorded by `model_change`
+entries; a virtual model names the router, never its physical target.
+_Avoid_: active model, current model (ambiguous between selection and dispatch)
+
+**Dispatched model**:
+The physical model recorded on an assistant message — `provider/model`, with `→responseModel` when
+the provider reported another id. Only successful responses count; an `error` or `aborted` response
+never does (a failed routing leaves the selected identity on its error message).
+_Avoid_: routed model, response model (that is only the provider-reported id)
+
+**Usage ledger**:
+The once-counted fold over Pi's usage records at their own boundaries (assistant and tool-result
+messages, `compaction` / `branch_summary` entries, `usage` entries; nested calls never summed):
+records, input, output, cacheRead, cacheWrite and cost (Pi's recorded `cost.total`). `unavailable`
+when no record exists — never zero; a recorded zero cost stays a number. The worker's ledger has
+`input + output` equal to its fresh tokens; selfcheck's covers the selected branch.
+_Avoid_: budget, total tokens, fresh tokens
+
 **Model-call policy**:
 The worker's fixed rule for model calls from its own codemode — no `models` namespace
 (`WORKER_CODEMODE_MODELS = false`, the worker's own codemode only), and any `codemode` call,

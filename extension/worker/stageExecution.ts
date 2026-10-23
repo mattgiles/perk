@@ -25,6 +25,13 @@
 // `getSessionStats().tokens.input + output` is the reference census the e2e tier asserts equality
 // against; see the adapter's `freshTokensOf`.
 //
+// The usage ledger (`RunOutcome.usage`, `substrate/usageLedger.ts`) folds the SAME records at the
+// SAME two boundaries under the same once-rule, so `budget.tokens === usage.input + usage.output`
+// whenever a record exists. It additionally carries cache reads/writes and Pi's recorded
+// `cost.total` — reported, never budgeted (`reasoning` and `cacheWrite1h` are subsets and never
+// summed). `usage: null` means no record was observed; a recorded zero stays a number. The e2e
+// reference census extends to `getSessionStats().tokens.cacheRead/cacheWrite` and `.cost`.
+//
 // CONFINEMENT: this seam's caller surface carries no SDK shapes. Every `@earendil-works` import
 // AND the session-drive mechanics (construction, raw events, prompt/abort) live in the private
 // `./sdkAdapter.ts` — the seam drives the session only through the adapter's drive-session
@@ -42,13 +49,17 @@
 // registration) → selection → admission → session construction → bind all run inside the
 // outcome boundary. A selection refusal (`no_model` / `model_not_found` / `model_auth`) is a
 // typed zero-turn `failed`/`model_error` outcome; any other failure before bind is
-// `runtime_init`.
+// `runtime_init`. Session construction is also the availability boundary of `RunOutcome.model`:
+// `null` before a session exists (the already-aborted entry sample, a rejecting factory, a
+// selection refusal), an object from the moment one does (its selection beside the dispatch
+// census, `dispatched: []` for a bind failure, the preflight or a pre-prompt abort).
 
 import { env } from "node:process";
 import { type PlanRef, readPlanRef } from "../substrate/cache.ts";
 import { capForModel } from "../substrate/modelVisible.ts";
 import { planReadInstruction, render } from "../substrate/prompts.ts";
 import { captureSessionPointer } from "../substrate/sessionPointers.ts";
+import { emptyUsageTotals, mergeUsageTotals, type UsageTotals } from "../substrate/usageLedger.ts";
 import { rebuildWorkflowState } from "../substrate/workflowState.ts";
 import {
   assembleOutcome,
@@ -126,6 +137,10 @@ export interface StageRunDeps {
 interface DriveCounters {
   turns: number;
   tokens: number;
+  /** The once-counted usage ledger over the same records `tokens` folds. */
+  usage: UsageTotals;
+  /** Successful responses by physical identity, insertion (first-seen) order. */
+  responses: Map<string, number>;
   /** Latest submit-bearing evidence (standalone submit or the nested finalizer submit). */
   submitDetails: Record<string, unknown> | null;
   finalizeDetails: Record<string, unknown> | null;
@@ -133,14 +148,24 @@ interface DriveCounters {
 }
 
 function freshCounters(): DriveCounters {
-  return { turns: 0, tokens: 0, submitDetails: null, finalizeDetails: null, modelError: null };
+  return {
+    turns: 0,
+    tokens: 0,
+    usage: emptyUsageTotals(),
+    responses: new Map(),
+    submitDetails: null,
+    finalizeDetails: null,
+    modelError: null,
+  };
 }
 
 /**
  * Fold one perk-owned drive event into the running counters (pure) — the seam's policy fold over
  * the adapter's translated `StageEvent` union. Counts turns and fresh-work tokens at both usage
  * boundaries (a turn's sum is adapter-computed — assistant plus tool-result usage; a compaction
- * adds its summarization usage without a turn), captures the `submit`/`finalize_address` terminal
+ * adds its summarization usage without a turn) and folds the same records into the usage ledger,
+ * counts each successful response by its physical identity (a failed or aborted response never
+ * counts as dispatch, though its usage does), captures the `submit`/`finalize_address` terminal
  * tool details, and REPLACES the recorded model error on every turn: an error Pi recovers (a
  * retried attempt, an overflow compacted and continued) is cleared by the recovery turn, so only
  * an error on the run's last turn survives to classification. A scheduled retry changes no
@@ -150,11 +175,17 @@ function applyStageEvent(counters: DriveCounters, event: StageEvent): void {
   if (event.kind === "turn_ended") {
     counters.turns += 1;
     counters.tokens += event.freshTokens;
+    mergeUsageTotals(counters.usage, event.usage);
+    if (event.response?.ok) {
+      const { model } = event.response;
+      counters.responses.set(model, (counters.responses.get(model) ?? 0) + 1);
+    }
     counters.modelError = event.modelError;
     return;
   }
   if (event.kind === "compaction_ended") {
     counters.tokens += event.freshTokens;
+    mergeUsageTotals(counters.usage, event.usage);
     return;
   }
   if (event.kind === "model_retrying") return;
@@ -401,11 +432,27 @@ export async function runStage(
   const runId = env.PERK_RUN_ID ?? "";
   const sink = deps.eventSink ?? defaultEventSink(opts.worktree, runId);
   const emitter = createEventEmitter(sink, now, startMs);
+  // Declared before `finish` (which reads it on every exit, the entry sample included): a later
+  // declaration would be a temporal-dead-zone throw outside the outcome boundary. Assigned the
+  // moment a session is constructed (before bind), so `model` is `null` exactly on the
+  // pre-construction exits.
+  let handle: DriveSessionHandle | null = null;
   const finish = (verdict: TerminalVerdict): RunOutcome => {
     const outcome = assembleOutcome({
       stage: opts.stage,
       verdict,
       budget: { turns: counters.turns, tokens: counters.tokens, elapsed_ms: elapsed() },
+      model:
+        handle === null
+          ? null
+          : {
+              selected: handle.selectedModel(),
+              dispatched: [...counters.responses].map(([model, responses]) => ({
+                model,
+                responses,
+              })),
+            },
+      usage: counters.usage.records === 0 ? null : { ...counters.usage },
     });
     emitter.emit({ kind: "run_finished", outcome });
     return outcome;
@@ -418,7 +465,6 @@ export async function runStage(
   let terminationReason: "natural" | "budget" | "abort" = "natural";
   let settled = false;
   let bound = false;
-  let handle: DriveSessionHandle | null = null;
   // The cap is checked at BOTH usage boundaries. A pre-request compaction runs before its request
   // starts, so a trip on `compaction_ended` aborts the agent signal before the request is
   // dispatched: zero provider requests follow a compaction-boundary trip.

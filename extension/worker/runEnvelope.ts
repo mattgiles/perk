@@ -36,9 +36,35 @@ export interface DriveBudget {
   wallClockMs: number;
 }
 
+/** The outcome's model identity: the session's selection beside its dispatch census. */
+export interface RunModelIdentity {
+  /** The session's selection as `provider/id`; `null` = the session exposes no selection. */
+  selected: string | null;
+  /**
+   * Successful responses by physical identity (`usageLedger.ts::physicalKey`), first-seen order;
+   * `[]` = none recorded.
+   */
+  dispatched: { model: string; responses: number }[];
+}
+
+/** The outcome's once-counted usage ledger (`usageLedger.ts::UsageTotals`). */
+export interface RunUsage {
+  records: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** Σ Pi's recorded `cost.total` (USD); an unpriced model records 0 — a number, never absent. */
+  cost: number;
+}
+
 /**
  * The structured run outcome (audit §B). **Additive-stable**: later fields may be added; existing
  * fields keep their meaning. Never thrown — `runStage` always resolves with one of these.
+ *
+ * Invariant: whenever `usage !== null`, `budget.tokens === usage.input + usage.output` (the ledger
+ * and the budget fold the same records at the same boundaries; cache and cost are carried, never
+ * budgeted).
  */
 export interface RunOutcome {
   run_id: string;
@@ -47,6 +73,16 @@ export interface RunOutcome {
   terminal_signal: TerminalSignal;
   pr: { number: number; url: string } | null;
   budget: { turns: number; tokens: number; elapsed_ms: number };
+  /**
+   * Model identity. The availability boundary is SESSION CONSTRUCTION: `null` = no session was
+   * constructed (the pre-construction exits — an entry sample that is already aborted, a runtime
+   * factory that rejects, a selection refusal); an object from the moment a session exists, even
+   * when the drive never ran a turn (a bind failure, the terminating-tool preflight, a pre-prompt
+   * abort). `null` means unavailable, never "none".
+   */
+  model: RunModelIdentity | null;
+  /** The once-counted usage ledger; `null` = no usage record was observed (unavailable, not 0). */
+  usage: RunUsage | null;
   error: { type: string; message: string; summary: string } | null;
 }
 
@@ -98,11 +134,15 @@ export interface TerminalVerdict {
  * Compose the final `RunOutcome` (pure). `run_id` is read from `PERK_RUN_ID` (inherited from
  * positioning, Gap 7), overridable for tests. On a non-completed status the `error` block carries a
  * capped `error.summary` (route-don't-relay discipline); a completed status has `error: null`.
+ * `model` and `usage` default to `null` (unavailable) — the SDK-free entry's refusals construct no
+ * session and observe no usage.
  */
 export function assembleOutcome(args: {
   stage: DriveStage;
   verdict: TerminalVerdict;
   budget: { turns: number; tokens: number; elapsed_ms: number };
+  model?: RunModelIdentity | null;
+  usage?: RunUsage | null;
   runId?: string;
 }): RunOutcome {
   const { verdict } = args;
@@ -121,6 +161,8 @@ export function assembleOutcome(args: {
     terminal_signal: verdict.terminal_signal,
     pr: verdict.pr,
     budget: args.budget,
+    model: args.model ?? null,
+    usage: args.usage ?? null,
     error,
   };
 }

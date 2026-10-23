@@ -42,23 +42,18 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { toolCallRefusalHook } from "../pi/v1/toolCallRefusal.ts";
 import { atomicWriteFileSync } from "../substrate/cache.ts";
+import {
+  addUsageRecord,
+  emptyUsageTotals,
+  freshTokens,
+  isSuccessfulResponse,
+  physicalKey,
+  type UsageRecord,
+  type UsageTotals,
+} from "../substrate/usageLedger.ts";
 import { codemodeCallRefusal, WORKER_CODEMODE_MODELS } from "./modelCallPolicy.ts";
 
 // --- structural shapes (kept minimal so pure helpers stay offline-testable) ---------------------
-
-/**
- * The slice of a Pi usage record the budget reads (assistant messages and tool results alike).
- * Only `input + output` is summed. `reasoning` is a provider-reported breakdown that is a
- * **subset of `output`** on every pi-ai provider that populates it (anthropic `thinking_tokens`,
- * google `thoughtsTokenCount` folded into `output`, openai `reasoning_tokens` inside completion/
- * output tokens — verified @ pi-ai 0.80.5), so it is deliberately EXCLUDED from the budget sum:
- * adding it would double-count. Cache reads/writes are not fresh work and are not read at all.
- */
-export interface UsageSlice {
-  input?: number;
-  output?: number;
-  reasoning?: number;
-}
 
 /** Why Pi compacted (`compaction_end.reason`). */
 export type CompactionReason = "manual" | "threshold" | "overflow";
@@ -86,8 +81,17 @@ export interface DriveEvent {
     role?: string;
     stopReason?: string;
     errorMessage?: string;
-    /** Assistant token usage (see `UsageSlice`). */
-    usage?: UsageSlice;
+    /** The physical identity Pi recorded for the response (`AssistantMessage`). */
+    provider?: string;
+    model?: string;
+    /** The provider-reported model id, when it differs from the requested one. */
+    responseModel?: string;
+    /**
+     * Assistant usage, narrowed at runtime by the ledger (`usageLedger.ts`). The budget sums
+     * `input + output`; cache reads/writes and `cost.total` are carried on the ledger, never
+     * budgeted; `reasoning` and `cacheWrite1h` are subsets and never summed.
+     */
+    usage?: UsageRecord;
   };
   /**
    * `turn_end` only: the turn's tool-result messages. Each `usage` is the tool's own reported
@@ -95,7 +99,7 @@ export interface DriveEvent {
    * aggregate, a nested `ctx.executeTool` roll-up) — the one place tool-driven model usage is
    * read, so nested `tool_execution_end` events are never summed.
    */
-  toolResults?: { usage?: UsageSlice }[];
+  toolResults?: { usage?: UsageRecord }[];
 }
 
 /** The session surface the worker drives (structurally satisfied by pi's `AgentSession`). */
@@ -106,6 +110,11 @@ export interface DriveSessionLike {
   abort(): Promise<void>;
   dispose(): void;
   sessionManager: { getBranch(): unknown[]; getSessionFile?(): string | null };
+  /**
+   * Optional (presence-gated): the session's model SELECTION (Pi's `AgentSession.model`; a
+   * virtual model names the router, never its physical target). Fakes may omit it.
+   */
+  readonly model?: { provider: string; id: string } | undefined;
   /**
    * Optional (presence-gated): when the session exposes its extension runner, the seam
    * preflights the stage's terminating perk tool post-bind and fails fast (zero-turn
@@ -157,9 +166,20 @@ export type StageEvent =
       /**
        * Fresh-work tokens for the turn (`freshTokensOf`): the assistant's `input + output` plus
        * every tool result's reported `input + output` — `reasoning` and cache reads/writes
-       * excluded (see `UsageSlice`).
+       * excluded. Always `freshTokens(usage)`.
        */
       freshTokens: number;
+      /**
+       * The turn's usage ledger (`turnUsageOf`): the assistant message's record plus every tool
+       * result's record, each once — cache reads/writes and cost carried for the outcome, never
+       * budgeted.
+       */
+      usage: UsageTotals;
+      /**
+       * The turn's response identity: `physicalKey` of the assistant message and whether it
+       * succeeded (`isSuccessfulResponse`); `null` when the message names no provider/model.
+       */
+      response: { model: string; ok: boolean } | null;
       /**
        * The turn's provider error (assistant `stopReason: "error"`), else null. Every turn
        * carries it so the seam can REPLACE its recorded error: a turn Pi recovers (auto-retry, or
@@ -174,6 +194,8 @@ export type StageEvent =
        * aborted or failed compaction, which carries no result and leaves no entry.
        */
       freshTokens: number;
+      /** The same summarization usage as a ledger fold (0 or 1 record). */
+      usage: UsageTotals;
       reason: CompactionReason;
     }
   | {
@@ -220,13 +242,22 @@ function toolErrorMessage(event: DriveEvent): string {
   return textContentOf(event.result) ?? `tool ${event.toolName ?? ""} failed`;
 }
 
-/** The compaction result's usage slice (absent ⇒ undefined: an aborted/failed compaction). */
-function compactionUsageOf(result: unknown): UsageSlice | undefined {
+/**
+ * The compaction result's usage as a ledger fold: one record, or none for an aborted/failed
+ * compaction (no result) or a result without usage.
+ */
+function compactionUsageOf(result: unknown): UsageTotals {
+  const totals = emptyUsageTotals();
   if (result && typeof result === "object" && "usage" in result) {
-    const usage = (result as { usage: unknown }).usage;
-    if (usage && typeof usage === "object") return usage as UsageSlice;
+    addUsageRecord(totals, (result as { usage: unknown }).usage);
   }
-  return undefined;
+  return totals;
+}
+
+/** A turn's response identity: `physicalKey` + success; `null` without provider/model. */
+function responseOf(message: DriveEvent["message"]): { model: string; ok: boolean } | null {
+  const model = physicalKey(message);
+  return model === null ? null : { model, ok: isSuccessfulResponse(message) };
 }
 
 /** A turn's provider error: the assistant message's `stopReason: "error"`, else null. */
@@ -239,17 +270,21 @@ function modelErrorOf(message: DriveEvent["message"]): { message: string } | nul
 /**
  * Translate one raw agent-session event into the perk-owned union (pure); `null` for event types
  * the drive does not observe. This is the entire SDK-event vocabulary the drive consumes: turn
- * completion (with the fresh-work token sum — the `sumAssistantTokens` pattern in objective.ts —
- * and the turn's provider error, which Pi's `turn_end` carries for error turns too), tool
- * completion (with the parsed `details` block and pre-cap error text), compaction completion
- * (with its summarization usage — the one out-of-turn usage record the worker produces), and a
- * scheduled auto-retry (narration only).
+ * completion (with the turn's usage ledger and its fresh-work token sum — the
+ * `sumAssistantTokens` pattern in objective.ts — the response's physical identity, and the
+ * turn's provider error, which Pi's `turn_end` carries for error turns too), tool completion
+ * (with the parsed `details` block and pre-cap error text), compaction completion (with its
+ * summarization usage — the one out-of-turn usage record the worker produces), and a scheduled
+ * auto-retry (narration only).
  */
 export function translateEvent(event: DriveEvent): StageEvent | null {
   if (event.type === "turn_end") {
+    const usage = turnUsageOf(event);
     return {
       kind: "turn_ended",
-      freshTokens: freshTokensOf(event),
+      freshTokens: freshTokens(usage),
+      usage,
+      response: responseOf(event.message),
       modelError: modelErrorOf(event.message),
     };
   }
@@ -265,9 +300,11 @@ export function translateEvent(event: DriveEvent): StageEvent | null {
     };
   }
   if (event.type === "compaction_end") {
+    const usage = compactionUsageOf(event.result);
     return {
       kind: "compaction_ended",
-      freshTokens: usageTokens(compactionUsageOf(event.result)),
+      freshTokens: freshTokens(usage),
+      usage,
       // Pi's event always names its reason; the fallback only keeps the usage counted (and the
       // stderr line well-formed) should that shape ever drift.
       reason: event.reason ?? "threshold",
@@ -287,21 +324,22 @@ export function translateEvent(event: DriveEvent): StageEvent | null {
   return null;
 }
 
-/** One usage record's fresh-work tokens: clamped `input + output` (absent ⇒ 0). */
-function usageTokens(usage: UsageSlice | undefined): number {
-  return usage ? Math.max(0, usage.input ?? 0) + Math.max(0, usage.output ?? 0) : 0;
+/**
+ * A turn's usage ledger — the ONE fold both the `turn_ended` translation and the turn gate use,
+ * so the gate's post-turn verdict and the seam's fold agree exactly: the assistant message's
+ * record plus every tool result's record (onto which Pi has already folded nested calls), each
+ * once. The same arithmetic as Pi's own session census, clamped.
+ */
+function turnUsageOf(turn: DriveTurn): UsageTotals {
+  const totals = emptyUsageTotals();
+  addUsageRecord(totals, turn.message?.usage);
+  for (const result of turn.toolResults ?? []) addUsageRecord(totals, result.usage);
+  return totals;
 }
 
-/**
- * A turn's fresh-work tokens — the ONE sum both the `turn_ended` translation and the turn gate
- * use, so the gate's post-turn verdict and the seam's fold agree exactly: the assistant message's
- * usage plus every tool result's usage (onto which Pi has already folded nested calls). The same
- * `input + output` arithmetic as Pi's own session census, clamped.
- */
+/** A turn's fresh-work tokens: `input + output` of its ledger (`turnUsageOf`). */
 function freshTokensOf(turn: DriveTurn): number {
-  let tokens = usageTokens(turn.message?.usage);
-  for (const result of turn.toolResults ?? []) tokens += usageTokens(result.usage);
-  return tokens;
+  return freshTokens(turnUsageOf(turn));
 }
 
 /**
@@ -468,6 +506,15 @@ export function createDriveSession(
     /** §8.35 pointer-capture read. */
     sessionFile(): string | null {
       return bound.sessionManager.getSessionFile?.() ?? null;
+    },
+    /**
+     * The session's selection as `provider/id`; `null` when it exposes none. A plain property
+     * read on the bound session (the runtime's session until a rebind), so it is valid before
+     * `bind()` resolves and after a failed bind — every post-construction exit can report it.
+     */
+    selectedModel(): string | null {
+      const model = bound.model;
+      return model ? `${model.provider}/${model.id}` : null;
     },
     /** `sessionManager.getBranch()` for the seam's terminal classification. */
     workflowBranch(): unknown[] {

@@ -3185,6 +3185,43 @@ ends with the host-SDK bridge state (`; bridge=<state>`, §8.73 — never affect
 the census block closes with a `native sdk bridge:` block (`describeBridge`, the host entry path or
 `-`, the verified consumer roots — identifiers only).
 
+Between the branch rows and `host sdk:` the census reports the session's **model identity, usage
+and context scope** — five rows, always rendered, report-only, read at invocation (identifiers now
+include model/provider/api ids; counts/costs, never content; thinking levels are not rendered):
+
+- `model: selected=<provider/id> (api=<api>)|none; dispatched=<physical>|none; same|differs|n/a` —
+  the **selection** is `ctx.model` (a virtual model names the router; `api` is Pi's public
+  `Model.api`, rendered verbatim); the **dispatch** is the latest successful assistant response's
+  recorded `provider/model`, with `→<responseModel>` appended only when the provider reported a
+  different id (`usageLedger.ts::physicalKey`, the one formatter both surfaces use). The relation
+  compares the selection's `provider/id` with that response's requested `provider/model` (before
+  the suffix); `n/a` when either side is absent. The indented `responses:` row lists successful
+  responses by physical identity (`<physical> ×<n>`, first-seen order) then `errors=<n>;
+  aborted=<n>` — an `error`/`aborted` response never counts as dispatch (Pi's latest-response rule;
+  a failed routing leaves the virtual identity on its error message) — or `none` when the branch
+  holds no assistant response.
+- `usage:` — the once-counted ledger (`extension/substrate/usageLedger.ts`) over the **selected
+  branch** (the `branch:` row's entries; Pi's own `/session` sums the whole tree): every assistant,
+  tool-result (nested calls already folded by Pi), `compaction`, `branch_summary` and `usage`
+  record once, rendered `records=<n> (assistant=<n>, tool=<n>, compaction=<n>, branch-summary=<n>,
+  usage-entry=<n>); fresh=<in+out> (in=<n> out=<n>); cache read=<n> write=<n>; cost=$<0.0000>`.
+  `reasoning`/`cacheWrite1h` are subsets and never summed; cost is Pi's recorded `cost.total` (an
+  unpriced model's recorded zero renders `$0.0000`). `usage: unavailable (no usage records on the
+  branch)` only when no record exists — unavailable is never rendered as zero.
+- `context: projection=<n> messages (pre-transform; the outgoing request is not observed);
+  window=<w> used=<t> (<p>%)` — the count of the same pre-filter projection read the `live=`
+  tokens use (`projection=?` when it fails; no second explicit projection read), then Pi's
+  `getContextUsage()` (`used=? (?%)` for its unknown tokens/percent after a compaction;
+  `limits=unavailable` when it is undefined or throws). **The projection's scope:** a `perk
+  contexts:` row's `live=<n>` is an upper bound on THAT owned copy (a `context` filter can drop it
+  and nothing re-adds it before the request); the `context:` row's TOTAL projection is the
+  pre-transform context, never a bound on the outgoing request — Pi's `context` /
+  `context_with_system` handlers return replacement message arrays (they may add messages or
+  enlarge content) and perk itself injects on the next `before_agent_start` after this
+  command-time snapshot. The outgoing request is not observed; no surface claims its size.
+- `wave children: usage=unavailable (separate sessions; no owned-run attribution read)` — a
+  constant row (§8.35 *Wave usage and cost*).
+
 The `.perk/workflow/.perk-t3.json` diagnostics sentinel additionally records **`run_mode`** — Pi's
 `ctx.mode` (`tui`/`rpc`/`json`/`print`) — distinct from the workflow **`mode`** (`read-only`/
 `read-write`) that drives tool gating. `run_mode` is observability `ctx.hasUI` (a binary) can't
@@ -4219,7 +4256,12 @@ outcome boundary. The ladder's typed refusals — `no_model`, `model_not_found`,
 `TerminalSignal` vocabulary; the throwaway `agentDir` is removed); any other rejection before the
 session is bound is a zero-turn `failed`/`model_error` outcome with `error.type "runtime_init"`;
 a rejection after bind keeps `error.type "drive_error"`. `runStage` never rejects, and an unknown
-`--model` is a `RunOutcome` (worker exit 1), never a pre-`run_started` usage exit.
+`--model` is a `RunOutcome` (worker exit 1), never a pre-`run_started` usage exit. Session
+**construction** is the availability boundary of `RunOutcome.model`: `null` before a session exists
+(the already-aborted entry sample, a rejecting runtime factory, a selection refusal, the entry
+admission's refusals); an object from the moment one does — `{selected, dispatched: []}` for a bind
+failure, the terminating-tool preflight or a pre-prompt abort. The drive handle is declared before
+the outcome assembler, so the entry sample's `finish` never reads it in its temporal dead zone.
 
 **The entry admission.** Before any drive, resource, provider or `ModelRuntime.create()` work, the
 worker entry admits the SDK it loaded against the host floor (§8.76(f)). Only the usage arms
@@ -4248,6 +4290,13 @@ follows the seam import.
                     | "budget" | "external_abort" | "model_error",
   "pr": { "number": 0, "url": "" } | null,   // populated on a completed implement; from SubmitDetails.pr
   "budget": { "turns": 0, "tokens": 0, "elapsed_ms": 0 },
+  "model": {                                 // null = no session was constructed (unavailable)
+    "selected": "provider/id" | null,        // the session's selection; null = it exposes none
+    "dispatched": [{ "model": "provider/model[→responseModel]", "responses": 0 }]  // [] = none
+  } | null,
+  "usage": {                                 // null = no usage record observed (never zero)
+    "records": 0, "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "cost": 0
+  } | null,
   "error": { "type": "string", "message": "string", "summary": "string" } | null
 }
 ```
@@ -4269,6 +4318,21 @@ session's records). The `finishTurn` gate decides on the running sum — every e
 compaction — plus the turn's own sum (`sdkAdapter.ts::freshTokensOf`). The reference census is
 Pi's `AgentSession.getSessionStats().tokens.input + output` — the e2e tier asserts equality for
 every scenario, across an in-drive compaction and a compaction-boundary trip included.
+
+`usage` is the **once-counted ledger** (`extension/substrate/usageLedger.ts`, SDK-free and shared
+with `/perk-selfcheck`) over the SAME records at the SAME boundaries under the same once-rule, so
+`budget.tokens === usage.input + usage.output` whenever `usage !== null`. It additionally carries
+`cacheRead`, `cacheWrite` and `cost` (Σ Pi's recorded `cost.total`, USD) — reported, **never
+budgeted**; `reasoning` and `cacheWrite1h` are subsets of `output` / `cacheWrite` and never summed;
+an unpriced model records a cost of 0, which is a recorded zero (a number), never `null`. Image and
+classifier calls appear only as the token-shaped usage Pi folds onto their tool result when the
+provider reports it — no separate counter, no manufactured token equivalent. `usage: null` means no
+record was observed. The reference census extends to `getSessionStats().tokens.cacheRead` /
+`.cacheWrite` and `.cost` (the e2e tier asserts equality on all four, a nested model-tool cost
+counted once). `model.dispatched` counts successful responses by `physicalKey` (an `error` /
+`aborted` response never counts as dispatch, though its usage does); `model.selected` is the
+session's selection (`AgentSession.model`), so a virtual selection names the router beside the
+physical target that answered. Thinking levels are not reported.
 `error.summary` is a short, model-free synthesis capped via the `route-don't-relay`/double-delivery
 discipline (`capForModel`); the PR is extracted **directly from the captured terminal tool event**,
 not a Python `find-pr-for-branch` JSON command. The run-event
@@ -4333,7 +4397,9 @@ A small, JSON-serializable, **additive-stable** discriminated union. Every event
   drive-error catch, AND the model-selection refusals — `no_model` / `model_not_found` /
   `model_auth`), and the worker entry's pre-drive refusals (§8.11 *The entry admission*), which
   emit the pair (seq 0/1) through the same default file sink before any drive exists — carrying
-  the full frozen `RunOutcome` (terminal status + `error.summary` = the terminal failure summary).
+  the full frozen `RunOutcome` (terminal status + `error.summary` = the terminal failure summary;
+  the additive `model` / `usage` fields ride it unchanged — `null` on the pre-construction /
+  zero-record exits, §8.11).
   The stream's "terminal status" event. A zero-turn run still emits a `run_started` +
   `run_finished` pair.
 
@@ -4673,7 +4739,8 @@ reporting propagates.
   correlation anchor known at *started* time (for `implement` the PR does not exist until mid-drive).
 - **The GitHub Actions job summary** (`$GITHUB_STEP_SUMMARY`) is the "checks"/run-page half: the
   terminal step appends a self-contained `## perk remote <stage>` summary (status + budget + the
-  failure summary on non-success) when the env var is set (skipped silently when unset — local/test).
+  `Model:` / `Usage:` lines + the failure summary on non-success) when the env var is set (skipped
+  silently when unset — local/test).
 
 ### Inputs the reporter derives
 
@@ -4687,6 +4754,12 @@ reporting propagates.
   `{server}/{repo}/actions/runs/{run_id}`); absent ⇒ notes post without the link.
 - `outcome.pr` is present only for a successful `implement` drive (the worker captures the PR from
   `submit`); for `address`/failures it is `null`, and the report omits the PR line.
+- After the budget line, the comment and the job summary render `Model: selected=<id|none>;
+  dispatched=<model ×n, …|none>` and `Usage: records=<n>; fresh=<in+out> (in=<n> out=<n>); cache
+  read=<n> write=<n>; cost=$<0.0000>`; a `null` field renders `Model: unavailable` /
+  `Usage: unavailable` (no session was constructed / no usage record), and an outcome WITHOUT the
+  keys (an events file older than the fields) renders neither line. `perk objective run`'s
+  cumulative `budget` is unchanged (no cumulative cost).
 
 ### Untrusted-data discipline (route-don't-relay end-to-end)
 
@@ -7815,6 +7888,20 @@ and never a secret (the engine persists it in `status.json.workflow.args`). Meas
 pi-subagents 0.76.1 with a control (the pre-token extension reused all three lanes of the
 replaced run) and a treatment (distinct tokens, no reuse evidence, all child runs new):
 `docs/design/archive/pi-1.1.0-collection-and-mcp-floor.md`.
+
+**Wave usage and cost (unavailable).** Perk reads **no** supplier accounting field: the
+pi-subagents completion's per-child `results[].usage` rows (`input`/`output`/`cacheRead`/
+`cacheWrite`/`cost`/`turns`, with no reuse flag — a reused child's row is indistinguishable), the
+root `totalCost` / `totalTokens` (present only on a complete run) and the session-wide `cost` RPC
+(which walks the parent's branch, the parent included) — none is owned-run attribution. Every perk
+surface therefore reports wave cost `unavailable` (`/perk-selfcheck`'s constant `wave children:`
+row; no per-lane cost in a receipt; the worker's `RunOutcome.usage` counts its own session's
+records only) until the supplier provides authoritative owned-run attribution (per spawned child,
+reused children and the parent excluded). The source pin
+(`extension/waves/reportWaveRpc.test.ts`) forbids the `usage` / `totalTokens` / `totalCost` /
+`costUsd` / `inputTokens` / `outputTokens` / `cacheRead` / `cacheWrite` tokens and any `.cost`
+member access in `rpcAdapter.ts` / `transport.ts` / `reportWave.ts`, with a non-vacuity control
+proving the guard matches representative forbidden reads.
 
 **RPC reply selection (the context-less hold) + the duplicate-load notice.** A pi-subagents
 RPC responder that holds no extension context answers every non-`ping` request with the

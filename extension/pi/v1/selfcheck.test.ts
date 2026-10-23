@@ -5,19 +5,23 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { type Api, fauxAssistantMessage, fauxText, type Model } from "@earendil-works/pi-ai";
 import { formatSkillsForPrompt, type Skill, type ToolInfo } from "@earendil-works/pi-coding-agent";
 import { BINDING_HEADER } from "../../substrate/bindingDelivery.ts";
 import { admitHostSdk, type HostSdkAdmission } from "../../substrate/hostAdmission.ts";
 import { loadedHostSdkVersion } from "../../substrate/hostSdkVersion.ts";
 import { type BridgeStatus, NATIVE_SDK_CENSUS } from "../../substrate/nativeSdkBridge.ts";
+import { branchUsageCensus } from "../../substrate/usageLedger.ts";
 import { REPORT_DETAIL_TYPE } from "../../surfaces/surfaces.ts";
-import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
+import { fauxModelRuntime, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
 import {
   ambientIndexProbe,
   branchContextCensus,
   buildSelfcheckReport,
+  contextCensus,
   MANAGED_AGENTS_MARKER,
   managedAgentsProbe,
+  modelIdentityCensus,
   promptCensus,
   readAmbientIndex,
   readLiveProjection,
@@ -401,8 +405,8 @@ const ADMITTED_SDK: HostSdkAdmission = {
 };
 
 test("renderCensus: full block pins the line grammar", () => {
-  const block = renderCensus(
-    {
+  const block = renderCensus({
+    prompt: {
       basePromptChars: null,
       appendChars: 34562,
       contextFiles: { count: 1, totalChars: 18234, files: [{ path: "AGENTS.md", chars: 18234 }] },
@@ -410,7 +414,7 @@ test("renderCensus: full block pins the line grammar", () => {
       toolGuidelineChars: 2400,
       toolSnippetChars: 800,
     },
-    {
+    tools: {
       active: 24,
       all: 41,
       schemaChars: 61234,
@@ -419,7 +423,7 @@ test("renderCensus: full block pins the line grammar", () => {
         { source: "perk", active: 4, schemaChars: 11234 },
       ],
     },
-    {
+    branch: {
       entries: 142,
       perkContexts: [
         { customType: "perk:binding-context", copies: 1, totalChars: 900, live: 1 },
@@ -428,7 +432,30 @@ test("renderCensus: full block pins the line grammar", () => {
       otherCustomMessages: { copies: 0, totalChars: 0 },
       bindingHeaderCopies: 2,
     },
-    {
+    model: {
+      selected: { key: "router/auto", api: "pi-virtual" },
+      dispatched: "ext-faux/m-1",
+      relation: "differs",
+      responses: [
+        { model: "ext-faux/m-1", count: 3 },
+        { model: "ext-faux/m-2", count: 1 },
+      ],
+      errors: 1,
+      aborted: 0,
+    },
+    usage: {
+      totals: {
+        records: 5,
+        input: 1000,
+        output: 234,
+        cacheRead: 5000,
+        cacheWrite: 800,
+        cost: 0.0123,
+      },
+      bySource: { assistant: 4, toolResult: 1, compaction: 0, branchSummary: 0, usageEntry: 0 },
+    },
+    context: { projected: 142, window: { contextWindow: 200000, tokens: 90000, percent: 45 } },
+    bridge: {
       state: "installed",
       hostEntry: "/pi/dist/index.js",
       roots: ["/repo/consumers/pi-subagents", "/repo/consumers/pi-web-access"],
@@ -436,9 +463,9 @@ test("renderCensus: full block pins the line grammar", () => {
       reused: true,
       detail: "",
     },
-    { cohort: true, family: ["collect_review_wave", "push_annotations"] },
-    ADMITTED_SDK,
-  );
+    discovery: { cohort: true, family: ["collect_review_wave", "push_annotations"] },
+    hostSdk: ADMITTED_SDK,
+  });
   assert.equal(
     block,
     [
@@ -452,6 +479,11 @@ test("renderCensus: full block pins the line grammar", () => {
       "  discovery: cohort (family: collect_review_wave, push_annotations)",
       "  branch: 142 entries; binding-header-copies=2",
       "    perk contexts: perk:binding-context ×1 (900c) live=1; perk:mode-context ×3 (14400c) live=?; other custom_message ×0 (0c)",
+      "  model: selected=router/auto (api=pi-virtual); dispatched=ext-faux/m-1; differs",
+      "    responses: ext-faux/m-1 ×3; ext-faux/m-2 ×1; errors=1; aborted=0",
+      "  usage: records=5 (assistant=4, tool=1, compaction=0, branch-summary=0, usage-entry=0); fresh=1234 (in=1000 out=234); cache read=5000 write=800; cost=$0.0123",
+      "  context: projection=142 messages (pre-transform; the outgoing request is not observed); window=200000 used=90000 (45%)",
+      "  wave children: usage=unavailable (separate sessions; no owned-run attribution read)",
       "  host sdk: 1.0.0 (floor >= 1.0.0)",
       `  native sdk bridge: installed (roots=2, specifiers=${NATIVE_SDK_CENSUS.length}, reused)`,
       "    host: /pi/dist/index.js",
@@ -460,9 +492,9 @@ test("renderCensus: full block pins the line grammar", () => {
   );
 });
 
-test("renderCensus: custom base prompt, empty surfaces → none/omitted segments", () => {
-  const block = renderCensus(
-    {
+test("renderCensus: custom base prompt, empty surfaces → none/omitted/unavailable segments", () => {
+  const block = renderCensus({
+    prompt: {
       basePromptChars: 4820,
       appendChars: 0,
       contextFiles: { count: 0, totalChars: 0, files: [] },
@@ -470,18 +502,21 @@ test("renderCensus: custom base prompt, empty surfaces → none/omitted segments
       toolGuidelineChars: 0,
       toolSnippetChars: 0,
     },
-    { active: 0, all: 0, schemaChars: 0, bySource: [] },
-    {
+    tools: { active: 0, all: 0, schemaChars: 0, bySource: [] },
+    branch: {
       entries: 3,
       perkContexts: [],
       otherCustomMessages: { copies: 1, totalChars: 12 },
       bindingHeaderCopies: 0,
     },
-    { ...NO_BRIDGE, state: "failed:host-entry", detail: "no entry" },
-    { cohort: false, family: [] },
+    model: modelIdentityCensus(undefined, []),
+    usage: branchUsageCensus([]),
+    context: contextCensus(null, null),
+    bridge: { ...NO_BRIDGE, state: "failed:host-entry", detail: "no entry" },
+    discovery: { cohort: false, family: [] },
     // Never reached in production (an activation is admitted); the render stays type-honest.
-    { outcome: "unverifiable", observed: null, required: "1.0.0", detail: "x" },
-  );
+    hostSdk: { outcome: "unverifiable", observed: null, required: "1.0.0", detail: "x" },
+  });
   assert.equal(
     block,
     [
@@ -494,11 +529,136 @@ test("renderCensus: custom base prompt, empty surfaces → none/omitted segments
       "  discovery: nonparticipant",
       "  branch: 3 entries; binding-header-copies=0",
       "    perk contexts: none; other custom_message ×1 (12c)",
+      "  model: selected=none; dispatched=none; n/a",
+      "    responses: none",
+      "  usage: unavailable (no usage records on the branch)",
+      "  context: projection=? messages (pre-transform; the outgoing request is not observed); limits=unavailable",
+      "  wave children: usage=unavailable (separate sessions; no owned-run attribution read)",
       "  host sdk: ? (floor >= 1.0.0)",
       "  native sdk bridge: failed:host-entry — no entry",
       "    host: -",
       "    roots: 0",
     ].join("\n"),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Pure: modelIdentityCensus / contextCensus (the model, usage and context rows)
+// ---------------------------------------------------------------------------
+
+/** A branch assistant `message` entry. */
+const assistantEntry = (fields: Record<string, unknown>): Record<string, unknown> => ({
+  type: "message",
+  message: { role: "assistant", ...fields },
+});
+
+/** Render only the five rows this node adds (the block between `perk contexts:` and `host sdk:`). */
+function identityRows(
+  model: ReturnType<typeof modelIdentityCensus>,
+  usage: ReturnType<typeof branchUsageCensus>,
+  context: ReturnType<typeof contextCensus>,
+): string[] {
+  const block = renderCensus({
+    prompt: promptCensus(undefined),
+    tools: toolsCensus([], []),
+    branch: branchContextCensus([], []),
+    model,
+    usage,
+    context,
+    bridge: NO_BRIDGE,
+    discovery: { cohort: false, family: [] },
+    hostSdk: ADMITTED_SDK,
+  }).split("\n");
+  const start = block.findIndex((line) => line.startsWith("    perk contexts:")) + 1;
+  const end = block.findIndex((line) => line.startsWith("  host sdk:"));
+  return block.slice(start, end);
+}
+
+test("modelIdentityCensus: a plain selection that answered renders `same`", () => {
+  const census = modelIdentityCensus(
+    { provider: "anthropic", id: "claude-x", api: "anthropic-messages" },
+    [assistantEntry({ provider: "anthropic", model: "claude-x", stopReason: "stop" })],
+  );
+  assert.deepEqual(census, {
+    selected: { key: "anthropic/claude-x", api: "anthropic-messages" },
+    dispatched: "anthropic/claude-x",
+    relation: "same",
+    responses: [{ model: "anthropic/claude-x", count: 1 }],
+    errors: 0,
+    aborted: 0,
+  });
+});
+
+test("modelIdentityCensus: `same` compares the requested physical id, before any →responseModel suffix", () => {
+  const census = modelIdentityCensus({ provider: "openai", id: "gpt-5", api: "openai-responses" }, [
+    assistantEntry({ provider: "openai", model: "gpt-5", responseModel: "gpt-5-2026" }),
+  ]);
+  assert.equal(census.dispatched, "openai/gpt-5→gpt-5-2026");
+  assert.equal(census.relation, "same");
+});
+
+test("modelIdentityCensus: no selection or no successful response renders `n/a`", () => {
+  const noSelection = modelIdentityCensus(undefined, [
+    assistantEntry({ provider: "faux", model: "faux-1" }),
+  ]);
+  assert.equal(noSelection.selected, null);
+  assert.equal(noSelection.relation, "n/a");
+  const onlyFailures = modelIdentityCensus({ provider: "router", id: "auto", api: "pi-virtual" }, [
+    assistantEntry({ provider: "router", model: "auto", stopReason: "error" }),
+    assistantEntry({ provider: "faux", model: "faux-1", stopReason: "aborted" }),
+  ]);
+  assert.equal(onlyFailures.dispatched, null);
+  assert.equal(onlyFailures.relation, "n/a");
+  assert.deepEqual(
+    identityRows(onlyFailures, branchUsageCensus([]), contextCensus(3, null)).slice(0, 2),
+    [
+      "  model: selected=router/auto (api=pi-virtual); dispatched=none; n/a",
+      "    responses: errors=1; aborted=1",
+    ],
+    "failures are counted, never dispatched",
+  );
+});
+
+test("renderCensus: a populated plain-model block renders `same`, the usage sources and a recorded zero cost", () => {
+  const entries = [
+    assistantEntry({
+      provider: "faux",
+      model: "faux-1",
+      stopReason: "stop",
+      usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
+    }),
+    { type: "compaction", usage: { input: 3, output: 1, cacheRead: 2, cacheWrite: 0 } },
+  ];
+  assert.deepEqual(
+    identityRows(
+      modelIdentityCensus({ provider: "faux", id: "faux-1", api: "faux" }, entries),
+      branchUsageCensus(entries),
+      contextCensus(7, { tokens: 1234, contextWindow: 8192, percent: 15.06 }),
+    ),
+    [
+      "  model: selected=faux/faux-1 (api=faux); dispatched=faux/faux-1; same",
+      "    responses: faux/faux-1 ×1; errors=0; aborted=0",
+      "  usage: records=2 (assistant=1, tool=0, compaction=1, branch-summary=0, usage-entry=0); fresh=19 (in=13 out=6); cache read=2 write=0; cost=$0.0000",
+      "  context: projection=7 messages (pre-transform; the outgoing request is not observed); window=8192 used=1234 (15%)",
+      "  wave children: usage=unavailable (separate sessions; no owned-run attribution read)",
+    ],
+  );
+});
+
+test("contextCensus: unknown tokens/percent (post-compaction) render `used=? (?%)`", () => {
+  const context = contextCensus(12, { tokens: null, contextWindow: 200000, percent: null });
+  assert.deepEqual(context, {
+    projected: 12,
+    window: { contextWindow: 200000, tokens: null, percent: null },
+  });
+  const [, , , row] = identityRows(
+    modelIdentityCensus(undefined, []),
+    branchUsageCensus([]),
+    context,
+  );
+  assert.equal(
+    row,
+    "  context: projection=12 messages (pre-transform; the outgoing request is not observed); window=200000 used=? (?%)",
   );
 });
 
@@ -578,6 +738,86 @@ test("selfcheck (live): the report-detail entry carries the census block", async
       text,
       /\n {2}native sdk bridge: unsupported:embedded-host\n {4}host: -\n {4}roots: 0/,
     );
+  } finally {
+    h.dispose();
+  }
+});
+
+/** The selfcheck's report-detail text from the session's entries. */
+function selfcheckDetail(h: Awaited<ReturnType<typeof loadPerkSession>>): string {
+  const entries = h.session.sessionManager.getEntries() as unknown as {
+    customType?: string;
+    data?: { text?: string };
+  }[];
+  return entries.findLast((entry) => entry.customType === REPORT_DETAIL_TYPE)?.data?.text ?? "";
+}
+
+const WAVE_ROW =
+  "\n  wave children: usage=unavailable (separate sessions; no owned-run attribution read)\n";
+
+test("selfcheck (live): a virtual selection is reported beside the physical model that answered", async () => {
+  const cwd = scaffoldRepo();
+  convergeContext(cwd);
+  const reg = await fauxModelRuntime();
+  const target = reg.getModel() as Model<Api>;
+  reg.modelRuntime.registerVirtualModel({
+    provider: "router",
+    id: "auto",
+    name: "Auto",
+    route: () => ({ model: target, thinkingLevel: "off" }),
+  });
+  const h = await loadPerkSession({
+    cwd,
+    model: reg.modelRuntime.getModel("router", "auto"),
+    modelRuntime: reg.modelRuntime,
+  });
+  try {
+    reg.setResponses([fauxAssistantMessage([fauxText("done")], { stopReason: "stop" })]);
+    await h.session.prompt("hello");
+    await h.invokeCommand("perk-selfcheck");
+    const text = selfcheckDetail(h);
+    assert.ok(
+      text.includes(
+        "\n  model: selected=router/auto (api=pi-virtual); dispatched=faux/faux-1; differs\n",
+      ),
+      text,
+    );
+    assert.ok(text.includes("\n    responses: faux/faux-1 ×1; errors=0; aborted=0\n"), text);
+    assert.match(
+      text,
+      /\n {2}usage: records=1 \(assistant=1, tool=0, compaction=0, branch-summary=0, usage-entry=0\); fresh=\d+ \(in=\d+ out=\d+\); cache read=\d+ write=\d+; cost=\$0\.0000\n/,
+    );
+    assert.match(
+      text,
+      /\n {2}context: projection=\d+ messages \(pre-transform; the outgoing request is not observed\); window=\d+ used=(\d+|\?) \((\d+|\?)%\)\n/,
+    );
+    assert.ok(text.includes(WAVE_ROW), text);
+    // The rows sit after the branch rows and before the host-SDK block.
+    assert.ok(text.indexOf("\n  model: ") > text.indexOf("\n    perk contexts: "));
+    assert.ok(text.indexOf(WAVE_ROW) < text.indexOf("\n  host sdk: "));
+  } finally {
+    h.dispose();
+  }
+});
+
+test("selfcheck (live): a session that never answered reports dispatched=none, n/a and unavailable usage", async () => {
+  const cwd = scaffoldRepo();
+  convergeContext(cwd);
+  const h = await loadPerkSession({ cwd });
+  try {
+    await h.invokeCommand("perk-selfcheck");
+    const text = selfcheckDetail(h);
+    assert.match(
+      text,
+      /\n {2}model: selected=anthropic\/claude-sonnet-4-5 \(api=[^)]+\); dispatched=none; n\/a\n/,
+    );
+    assert.ok(text.includes("\n    responses: none\n"), text);
+    assert.ok(text.includes("\n  usage: unavailable (no usage records on the branch)\n"), text);
+    assert.match(
+      text,
+      /\n {2}context: projection=\d+ messages \(pre-transform; the outgoing request is not observed\); /,
+    );
+    assert.ok(text.includes(WAVE_ROW), text);
   } finally {
     h.dispose();
   }

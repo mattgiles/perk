@@ -755,14 +755,31 @@ test("rpc integration: a ghost responder on the timeout arm — spawn, stop and 
   assert.equal(fake.statuses.length, 1);
 });
 
-test("source pin: the wave modules never read the awaited-child lineage, capacity, partial-marker or reuse fields; the terminal proof is narrowed in rpcAdapter.ts only; transport.ts alone mints the launch token", () => {
+test("source pin: the wave modules never read the awaited-child lineage, capacity, partial-marker, reuse or usage/cost accounting fields; the terminal proof is narrowed in rpcAdapter.ts only; transport.ts alone mints the launch token", () => {
   const adapter = readFileSync(new URL("./rpcAdapter.ts", import.meta.url), "utf8");
   const transport = readFileSync(new URL("./transport.ts", import.meta.url), "utf8");
   const logical = readFileSync(new URL("./reportWave.ts", import.meta.url), "utf8");
   // `ok` (the engine's `success`) is the sole status fact; reuse evidence is never consulted
-  // because the launch token makes every launch fresh.
+  // because the launch token makes every launch fresh. Nor is any supplier accounting field: the
+  // per-child `results[].usage` rows may include reused children, the root `totalCost` /
+  // `totalTokens` exist only on a complete run, and the `cost` RPC is session-wide (the parent
+  // included) — none is owned-run attribution, so every perk surface reports wave cost
+  // `unavailable`.
   const forbidden =
-    /\b(awaitedByWorkflow|parentWorkflowRunId|triggerTurn|capacity|abandonedSlot\w*|slotReleased|outputPartial|timedOut|reused|reusedFrom|stopCause)\b/;
+    /\b(awaitedByWorkflow|parentWorkflowRunId|triggerTurn|capacity|abandonedSlot\w*|slotReleased|outputPartial|timedOut|reused|reusedFrom|stopCause|usage|totalTokens|totalCost|costUsd|inputTokens|outputTokens|cacheRead|cacheWrite)\b|\.cost\b/;
+  // Non-vacuity control: the guard bites on representative forbidden reads before it is trusted.
+  for (const snippet of [
+    "results[0].usage.cost",
+    "child.usage.input",
+    "status.totalCost.costUsd",
+    "const spent = reply.cost;",
+    "lane.cacheRead + lane.cacheWrite",
+    "root.totalTokens",
+  ]) {
+    assert.match(snippet, forbidden, snippet);
+  }
+  // A prose "cost" (no member access) is not a read.
+  assert.doesNotMatch("// a pure cost of the transport", forbidden);
   assert.doesNotMatch(adapter, forbidden);
   assert.doesNotMatch(transport, forbidden);
   assert.doesNotMatch(logical, forbidden);

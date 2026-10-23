@@ -65,6 +65,8 @@ class FakeSession implements DriveSessionLike {
   disposed = false;
   branch: unknown[] = [];
   sessionFile: string | null = null;
+  /** The session's selection (Pi's `AgentSession.model`); unset = a session exposing none. */
+  model?: { provider: string; id: string };
   /** Unset by default — the preflight is presence-gated, so most fakes skip it unchanged. */
   extensionRunner?: { getAllRegisteredTools(): { definition: { name: string } }[] };
   private listeners: ((e: DriveEvent) => void)[] = [];
@@ -417,10 +419,14 @@ test("runStage: the frozen completed RunOutcome (lockstep with tests/test_run_re
   process.env.PERK_RUN_ID = "RID123";
   try {
     let t = 0;
+    const turn = (input: number, output: number): DriveEvent => ({
+      type: "turn_end",
+      message: { role: "assistant", provider: "faux", model: "m-1", usage: { input, output } },
+    });
     const session = new FakeSession((emit) => {
-      emit({ type: "turn_end", message: { role: "assistant", usage: { input: 20, output: 20 } } });
-      emit({ type: "turn_end", message: { role: "assistant", usage: { input: 20, output: 20 } } });
-      emit({ type: "turn_end", message: { role: "assistant", usage: { input: 10, output: 10 } } });
+      emit(turn(20, 20));
+      emit(turn(20, 20));
+      emit(turn(10, 10));
       emit({
         type: "tool_execution_end",
         toolName: "submit",
@@ -428,6 +434,7 @@ test("runStage: the frozen completed RunOutcome (lockstep with tests/test_run_re
       });
       t = 42;
     });
+    session.model = { provider: "faux", id: "m-1" };
     const outcome = await runStage(
       { worktree: "/tmp/wt", stage: "implement", initialPrompt: "go", budget: baseBudget },
       { createRuntime: async () => fakeRuntime(session), now: () => t, eventSink: () => {} },
@@ -439,6 +446,8 @@ test("runStage: the frozen completed RunOutcome (lockstep with tests/test_run_re
       terminal_signal: "submit_tool",
       pr: { number: 7, url: "https://x/pr/7" },
       budget: { turns: 3, tokens: 100, elapsed_ms: 42 },
+      model: { selected: "faux/m-1", dispatched: [{ model: "faux/m-1", responses: 3 }] },
+      usage: { records: 3, input: 50, output: 50, cacheRead: 0, cacheWrite: 0, cost: 0 },
       error: null,
     });
   } finally {
@@ -470,6 +479,8 @@ test("runStage: the frozen failed RunOutcome (lockstep with tests/test_run_repor
       terminal_signal: "agent_idle_incomplete",
       pr: null,
       budget: { turns: 1, tokens: 0, elapsed_ms: 1 },
+      model: { selected: null, dispatched: [] },
+      usage: null,
       error: {
         type: "incomplete",
         message: "implement drive went idle without an opened PR (no successful submit).",
@@ -482,6 +493,162 @@ test("runStage: the frozen failed RunOutcome (lockstep with tests/test_run_repor
   }
 });
 
+// --- the usage ledger and model identity on the outcome ------------------------------------------
+
+/** A Pi-shaped usage record carrying cache reads/writes and a recorded `cost.total`. */
+const pricedUsage = (input: number, output: number, cacheRead: number, cost: number) => ({
+  input,
+  output,
+  cacheRead,
+  cacheWrite: 2 * cacheRead,
+  reasoning: output,
+  cacheWrite1h: cacheRead,
+  cost: { total: cost },
+});
+
+test("runStage: an error turn carrying the selected (virtual) identity never enters dispatched, while its usage counts", async () => {
+  const session = new FakeSession((emit) => {
+    // A failed routing leaves the virtual identity on its error message.
+    emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        provider: "router",
+        model: "auto",
+        stopReason: "error",
+        errorMessage: "overloaded",
+        usage: { input: 7, output: 0 },
+      },
+      toolResults: [],
+    });
+    emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        provider: "ext-faux",
+        model: "m-1",
+        stopReason: "toolUse",
+        usage: { input: 10, output: 5 },
+      },
+    });
+    emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        provider: "ext-faux",
+        model: "m-2",
+        responseModel: "m-2-2026",
+        stopReason: "aborted",
+        usage: { input: 1, output: 0 },
+      },
+    });
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
+    });
+  });
+  session.model = { provider: "router", id: "auto" };
+  const outcome = await driveFake(session);
+  assert.equal(outcome.status, "completed");
+  assert.deepEqual(outcome.model, {
+    selected: "router/auto",
+    dispatched: [{ model: "ext-faux/m-1", responses: 1 }],
+  });
+  assert.deepEqual(outcome.usage, {
+    records: 3,
+    input: 18,
+    output: 5,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cost: 0,
+  });
+  assert.equal(outcome.budget.tokens, 23, "failed and aborted usage counts toward the budget too");
+});
+
+test("runStage: a compaction adds one record and its cost; cache and cost are carried, never budgeted", async () => {
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "turn_end",
+      message: { role: "assistant", usage: pricedUsage(30, 10, 400, 0.01) },
+      toolResults: [{ usage: pricedUsage(60, 40, 0, 0.0125) }],
+    });
+    emit({
+      type: "compaction_end",
+      reason: "threshold",
+      result: { summary: "s", usage: pricedUsage(50, 9, 100, 0.25) },
+    });
+    // An aborted compaction carries no result: no record.
+    emit({ type: "compaction_end", reason: "overflow", result: undefined });
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
+    });
+  });
+  const outcome = await runStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: { ...baseBudget, maxTokens: 300 },
+    },
+    { createRuntime: async () => fakeRuntime(session), now: () => 1000 },
+  );
+  assert.equal(outcome.status, "completed", "cache reads never trip the token cap");
+  const usage = outcome.usage;
+  assert.ok(usage !== null);
+  assert.equal(usage.records, 3, "assistant + tool result + one compaction");
+  assert.deepEqual(
+    [usage.input, usage.output, usage.cacheRead, usage.cacheWrite],
+    [140, 59, 500, 1_000],
+    "reasoning and cacheWrite1h are never summed",
+  );
+  assert.ok(Math.abs(usage.cost - 0.2725) < 1e-12, `cost ${usage.cost}`);
+  assert.equal(outcome.budget.tokens, 199);
+  assert.deepEqual(outcome.model, { selected: null, dispatched: [] });
+});
+
+test("runStage: budget.tokens === usage.input + usage.output whenever usage is recorded", async () => {
+  const scripts: ((emit: (e: DriveEvent) => void) => void)[] = [
+    (emit) =>
+      emit({ type: "turn_end", message: { role: "assistant", usage: { input: 3, output: 4 } } }),
+    (emit) => {
+      emit({
+        type: "turn_end",
+        message: { role: "assistant", usage: pricedUsage(5, 6, 70, 0.1) },
+        toolResults: [{ usage: pricedUsage(8, 9, 0, 0) }, {}],
+      });
+      emit({
+        type: "compaction_end",
+        reason: "manual",
+        result: { summary: "s", usage: pricedUsage(11, 12, 1, 0) },
+      });
+    },
+    (emit) => emit({ type: "turn_end", message: { role: "assistant", usage: {} } }),
+  ];
+  for (const script of scripts) {
+    const outcome = await driveFake(new FakeSession(script));
+    assert.ok(outcome.usage !== null, "a record was observed");
+    assert.equal(outcome.budget.tokens, outcome.usage.input + outcome.usage.output);
+  }
+  // `usage: {}` is a recorded zero, never unavailable; no record at all is `null`.
+  const zero = await driveFake(new FakeSession(scripts[2] ?? (() => {})));
+  assert.deepEqual(zero.usage, {
+    records: 1,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cost: 0,
+  });
+  const none = await driveFake(
+    new FakeSession((emit) => emit({ type: "turn_end", message: { role: "assistant" } })),
+  );
+  assert.equal(none.usage, null);
+  assert.equal(none.budget.tokens, 0);
+});
+
 // --- the terminating-tool preflight ---------------------------------------------------------------
 
 test("runStage: preflight — zero registered tools → fast no_extension_tools failure, no prompt", async () => {
@@ -490,6 +657,7 @@ test("runStage: preflight — zero registered tools → fast no_extension_tools 
     promptRan = true;
   });
   session.extensionRunner = { getAllRegisteredTools: () => [] };
+  session.model = { provider: "faux", id: "m-1" };
   const runtime = fakeRuntime(session);
   const events: RunEvent[] = [];
   const outcome = await runStage(
@@ -507,6 +675,11 @@ test("runStage: preflight — zero registered tools → fast no_extension_tools 
   assert.ok(outcome.error?.message.includes("submit"), "names the missing tool");
   assert.ok(outcome.error?.message.includes(".pi/settings.json"), "points at the settings file");
   assert.equal(outcome.budget.turns, 0);
+  assert.deepEqual(
+    [outcome.model, outcome.usage],
+    [{ selected: "faux/m-1", dispatched: [] }, null],
+    "a constructed session reports its selection; no usage record exists",
+  );
   assert.equal(promptRan, false, "the drive never prompted");
   assert.equal(runtime.disposed, true, "the runtime is still disposed");
   assert.deepEqual(
@@ -560,6 +733,11 @@ test("runStage: preflight — an address drive without finalize_address names it
   assert.equal(outcome.status, "failed");
   assert.equal(outcome.error?.type, "no_extension_tools");
   assert.ok(outcome.error?.message.includes("finalize_address"), "names the missing tool");
+  assert.deepEqual(
+    [outcome.model, outcome.usage],
+    [{ selected: null, dispatched: [] }, null],
+    "a constructed session without a selection: selected null, never model null",
+  );
   assert.equal(promptRan, false, "the drive never prompted");
 });
 
@@ -889,13 +1067,20 @@ async function driveInit(
 }
 
 test("runStage: a rejecting runtime initialization → zero-turn failed/model_error/runtime_init pair, never throws", async () => {
-  const expectRuntimeInit = async (drive: ReturnType<typeof driveInit>, fragment: string) => {
+  const expectRuntimeInit = async (
+    drive: ReturnType<typeof driveInit>,
+    fragment: string,
+    model: RunOutcome["model"],
+  ) => {
     const { outcome, events } = await drive;
     assert.equal(outcome.status, "failed");
     assert.equal(outcome.terminal_signal, "model_error");
     assert.equal(outcome.error?.type, "runtime_init");
     assert.ok(outcome.error?.message.includes(fragment), `names the cause: ${fragment}`);
     assert.deepEqual([outcome.budget.turns, outcome.budget.tokens, outcome.pr], [0, 0, null]);
+    // The construction boundary decides `model`; no zero-turn exit has a usage record.
+    assert.deepEqual(outcome.model, model);
+    assert.equal(outcome.usage, null);
     assert.deepEqual(
       events.map((e) => e.kind),
       ["run_started", "run_finished"],
@@ -904,23 +1089,35 @@ test("runStage: a rejecting runtime initialization → zero-turn failed/model_er
   };
   // Arm A — the runtime factory rejects. (A failing read inside the production factory's
   // selection step is the real-runtime tier's arm: stageExecutionE2e.test.ts.)
+  // No session was constructed: `model` is unavailable.
   const factory = driveInit({}, { createRuntime: rejecting("construction exploded") });
-  await expectRuntimeInit(factory, "construction exploded");
-  // Arm B — extension binding rejects; the never-bound handle is still disposed.
+  await expectRuntimeInit(factory, "construction exploded", null);
+  // Arm B — extension binding rejects; the never-bound handle is still disposed. The session
+  // exists, so its selection is reported beside an empty dispatch census.
   const session = new FakeSession(() => {});
   session.bindExtensions = rejecting("bind exploded");
+  session.model = { provider: "faux", id: "m-1" };
   const runtime = fakeRuntime(session);
-  await expectRuntimeInit(driveInit({}, { createRuntime: async () => runtime }), "bind exploded");
+  await expectRuntimeInit(driveInit({}, { createRuntime: async () => runtime }), "bind exploded", {
+    selected: "faux/m-1",
+    dispatched: [],
+  });
   assert.equal(runtime.disposed, true, "guarded disposal ran on the never-bound handle");
 });
 
 test("runStage: an abort before the driving prompt → aborted/external_abort with zero turns, no prompt, no idle-session abort", async () => {
-  const expectPrePromptAbort = async (drive: ReturnType<typeof driveInit>, s: FakeSession) => {
+  const expectPrePromptAbort = async (
+    drive: ReturnType<typeof driveInit>,
+    s: FakeSession,
+    model: RunOutcome["model"],
+  ) => {
     const { outcome, events } = await drive;
     assert.equal(outcome.status, "aborted");
     assert.equal(outcome.terminal_signal, "external_abort");
     assert.equal(outcome.error?.type, "external_abort");
     assert.equal(outcome.budget.turns, 0);
+    assert.deepEqual(outcome.model, model);
+    assert.equal(outcome.usage, null, "no usage record on a zero-turn exit");
     assert.equal(s.abortCalls, 0, "no session.abort() is fired on an idle session");
     assert.deepEqual(
       events.map((e) => e.kind),
@@ -936,8 +1133,9 @@ test("runStage: an abort before the driving prompt → aborted/external_abort wi
     factoryCalls++;
     return fakeRuntime(entrySession);
   };
+  entrySession.model = { provider: "faux", id: "m-1" };
   const entryDrive = driveInit({ signal: entry.signal }, { createRuntime: entryFactory });
-  await expectPrePromptAbort(entryDrive, entrySession);
+  await expectPrePromptAbort(entryDrive, entrySession, null);
   assert.deepEqual([factoryCalls, entrySession.bindCalls], [0, 0], "nothing constructed or bound");
   // Arm B — aborted during initialization (inside the factory: strictly between the two samples):
   // initialization completes, then the pre-prompt sample returns without a prompt().
@@ -946,13 +1144,14 @@ test("runStage: an abort before the driving prompt → aborted/external_abort wi
   const midSession = new FakeSession(() => {
     prompted = true;
   });
+  midSession.model = { provider: "faux", id: "m-1" };
   const midRuntime = fakeRuntime(midSession);
   const midFactory = async (): Promise<DriveRuntimeLike> => {
     mid.abort();
     return midRuntime;
   };
   const midDrive = driveInit({ signal: mid.signal }, { createRuntime: midFactory });
-  await expectPrePromptAbort(midDrive, midSession);
+  await expectPrePromptAbort(midDrive, midSession, { selected: "faux/m-1", dispatched: [] });
   assert.deepEqual([midSession.bindCalls, prompted, midRuntime.disposed], [1, false, true]);
 });
 

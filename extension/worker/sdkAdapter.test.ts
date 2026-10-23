@@ -20,6 +20,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import type { UsageTotals } from "../substrate/usageLedger.ts";
 import { loadSdkPiAi } from "../testing/harness.ts";
 import { MODEL_CALL_REFUSAL_PREFIX } from "./modelCallPolicy.ts";
 import {
@@ -40,25 +41,56 @@ import {
 
 // --- pure: translateEvent -------------------------------------------------------------------------
 
+/** An expected usage-ledger fold (`usageLedger.ts::UsageTotals`). */
+function ledger(
+  records: number,
+  input: number,
+  output: number,
+  extra: { cacheRead?: number; cacheWrite?: number; cost?: number } = {},
+): UsageTotals {
+  return {
+    records,
+    input,
+    output,
+    cacheRead: extra.cacheRead ?? 0,
+    cacheWrite: extra.cacheWrite ?? 0,
+    cost: extra.cost ?? 0,
+  };
+}
+
 test("translateEvent: turn_end → turn_ended with the clamped input+output sum", () => {
   assert.deepEqual(
     translateEvent({
       type: "turn_end",
       message: { role: "assistant", usage: { input: 10, output: 5 } },
     }),
-    { kind: "turn_ended", freshTokens: 15, modelError: null },
+    {
+      kind: "turn_ended",
+      freshTokens: 15,
+      usage: ledger(1, 10, 5),
+      response: null,
+      modelError: null,
+    },
   );
-  // Negative components clamp to 0; absent usage sums to 0.
+  // Negative components clamp to 0; absent usage sums to 0 and is no record.
   assert.deepEqual(
     translateEvent({
       type: "turn_end",
       message: { role: "assistant", usage: { input: 3, output: -9 } },
     }),
-    { kind: "turn_ended", freshTokens: 3, modelError: null },
+    {
+      kind: "turn_ended",
+      freshTokens: 3,
+      usage: ledger(1, 3, 0),
+      response: null,
+      modelError: null,
+    },
   );
   assert.deepEqual(translateEvent({ type: "turn_end", message: { role: "assistant" } }), {
     kind: "turn_ended",
     freshTokens: 0,
+    usage: ledger(0, 0, 0),
+    response: null,
     modelError: null,
   });
 });
@@ -72,7 +104,13 @@ test("translateEvent: usage.reasoning is NOT summed — it is a subset of output
       type: "turn_end",
       message: { role: "assistant", usage: { input: 10, output: 20, reasoning: 15 } },
     }),
-    { kind: "turn_ended", freshTokens: 30, modelError: null },
+    {
+      kind: "turn_ended",
+      freshTokens: 30,
+      usage: ledger(1, 10, 20),
+      response: null,
+      modelError: null,
+    },
   );
 });
 
@@ -89,7 +127,13 @@ test("translateEvent: turn_end sums every tool result's reported usage onto the 
         { usage: { input: 20, output: -4, reasoning: 50 } }, // negatives clamp; reasoning excluded
       ],
     }),
-    { kind: "turn_ended", freshTokens: 15 + 1_000 + 20, modelError: null },
+    {
+      kind: "turn_ended",
+      freshTokens: 15 + 1_000 + 20,
+      usage: ledger(3, 730, 305),
+      response: null,
+      modelError: null,
+    },
   );
   // An error/aborted assistant turn carries no tool results: the assistant usage alone.
   assert.deepEqual(
@@ -98,7 +142,13 @@ test("translateEvent: turn_end sums every tool result's reported usage onto the 
       message: { role: "assistant", usage: { input: 4, output: 2 } },
       toolResults: [],
     }),
-    { kind: "turn_ended", freshTokens: 6, modelError: null },
+    {
+      kind: "turn_ended",
+      freshTokens: 6,
+      usage: ledger(1, 4, 2),
+      response: null,
+      modelError: null,
+    },
   );
   // Tool usage counts even when the assistant message carries none.
   assert.deepEqual(
@@ -107,7 +157,13 @@ test("translateEvent: turn_end sums every tool result's reported usage onto the 
       message: { role: "assistant" },
       toolResults: [{ usage: { input: 3, output: 4 } }],
     }),
-    { kind: "turn_ended", freshTokens: 7, modelError: null },
+    {
+      kind: "turn_ended",
+      freshTokens: 7,
+      usage: ledger(1, 3, 4),
+      response: null,
+      modelError: null,
+    },
   );
 });
 
@@ -211,11 +267,23 @@ test("translateEvent: an error turn_end carries its error; a normal turn carries
       },
       toolResults: [],
     }),
-    { kind: "turn_ended", freshTokens: 8, modelError: { message: "overloaded" } },
+    {
+      kind: "turn_ended",
+      freshTokens: 8,
+      usage: ledger(1, 8, 0),
+      response: null,
+      modelError: { message: "overloaded" },
+    },
   );
   assert.deepEqual(
     translateEvent({ type: "turn_end", message: { role: "assistant", stopReason: "error" } }),
-    { kind: "turn_ended", freshTokens: 0, modelError: { message: "model error" } },
+    {
+      kind: "turn_ended",
+      freshTokens: 0,
+      usage: ledger(0, 0, 0),
+      response: null,
+      modelError: { message: "model error" },
+    },
   );
   for (const stopReason of ["stop", "toolUse", "aborted", "length"]) {
     const translated = translateEvent({
@@ -253,7 +321,12 @@ test("translateEvent: compaction_end → compaction_ended with the summarization
       reason: "threshold",
       result: { summary: "s", usage: { input: 900, output: 100, reasoning: 40 } },
     }),
-    { kind: "compaction_ended", freshTokens: 1_000, reason: "threshold" },
+    {
+      kind: "compaction_ended",
+      freshTokens: 1_000,
+      usage: ledger(1, 900, 100),
+      reason: "threshold",
+    },
   );
   assert.deepEqual(
     translateEvent({
@@ -261,19 +334,86 @@ test("translateEvent: compaction_end → compaction_ended with the summarization
       reason: "overflow",
       result: { summary: "s", usage: { input: 50, output: -7 } },
     }),
-    { kind: "compaction_ended", freshTokens: 50, reason: "overflow" },
+    { kind: "compaction_ended", freshTokens: 50, usage: ledger(1, 50, 0), reason: "overflow" },
   );
   // An aborted or failed compaction carries no result (Pi persists no entry): 0 tokens.
   assert.deepEqual(translateEvent({ type: "compaction_end", reason: "manual" }), {
     kind: "compaction_ended",
     freshTokens: 0,
+    usage: ledger(0, 0, 0),
     reason: "manual",
   });
   // A result without usage (an extension-supplied compaction may omit it) also counts 0.
   assert.deepEqual(
     translateEvent({ type: "compaction_end", reason: "threshold", result: { summary: "s" } }),
-    { kind: "compaction_ended", freshTokens: 0, reason: "threshold" },
+    { kind: "compaction_ended", freshTokens: 0, usage: ledger(0, 0, 0), reason: "threshold" },
   );
+});
+
+test("translateEvent: cache reads/writes and cost ride the ledger on turn_ended and compaction_ended — never the fresh sum", () => {
+  const piUsage = (input: number, output: number, cacheRead: number, cost: number) => ({
+    input,
+    output,
+    cacheRead,
+    cacheWrite: cacheRead / 2,
+    cacheWrite1h: cacheRead / 2,
+    reasoning: output,
+    totalTokens: input + output + cacheRead + cacheRead / 2,
+    cost: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1, total: cost },
+  });
+  const turn = translateEvent({
+    type: "turn_end",
+    message: { role: "assistant", usage: piUsage(10, 5, 400, 0.01) },
+    toolResults: [{ usage: piUsage(700, 300, 40, 0.0125) }],
+  });
+  assert.ok(turn?.kind === "turn_ended");
+  assert.deepEqual(
+    turn.usage,
+    ledger(2, 710, 305, { cacheRead: 440, cacheWrite: 220, cost: 0.0225 }),
+  );
+  assert.equal(turn.freshTokens, turn.usage.input + turn.usage.output, "fresh = input + output");
+  const compaction = translateEvent({
+    type: "compaction_end",
+    reason: "threshold",
+    result: { summary: "s", usage: piUsage(900, 100, 80, 0.5) },
+  });
+  assert.ok(compaction?.kind === "compaction_ended");
+  assert.deepEqual(
+    compaction.usage,
+    ledger(1, 900, 100, { cacheRead: 80, cacheWrite: 40, cost: 0.5 }),
+  );
+  assert.equal(compaction.freshTokens, 1_000);
+});
+
+test("translateEvent: turn_ended carries the response's physical identity and success; null without provider/model", () => {
+  const responseOf = (message: DriveEvent["message"]) => {
+    const translated = translateEvent({ type: "turn_end", message });
+    assert.ok(translated?.kind === "turn_ended");
+    return translated.response;
+  };
+  assert.deepEqual(
+    responseOf({ role: "assistant", provider: "faux", model: "m-1", stopReason: "stop" }),
+    { model: "faux/m-1", ok: true },
+  );
+  assert.deepEqual(
+    responseOf({ role: "assistant", provider: "openai", model: "gpt-5", responseModel: "gpt-5-x" }),
+    { model: "openai/gpt-5→gpt-5-x", ok: true },
+    "→responseModel when the provider reported a different id",
+  );
+  assert.deepEqual(
+    responseOf({ role: "assistant", provider: "faux", model: "m-1", responseModel: "m-1" }),
+    { model: "faux/m-1", ok: true },
+  );
+  for (const stopReason of ["error", "aborted"]) {
+    assert.deepEqual(
+      responseOf({ role: "assistant", provider: "router", model: "auto", stopReason }),
+      { model: "router/auto", ok: false },
+      `${stopReason} is never a successful dispatch`,
+    );
+  }
+  assert.equal(responseOf({ role: "assistant", provider: "faux" }), null);
+  assert.equal(responseOf({ role: "assistant", model: "m-1" }), null);
+  assert.equal(responseOf(undefined), null);
 });
 
 test("translateEvent: auto_retry_start → model_retrying with its fields", () => {
@@ -386,10 +526,43 @@ test("createDriveSession: rebindIfReplaced unsubscribes the prior listener (no d
   assert.equal(seen.length, 0, "prior listener was unsubscribed on rebind");
   // The live binding is s2: driving it reaches the listener exactly once — translated.
   await s2.prompt();
-  assert.deepEqual(seen, [{ kind: "turn_ended", freshTokens: 0, modelError: null }]);
+  assert.deepEqual(seen, [
+    {
+      kind: "turn_ended",
+      freshTokens: 0,
+      usage: ledger(0, 0, 0),
+      response: null,
+      modelError: null,
+    },
+  ]);
   assert.equal(s1.bindCalls, 1);
   assert.equal(s2.bindCalls, 1);
   await handle.dispose();
+});
+
+test("createDriveSession: selectedModel reads the session's selection before bind, after a failed bind, and null without one", async () => {
+  const session = Object.assign(new FakeSession(() => {}), {
+    model: { provider: "faux", id: "m-1" } as { provider: string; id: string } | undefined,
+  });
+  session.bindExtensions = async () => {
+    throw new Error("bind exploded");
+  };
+  const handle = createDriveSession({ session, dispose() {} }, () => {});
+  assert.equal(handle.selectedModel(), "faux/m-1", "readable before bind");
+  await assert.rejects(handle.bind(), /bind exploded/);
+  assert.equal(handle.selectedModel(), "faux/m-1", "readable after a failed bind");
+  session.model = { provider: "router", id: "auto" };
+  assert.equal(handle.selectedModel(), "router/auto", "a live read, never cached");
+  session.model = undefined;
+  assert.equal(handle.selectedModel(), null, "a session without a selection");
+  await handle.dispose();
+
+  const modelless = createDriveSession(
+    { session: new FakeSession(() => {}), dispose() {} },
+    () => {},
+  );
+  assert.equal(modelless.selectedModel(), null, "a session exposing no model");
+  await modelless.dispose();
 });
 
 test("createDriveSession: abort is idempotent — repeated trips launch exactly one SDK abort", async () => {
@@ -589,6 +762,8 @@ test("createDriveSession: the gate decides on assistant + tool-result usage — 
   assert.deepEqual(translateEvent({ type: "turn_end", ...turn }), {
     kind: "turn_ended",
     freshTokens: 1_000,
+    usage: ledger(2, 605, 395),
+    response: null,
     modelError: null,
   });
   await handle.dispose();
