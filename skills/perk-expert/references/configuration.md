@@ -87,6 +87,28 @@ included — `run_librarian` adds or refreshes a documentation mirror through th
 writer child (bracketed by a fail-closed check on the main checkout);
 `[models.subagents] librarian` overrides its model.
 
+**The write admission (`perk init`, `perk doctor --fix`).** Both converge managed files toward the
+*running* perk, so both refuse — exit 2, before any write, `--json` `error_type` set (doctor:
+`checks: []`) — when that would move them backward: `perk_outdated` in a consumer when the running
+perk is strictly older than `.perk/required-perk-version` (equal converges; newer moves the pin
+forward; a missing/unreadable/unparseable pin never refuses), and `foreign_perk` in perk's own repo
+unless the running perk's checkout (`Path(perk.__file__).resolve().parents[2]`) **equals** the
+converged root (equality, not containment: worktrees nest under `<main>/.worktrees/`; run
+`uv run perk …` in the checkout being converged). Bare `perk doctor` never refuses — it reports
+(the `required-perk-version` managed fail and the `cli-version` warn); every other command only
+warns.
+
+**Worktree `.pi/npm` staging is isolated.** A worktree launch stages the main checkout's converged
+`.pi/npm/` into the worktree: on macOS a `clonefile(2)` copy-on-write clone (`staged extensions
+(clonefile)`), else per-file hardlinks whose depth-≤1 metadata files (directly under `.pi/npm/` and
+`.pi/npm/node_modules/` — `package.json`, lockfiles, `.package-lock.json` …, the files npm and Pi
+rewrite in place) get their own inodes (`staged extensions (hardlink)`); never a byte copy. A
+resumed worktree's install is never replaced but its shared metadata is detached the same way
+(`detached <n> shared extension file(s)` — the migration for the former all-hardlink staging). Then
+one warning names any `.pi/settings.json` `npm:` spec the staged install does not satisfy (absent,
+or an exact `X.Y.Z` pin at another version; ranges and unversioned specs need presence only) — Pi
+installs it in-session.
+
 **One perk-owned path lives *outside* the repo.** `~/.perk/last-seen-version` is the user-level,
 machine-local store behind the one-line post-upgrade notice (the `perk release-notes` pointer):
 the max perk version this user has run interactively. Self-healing (missing/garbled content is
@@ -98,9 +120,15 @@ versions once in the bundled `shared/host-floor.yaml` and compares with semver p
 `1.1.0-rc.1` prerelease is below the floor; 1.1.1 or 1.10.0 is admitted). Every local launch (bare `perk`, a stage launch, `perk resume`) runs `pi --version`
 once (20 s timeout) as the first exec-phase step, before any lock sweep, chdir or exec, and refuses
 `pi_version_unsupported` (older or a floor prerelease) or `pi_version_unverifiable` (non-zero exit,
-timeout, spawn failure, or output that is not a version) — exit 1, naming the executable, the
-observed version (or the reason), the required version and the pinned install command; no
-override. **The adopted Pi pin and its pinned install set** (`PI_ADOPTED_VERSION`,
+timeout, spawn failure, output that is not a version, or a `pi` answering the adopted version whose
+realpath is not inside an installed `@earendil-works/pi-coding-agent` package) — exit 1, naming the
+executable, the observed version (or the reason), the required version and the pinned install
+command; no override. **The companion-family check:** a `pi` answering exactly the adopted 1.1.0
+must also resolve its seven `@earendil-works/*` companions — the way Node does, from the resolved
+executable (a copy nested under the Pi package shadows the global-root sibling; a dangling link
+does not resolve) — at exactly 1.1.0, else it is refused `pi_companions_incoherent`, naming each
+offender (`<name> resolves to <version>` / `<name> does not resolve`) and `perk doctor --fix`. A
+floor-satisfying Pi at another version is not family-checked (the advisory below covers it). **The adopted Pi pin and its pinned install set** (`PI_ADOPTED_VERSION`,
 `PI_INSTALL_COMMAND` in `perk/substrate/pi_host.py`): perk adopts exactly Pi 1.1.0, and every
 install-guidance string names one command installing Pi and its seven `@earendil-works/*`
 companions at exactly that version — `npm install -g @earendil-works/pi-coding-agent@1.1.0
@@ -111,14 +139,24 @@ companions at exactly that version — `npm install -g @earendil-works/pi-coding
 (`pi-codemode` ≥ 1.2.0 breaks Pi 1.1.0's codemode extension at module link; Pi 1.4.0 itself no
 longer ships `chord`, which pi-subagents 0.76.1 refuses). `--dry-run` never probes; `perk init`, `perk doctor`
 and `--help` are never gated by it. Instead the environment checks report the same floor: the `pi`
-row is presence + version and the `node` row checks the major against the supported lines
-(`node.min_version` plus `node.line_floors`) and the full version against that line's floor — a
-major outside the table is `<version> (unsupported release line)` — and an outdated, unsupported
-or unverifiable one is `ok=False` like a missing one (init exits 2 `missing_tool`; doctor `fail`).
-An admitted PATH `pi` at a version other than the adopted pin stays `ok` but carries an advisory
-naming the pinned command: a successful `perk init` adds it as a `pi:` warning (failure reports
-never do; the env `--json` row is unchanged) and `perk doctor` reports the row `warn` (`pi ok,
-with a caution`), never `fail`. `engines.node` mirrors the lines as `^22.23.4 || ^24.22.1 || ^26.12.1`. The
+row is presence + version + (at the adopted version) the companion family, and the `node` row
+checks the major against the supported lines (`node.min_version` plus `node.line_floors`) and the
+full version against that line's floor — a major outside the table is `<version> (unsupported
+release line)` — and an outdated, unsupported, unverifiable or incoherent one is `ok=False` like a
+missing one (init exits 2 `missing_tool`; doctor `fail`; the incoherent detail is `<observed>
+(floor >= <required>) — companions: <offenders>`, and the unverifiable/incoherent remediation
+reads: Run `perk doctor --fix` (it runs: <the pinned command>).). An admitted PATH `pi` at a version
+other than the adopted pin stays `ok` but carries an advisory naming the pinned command: a
+successful `perk init` adds it as a `pi:` warning (failure reports never do; the env `--json` row
+is unchanged; interactive init first offers to install the adopted set, and a decline adds no
+second warning) and `perk doctor` reports the row `warn` (`pi ok, with a caution`), never `fail`.
+**`perk doctor --fix` repairs the `pi` row** (verify-gated, before the skills steps) whenever it is
+not green — absent, below the floor, unverifiable, incoherent, or the advisory — by running the
+pinned eight-spec `npm install -g` itself and re-probing: `fixed` gets `pi: installed the adopted
+Pi 1.1.0 set (npm -g, 8 packages)`; an npm failure (`pi: adopted-set install failed (…); run
+manually: …`) or a `pi` on PATH that still is not the install npm wrote (`pi: still … — fix PATH
+order or remove the other pi`) lands on `fix_errors`; a failing `node` row stops it with the
+install-Node-first warning. `engines.node` mirrors the lines as `^22.23.4 || ^24.22.1 || ^26.12.1`. The
 managed remote runner installs the pinned install set (`REMOTE_PI_VERSION`, the adopted pin under
 its remote name) for both the global CLI and the consumer worker SDK (the worker install adds
 `--save-exact`, recording exact pins in `.pi/npm/package.json`), sets up exactly Node 22.23.4 (the lowest supported line) and pins

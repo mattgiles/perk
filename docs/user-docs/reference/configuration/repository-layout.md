@@ -40,6 +40,22 @@ perk-owned: it is Pi's directory with a perk-managed slice.
 | `docs/library/` | perk (`perk librarian`) | gitignored cache (main checkout only) | no |
 | `docs/library/README.md` | perk-generated (`perk init` / `doctor --fix`, only when the directory exists) | committed | yes |
 
+### Worktree extension staging
+
+When a stage launches in a worktree, perk stages the main checkout's converged `.pi/npm/` into the
+worktree's own `.pi/npm/` so Pi installs nothing at startup. The staged copy is **isolated**: a
+write in one tree never reaches another. On macOS perk clones the directory copy-on-write
+(`staged extensions (clonefile)` — no extra disk until a file changes); elsewhere it hardlinks the
+package files and gives the install root's own metadata files (`package.json`, lockfiles,
+`node_modules/.package-lock.json` and the like) their own copies (`staged extensions (hardlink)`).
+perk never byte-copies the whole tree; if staging fails, the launch continues and Pi installs the
+extensions in-session. Resuming a worktree never replaces its install, but detaches any metadata
+file it still shares with another tree (`detached <n> shared extension file(s)` — worktrees
+staged by older perk versions shared them). After staging, perk checks the install against the
+worktree's own `.pi/settings.json` and warns once when an extension is missing or not at its
+exact pinned version (`extensions: <n> staged extension(s) do not match this worktree's
+.pi/settings.json (…) — pi will install them in-session`); Pi then installs it in-session.
+
 ### Agent scratch
 
 For each eligible write-capable model turn, perk creates
