@@ -227,6 +227,9 @@ def test_format_step_summary_degraded_when_none():
 
 # ----------------------------------------------------------------- RunOutcome lockstep
 
+# The Model line's response-count marker (the selfcheck census uses the same marker).
+_TIMES = "\N{MULTIPLICATION SIGN}"
+
 # LOCKSTEP LITERALS (contracts.md §8.11/§8.38): these two RunOutcome shapes are pinned
 # byte-identically in extension/worker/stageExecution.test.ts ("runStage: the frozen completed
 # RunOutcome (lockstep with tests/test_run_report.py)" / "runStage: the frozen failed RunOutcome
@@ -240,6 +243,8 @@ _COMPLETED_OUTCOME_LOCKSTEP = {
     "terminal_signal": "submit_tool",
     "pr": {"number": 7, "url": "https://x/pr/7"},
     "budget": {"turns": 3, "tokens": 100, "elapsed_ms": 42},
+    "model": {"selected": "faux/m-1", "dispatched": [{"model": "faux/m-1", "responses": 3}]},
+    "usage": {"records": 3, "input": 50, "output": 50, "cacheRead": 0, "cacheWrite": 0, "cost": 0},
     "error": None,
 }
 _FAILED_OUTCOME_LOCKSTEP = {
@@ -249,6 +254,8 @@ _FAILED_OUTCOME_LOCKSTEP = {
     "terminal_signal": "agent_idle_incomplete",
     "pr": None,
     "budget": {"turns": 1, "tokens": 0, "elapsed_ms": 1},
+    "model": {"selected": None, "dispatched": []},
+    "usage": None,
     "error": {
         "type": "incomplete",
         "message": "implement drive went idle without an opened PR (no successful submit).",
@@ -278,12 +285,18 @@ def test_run_outcome_lockstep_completed_renders_every_field(tmp_path):
     assert "Status: completed" in body
     assert "terminal_signal: submit_tool" in body
     assert "Budget: turns=3, tokens=100, elapsed_ms=42" in body
+    assert f"\nModel: selected=faux/m-1; dispatched=faux/m-1 {_TIMES}3\n" in body
+    assert (
+        "\nUsage: records=3; fresh=100 (in=50 out=50); cache read=0 write=0; cost=$0.0000\n" in body
+    )
     assert "Opened PR #7 (https://x/pr/7)" in body
     assert "Failure summary" not in body
     summary = run_report.format_step_summary(
         stage="implement", plan="42", run_url=None, outcome=outcome, exit_code=0
     )
     assert "Status: completed" in summary and "Budget: turns=3" in summary
+    assert f"Model: selected=faux/m-1; dispatched=faux/m-1 {_TIMES}3" in summary
+    assert "Usage: records=3; fresh=100" in summary
 
 
 def test_run_outcome_lockstep_failed_renders_failure_arm(tmp_path):
@@ -301,9 +314,86 @@ def test_run_outcome_lockstep_failed_renders_failure_arm(tmp_path):
     assert "Status: failed" in body
     assert "terminal_signal: agent_idle_incomplete" in body
     assert "Budget: turns=1, tokens=0, elapsed_ms=1" in body
+    assert "\nModel: selected=none; dispatched=none\n" in body
+    assert "\nUsage: unavailable" in body
     assert "Opened PR" not in body
     assert "**Failure summary:**" in body
     assert "implement drive went idle without an opened PR (no successful submit)." in body
+
+
+# ----------------------------------------------------------------- model / usage lines
+
+
+def _body(outcome: dict) -> str:
+    return run_report.format_outcome(
+        run_id="RID", stage="implement", plan="5", run_url=None, outcome=outcome, exit_code=1
+    )
+
+
+def test_model_none_renders_unavailable_distinct_from_a_selectionless_session():
+    # `model: None` = no session was constructed; `selected: None` = a session without one.
+    unavailable = _body({**_outcome(status="failed"), "model": None, "usage": None})
+    assert "\nModel: unavailable" in unavailable
+    assert "\nUsage: unavailable" in unavailable
+    selectionless = _body(
+        {**_outcome(status="failed"), "model": {"selected": None, "dispatched": []}}
+    )
+    assert "\nModel: selected=none; dispatched=none" in selectionless
+
+
+def test_model_line_joins_every_dispatched_identity_in_order():
+    outcome = {
+        **_outcome(),
+        "model": {
+            "selected": "router/auto",
+            "dispatched": [
+                {"model": "ext-faux/m-1", "responses": 2},
+                {"model": "openai/gpt-5→gpt-5-x", "responses": 1},
+            ],
+        },
+    }
+    assert (
+        f"\nModel: selected=router/auto; dispatched=ext-faux/m-1 {_TIMES}2, "
+        f"openai/gpt-5→gpt-5-x {_TIMES}1" in _body(outcome)
+    )
+
+
+def test_usage_line_renders_fresh_cache_and_cost():
+    outcome = {
+        **_outcome(),
+        "usage": {
+            "records": 5,
+            "input": 1000,
+            "output": 234,
+            "cacheRead": 5000,
+            "cacheWrite": 800,
+            "cost": 0.0123,
+        },
+    }
+    assert (
+        "\nUsage: records=5; fresh=1234 (in=1000 out=234); cache read=5000 write=800; cost=$0.0123"
+        in _body(outcome)
+    )
+
+
+def test_legacy_outcome_without_the_keys_renders_neither_line():
+    # Older events files predate the additive fields: absent keys render nothing.
+    body = _body(_outcome(status="failed", error={"summary": "x"}))
+    assert "Model:" not in body
+    assert "Usage:" not in body
+
+
+def test_step_summary_carries_model_and_usage_lines():
+    outcome = {
+        **_outcome(),
+        "model": {"selected": "faux/m-1", "dispatched": []},
+        "usage": None,
+    }
+    summary = run_report.format_step_summary(
+        stage="implement", plan="42", run_url=None, outcome=outcome, exit_code=0
+    )
+    assert "Model: selected=faux/m-1; dispatched=none" in summary
+    assert "Usage: unavailable" in summary
 
 
 # ----------------------------------------------------------------- orchestration

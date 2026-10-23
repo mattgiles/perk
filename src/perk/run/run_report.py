@@ -90,6 +90,60 @@ def _budget_line(outcome: dict[str, Any]) -> str:
     return f"\nBudget: turns={turns}, tokens={tokens}, elapsed_ms={elapsed}"
 
 
+def _model_line(outcome: dict[str, Any]) -> str:
+    """The selected-vs-dispatched identity line.
+
+    An absent key (an events file older than the field) renders nothing; ``None`` means no
+    session was constructed (``unavailable``), distinct from a session without a selection
+    (``selected=none``) or without a successful response (``dispatched=none``).
+    """
+    if "model" not in outcome:
+        return ""
+    model = outcome.get("model")
+    if not isinstance(model, dict):
+        return "\nModel: unavailable"
+    dispatched = model.get("dispatched")
+    rows = (
+        [
+            f"{row.get('model')} \N{MULTIPLICATION SIGN}{row.get('responses')}"
+            for row in dispatched
+            if isinstance(row, dict)
+        ]
+        if isinstance(dispatched, list)
+        else []
+    )
+    selected = model.get("selected") or "none"
+    return f"\nModel: selected={selected}; dispatched={', '.join(rows) or 'none'}"
+
+
+def _count(value: object) -> int | float:
+    """A numeric ledger field (``bool`` excluded); anything else reads 0."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return 0
+    return value
+
+
+def _usage_line(outcome: dict[str, Any]) -> str:
+    """The once-counted usage line: fresh tokens (the budget sum), cache reads/writes, cost.
+
+    An absent key renders nothing; ``None`` means no usage record was observed (``unavailable``)
+    — a recorded zero renders as numbers, never as unavailable.
+    """
+    if "usage" not in outcome:
+        return ""
+    usage = outcome.get("usage")
+    if not isinstance(usage, dict):
+        return "\nUsage: unavailable"
+    tokens_in = _count(usage.get("input"))
+    tokens_out = _count(usage.get("output"))
+    return (
+        f"\nUsage: records={_count(usage.get('records'))}; "
+        f"fresh={tokens_in + tokens_out} (in={tokens_in} out={tokens_out}); "
+        f"cache read={_count(usage.get('cacheRead'))} write={_count(usage.get('cacheWrite'))}; "
+        f"cost=${_count(usage.get('cost')):.4f}"
+    )
+
+
 def _pr_line(outcome: dict[str, Any]) -> str:
     pr = outcome.get("pr")
     if isinstance(pr, dict) and pr.get("number") is not None:
@@ -113,9 +167,9 @@ def _outcome_body(*, outcome: dict[str, Any] | None, exit_code: int, run_url: st
     :func:`format_outcome` and :func:`format_step_summary`.
 
     Without an ``outcome`` (events file unreadable): a clearly-labelled degraded note derived
-    from ``exit_code`` only. With one: status, ``terminal_signal``, the budget line, the PR link
-    when present, the run URL, and on any non-``completed`` status the verbatim worker failure
-    summary.
+    from ``exit_code`` only. With one: status, ``terminal_signal``, the budget line, the model and
+    usage lines (when the outcome carries those keys), the PR link when present, the run URL, and
+    on any non-``completed`` status the verbatim worker failure summary.
     """
     if outcome is None:
         degraded = (
@@ -129,6 +183,8 @@ def _outcome_body(*, outcome: dict[str, Any] | None, exit_code: int, run_url: st
         f"Status: {status}"
         f"\nterminal_signal: {outcome.get('terminal_signal')}"
         f"{_budget_line(outcome)}"
+        f"{_model_line(outcome)}"
+        f"{_usage_line(outcome)}"
         f"{_pr_line(outcome)}"
         f"{_run_line(run_url)}"
     )
