@@ -40,8 +40,10 @@ The managed `.gitignore` block also carries the perk library rules `/docs/librar
 
 Run **interactively**, `perk init` is also a guided onboarding flow. It offers to install the
 missing *supported* required tools — `gh` via `brew install gh` (when brew is on PATH), `pi` via
-`npm install -g @earendil-works/pi-coding-agent` (when the `node` check passes; the same
-command upgrades a Pi older than the 1.1.0 floor), `skills` via
+the pinned install command — one `npm install -g` naming Pi 1.1.0 plus its seven companion
+packages at exactly 1.1.0 (when the `node` check passes; the same command upgrades a Pi older than
+the 1.1.0 floor; the exact command is in
+[Requirements and compatibility](../requirements-and-compatibility.md#version-compatibility)), `skills` via
 its official installer script on macOS / `go install` elsewhere, and `cloc` via `brew install
 cloc` (when brew is on PATH) or `npm install -g cloc` (when the `node` check passes) (`git` and
 `node` stay guide-only — the failure report carries their install commands). It offers to run `gh auth
@@ -55,6 +57,12 @@ nothing), and **every prompt and mutation is disabled** by `--no-interactive`, a
 or `--json` (a machine surface — nothing may interleave with the stdout JSON); the git-identity
 *check* itself still runs on every verified init — non-interactively it only degrades to a
 report warning carrying the manual `git config` commands.
+
+When the `pi` on your PATH is admitted (at or above the floor) but is not the adopted Pi 1.1.0,
+a successful `perk init` still converges, marks the `pi` line `⚠️` and adds one warning naming
+the pinned install command (also in the `--json` report's `warnings`; the `env` row itself is
+unchanged). A failed init does not add it — the failure report names what blocked init, and
+`perk doctor` reports the `pi` row regardless.
 
 `--force` re-seeds
 the user-editable config to defaults; `--no-interactive`
@@ -197,7 +205,9 @@ The
 [Requirements and compatibility](../requirements-and-compatibility.md)), so an outdated,
 unverifiable or unsupported-line Node/Pi is a `fail` whose remediation names the floor to reach,
 exactly like a missing one (and a `missing_tool` exit 2 for `perk init`). A Node major outside
-the supported lines reports `<version> (unsupported release line)`. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.
+the supported lines reports `<version> (unsupported release line)`. An admitted Pi that is not
+the adopted Pi 1.1.0 is a `warn` (`pi ok, with a caution`) whose remediation names the pinned
+install command — never a `fail`, so the report stays healthy and the exit code is unchanged. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.
 This is a group whose bare invocation runs the health report.
 
 ### `perk doctor workflow`

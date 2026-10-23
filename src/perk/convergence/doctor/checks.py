@@ -40,6 +40,20 @@ from perk.substrate.skill_exposure import parse_skill_frontmatter
 def _env_checks() -> list[Check]:
     checks: list[Check] = []
     for c in env.check_environment():
+        if c.ok and c.advisory:
+            # An admitted row with a caution (e.g. a Pi other than the adopted pin): `warn`,
+            # never `fail` — it reports on every run but never flips `healthy`.
+            checks.append(
+                Check(
+                    name=c.name,
+                    group="environment",
+                    status="warn",
+                    message=f"{c.name} ok, with a caution",
+                    detail=c.detail,
+                    remediation=c.advisory,
+                )
+            )
+            continue
         status: Status = "ok" if c.ok else ("warn" if c.optional else "fail")
         checks.append(
             Check(

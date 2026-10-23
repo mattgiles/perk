@@ -9,6 +9,12 @@ or unverifiable Node/Pi is ``ok=False`` exactly like an absent one. Checks
 are side-effect-free probes; the caller decides fatality (init: missing/outdated required tool
 -> exit 2; doctor: ``fail``). The launch admission in ``perk.run.pi_exec`` shares the Pi probe
 (``perk.substrate.pi_host``) but never gates these checks.
+
+A Pi admitted at a version other than the adopted Pi pin stays ``ok`` (the floor is a minimum) but
+carries an **advisory** naming the pinned install command — a successful init renders it as a
+warning, doctor as a ``warn`` check. The ``pi`` row reads the PATH ``pi`` only: the Pi a session
+actually runs may be a different install (contracts.md §8.76(f)), which is why the extension's
+SDK-boundary refusal names the public requirements reference rather than this row.
 """
 
 import shutil
@@ -21,18 +27,26 @@ from perk.substrate.host_floor import (
     node_line_floor,
     supported_node_lines,
 )
-from perk.substrate.pi_host import PI_INSTALL_COMMAND, probe_pi_host
+from perk.substrate.pi_host import PI_ADOPTED_VERSION, PI_INSTALL_COMMAND, probe_pi_host
 from perk.substrate.proc import ProcFailure, run_captured, which_absolute
 from perk.substrate.semver import parse_semver, satisfies_floor
 
 
 @dataclass(frozen=True)
 class EnvCheck:
+    """One environment probe result.
+
+    ``advisory`` is a non-blocking caution on an ``ok`` row — rendered as a warning by a
+    successful init and as a ``warn`` check by doctor; it is always empty on a not-ok row (whose
+    ``remediation`` carries the repair).
+    """
+
     name: str
     ok: bool
     detail: str
     remediation: str
     optional: bool = False
+    advisory: str = ""
 
 
 def _node_version() -> str | None:
@@ -111,7 +125,21 @@ def _check_pi() -> EnvCheck:
         )
     host = probe_pi_host(path)
     if host.outcome == "admitted":
-        return EnvCheck("pi", True, f"{host.observed} (floor >= {host.required})", "")
+        detail = f"{host.observed} (floor >= {host.required})"
+        if host.observed == PI_ADOPTED_VERSION:
+            return EnvCheck("pi", True, detail, "")
+        return EnvCheck(
+            "pi",
+            True,
+            detail,
+            "",
+            advisory=(
+                f"Pi {host.observed} is admitted (floor >= {host.required}) but is not the "
+                f"adopted Pi {PI_ADOPTED_VERSION}: perk's subagent waves are characterized only "
+                "on the adopted Pi with its pinned companions and can be refused on another. "
+                f"Install the adopted set: {PI_INSTALL_COMMAND}."
+            ),
+        )
     if host.outcome == "unsupported":
         return EnvCheck(
             "pi",

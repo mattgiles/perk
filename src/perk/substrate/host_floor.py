@@ -16,7 +16,8 @@ lowest line's floor; ``node.line_floors`` is read only by this plane (the TS rea
 
 A floor is a **minimum**, never a pin: it is distinct from the development pins
 (``package.json`` devDependencies), the pi-subagents supplier pin, the doctor guidance stamp and the
-remote install pin (``perk.run.workflow_artifacts.REMOTE_PI_VERSION``). Consumers compare each host
+adopted Pi pin (``perk.substrate.pi_host.PI_ADOPTED_VERSION``, which the remote install pin
+``perk.run.workflow_artifacts.REMOTE_PI_VERSION`` carries). Consumers compare each host
 observation independently against it (``perk.substrate.pi_host`` for the PATH ``pi`` CLI,
 ``perk.convergence.env`` for ``node``).
 

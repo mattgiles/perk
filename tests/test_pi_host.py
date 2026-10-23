@@ -2,15 +2,21 @@
 
 import ast
 import json
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from perk.run import workflow_artifacts
 from perk.substrate import pi_host
 from perk.substrate.host_floor import load_host_floor, required_pi_version
 from perk.substrate.pi_host import (
+    PI_ADOPTED_VERSION,
+    PI_COMPANION_PACKAGES,
     PI_INSTALL_COMMAND,
+    PI_INSTALL_SPECS,
+    PI_NPM_SPEC,
     PI_VERSION_PROBE_TIMEOUT,
     PiHost,
     admit_pi_version,
@@ -26,9 +32,55 @@ FLOOR = Semver(1, 0, 0)
 PI = "/opt/bin/pi"
 
 
-def test_install_command_is_the_global_npm_install() -> None:
-    assert PI_INSTALL_COMMAND == "npm install -g @earendil-works/pi-coding-agent"
+PINNED_INSTALL_COMMAND = (
+    "npm install -g @earendil-works/pi-coding-agent@1.1.0 @earendil-works/chord@1.1.0 "
+    "@earendil-works/pi-agent-core@1.1.0 @earendil-works/pi-ai@1.1.0 "
+    "@earendil-works/pi-codemode@1.1.0 @earendil-works/pi-mcp@1.1.0 "
+    "@earendil-works/pi-telemetry@1.1.0 @earendil-works/pi-tui@1.1.0"
+)
+
+
+def test_install_command_is_the_pinned_set() -> None:
+    assert PI_INSTALL_COMMAND == PINNED_INSTALL_COMMAND
     assert PI_VERSION_PROBE_TIMEOUT == 20
+    assert len(PI_INSTALL_SPECS) == 8
+    assert PI_INSTALL_SPECS[0] == f"{PI_NPM_SPEC}@{PI_ADOPTED_VERSION}"
+    companions = [spec.removesuffix(f"@{PI_ADOPTED_VERSION}") for spec in PI_INSTALL_SPECS[1:]]
+    assert companions == sorted(companions) == list(PI_COMPANION_PACKAGES)
+    adopted = parse_semver(PI_ADOPTED_VERSION)
+    assert adopted is not None
+    assert str(adopted) == PI_ADOPTED_VERSION  # a plain release: no `v`, prerelease or build
+    assert adopted.prerelease == ()
+    assert satisfies_floor(adopted, required_pi_version(load_host_floor()))
+
+
+def _family_keys(deps: dict[str, str]) -> set[str]:
+    return {dep for dep in deps if dep.startswith("@earendil-works/")}
+
+
+def test_pinned_install_family_is_closed_against_the_characterized_lockfile() -> None:
+    # The committed lockfile is the characterized graph: its top-level `@earendil-works/*` entries
+    # are exactly the pinned set (names), and every family range those entries declare names a
+    # member (closure) — a companion added or dropped upstream fails here before it can float.
+    lock = json.loads((REPO_ROOT / "package-lock.json").read_text(encoding="utf-8"))
+    packages: dict[str, dict] = lock["packages"]
+    top = {
+        key.removeprefix("node_modules/"): entry
+        for key, entry in packages.items()
+        if re.fullmatch(r"node_modules/@earendil-works/[^/]+", key)
+    }
+    family = {PI_NPM_SPEC, *PI_COMPANION_PACKAGES}
+    assert set(top) == family
+    for name, entry in top.items():
+        declared = _family_keys(entry.get("dependencies", {}))
+        assert declared <= family, (name, declared - family)
+        peers = _family_keys(entry.get("peerDependencies", {}))
+        assert not peers, (name, peers)
+
+
+def test_remote_install_pin_is_the_adopted_pin() -> None:
+    assert workflow_artifacts.REMOTE_PI_VERSION == PI_ADOPTED_VERSION
+    assert workflow_artifacts._PI_GLOBAL_INSTALL == PI_INSTALL_COMMAND
 
 
 # --- the pure decision -----------------------------------------------------------------------
@@ -213,8 +265,7 @@ def test_unsupported_refusal_text_and_error_type() -> None:
     host = admit_pi_version(PI, "0.99.2\n", FLOOR)
     assert format_pi_refusal(host) == (
         "pi at /opt/bin/pi is version 0.99.2; perk requires Pi >= 1.0.0. Upgrade it: "
-        "npm install -g @earendil-works/pi-coding-agent — perk init and perk doctor report the "
-        "same requirement."
+        f"{PINNED_INSTALL_COMMAND} — perk init and perk doctor report the same requirement."
     )
     assert pi_refusal_error_type(host) == "pi_version_unsupported"
 
@@ -223,7 +274,6 @@ def test_unverifiable_refusal_text_and_error_type() -> None:
     host = admit_pi_version(PI, "latest\n", FLOOR)
     assert format_pi_refusal(host) == (
         "could not verify the Pi version of /opt/bin/pi (pi --version printed 'latest' instead "
-        "of a version); perk requires Pi >= 1.0.0. Reinstall it: "
-        "npm install -g @earendil-works/pi-coding-agent."
+        f"of a version); perk requires Pi >= 1.0.0. Reinstall it: {PINNED_INSTALL_COMMAND}."
     )
     assert pi_refusal_error_type(host) == "pi_version_unverifiable"

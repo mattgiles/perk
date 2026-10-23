@@ -18,6 +18,13 @@ The admission reads only the PATH CLI's own answer: it never consults ``package.
 ``node_modules`` or a loaded SDK — those are independent observations, and equality between them
 is never required (a CLI ``1.1.0`` beside a ``1.0.0`` dev SDK pin is admitted on the CLI's own
 reading).
+
+This module also declares the **adopted Pi pin** (``PI_ADOPTED_VERSION``) and its **pinned install
+set** (``PI_INSTALL_SPECS`` / ``PI_INSTALL_COMMAND``): the exact Pi perk adopted, installed together
+with its companion packages at that same exact version. It lives here, below ``perk.run``, so the
+launch refusal, the environment rows, the guided install and the remote install pin all name the
+same version and the same command. The floor admits any Pi at or above it; the adopted pin is what
+every install-guidance string installs.
 """
 
 from dataclasses import dataclass
@@ -28,7 +35,31 @@ from perk.substrate.proc import ProcFailure, run_captured
 from perk.substrate.semver import Semver, parse_semver, satisfies_floor
 
 PI_NPM_SPEC = "@earendil-works/pi-coding-agent"
-PI_INSTALL_COMMAND = f"npm install -g {PI_NPM_SPEC}"
+# The adopted Pi pin: the exact published Pi perk adopted (the remote install pin carries this
+# same value). It is distinct from the host floor (a minimum), the dev pins, the pi-subagents
+# supplier pin and the guidance stamp; it moves on characterization + offline evidence (the live
+# certification follows) and never below the floor.
+#
+# Pi ships no `npm-shrinkwrap.json` since 1.0.1 and declares its `@earendil-works/*` companions at
+# caret ranges, so any lockfile-free install of an exact Pi would float the companions to the newest
+# `^` satisfier — a graph Pi was never published against. The install therefore names the whole
+# family as exact specs: one global command places the eight packages as siblings under the global
+# root, which the package's own ranges, Node's module resolvers and pi-subagents' peer-alias
+# resolver all reach. The tuple is pinned closed against the committed lockfile by test.
+PI_ADOPTED_VERSION = "1.1.0"
+PI_COMPANION_PACKAGES: tuple[str, ...] = (
+    "@earendil-works/chord",
+    "@earendil-works/pi-agent-core",
+    "@earendil-works/pi-ai",
+    "@earendil-works/pi-codemode",
+    "@earendil-works/pi-mcp",
+    "@earendil-works/pi-telemetry",
+    "@earendil-works/pi-tui",
+)
+PI_INSTALL_SPECS: tuple[str, ...] = tuple(
+    f"{pkg}@{PI_ADOPTED_VERSION}" for pkg in (PI_NPM_SPEC, *PI_COMPANION_PACKAGES)
+)
+PI_INSTALL_COMMAND = f"npm install -g {' '.join(PI_INSTALL_SPECS)}"
 # `pi --version` answers before any extension/settings load (well under a second measured); the
 # generous bound only catches a wedged binary, which reads as unverifiable.
 PI_VERSION_PROBE_TIMEOUT = 20

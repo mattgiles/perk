@@ -12,12 +12,25 @@
 // between them is never required.
 //
 // Vocabulary mirrors perk/substrate/pi_host.py: the same three outcomes, the same refusal error
-// codes, the same 80-character unverifiable preview, the same install command.
+// codes, the same 80-character unverifiable preview.
+//
+// The repair pointer deliberately names no version-specific command: the adopted Pi pin and its
+// pinned install set live in the Python substrate (perk/substrate/pi_host.py), so this plane names
+// the shape (the adopted Pi with its pinned companions) and where the exact command lives. It
+// points at neither a PATH-dependent surface (the SDK admitted here need not be the PATH `pi` that
+// perk init / perk doctor probe) nor a source-tree path (the docs tree ships in no distribution),
+// but at the public requirements reference — whose file and heading a test pins to the checkout.
 
 import { formatSemver, parseSemver, satisfiesFloor } from "./semver.ts";
 
 export const HOST_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
-export const PI_INSTALL_COMMAND = `npm install -g ${HOST_SDK_PACKAGE}`;
+export const REQUIREMENTS_DOC_URL =
+  "https://github.com/mattgiles/perk/blob/main/docs/user-docs/reference/requirements-and-compatibility.md#version-compatibility";
+
+const EXTENSION_REPAIR =
+  "to perk's adopted Pi version with its pinned companion set — the exact npm command is in " +
+  `perk's "Requirements and compatibility" reference (${REQUIREMENTS_DOC_URL}), and perk init / ` +
+  "perk doctor print it when the PATH pi is not the adopted one";
 
 const DETAIL_PREVIEW_CHARS = 80;
 
@@ -91,15 +104,15 @@ export function formatHostSdkRefusal(
   const { observed, required, detail } = admission;
   if (surface === "extension") {
     if (admission.outcome === "unsupported") {
+      // "That Pi": the refused SDK is the Pi running this session, not necessarily the PATH pi.
       return (
         `perk requires Pi >= ${required}; the Pi running this session is ${observed} ` +
-        `(${HOST_SDK_PACKAGE} VERSION). Upgrade it: ${PI_INSTALL_COMMAND} — perk init and ` +
-        "perk doctor report the same requirement."
+        `(${HOST_SDK_PACKAGE} VERSION). Upgrade that Pi ${EXTENSION_REPAIR}.`
       );
     }
     return (
       `perk requires Pi >= ${required} and could not verify this Pi's version (${detail}). ` +
-      `Reinstall it: ${PI_INSTALL_COMMAND}.`
+      `Reinstall that Pi ${EXTENSION_REPAIR}.`
     );
   }
   if (admission.outcome === "unsupported") {

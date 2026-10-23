@@ -2852,7 +2852,8 @@ env gate runs before the repo probe — in both modes).
 
 **Interactive onboarding gestures.** Interactive `perk init` is a guided onboarding flow: a
 confirm-then-install pass over the failing *supported* required tools (`gh` via brew, `pi` via
-`npm -g` — which also upgrades a `pi` the §8.76 floor reports outdated or unverifiable, `skills` via its official installer script on macOS / `go install` elsewhere, `cloc`
+the pinned install set (§8.76(b): one `npm install -g` naming the adopted Pi and its seven companions
+at the same exact version) — which also upgrades a `pi` the §8.76 floor reports outdated or unverifiable, `skills` via its official installer script on macOS / `go install` elsewhere, `cloc`
 via brew else `npm -g` when node works — `git`/`node` stay guide-only), an offered interactive `gh auth login` (re-probed afterward; the
 re-probe is the authority), a git `user.name`/`user.email` check with a prompted setup (scope
 confirm, global default), and — when the committed backend is `linear` with a `team` and no key
@@ -2895,7 +2896,9 @@ declines/failures ride `warnings`.
                                                           #   when the file is created/updated (the one-time
                                                           #   backfill), preserving the pure-delta invariant
   warnings: string[],                                      # non-fatal clear-report lines (e.g. repo-authored-skills
-                                                          #   structural errors / untracked SKILL.md); kept separate
+                                                          #   structural errors / untracked SKILL.md; on a SUCCESS
+                                                          #   report only, an ok env row's advisory as
+                                                          #   `pi: <advisory>` — §8.76(e)); kept separate
                                                           #   from `changes` so `changes` stays a pure delta list
   handoff: string|null }                                   # path to the post-init markdown on-ramp
 ```
@@ -2960,7 +2963,8 @@ second `--fix` at `fixed == []`).
 **Groups.**
 
 - `environment` — tools; required tools missing = `fail`; optional tools (e.g. ast-grep)
-  missing = `warn`.
+  missing = `warn`; an admitted row carrying an advisory (the `pi` row at a version other than
+  the adopted Pi pin, §8.76(e)) = `warn`, never `fail`.
 - `github` — auth/access; non-fatal `warn`.
 - `linear` — verify-gated Linear readiness (auth/team/labels); present only when the committed
   `[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the six
@@ -4557,21 +4561,30 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   rendered from `shared/host-floor.yaml`, §8.76), then perk (the exterior CLI — `--from . perk` for the self-repo,
   an exact-version-pinned PyPI install `uv tool install perk=={__version__}` for a consumer,
   baked in at `perk init` time so the runner reproduces the wiring perk version), pi (the interior the
-  worker drives — `npm install -g @earendil-works/pi-coding-agent@<REMOTE_PI_VERSION>`, exactly
-  `1.1.0`), the **skills CLI** (`go install github.com/mattgiles/skills/cmd/skills@latest`
+  worker drives — the **pinned install set** `PI_INSTALL_COMMAND` (§8.76(b)), exactly
+  `npm install -g @earendil-works/pi-coding-agent@1.1.0 @earendil-works/chord@1.1.0
+  @earendil-works/pi-agent-core@1.1.0 @earendil-works/pi-ai@1.1.0 @earendil-works/pi-codemode@1.1.0
+  @earendil-works/pi-mcp@1.1.0 @earendil-works/pi-telemetry@1.1.0 @earendil-works/pi-tui@1.1.0`
+  — the package at `REMOTE_PI_VERSION` and its seven companions at the same exact version), the **skills CLI** (`go install github.com/mattgiles/skills/cmd/skills@latest`
   — built from source because its release binaries are darwin-only; the runner's preinstalled Go +
   `GOTOOLCHAIN=auto` suffice, and the step is **fatal**: a failed install fails the job — no
   skills, no drive), the Node worker's peer deps, and a final **git-identity** step (`perk[bot]`,
   `--global`) so the worker's commits succeed on a fresh runner. The worker-deps step is repo-kind
   aware: **self** uses `npm ci` (the self-repo has the `package.json`/lockfile/devDeps the worker
-  resolves; the committed pins); **consumer** installs the pinned `@mgiles/perk` **plus the pi SDK
-  pinned to `REMOTE_PI_VERSION`** (`npm install @mgiles/perk@{__version__}
-  @earendil-works/pi-coding-agent@1.1.0 --prefix .pi/npm --legacy-peer-deps`, the perk pin baked in
-  at `perk init` time so the runner reproduces the wiring perk version; the consumer worker SDK is
-  the remote wave host, so it carries the same exact pin as the global CLI). Only the pinned
-  package is exact: its `^1.1.0` `@earendil-works/*` companions are resolved by npm at install
-  time (Pi ships no `npm-shrinkwrap.json` since 1.0.1, and neither remote install uses a lockfile),
-  bound to the characterized graph by the registry preflight each pin move runs. `@mgiles/perk` ships **zero** runtime `dependencies` (the pi packages are peers) and
+  resolves; the committed pins); **consumer** installs the pinned `@mgiles/perk` **plus the pi SDK's
+  pinned install set** (`npm install @mgiles/perk@{__version__} <the same eight exact specs>
+  --prefix .pi/npm --legacy-peer-deps --save-exact`, the perk pin baked in at `perk init` time so
+  the runner reproduces the wiring perk version; the consumer worker SDK is the remote wave host, so
+  it carries the same pinned set as the global CLI, and `--save-exact` records the pins as exact in
+  `.pi/npm/package.json`). **The family is closed and every member exact:** Pi ships no
+  `npm-shrinkwrap.json` since 1.0.1 and declares its `@earendil-works/*` companions at `^` ranges,
+  and neither remote install uses a lockfile, so a bare package spec would float the companions to
+  the newest `^` satisfier (at 1.1.0 that graph fails to link). The global install places the eight
+  as siblings under the global root — which the package's ranges, Node's module resolvers and
+  pi-subagents' peer-alias resolver all reach — and the consumer install hoists them under
+  `.pi/npm/node_modules/`; the registry preflight at each pin move checks the family stays closed,
+  and the placement is measured under the composite's Node line
+  (`docs/design/archive/pi-1.1.0-install-pins.md`). `@mgiles/perk` ships **zero** runtime `dependencies` (the pi packages are peers) and
   `--legacy-peer-deps` makes npm skip peer installation entirely — the SDK spec is what lands the
   worker's imports: its real deps (pi-ai, pi-tui, typebox) close the worker graph's bare-import set
   under `.pi/npm/node_modules/`, resolvable from the staged `consumer-npm` entry (step 5 below).
@@ -15720,7 +15733,7 @@ perk declares the minimum supported host versions once and enforces them at the 
 boundary and at both SDK-boundary entries (the extension, the worker); `perk init` / `perk doctor`
 report the same requirement. Owning modules: `perk/substrate/host_floor.py` (the reader),
 `perk/substrate/semver.py` (precedence), `perk/substrate/pi_host.py` (the probe + the pure
-decision), `perk/run/pi_exec.py` (the launch preflight), `perk/convergence/env.py` (the
+decision + the adopted Pi pin and its pinned install set), `perk/run/pi_exec.py` (the launch preflight), `perk/convergence/env.py` (the
 environment rows), `extension/substrate/hostFloor.ts` (the TS reader),
 `extension/substrate/semver.ts` (the TS precedence twin), `extension/substrate/hostAdmission.ts`
 (the pure SDK-boundary decision), `extension/substrate/hostSdkVersion.ts` (the loaded SDK's
@@ -15778,12 +15791,22 @@ backs both. Every Node-requirement message renders the table through `describe_n
 
 Five facts, each in its own home, never conflated: the **host floor** (this file — a minimum);
 the **development pins** (`package.json` `devDependencies` — exact); the **pi-subagents supplier
-pin** (§8.10 settings wiring); the **doctor guidance stamp** (`subagent-compat`); and the **remote
-install pin** `REMOTE_PI_VERSION` (`perk/run/workflow_artifacts.py`, §8.14) — exact, the
-**adopted** published subject, used by both remote installs (the global `pi` CLI and the consumer
-worker SDK). It moves with the floor on characterization + offline evidence; the live
-certification of the pair follows as its own later record (adopted is not certified), and it is
-never below the floor (a test pins it). Every host observation — the PATH `pi` CLI,
+pin** (§8.10 settings wiring); the **doctor guidance stamp** (`subagent-compat`); and the **adopted
+Pi pin** `PI_ADOPTED_VERSION` (`perk/substrate/pi_host.py`) — exact, the **adopted** published
+subject. Beside it the same module declares the **pinned install set**: `PI_COMPANION_PACKAGES`
+(the seven `@earendil-works/*` companions — `chord`, `pi-agent-core`, `pi-ai`, `pi-codemode`,
+`pi-mcp`, `pi-telemetry`, `pi-tui` — pinned closed against the committed lockfile by test),
+`PI_INSTALL_SPECS` (the package then the companions, each `@<PI_ADOPTED_VERSION>`) and
+`PI_INSTALL_COMMAND` (`npm install -g <the eight specs>`): Pi ships no shrinkwrap and declares its
+companions at `^` ranges, so any lockfile-free install names the whole family exactly. The
+**remote install pin** `REMOTE_PI_VERSION` (`perk/run/workflow_artifacts.py`, §8.14) is that same
+fact under its remote name, used by both remote installs (the global `pi` CLI and the consumer
+worker SDK, each naming the pinned install set). Every install-guidance string — the launch
+refusal ((c)), `pi_cli_missing`, the `pi` environment remediations and the guided install ((e)) —
+names `PI_INSTALL_COMMAND`; an admitted PATH `pi` at another version is never refused but is
+reported (the (e) advisory). The adopted pin moves with the floor on characterization + offline
+evidence; the live certification of the pair follows as its own later record (adopted is not
+certified), and it is never below the floor (a test pins it). Every host observation — the PATH `pi` CLI,
 a loaded SDK — is admitted **independently** against the same floor; equality between
 observations is never required (a floor-satisfying CLI beside an older dev SDK pin is admitted on
 the CLI's own reading). The launch admission below reads no `package.json`, `node_modules` or
@@ -15807,8 +15830,8 @@ then a semver comparison against `pi.min_version`. Three outcomes:
 | `unverifiable` | stdout is not a semver version (empty or over 256 characters included), output that is not UTF-8, a non-zero exit, a timeout, or a spawn failure | `pi_version_unverifiable` |
 
 The refusal message always carries the executable path, the observed version (or the
-unverifiable reason), the required version, and the repair command (`npm install -g
-@earendil-works/pi-coding-agent`). No operator override exists. One implementation applies to the
+unverifiable reason), the required version, and the pinned install command (`PI_INSTALL_COMMAND`,
+(b)). No operator override exists. One implementation applies to the
 plain session, every staged launch (through `_exec_pi`) and `perk resume`; a refused host leaves
 no handoff record (§8.72(i)). `--dry-run` previews return before the exec phase and never probe.
 On a staged launch the worktree, handoff and setup hook may already have run — the same posture
@@ -15837,8 +15860,23 @@ outdated host); a parsed version whose major is no supported line → `ok=False`
 its floor → `ok=False`, detail `<version>`, the remediation naming that line's floor; otherwise
 `ok=True`, detail `<version>`. An outdated, unsupported or unverifiable Node/Pi is
 `ok=False` exactly like an absent one — `missing_tool` exit 2 for `perk init` (the guided `pi`
-install, `npm install -g @earendil-works/pi-coding-agent`, also upgrades), `fail` for
+install, the pinned install command `PI_INSTALL_COMMAND` ((b)), also upgrades), `fail` for
 `perk doctor`. The row names, positions and envelope shapes are unchanged.
+
+**The `pi` row's advisory arm.** An admitted `pi` whose observed version is not
+`PI_ADOPTED_VERSION` stays `ok=True` (the floor is a minimum — `perk init` converges, no launch
+refusal) with the same detail and an empty remediation, and carries `EnvCheck.advisory`:
+`Pi <observed> is admitted (floor >= <required>) but is not the adopted Pi <adopted>: perk's
+subagent waves are characterized only on the adopted Pi with its pinned companions and can be
+refused on another. Install the adopted set: <PI_INSTALL_COMMAND>.` (empty at the adopted version
+and on every not-ok row). A **successful** `perk init` appends `pi: <advisory>` to `warnings` and
+marks the env line `⚠️`; a failed init (`missing_tool`, `not_a_repo`, `skills_conflict`,
+`legacy_config`, `skills_sync_failed`) carries no advisory — those reports name what blocked init.
+`perk doctor` reports the row `warn` on every run (message `pi ok, with a caution`, the detail
+unchanged, the advisory as the remediation), never `fail` — `healthy` and the exit code are
+untouched. The env `--json` row keeps its shape `{name, ok, detail, remediation}` (the advisory
+is not serialized there). The row reads the PATH `pi` only; the Pi a session runs may differ
+((f)).
 
 ### (f) The SDK-boundary admission (the extension entry, the worker entry)
 
@@ -15860,9 +15898,21 @@ bundle and throws — not a host verdict.
 **The extension arm.** `extension/index.ts` is a thin bootstrap whose only value imports are the
 three SDK-free substrate modules (`hostAdmission.ts`, `hostFloor.ts`, `hostSdkVersion.ts`); its
 async factory admits, then dynamically imports the composition root (`pi/activation.ts`) and runs
-it. A refusal throws exactly the extension refusal text (`perk requires Pi >= <required>; the Pi
-running this session is <observed> (@earendil-works/pi-coding-agent VERSION). Upgrade it: …` /
-`… could not verify this Pi's version (<reason>). Reinstall it: …`). Pi's loader commits an
+it. A refusal throws exactly the extension refusal text — unsupported: `perk requires Pi >=
+<required>; the Pi running this session is <observed> (@earendil-works/pi-coding-agent VERSION).
+Upgrade that Pi <repair>.`; unverifiable: `perk requires Pi >= <required> and could not verify this
+Pi's version (<reason>). Reinstall that Pi <repair>.` — where `<repair>` is `to perk's adopted Pi
+version with its pinned companion set — the exact npm command is in perk's "Requirements and
+compatibility" reference (<REQUIREMENTS_DOC_URL>), and perk init / perk doctor print it when the
+PATH pi is not the adopted one` and `REQUIREMENTS_DOC_URL` is
+`https://github.com/mattgiles/perk/blob/main/docs/user-docs/reference/requirements-and-compatibility.md#version-compatibility`.
+The refused SDK need not be the PATH `pi` (the independence below), so the refusal never points at
+a PATH-dependent surface as its only repair; and the docs tree ships in no distribution, so it
+never names a source-tree path — it names the adopted-pin-plus-pinned-set shape and the public URL,
+the always-available source (that page carries `PI_INSTALL_COMMAND` verbatim; a test pins the
+URL's file and heading to the checkout). The TS plane names no version-specific command — the
+adopted pin's home is the Python substrate ((b)); the PATH row's advisory ((e)) covers only the
+PATH `pi`. Pi's loader commits an
 extension's registrations only after its factory returns, so a throwing factory registers nothing
 and the host-SDK bridge (§8.73) is never installed; Pi reports an error diagnostic wrapping perk's
 message — the visible line begins `Error: Failed to load extension "<path>": Failed to load

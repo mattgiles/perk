@@ -13,6 +13,15 @@ from perk.substrate.semver import parse_semver, satisfies_floor
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# The pinned install set, spelled out (version-honest): the package first, then its seven
+# companions, each at the exact adopted Pi version.
+PINNED_SPECS = (
+    "@earendil-works/pi-coding-agent@1.1.0 @earendil-works/chord@1.1.0 "
+    "@earendil-works/pi-agent-core@1.1.0 @earendil-works/pi-ai@1.1.0 "
+    "@earendil-works/pi-codemode@1.1.0 @earendil-works/pi-mcp@1.1.0 "
+    "@earendil-works/pi-telemetry@1.1.0 @earendil-works/pi-tui@1.1.0"
+)
+
 
 def test_workflow_path_matches_the_locked_dispatch_filename():
     # §8.13 locks `perk-run.yml` (runner.GITHUB_ACTIONS_WORKFLOW); the managed file must match.
@@ -141,7 +150,7 @@ def test_composite_action_pins_pi_and_node_for_both_repo_kinds():
     for self_repo in (True, False):
         doc = yaml.safe_load(wa.remote_setup_action(self_repo=self_repo))
         steps = {step["name"]: step for step in doc["runs"]["steps"]}
-        assert steps["Install pi"]["run"] == "npm install -g @earendil-works/pi-coding-agent@1.1.0"
+        assert steps["Install pi"]["run"] == f"npm install -g {PINNED_SPECS}"
         node = steps["Set up Node 22.23.4"]
         assert node["with"]["node-version"] == "22.23.4"  # exact: CI exercises the floor
         uv = steps["Set up uv (+ Python 3.13)"]
@@ -218,7 +227,8 @@ def test_composite_action_worker_deps_is_repo_kind_aware():
     # self uses `npm ci` (the committed pins); consumer installs the pinned `@mgiles/perk` into
     # `.pi/npm` PLUS the pi SDK — `@mgiles/perk` has zero runtime deps and `--legacy-peer-deps`
     # skips peers, so the SDK spec is what lands the worker's imports (B-pre-c). The consumer
-    # worker SDK is the remote wave host, so it is pinned to the exact remote install pin.
+    # worker SDK is the remote wave host, so it carries the same pinned install set as the global
+    # CLI, recorded as exact pins (`--save-exact`).
     assert "npm ci" in wa.remote_setup_action(self_repo=True)
     consumer = wa.remote_setup_action(self_repo=False)
     assert "npm ci" not in consumer
@@ -228,9 +238,10 @@ def test_composite_action_worker_deps_is_repo_kind_aware():
         if s["name"] == "Install Node worker deps"
     )
     assert deps["run"] == (
-        f"npm install @mgiles/perk@{__version__} @earendil-works/pi-coding-agent@1.1.0"
-        " --prefix .pi/npm --legacy-peer-deps"
+        f"npm install @mgiles/perk@{__version__} {PINNED_SPECS}"
+        " --prefix .pi/npm --legacy-peer-deps --save-exact"
     )
+    assert "--save-exact" in consumer
     assert "--prefix .pi/npm" in consumer
     assert "--legacy-peer-deps" in consumer
     assert "::error::" not in consumer

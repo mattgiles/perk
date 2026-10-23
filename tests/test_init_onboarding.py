@@ -6,6 +6,7 @@ wiring tests ride the `stub_env` fixture and override exactly the seam under tes
 """
 
 import json
+import subprocess
 
 import pytest
 from click.testing import CliRunner
@@ -29,6 +30,7 @@ from perk.substrate import config as config_mod
 from perk.substrate import git as git_mod
 from perk.substrate import npm as npm_mod
 from perk.substrate import proc as proc_mod
+from perk.substrate.pi_host import PI_ADOPTED_VERSION, PI_INSTALL_COMMAND, PI_INSTALL_SPECS
 
 _ALL_OK = [
     EnvCheck("git", True, "ok", ""),
@@ -74,7 +76,7 @@ def test_resolve_installer_gh_is_brew_gated(monkeypatch):
 def test_resolve_installer_pi_is_node_gated():
     assert onboarding._resolve_installer("pi", node_ok=False) is None
     installer = onboarding._resolve_installer("pi", node_ok=True)
-    assert installer is not None and onboarding.PI_NPM_SPEC in installer.label
+    assert installer is not None and installer.label == PI_INSTALL_COMMAND
 
 
 def test_resolve_installer_skills_darwin_vs_linux(monkeypatch):
@@ -134,17 +136,42 @@ def test_guide_installs_pi_happy_path(monkeypatch):
     monkeypatch.setattr(
         onboarding, "user_confirm", lambda prompt, *, default: confirms.append(prompt) or True
     )
-    installed: list[tuple[str, int]] = []
+    installed: list[tuple[tuple[str, ...], int]] = []
     monkeypatch.setattr(
-        npm_mod, "install_global", lambda spec, *, timeout: installed.append((spec, timeout))
+        npm_mod,
+        "install_global",
+        lambda spec, *more, timeout: installed.append(((spec, *more), timeout)),
     )
     monkeypatch.setattr(
         onboarding.shutil, "which", lambda name: "/usr/local/bin/pi" if name == "pi" else None
     )
     changes, warnings = onboarding.guide_missing_tools(_env("pi"))
-    assert confirms == [f"Install pi via npm install -g {onboarding.PI_NPM_SPEC}?"]
-    assert installed == [(onboarding.PI_NPM_SPEC, 600)]
-    assert changes == [f"tool pi: installed (npm -g {onboarding.PI_NPM_SPEC})"]
+    assert confirms == [f"Install pi via {PI_INSTALL_COMMAND}?"]
+    assert installed == [(PI_INSTALL_SPECS, 600)]  # the whole pinned set, in one install
+    assert changes == [
+        "tool pi: installed (npm -g "
+        f"@earendil-works/pi-coding-agent@{PI_ADOPTED_VERSION} + pinned companions)"
+    ]
+    assert warnings == []
+
+
+def test_guide_pi_install_reaches_npm_with_the_pinned_set(monkeypatch):
+    # The happy path above stubs the gateway; this one keeps the real `npm.install_global` and
+    # stubs only the subprocess boundary, so the guided install is pinned down to the npm argv.
+    monkeypatch.setattr(onboarding, "user_confirm", lambda prompt, *, default: True)
+    spawned: list[tuple[list[str], object]] = []
+
+    def fake_run(argv, **kwargs):
+        spawned.append((list(argv), kwargs["timeout"]))
+        return subprocess.CompletedProcess(list(argv), 0, "", "")
+
+    monkeypatch.setattr(proc_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        onboarding.shutil, "which", lambda name: "/usr/local/bin/pi" if name == "pi" else None
+    )
+    changes, warnings = onboarding.guide_missing_tools(_env("pi"))
+    assert spawned == [(["npm", "install", "-g", *PI_INSTALL_SPECS], 600)]
+    assert len(changes) == 1 and changes[0].startswith("tool pi: installed (")
     assert warnings == []
 
 
@@ -159,11 +186,15 @@ def test_guide_decline_warns_with_the_remediation(monkeypatch):
 def test_guide_install_failure_warns(monkeypatch):
     monkeypatch.setattr(onboarding, "user_confirm", lambda prompt, *, default: True)
 
-    def _boom(spec, *, timeout):
+    received: list[tuple[str, ...]] = []
+
+    def _boom(spec, *more, timeout):
+        received.append((spec, *more))
         raise npm_mod.NpmError("registry down")
 
     monkeypatch.setattr(npm_mod, "install_global", _boom)
     changes, warnings = onboarding.guide_missing_tools(_env("pi"))
+    assert received == [PI_INSTALL_SPECS]
     assert changes == []
     assert len(warnings) == 1
     assert "registry down" in warnings[0] and "install manually" in warnings[0]
@@ -220,7 +251,7 @@ def test_guide_pi_without_node_notes_node_first(monkeypatch):
     assert warnings == [
         "pi: install Node.js on a supported release line "
         "(22.x >= 22.23.4, 24.x >= 24.22.1, 26.x >= 26.12.1) first, "
-        f"then: npm install -g {onboarding.PI_NPM_SPEC}"
+        f"then: {PI_INSTALL_COMMAND}"
     ]
 
 
@@ -578,6 +609,79 @@ def test_guided_pass_runs_once(git_repo, stub_env, monkeypatch):
     assert not report.ok and report.error_type == "missing_tool"
 
 
+_PI_ADVISORY = (
+    "Pi 1.4.0 is admitted (floor >= 1.1.0) but is not the adopted Pi 1.1.0: perk's subagent "
+    "waves are characterized only on the adopted Pi with its pinned companions and can be "
+    f"refused on another. Install the adopted set: {PI_INSTALL_COMMAND}."
+)
+
+
+def _env_with_pi_advisory() -> list[EnvCheck]:
+    return [
+        EnvCheck("pi", True, "1.4.0 (floor >= 1.1.0)", "", advisory=_PI_ADVISORY)
+        if c.name == "pi"
+        else c
+        for c in _ALL_OK
+    ]
+
+
+def _json_env_row(report: InitReport, name: str) -> dict[str, object]:
+    # Round-trip through JSON: the row exactly as `perk init --json` prints it.
+    rows: list[dict[str, object]] = json.loads(json.dumps(report_to_dict(report)))["env"]
+    return next(row for row in rows if row["name"] == name)
+
+
+def test_init_warns_on_an_admitted_pi_that_is_not_the_adopted_pin(git_repo, stub_env, monkeypatch):
+    monkeypatch.setattr(env_mod, "check_environment", _env_with_pi_advisory)
+    report = run_init(git_repo, verify=True)
+    assert report.ok  # the floor admits it: init converges
+    assert f"pi: {_PI_ADVISORY}" in report.warnings
+    # The env --json row keeps its stable four-key shape; the advisory rides `warnings` only.
+    assert _json_env_row(report, "pi") == {
+        "name": "pi",
+        "ok": True,
+        "detail": "1.4.0 (floor >= 1.1.0)",
+        "remediation": "",
+    }
+
+
+def test_init_at_the_adopted_pin_adds_no_pi_warning(git_repo, stub_env, monkeypatch):
+    monkeypatch.setattr(env_mod, "check_environment", lambda: list(_ALL_OK))
+    report = run_init(git_repo, verify=True)
+    assert report.ok
+    assert not [w for w in report.warnings if w.startswith("pi: ")]
+
+
+def test_init_failure_reports_carry_no_pi_advisory(git_repo, stub_env, monkeypatch):
+    # The advisory is a promise of the SUCCESS report only: a failed init names what blocked it.
+    monkeypatch.setattr(env_mod, "check_environment", _env_with_pi_advisory)
+    skill = git_repo / ".claude" / "skills" / "x" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("# x\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".claude"], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "skills"], cwd=git_repo, check=True, capture_output=True
+    )
+    report = run_init(git_repo, verify=True)
+    assert report.ok is False and report.error_type == "skills_conflict"
+    assert report.warnings == []
+    assert _json_env_row(report, "pi") == {
+        "name": "pi",
+        "ok": True,
+        "detail": "1.4.0 (floor >= 1.1.0)",
+        "remediation": "",
+    }
+
+
+def test_init_sync_failure_report_carries_no_pi_advisory(git_repo, stub_env, monkeypatch):
+    # `skills_sync_failed` preserves the accumulated warnings — the advisory is never among them.
+    monkeypatch.setattr(env_mod, "check_environment", _env_with_pi_advisory)
+    monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: "sync exploded")
+    report = run_init(git_repo, verify=True)
+    assert report.ok is False and report.error_type == "skills_sync_failed"
+    assert not [w for w in report.warnings if w.startswith("pi: ")]
+
+
 # --- run_init wiring: the verify-gated gestures -------------------------------------------------
 
 
@@ -844,3 +948,20 @@ def test_success_render_host_only_changes_skip_the_commit_hint(capsys):
     assert "Review and commit" not in err  # host/local-only deltas never suggest a commit
     assert "- Authenticate GitHub" not in err
     assert "- Start with: perk plan" in err  # always present
+
+
+def test_success_render_marks_an_advisory_env_row_with_a_caution(capsys):
+    report = InitReport(
+        ok=True,
+        mode="consumer",
+        env=_env_with_pi_advisory(),
+        changes=[],
+        github=None,
+        handoff=None,
+        warnings=[f"pi: {_PI_ADVISORY}"],
+    )
+    _render_human(report)
+    err = capsys.readouterr().err
+    assert "  ⚠️ pi 1.4.0 (floor >= 1.1.0)" in err
+    assert "  ✓ git ok" in err  # a plain ok row keeps its check mark
+    assert f"⚠️ pi: {_PI_ADVISORY}" in err
