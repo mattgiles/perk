@@ -206,9 +206,10 @@ def _admit_pi_host(pi_path: str) -> PiHost:
 
     One bounded ``pi --version`` spawn (:func:`perk.substrate.pi_host.probe_pi_host`); an
     ``unsupported`` host refuses ``pi_version_unsupported``, an ``unverifiable`` one
-    ``pi_version_unverifiable`` — no operator override. Module-level on purpose: ``exec_pi``
-    reads it as this module's global, so tests patch ``pi_exec._admit_pi_host`` (the same rule
-    as :func:`_resolve_pi_executable`).
+    ``pi_version_unverifiable``, an ``incoherent`` one (the adopted Pi with a broken companion
+    family) ``pi_companions_incoherent`` — no operator override. Module-level on purpose:
+    ``exec_pi`` reads it as this module's global, so tests patch ``pi_exec._admit_pi_host`` (the
+    same rule as :func:`_resolve_pi_executable`).
     """
     host = probe_pi_host(pi_path)
     if host.outcome != "admitted":
