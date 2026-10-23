@@ -1186,6 +1186,49 @@ test("tool: classify_review_feedback — a snapshot beyond the floor is refused 
   }
 });
 
+test("tool: classify_review_feedback — a snapshot over the budget is still fully classified, with the cap named", async () => {
+  // 100 discussion comments of 4,000 chars overflow the budget at the ceiling: every comment is
+  // still listed (bodies capped), and the ok text names the cap the digest used.
+  const comments = Array.from({ length: 100 }, (_, i) => ({
+    comment_id: i + 1,
+    body: "w".repeat(4_000),
+    author: "rev",
+    created_at: null,
+  }));
+  const report = {
+    pr: 42,
+    review_threads: [],
+    discussion_comments: comments.map((c) => ({
+      comment_id: c.comment_id,
+      classification: "informational",
+      summary: "fyi",
+    })),
+  };
+  const responder = classifierResponder(report);
+  const { h } = await classifySession({
+    feedback: {
+      json: { ...MIXED_FEEDBACK, review_threads: [], discussion_comments: comments },
+    },
+    responder,
+  });
+  try {
+    const result = await h.invokeTool("classify_review_feedback", {});
+    const details = result.details as ClassifyDetails & {
+      report?: { counts?: Record<string, number> };
+    };
+    assert.equal(details.ok, true);
+    assert.equal(details.report?.counts?.informational, 100);
+    assert.match(
+      result.content[0]?.text ?? "",
+      /Counts: actionable 0, informational 100, praise 0, question 0\. Comment bodies were capped at \d+ chars to fit the task budget\.\n\n/,
+    );
+    const task = String(waveScriptItems(String(responder.spawns[0]?.script ?? ""))[0]?.task ?? "");
+    assert.equal(task.split("<discussion_comment ").length - 1, 100, "every subject listed");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: classify_review_feedback — a report that does not bind soft-fails invalid_classification and clears the holder", async () => {
   // Spawn 1 binds; spawn 2 answers with a foreign thread id.
   const foreign = {
