@@ -282,7 +282,8 @@ def _parse_reviews(payload: dict[str, object]) -> tuple[Review, ...]:
 def get_pr_feedback(*, pr_number: int, repo_root: Path) -> PrFeedback:
     """Fetch a PR's reviewer feedback: review threads + PR-level reviews (GraphQL) and discussion
     comments (REST). The three sources are kept **separate** (counted apart). Read-only; raises
-    ``GitHubError`` on an infra failure. This is what the classify child runs (`perk pr feedback`).
+    ``GitHubError`` on an infra failure. ``perk pr feedback`` serves it as the ``/address``
+    parent's prepared snapshot (that command, not this read, refuses duplicate ids).
     """
     owner, repo = _exec._owner_repo(repo_root)
     threads_payload = _exec._graphql(
