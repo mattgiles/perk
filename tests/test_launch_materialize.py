@@ -1450,16 +1450,20 @@ def test_materialize_extensions_idempotent_resume(tmp_path):
     assert not (dst_modules / "ext-a").exists()  # resume left the install untouched
 
 
-def test_materialize_extensions_resume_detaches_a_legacy_hardlinked_install(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    worktree = tmp_path / "wt"
+def _legacy_hardlinked_worktree(repo_root: Path, worktree: Path) -> tuple[Path, Path]:
+    """A worktree staged by the former all-hardlink layout: every file shares main's inode."""
     _seed_npm_install(repo_root, "ext-a", "ext-b")
     src = _seed_npm_metadata(repo_root)
     dst = worktree / ".pi" / "npm"
-    shutil.copytree(src, dst, copy_function=os.link)  # the legacy all-hardlink staging
+    shutil.copytree(src, dst, copy_function=os.link)
     assert (dst / "package.json").stat().st_nlink == 2
+    return src, dst
 
-    materialize_extensions(repo_root, worktree)
+
+def test_detach_extension_install_migrates_a_legacy_hardlinked_install(tmp_path, capsys):
+    src, dst = _legacy_hardlinked_worktree(tmp_path / "repo", tmp_path / "wt")
+
+    pi_exec._detach_extension_install(tmp_path / "wt")
 
     for pkg in ("ext-a", "ext-b"):
         staged = dst / "node_modules" / pkg / "package.json"
@@ -1472,35 +1476,56 @@ def test_materialize_extensions_resume_detaches_a_legacy_hardlinked_install(tmp_
     assert "detached 4 shared extension file(s)" in capsys.readouterr().err
 
 
-def test_materialize_extensions_resume_of_an_isolated_install_prints_no_detach(tmp_path, capsys):
+def test_detach_extension_install_is_quiet_when_isolated_or_absent(tmp_path, capsys):
     repo_root = tmp_path / "repo"
     worktree = tmp_path / "wt"
     _seed_npm_install(repo_root, "ext-a")
     _seed_npm_metadata(repo_root)
-    materialize_extensions(repo_root, worktree)  # the first (isolated) staging
+    materialize_extensions(repo_root, worktree)  # an isolated staging
     capsys.readouterr()
 
-    materialize_extensions(repo_root, worktree)
+    pi_exec._detach_extension_install(worktree)
+    pi_exec._detach_extension_install(tmp_path / "no-install")
+    materialize_extensions(repo_root, worktree)  # a resume never re-stages
 
     err = capsys.readouterr().err
     assert "detached" not in err
-    assert "staged extensions" not in err  # a resume never re-stages
+    assert "staged extensions" not in err
 
 
-def test_materialize_extensions_resume_detach_failure_is_non_fatal(tmp_path, capsys, monkeypatch):
-    repo_root = tmp_path / "repo"
-    worktree = tmp_path / "wt"
-    _seed_npm_install(repo_root, "ext-a")
-    _seed_npm_install(worktree, "ext-a")
+def test_detach_extension_install_failure_is_non_fatal(tmp_path, capsys, monkeypatch):
+    _seed_npm_install(tmp_path / "wt", "ext-a")
 
     def _boom(root):
         raise OSError("read-only file system")
 
-    monkeypatch.setattr("perk.run.launch.materialize.fsclone.detach_shared_files", _boom)
-    materialize_extensions(repo_root, worktree)
+    monkeypatch.setattr(pi_exec.fsclone, "detach_shared_files", _boom)
+    pi_exec._detach_extension_install(tmp_path / "wt")
     assert "could not detach shared .pi/npm files — read-only file system" in (
         capsys.readouterr().err
     )
+
+
+def test_resume_without_a_main_install_still_verifies_and_detaches(tmp_path, capsys):
+    """A populated worktree needs no repo-root install: main's node_modules being gone must not
+    skip the worktree's verification, nor the exec pipeline's detach of its shared metadata."""
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "wt"
+    src, dst = _legacy_hardlinked_worktree(repo_root, worktree)
+    shutil.rmtree(src / "node_modules")  # main's install is gone; its root metadata remains
+    _write_wt_settings(worktree, ["npm:ext-a@1.0.0", "npm:ext-b@2.0.0"])
+
+    materialize_extensions(repo_root, worktree)
+    pi_exec._detach_extension_install(worktree)
+
+    err = capsys.readouterr().err
+    assert "not staged" not in err
+    assert "extensions: 1 staged extension(s) do not match" in err and "(ext-b@2.0.0)" in err
+    # main's node_modules/.package-lock.json went with its node_modules: three still shared.
+    assert "detached 3 shared extension file(s)" in err
+    before = (src / "package.json").read_bytes()
+    (dst / "package.json").write_text("{}\n", encoding="utf-8")
+    assert (src / "package.json").read_bytes() == before
 
 
 def test_materialize_extensions_missing_source_is_non_fatal(tmp_path, capsys):

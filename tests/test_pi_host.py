@@ -246,6 +246,20 @@ def test_resolve_reads_a_versionless_manifest_as_unresolved(repaired_pi_layout: 
     assert resolved["@earendil-works/chord"] is None
 
 
+def test_a_nested_directory_without_a_manifest_shadows_the_outer_copy(
+    repaired_pi_layout: str,
+) -> None:
+    # Node's ESM lookup stops at the first existing package directory; it never falls through to
+    # the healthy global-root sibling, so neither may the probe.
+    package = locate_pi_package(repaired_pi_layout)
+    assert package is not None
+    (package / "node_modules" / CODEMODE).mkdir(parents=True)
+    resolved = resolve_companions(Path(repaired_pi_layout).resolve().parent)
+    assert resolved[CODEMODE] is None
+    host = probe_pi_host(repaired_pi_layout)
+    assert (host.outcome, host.detail) == ("incoherent", f"{CODEMODE} does not resolve")
+
+
 def test_real_probe_of_the_broken_layout_is_incoherent(
     broken_pi_layout: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

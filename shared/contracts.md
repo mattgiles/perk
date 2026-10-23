@@ -3150,35 +3150,48 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   `absent`/`mismatch` → **fail** (+`perk doctor --fix`, which install/reinstalls — perk init/doctor
   *own installing*), `present` → `ok`, `unverifiable` → `warn`, `self` → `info`.
   This is **install ownership**: presence + the *install-vs-pin* version comparison.
-- **Worktree staging of `.pi/npm` is isolated** (`materialize_extensions`,
-  `perk/run/launch/materialize.py`; the primitives in `perk/substrate/fsclone.py`). A launch
-  stages the converged repo-root install into the worktree so Pi's `needsInstall` short-circuits,
-  and no write in one tree may reach another — the package manager and Pi rewrite the install
-  root's metadata files in place. Three steps, all non-fatal:
-  1. **Stage or detach.** An *unpopulated* worktree install (`node_modules` missing, empty or
-     unreadable — only regenerable metadata) is removed, then staged by `clone_tree`: on macOS
-     `clonefile(2)` of the whole hierarchy (independent inodes, shared blocks); otherwise — or when
-     the clone fails — per-file hardlinks (symlinks recreated as symlinks) followed by
-     `detach_shared_files`. **There is no byte-copy tier** (a full copy is the per-worktree disk
-     cost this avoids); a failure of both tiers removes the partial tree and warns
-     `extensions: could not stage .pi/npm — <exc>; pi will install them in-session`. Success
-     resolves `staged extensions (<clonefile|hardlink>)`. A *populated* install is never
-     clobbered but is detached (`detached <n> shared extension file(s)` when any) — the migration
-     for worktrees staged by the former all-hardlink layout, run before Pi can write through them;
-     an `OSError` there warns and continues.
+- **Worktree `.pi/npm` staging and metadata isolation** (`materialize_extensions`,
+  `perk/run/launch/materialize.py`; `pi_exec._detach_extension_install`; the primitives in
+  `perk/substrate/fsclone.py`). A stage launch stages the converged repo-root install into the
+  worktree so Pi's `needsInstall` short-circuits. The package manager and Pi rewrite the install
+  root's **metadata files** in place, so no tree may share those with another; package *files* may
+  stay shared on the hardlink tier (below). All steps are non-fatal:
+  1. **Stage** (stage launches, worktree stages). Only an *unpopulated* worktree install
+     (`node_modules` missing, empty or unreadable — only regenerable metadata) is staged, and
+     only from a populated repo-root install (else the warning `extensions: repo .pi/npm not
+     staged — pi will install them in-session`): it is removed, then staged by `clone_tree` — on
+     macOS `clonefile(2)` of the whole hierarchy (independent inodes, shared blocks: fully
+     isolated); otherwise, or when the clone fails, per-file hardlinks (symlinks recreated as
+     symlinks) followed by `detach_shared_files`. **There is no byte-copy tier** (a full copy is
+     the per-worktree disk cost this avoids); a failure of both tiers removes the partial tree and
+     warns `extensions: could not stage .pi/npm — <exc>; pi will install them in-session`.
+     Success resolves `staged extensions (<clonefile|hardlink>)`. A *populated* install is never
+     clobbered and needs no repo-root install.
   2. **The detach rule** (`detach_shared_files`) is structural, not a filename list: every
      regular, non-symlink file at depth ≤ 1 of the install root — directly under it and directly
      under its `node_modules/` — whose link count exceeds 1 is copied beside itself and renamed
      over the link (own inode, identical bytes and mode). Package directories stay linked: every
-     package manager Pi supports replaces a package by removing and re-extracting its directory.
-  3. **Verify + warn.** `_stale_extension_specs` reads the worktree's own `.pi/settings.json`
+     package manager Pi supports replaces a package by removing and re-extracting its directory
+     (which breaks the links); a tool that patches an installed package's files in place writes
+     through to every tree sharing them — the hardlink tier isolates metadata, not package
+     contents.
+  3. **Detach on every launch** (`pi_exec._detach_extension_install`, inside `exec_pi` after the
+     stale agent-lock sweep — so plain sessions, stage launches and session resumes alike, §8.71(b),
+     §8.72(b)). When `<checkout>/.pi/npm` exists, the detach rule runs over it: the migration for
+     worktrees (and the main checkout) staged by the former all-hardlink layout, before Pi can
+     write through a shared inode. A non-zero count logs `detached <n> shared extension
+     file(s)`; an `OSError` warns `extensions: could not detach shared .pi/npm files — <exc>` and
+     the launch continues. Not a materialization — nothing is staged, only existing metadata gets
+     its own inodes; a refused host (§8.76(c)) never reaches it.
+  4. **Verify + warn** (stage launches, worktree stages — after staging, or directly for a
+     populated install). `_stale_extension_specs` reads the worktree's own `.pi/settings.json`
      `packages` (string and object-form `source` entries; non-`npm:` entries ignored;
-     missing/unreadable settings → nothing): a package whose installed `package.json` is absent or
-     unreadable is stale, and an exact `X.Y.Z` spec must be installed at exactly that version
-     (unversioned and range specs need presence only — Pi applies the range in-session). Any
-     stale spec emits one warning `extensions: <n> staged extension(s) do not match this
-     worktree's .pi/settings.json (<specs>) — pi will install them in-session`; perk installs
-     nothing here.
+     missing/unreadable settings → nothing): a package whose directory is absent or whose
+     `package.json` is unreadable is stale, and an exact `X.Y.Z` spec must be installed at
+     exactly that version (unversioned and range specs need presence only — Pi applies the range
+     in-session). Any stale spec emits one warning `extensions: <n> staged extension(s) do not
+     match this worktree's .pi/settings.json (<specs>) — pi will install them in-session`; perk
+     installs nothing here.
 - **Version parity.** The wired and installed pins are enforced by the checks above, both
   against the running CLI's `perk.__version__` SSOT — **no third
   `version-parity` doctor check** exists (it would only duplicate these). The only version perk
@@ -14724,7 +14737,8 @@ launch environment with a stage launch, through the same seams: `resolve_launch_
 the same missing-dir warning and `pi_agent_dir_invalid` refusal), `_build_exec_env(run_id=None)`,
 the `LINEAR_API_KEY` seed from the main checkout's `local.toml` (env wins), the pre-chdir
 absolute `pi` resolution (`pi_cli_missing`), then the host admission (`pi_version_unsupported` /
-`pi_version_unverifiable`, §8.76), the stale agent-lock sweep, and the one shared Pi
+`pi_version_unverifiable`, §8.76), the stale agent-lock sweep, the extension-install metadata
+detach (§8.6a — not a materialization: nothing is staged), and the one shared Pi
 executor `exec_pi` (`perk.run.pi_exec`; `perk.run.launch` re-exports `exec_pi`, `LaunchAgentDir`
 and `resolve_launch_agent_dir` for its `_exec_pi` adapter — `_exec_pi(ctx)` is the stage launch's
 `_LaunchContext` adapter over it, so the two paths cannot drift). `run_id=None` **removes an inherited `PERK_RUN_ID`** (never forwards
@@ -14963,8 +14977,8 @@ env → main-checkout `[pi] agent_dir` → default — with the same missing-dir
 ordinary warm-session mint on load, §8.2 — exactly as a hand-run `pi`), the npm-quiet
 defaults and the `PERK_CLI_VERSION` stamp, the `LINEAR_API_KEY` seed from the main
 checkout's `local.toml` (env wins), the pre-chdir absolute `pi` resolution (`pi_cli_missing`),
-then the host admission (`pi_version_unsupported` / `pi_version_unverifiable`, §8.76), and the
-stale agent-lock sweep. The door imports `perk.run.pi_exec` only after the `not_a_tty`
+then the host admission (`pi_version_unsupported` / `pi_version_unverifiable`, §8.76), the
+stale agent-lock sweep, and the extension-install metadata detach (§8.6a). The door imports `perk.run.pi_exec` only after the `not_a_tty`
 check and reads `pi_exec.resolve_launch_agent_dir` / `pi_exec.exec_pi` at call time, so the two
 paths cannot drift and the exec recorder's `pi_exec` monkeypatches reach it. The
 committed-redirect trust residual this shares with every cold-local launch is recorded in (h).
@@ -15047,7 +15061,7 @@ operator surface**:
 when `PERK_PROFILE_HANDOFF=<file>` is set to a non-blank value, `exec_pi` runs every pre-exec phase
 as usual — the pre-chdir absolute `pi` resolution, the host admission (§8.76; a refused host
 raises its typed error and records nothing), the child-env build (`_build_exec_env`), the
-stale agent-lock sweep — and then, immediately before the `chdir` + `exec` that would otherwise
+stale agent-lock sweep, the extension-install metadata detach (§8.6a) — and then, immediately before the `chdir` + `exec` that would otherwise
 follow, **records the handoff and exits `0` without exec'ing pi**: it writes `<file>` (parents
 created) as a JSON object with exactly the keys `schema` (`1`), `handoff_monotonic_ns` (a
 `time.monotonic_ns()` stamp taken as the FIRST statement of the recording — the instant that
@@ -16023,10 +16037,13 @@ SDK and never the repo's dev install; only when the PATH `pi` answers exactly
 `PI_ADOPTED_VERSION` does it read that install's companion graph — `locate_pi_package` follows the
 resolved executable's realpath up to the first ancestor whose `package.json` names
 `@earendil-works/pi-coding-agent`, and `resolve_companions` resolves each of the seven
-`PI_COMPANION_PACKAGES` the way Node does from the resolved executable's directory (for each
-ancestor not itself named `node_modules`, `<ancestor>/node_modules/<name>/package.json`; the first
-existing candidate's `version` wins — a copy nested under the Pi package shadows the global-root
-sibling, a dangling link does not resolve). Every companion must resolve at the adopted version
+`PI_COMPANION_PACKAGES` the way Node's ESM lookup does from the resolved executable's directory
+(for each ancestor not itself named `node_modules`, the directory
+`<ancestor>/node_modules/<name>`; the first one that exists, symlinks followed, **wins** and the
+walk stops there — a copy nested under the Pi package shadows the global-root sibling, a dangling
+link does not resolve, and a winning directory whose `package.json` is missing, unreadable or
+versionless is unresolved, never a fall-through to an outer copy). The winner's version is its
+`package.json` `version`. Every companion must resolve at the adopted version
 (`admit_pi_companions`). An admitted Pi at another version is not family-checked (perk knows one
 family; the (e) advisory covers it). The SDK-boundary admissions ((f)) read no PATH `pi`, no
 `PERK_CLI_VERSION` and no `package.json`. Host libraries stay wildcard peers; only `engines.node` mirrors the supported Node
@@ -16037,8 +16054,8 @@ in both `package.json` and `docs/site/package.json` — a test pins the mirror).
 
 The one Pi exec pipeline (§8.71(b), §8.72(b)) runs, immediately after the pre-chdir absolute `pi`
 resolution (`pi_cli_missing` on a PATH miss) and **before every other exec-phase step** (the
-`LINEAR_API_KEY` read, the env build, the stale agent-lock sweep, the `PERK_PROFILE_HANDOFF` arm,
-`chdir`, exec): one `<resolved pi> --version` spawn through `run_captured` with a 20 s timeout,
+`LINEAR_API_KEY` read, the env build, the stale agent-lock sweep, the extension-install detach,
+the `PERK_PROFILE_HANDOFF` arm, `chdir`, exec): one `<resolved pi> --version` spawn through `run_captured` with a 20 s timeout,
 then a semver comparison against `pi.min_version`, then — at the adopted version only — the
 companion-family read ((b)). Four outcomes:
 

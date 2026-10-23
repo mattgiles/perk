@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Verify the adopted Pi's companion packages: a `pi` answering 1.1.0 whose seven `@earendil-works/*` companions do not all resolve at 1.1.0 the way Node loads them (a dangling link, a nested newer copy) is now refused at launch (`pi_companions_incoherent`) and fails `perk doctor`'s `pi` row, instead of passing and crashing pi-subagents' background children later. (a3e6bc1)
-- Stage each worktree's `.pi/npm` in isolation — a copy-on-write clone on macOS, else hardlinks whose install-root metadata files get their own copies — so an extension install in one worktree no longer rewrites the `package.json` and lockfiles of every other worktree and the main checkout; resuming a worktree staged by an older perk detaches its shared files, and the launch warns when a staged extension does not match the worktree's own `.pi/settings.json`. (8fdd8f9)
+- Stage each worktree's `.pi/npm` without shared metadata — a copy-on-write clone on macOS, else hardlinks whose install-root metadata files get their own copies — so an extension install in one worktree no longer rewrites the `package.json` and lockfiles of every other worktree and the main checkout; every launch (including `perk resume`) detaches metadata a worktree staged by an older perk still shares, and a stage launch warns when a staged extension does not match the worktree's own `.pi/settings.json`. (8fdd8f9)
 
 ### Security
 

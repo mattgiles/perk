@@ -1,23 +1,23 @@
 """Isolated staging of an npm install root: a copy-on-write clone, else hardlinks + own metadata.
 
-A worktree's ``.pi/npm`` is staged from the main checkout's so Pi installs nothing at startup. The
-staging must be **isolated** — a write in one tree never reaches another — without paying a full
-byte copy (hundreds of MB per worktree):
+A worktree's ``.pi/npm`` is staged from the main checkout's so Pi installs nothing at startup,
+without paying a full byte copy (hundreds of MB per worktree). What each tier isolates:
 
 - **clonefile** (macOS): ``clonefile(2)`` on the directory clones the whole hierarchy in one call —
-  independent inodes everywhere, data blocks shared until a byte diverges.
-- **hardlink** (every platform): per-file hardlinks, then :func:`detach_shared_files`. Package
-  *directories* may stay linked: every package manager Pi supports replaces a package by removing
-  and re-extracting its directory, never by writing into it. The install root's own metadata files
-  (``package.json``, the lockfiles, ``node_modules/.package-lock.json`` …) are rewritten **in
-  place**, so a shared inode there leaks every write across trees — those get their own inodes.
+  independent inodes everywhere, data blocks shared until a byte diverges. Fully isolated.
+- **hardlink** (every platform): per-file hardlinks, then :func:`detach_shared_files`. Only the
+  install root's own metadata files (``package.json``, the lockfiles,
+  ``node_modules/.package-lock.json`` …) get their own inodes — the package manager and Pi rewrite
+  those **in place**, so a shared inode there leaks every install across trees. Package files
+  stay **shared**: every package manager Pi supports replaces a package by removing and
+  re-extracting its directory, which breaks the links, but a tool that patches an installed
+  package's files in place writes through to every tree that shares them.
 
 There is deliberately no byte-copy tier. ``shutil.copy2`` is not a clone on macOS (CPython's fast
 path is ``fcopyfile(COPYFILE_DATA)``, a byte copy), and ``copyfile(3)``'s best-effort clone flag
 silently degrades to one — the exact cost this module exists to avoid.
 """
 
-import ctypes
 import os
 import shutil
 import sys
@@ -74,6 +74,10 @@ def _clonefile(src: Path, dst: Path) -> bool:
 
     A failure removes whatever partial hierarchy the call left, so the next tier starts clean.
     """
+    # Tiered import: the Pi exec pipeline imports this module for the detach rule on every launch
+    # (the bare-`perk` path), and only the clone tier needs ctypes.
+    import ctypes  # noqa: PLC0415 — tiered import
+
     try:
         clonefile = ctypes.CDLL(None, use_errno=True).clonefile
     except (OSError, AttributeError):
@@ -87,11 +91,12 @@ def _clonefile(src: Path, dst: Path) -> bool:
 
 
 def clone_tree(src: Path, dst: Path) -> CloneMethod:
-    """Stage the directory ``src`` at the absent path ``dst``, isolated; return the tier used.
+    """Stage the directory ``src`` at the absent path ``dst``; return the tier used.
 
-    ``clonefile`` on macOS; otherwise (or when it fails — another volume, a filesystem without
-    clones) per-file hardlinks with symlinks recreated as symlinks (what ``clonefile`` does), then
-    :func:`detach_shared_files`. Raises ``FileExistsError`` when ``dst`` exists and ``OSError``
+    ``clonefile`` on macOS (fully independent); otherwise (or when it fails — another volume, a
+    filesystem without clones) per-file hardlinks with symlinks recreated as symlinks (what
+    ``clonefile`` does), then :func:`detach_shared_files` — private metadata, shared package
+    files. Raises ``FileExistsError`` when ``dst`` exists and ``OSError``
     when neither tier works — after removing the partial tree, which holds only links, never
     byte copies.
     """

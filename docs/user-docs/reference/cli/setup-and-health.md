@@ -66,8 +66,9 @@ in the `--json` report's `warnings`; the `env` row itself is unchanged). A faile
 add it — the failure report names what blocked init, and `perk doctor` reports the `pi` row
 regardless.
 
-**When init refuses to write.** `perk init` refuses — exit 2, before touching any file — when the
-running perk would converge the repo's managed files backward:
+**When init refuses to write.** `perk init` refuses — exit 2, before writing anything to the
+repository (an interactive tool install you accepted may already have run) — when the running perk
+would converge the repo's managed files backward:
 
 - `perk_outdated` — the running perk is older than the repo's `.perk/required-perk-version`:
   `perk <version> is older than this repo's required perk version <pin>

@@ -98,16 +98,20 @@ converged root (equality, not containment: worktrees nest under `<main>/.worktre
 (the `required-perk-version` managed fail and the `cli-version` warn); every other command only
 warns.
 
-**Worktree `.pi/npm` staging is isolated.** A worktree launch stages the main checkout's converged
-`.pi/npm/` into the worktree: on macOS a `clonefile(2)` copy-on-write clone (`staged extensions
-(clonefile)`), else per-file hardlinks whose depth-≤1 metadata files (directly under `.pi/npm/` and
-`.pi/npm/node_modules/` — `package.json`, lockfiles, `.package-lock.json` …, the files npm and Pi
-rewrite in place) get their own inodes (`staged extensions (hardlink)`); never a byte copy. A
-resumed worktree's install is never replaced but its shared metadata is detached the same way
-(`detached <n> shared extension file(s)` — the migration for the former all-hardlink staging). Then
-one warning names any `.pi/settings.json` `npm:` spec the staged install does not satisfy (absent,
-or an exact `X.Y.Z` pin at another version; ranges and unversioned specs need presence only) — Pi
-installs it in-session.
+**Worktree `.pi/npm` staging keeps metadata private.** A stage launch into a worktree whose
+`.pi/npm/` is unpopulated stages the main checkout's converged install: on macOS a `clonefile(2)`
+copy-on-write clone (`staged extensions (clonefile)`, fully independent), else per-file hardlinks
+whose depth-≤1 metadata files (directly under `.pi/npm/` and `.pi/npm/node_modules/` —
+`package.json`, lockfiles, `.package-lock.json` …, the files npm and Pi rewrite in place) get their
+own inodes (`staged extensions (hardlink)`; package files stay shared — package managers replace
+a package directory, so only an in-place patch of installed package files would reach other
+trees); never a byte copy. A populated install is never replaced and needs no main-checkout
+install. **Every launch** (bare `perk`, stage launches, `perk resume`) detaches the checkout's
+still-shared `.pi/npm` metadata inside the exec pipeline after the lock sweep (`detached <n>
+shared extension file(s)` — the migration for the former all-hardlink staging; an `OSError` only
+warns). Stage launches into a worktree then warn once about any `.pi/settings.json` `npm:` spec the
+install does not satisfy (absent, or an exact `X.Y.Z` pin at another version; ranges and
+unversioned specs need presence only) — Pi installs it in-session.
 
 **One perk-owned path lives *outside* the repo.** `~/.perk/last-seen-version` is the user-level,
 machine-local store behind the one-line post-upgrade notice (the `perk release-notes` pointer):

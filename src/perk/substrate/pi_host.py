@@ -150,26 +150,27 @@ def locate_pi_package(executable: str) -> Path | None:
 def resolve_companions(entry_dir: Path) -> dict[str, str | None]:
     """Each companion's version as Node resolves it from ``entry_dir`` (the resolved ``pi``'s dir).
 
-    Node's ``node_modules`` lookup walk: for each ancestor ``d`` of ``entry_dir`` (itself
-    included) not itself named ``node_modules``, the candidate is
-    ``d/node_modules/<name>/package.json``; the first existing candidate wins. That finds a copy
-    nested under the Pi package before the global-root sibling, and reports a dangling symlink as
-    unresolved (``None``) — exactly what Pi's own loader would load. A winning manifest without a
-    readable string ``version`` is ``None``. Never raises.
+    Node's ESM package lookup walk: for each ancestor ``d`` of ``entry_dir`` (itself included) not
+    itself named ``node_modules``, the candidate is the directory ``d/node_modules/<name>``; the
+    first one that exists (symlinks followed) **wins**, whatever it holds. That finds a copy
+    nested under the Pi package before the global-root sibling, reports a dangling symlink as
+    unresolved, and never falls through past a winning directory — Node would load from it.
+    The winner's version is its ``package.json`` ``version``; a missing or unreadable manifest
+    or a non-string version there is unresolved (``None``). Never raises.
     """
     lookup_dirs = [d for d in (entry_dir, *entry_dir.parents) if d.name != "node_modules"]
     resolved: dict[str, str | None] = {}
     for name in PI_COMPANION_PACKAGES:
         resolved[name] = None
         for directory in lookup_dirs:
-            candidate = directory / "node_modules" / name / "package.json"
+            package_dir = directory / "node_modules" / name
             try:
-                exists = candidate.is_file()
+                exists = package_dir.is_dir()
             except OSError:
                 exists = False
             if not exists:
                 continue
-            manifest = _read_manifest(candidate)
+            manifest = _read_manifest(package_dir / "package.json")
             version = None if manifest is None else manifest.get("version")
             resolved[name] = version if isinstance(version, str) else None
             break

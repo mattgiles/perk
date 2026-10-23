@@ -8,6 +8,8 @@ validators refuse a bare `mkdir` as `worktree_unregistered`. The process boundar
 
 import ast
 import json
+import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -454,6 +456,26 @@ def test_exec_chdirs_then_execs_absolute_pi_with_pi_resume(
     assert env["PERK_CLI_VERSION"] == __version__
     # The env arm's redirect is forwarded untouched (no injection, no scrub).
     assert env["PI_CODING_AGENT_DIR"] == str(launch_exec_recorder.agent_dir)
+
+
+def test_exec_detaches_a_legacy_hardlinked_extension_install(
+    tmp_path, monkeypatch, launch_exec_recorder, capsys
+):
+    # A native resume never stages, but it reaches the shared exec pipeline, which gives the
+    # checkout's .pi/npm metadata its own inodes before Pi can write through a shared one.
+    main_npm = tmp_path / "main" / ".pi" / "npm"
+    (main_npm / "node_modules" / "ext").mkdir(parents=True)
+    (main_npm / "package.json").write_text('{"name": "pi-extensions"}\n', encoding="utf-8")
+    (main_npm / "node_modules" / "ext" / "package.json").write_text("{}\n", encoding="utf-8")
+    checkout = tmp_path / "checkout"
+    shutil.copytree(main_npm, checkout / ".pi" / "npm", copy_function=os.link)
+    session_resume.exec_session_resume(_spec(tmp_path, checkout))
+    assert launch_exec_recorder.chdirs == [checkout]
+    staged = checkout / ".pi" / "npm" / "package.json"
+    assert staged.stat().st_nlink == 1
+    staged.write_text("{}\n", encoding="utf-8")
+    assert (main_npm / "package.json").read_text(encoding="utf-8") == '{"name": "pi-extensions"}\n'
+    assert "detached 1 shared extension file(s)" in capsys.readouterr().err
 
 
 def test_exec_config_arm_injects_main_root_relative_dir_from_a_linked_worktree(

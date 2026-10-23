@@ -340,43 +340,35 @@ def _install_populated(modules: Path) -> bool:
 
 def materialize_extensions(repo_root: Path, worktree: Path) -> None:
     """Stage the converged repo-root ``.pi/npm/`` into the worktree so pi installs nothing at
-    startup (a silent + faster launch beneath the banner), isolated from every other tree.
+    startup (a silent + faster launch beneath the banner), then verify the worktree's install.
 
     A fresh worktree starts with an empty gitignored ``.pi/npm/``; at startup pi would ``npm
-    install`` every configured extension with inherited stdio (the ``added N packages`` noise). An
-    isolated copy of the converged repo-root install satisfies pi's ``needsInstall`` short-circuit
-    for every package. Three steps:
+    install`` every configured extension with inherited stdio (the ``added N packages`` noise). A
+    staged copy of the converged repo-root install satisfies pi's ``needsInstall`` short-circuit
+    for every package. Two steps:
 
-    1. **Stage or detach.** An unpopulated worktree install (``node_modules`` missing, empty or
-       unreadable — only regenerable metadata) is removed and staged through
-       :func:`perk.substrate.fsclone.clone_tree`: a ``clonefile(2)`` copy-on-write clone on
-       macOS, else per-file hardlinks whose depth-<=1 metadata files (the ones package managers
-       and Pi rewrite in place) get their own inodes. There is no byte-copy tier. A populated
-       install is never clobbered (D4 resume) but is detached the same way — the migration for
-       worktrees staged by the older all-hardlink layout, before Pi can write through them.
-    2. **Verify** the staged install against the worktree's own ``.pi/settings.json``
-       (:func:`_stale_extension_specs`).
-    3. **Warn** once about any mismatch — perk installs nothing; Pi's ``needsInstall`` installs
-       in-session, into a tree whose metadata is now private.
+    1. **Stage.** An unpopulated worktree install (``node_modules`` missing, empty or unreadable —
+       only regenerable metadata) is removed and staged from a populated repo-root install
+       through :func:`perk.substrate.fsclone.clone_tree`: a ``clonefile(2)`` copy-on-write clone
+       on macOS, else per-file hardlinks whose install-root metadata files (the ones package
+       managers and Pi rewrite in place) get their own inodes. There is no byte-copy tier. A
+       populated install is never clobbered (D4 resume) and needs no repo-root install at all;
+       detaching one staged by the former all-hardlink layout is the exec pipeline's job
+       (``pi_exec._detach_extension_install``), which every launch — resumes included — reaches.
+    2. **Verify + warn.** The worktree's install is checked against its own
+       ``.pi/settings.json`` (:func:`_stale_extension_specs`) and any mismatch warned once — perk
+       installs nothing; Pi's ``needsInstall`` installs in-session.
 
     Loud-but-non-fatal, mirroring :func:`materialize_skills`: a staging failure warns and degrades
     to pi installing in-session (the noise reappears below the banner) but never blocks the
     launch.
     """
-    src = consumer_npm_install_root(repo_root)
-    if not _install_populated(src / "node_modules"):
-        log_warn("extensions: repo .pi/npm not staged — pi will install them in-session")
-        return
     dst = consumer_npm_install_root(worktree)
-    if _install_populated(dst / "node_modules"):
-        try:
-            detached = fsclone.detach_shared_files(dst)
-        except OSError as exc:
-            log_warn(f"extensions: could not detach shared .pi/npm files — {exc}")
-        else:
-            if detached:
-                log_done(f"detached {detached} shared extension file(s)")
-    else:
+    if not _install_populated(dst / "node_modules"):
+        src = consumer_npm_install_root(repo_root)
+        if not _install_populated(src / "node_modules"):
+            log_warn("extensions: repo .pi/npm not staged — pi will install them in-session")
+            return
         # An unpopulated install root holds only regenerable metadata (Pi rewrites package.json /
         # .gitignore on demand), so removal — not merge — prepares clone_tree's absent `dst`.
         shutil.rmtree(dst, ignore_errors=True)
