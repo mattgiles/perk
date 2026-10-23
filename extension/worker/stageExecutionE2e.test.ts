@@ -51,10 +51,12 @@ import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { agentScratchDir, type PlanRef, runEventsPath } from "../substrate/cache.ts";
 import { readSessionPointers } from "../substrate/sessionPointers.ts";
 import {
+  addressClassifyFixture,
   bareModelRuntime,
   fakePerkRouter,
   fauxModelRuntime,
   mcpFixtureServer,
+  plantFakeSubagentsResponder,
   plantGlobalModelAuth,
   plantMcpRegistrar,
   plantProjectMcpConfig,
@@ -257,9 +259,11 @@ async function runDrive(opts: {
         events.push(JSON.parse(line) as RunEvent);
       }
     }
-    const argv = opts.captureArgv
-      ? readFileSync(argvFile, "utf8").trim().split("\n").filter(Boolean)
-      : [];
+    // No file ⇒ the drive invoked no cold door at all.
+    const argv =
+      opts.captureArgv && existsSync(argvFile)
+        ? readFileSync(argvFile, "utf8").trim().split("\n").filter(Boolean)
+        : [];
     return {
       outcome,
       events,
@@ -566,39 +570,46 @@ test("e2e: implement HAPPY (file sink) — the production NDJSON sink writes the
 
 // --- Scenario 2: address HAPPY -----------------------------------------------------------------
 
-test("e2e: address HAPPY — finalize_address ok → completed/address_resolved", async () => {
+/** The address scenarios' snapshot: thread T1 open on PR 42 (the `pr submit` route's PR). */
+const ADDRESS_FEEDBACK = addressClassifyFixture({ pr: 42, threadIds: ["T1"] });
+
+const addressRoutes = {
+  "pr feedback": { json: ADDRESS_FEEDBACK.feedback },
+  "pr submit": {
+    json: {
+      success: true,
+      pr: { number: 42, url: "https://github.com/x/pull/42", is_draft: false, existed: true },
+      branch: "b",
+      issue: 148,
+      plan_embedded: true,
+      base: "main",
+      mergeable: true,
+      conflicts: [],
+    },
+  },
+  "pr resolve-threads": {
+    // The full per-row contract shape — the decode is strict on comment_added.
+    json: {
+      success: true,
+      results: [{ thread_id: "T1", success: true, comment_added: true, error: null }],
+    },
+  },
+};
+
+test("e2e: address HAPPY — classify → finalize_address ok → completed/address_resolved", async () => {
   const { outcome, events, argv } = await runDrive({
     stage: "address",
     captureArgv: true,
-    routes: {
-      "pr submit": {
-        json: {
-          success: true,
-          pr: { number: 42, url: "https://github.com/x/pull/42", is_draft: false, existed: true },
-          branch: "b",
-          issue: 148,
-          plan_embedded: true,
-          base: "main",
-          mergeable: true,
-          conflicts: [],
-        },
-      },
-      "pr resolve-threads": {
-        // The full per-row contract shape — the decode is strict on comment_added.
-        json: {
-          success: true,
-          results: [{ thread_id: "T1", success: true, comment_added: true, error: null }],
-        },
-      },
-    },
+    // The classifier lane answers through the ONE shared fake responder, planted as a project
+    // extension so Pi's own loader binds it beside the real perk extension.
+    plant: (cwd) => plantFakeSubagentsResponder(cwd, { report: ADDRESS_FEEDBACK.report }),
+    routes: addressRoutes,
     responses: [
+      fauxAssistantMessage([fauxToolCall("classify_review_feedback", {})], {
+        stopReason: "toolUse",
+      }),
       fauxAssistantMessage(
-        [
-          fauxToolCall("finalize_address", {
-            threads: [{ thread_id: "T1", comment: "done" }],
-            pr: 42,
-          }),
-        ],
+        [fauxToolCall("finalize_address", { threads: [{ thread_id: "T1", comment: "done" }] })],
         { stopReason: "toolUse" },
       ),
       fauxAssistantMessage([fauxText("finalized")], { stopReason: "stop" }),
@@ -607,13 +618,45 @@ test("e2e: address HAPPY — finalize_address ok → completed/address_resolved"
 
   assert.equal(outcome.status, "completed");
   assert.equal(outcome.terminal_signal, "address_resolved");
-  assert.deepEqual(argv, ["pr submit", "pr resolve-threads"]);
+  assert.deepEqual(argv, ["pr feedback", "pr submit", "pr resolve-threads"]);
 
+  const classify = events.find(
+    (e) => e.kind === "tool_outcome" && e.tool === "classify_review_feedback",
+  );
+  assert.ok(
+    classify && classify.kind === "tool_outcome" && classify.ok === true,
+    "the classify step bound the planted lane's report",
+  );
   const finalize = events.find((e) => e.kind === "tool_outcome" && e.tool === "finalize_address");
   assert.ok(
     finalize && finalize.kind === "tool_outcome" && finalize.ok === true,
     "finalizer ran ok",
   );
+  assertMonotonicSeq(events);
+});
+
+test("e2e: address without a prior classify — finalize_address refuses no_classification, nothing published", async () => {
+  const { outcome, events, argv } = await runDrive({
+    stage: "address",
+    captureArgv: true,
+    routes: addressRoutes,
+    responses: [
+      fauxAssistantMessage(
+        [fauxToolCall("finalize_address", { threads: [{ thread_id: "T1", comment: "done" }] })],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage([fauxText("gave up")], { stopReason: "stop" }),
+    ],
+  });
+
+  assert.notEqual(outcome.status, "completed");
+  assert.deepEqual(argv, [], "no snapshot read, no publish, no resolve");
+  const finalize = events.find((e) => e.kind === "tool_outcome" && e.tool === "finalize_address");
+  assert.ok(
+    finalize && finalize.kind === "tool_outcome" && finalize.ok === false,
+    "the finalizer refused",
+  );
+  assert.match(finalize.summary ?? "", /no bound classification in this session/);
   assertMonotonicSeq(events);
 });
 
