@@ -6,8 +6,9 @@ the one best-effort network read (:func:`fetch_plan_body`) and the silent local 
 (:func:`write_plan_body_snapshot`), composed by :func:`materialize_plan_body` (the shape
 ``run_worker.position_worktree`` consumes; the cold-door launch calls the two halves separately so
 the fetched body can also seed the handoff's naming hints) — the
-per-skill symlink mirror (:func:`materialize_skills`), and the extension-install clone-copy
-(:func:`materialize_extensions`). The launch banner (:func:`print_launch_banner`) is the
+per-skill symlink mirror (:func:`materialize_skills`), and the isolated extension-install staging
+(:func:`materialize_extensions` — a copy-on-write clone or detached hardlinks, then a verification
+against the worktree's own settings). The launch banner (:func:`print_launch_banner`) is the
 idempotent once-per-process emitter that heads a real launch's output. ``_WORKTREE_SETUP_TIMEOUT_S``
 (the per-command wall-clock cap) travels with
 :func:`run_worktree_setup` and is re-exported by the package facade so
@@ -28,9 +29,12 @@ from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init.extension_install import consumer_npm_install_root
+from perk.convergence.init.settings import _entry_spec, _npm_name, _npm_version
 from perk.github import GitHubError
 from perk.state import cache
+from perk.substrate import fsclone
 from perk.substrate.output import io_step, log_done, log_warn, user_output
+from perk.substrate.semver import parse_semver
 
 # Per-command wall-clock cap for `[worktree] setup` commands (10 minutes) — `uv sync` / `npm ci`
 # can be slow on a cold cache, but a hung command must not wedge the launch forever.
@@ -278,63 +282,123 @@ def print_launch_banner_gated(repo_root: Path, *, dry_run: bool, remote: str | N
         print_launch_banner(repo_root)
 
 
-def _clone_npm_tree(src: Path, dst: Path) -> None:
-    """Clone the converged npm install tree ``src`` into ``dst``, preferring cheap isolation.
+def _is_exact_version(version: str) -> bool:
+    """Whether a spec's version is an exact plain ``X.Y.Z`` (not a range, tag or prerelease)."""
+    parsed = parse_semver(version)
+    return parsed is not None and not parsed.prerelease and version == str(parsed)
 
-    First attempt per-file **hardlinks** (``copy_function=os.link``) — near-instant and disk-free;
-    npm only ever add/replaces a package via rename, which breaks the link, so the main checkout's
-    inodes are never mutated in place. On ``OSError`` (cross-device ``EXDEV``, or no hardlink
-    support) fall back to a deep copy (``copy2`` is reflink/clonefile-accelerated on APFS/Btrfs,
-    a full copy elsewhere — still fully isolated).
+
+def _installed_npm_version(manifest: Path) -> str | None:
+    """An installed package's ``package.json`` ``version``; ``None`` when absent/unreadable."""
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    version = data.get("version") if isinstance(data, dict) else None
+    return version if isinstance(version, str) else None
+
+
+def _stale_extension_specs(worktree: Path) -> list[str]:
+    """The worktree's ``.pi/settings.json`` npm specs its staged ``.pi/npm`` does not satisfy.
+
+    Mirrors Pi's ``needsInstall`` with one deliberate narrowing: an exact ``X.Y.Z`` spec must be
+    installed at exactly that version; an unversioned or range spec needs only presence (Pi
+    applies the range in-session). A package whose ``package.json`` is absent or unreadable is
+    stale. Non-npm entries (local paths, ``git:``) are ignored; object-form entries are read
+    through their ``source``. Missing/unreadable settings or a non-list ``packages`` → ``[]``
+    (``skill_exposure`` owns that diagnosis). Returns bare specs (no ``npm:``), in settings order.
     """
     try:
-        shutil.copytree(src, dst, copy_function=os.link, dirs_exist_ok=True)
+        data = json.loads((worktree / ".pi" / "settings.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    packages = data.get("packages") if isinstance(data, dict) else None
+    if not isinstance(packages, list):
+        return []
+    modules = consumer_npm_install_root(worktree) / "node_modules"
+    stale: list[str] = []
+    for entry in packages:
+        spec = _entry_spec(entry)
+        name = _npm_name(spec) if spec is not None else None
+        if spec is None or name is None:
+            continue
+        installed = _installed_npm_version(modules / name / "package.json")
+        wanted = _npm_version(spec)
+        exact_mismatch = wanted is not None and _is_exact_version(wanted) and installed != wanted
+        if installed is None or exact_mismatch:
+            stale.append(spec.removeprefix("npm:"))
+    return stale
+
+
+def _install_populated(modules: Path) -> bool:
+    """Whether ``modules`` is a non-empty readable directory (an unreadable one counts as empty)."""
+    try:
+        return modules.is_dir() and any(modules.iterdir())
     except OSError:
-        shutil.rmtree(dst, ignore_errors=True)
-        shutil.copytree(src, dst, dirs_exist_ok=True)
+        return False
 
 
 def materialize_extensions(repo_root: Path, worktree: Path) -> None:
     """Stage the converged repo-root ``.pi/npm/`` into the worktree so pi installs nothing at
-    startup (a silent + faster launch beneath the banner).
+    startup (a silent + faster launch beneath the banner), isolated from every other tree.
 
     A fresh worktree starts with an empty gitignored ``.pi/npm/``; at startup pi would ``npm
-    install`` every configured extension with inherited stdio (the ``added N packages`` noise). A
-    faithful copy of the converged repo-root install satisfies pi's ``needsInstall`` short-circuit
-    for every package. Copying (not symlinking) preserves per-worktree isolation: an in-dev
-    extension a worktree adopts stays in the worktree and never leaks to the main checkout.
+    install`` every configured extension with inherited stdio (the ``added N packages`` noise). An
+    isolated copy of the converged repo-root install satisfies pi's ``needsInstall`` short-circuit
+    for every package. Three steps:
 
-    Loud-but-non-fatal + idempotent (D4 resume), mirroring :func:`materialize_skills`: a staging
-    failure warns and degrades to pi installing in-session (the noise reappears below the banner)
-    but never blocks the launch.
+    1. **Stage or detach.** An unpopulated worktree install (``node_modules`` missing, empty or
+       unreadable — only regenerable metadata) is removed and staged through
+       :func:`perk.substrate.fsclone.clone_tree`: a ``clonefile(2)`` copy-on-write clone on
+       macOS, else per-file hardlinks whose depth-<=1 metadata files (the ones package managers
+       and Pi rewrite in place) get their own inodes. There is no byte-copy tier. A populated
+       install is never clobbered (D4 resume) but is detached the same way — the migration for
+       worktrees staged by the older all-hardlink layout, before Pi can write through them.
+    2. **Verify** the staged install against the worktree's own ``.pi/settings.json``
+       (:func:`_stale_extension_specs`).
+    3. **Warn** once about any mismatch — perk installs nothing; Pi's ``needsInstall`` installs
+       in-session, into a tree whose metadata is now private.
+
+    Loud-but-non-fatal, mirroring :func:`materialize_skills`: a staging failure warns and degrades
+    to pi installing in-session (the noise reappears below the banner) but never blocks the
+    launch.
     """
     src = consumer_npm_install_root(repo_root)
-    src_modules = src / "node_modules"
-    try:
-        src_empty = not src_modules.is_dir() or not any(src_modules.iterdir())
-    except OSError:
-        src_empty = True
-    if src_empty:
+    if not _install_populated(src / "node_modules"):
         log_warn("extensions: repo .pi/npm not staged — pi will install them in-session")
         return
-    dst = worktree / ".pi" / "npm"
-    dst_modules = dst / "node_modules"
-    try:
-        if dst_modules.is_dir() and any(dst_modules.iterdir()):
-            return  # idempotent resume: a populated install is already present — never clobber
-    except OSError:
-        pass  # treat an unreadable dst as absent and re-stage
-    # The clone-copy is perceptible blocking I/O (python-cli-guidelines.md §7.5), so it earns a
-    # step line, not just a bare confirmation.
-    with io_step("staging extensions") as s:
+    dst = consumer_npm_install_root(worktree)
+    if _install_populated(dst / "node_modules"):
         try:
-            _clone_npm_tree(src, dst)
+            detached = fsclone.detach_shared_files(dst)
         except OSError as exc:
-            # A clone that fails mid-copy leaves a partial tree behind. Remove it so the
-            # presence-only resume guard above doesn't permanently cache a half-copied (corrupt)
-            # install — a failed stage must degrade to pi installing fresh in-session, never to a
-            # broken tree.
-            shutil.rmtree(dst, ignore_errors=True)
-            s.warn(f"extensions: could not stage .pi/npm — {exc}; pi will install them in-session")
-            return
-        s.done("staged extensions")
+            log_warn(f"extensions: could not detach shared .pi/npm files — {exc}")
+        else:
+            if detached:
+                log_done(f"detached {detached} shared extension file(s)")
+    else:
+        # An unpopulated install root holds only regenerable metadata (Pi rewrites package.json /
+        # .gitignore on demand), so removal — not merge — prepares clone_tree's absent `dst`.
+        shutil.rmtree(dst, ignore_errors=True)
+        # The staging is perceptible blocking I/O (python-cli-guidelines.md §7.5), so it earns a
+        # step line, not just a bare confirmation.
+        with io_step("staging extensions") as s:
+            try:
+                method = fsclone.clone_tree(src, dst)
+            except OSError as exc:
+                # A staging that fails mid-way leaves a partial tree behind. Remove it so the
+                # presence-only resume guard above doesn't permanently cache a half-staged
+                # (corrupt) install — a failed stage must degrade to pi installing fresh
+                # in-session, never to a broken tree.
+                shutil.rmtree(dst, ignore_errors=True)
+                s.warn(
+                    f"extensions: could not stage .pi/npm — {exc}; pi will install them in-session"
+                )
+                return
+            s.done(f"staged extensions ({method})")
+    stale = _stale_extension_specs(worktree)
+    if stale:
+        log_warn(
+            f"extensions: {len(stale)} staged extension(s) do not match this worktree's "
+            f".pi/settings.json ({', '.join(stale)}) — pi will install them in-session"
+        )
