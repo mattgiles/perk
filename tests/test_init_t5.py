@@ -3,12 +3,15 @@ import subprocess
 from pathlib import Path
 from typing import cast
 
+import pytest
 from click.testing import CliRunner
 
+import perk
 from perk import github as gh_mod
 from perk.cli.cli import cli
 from perk.convergence import env as env_mod
 from perk.convergence import init as init_mod
+from perk.convergence import write_admission
 from perk.convergence.env import EnvCheck
 from perk.convergence.init import report_to_dict, run_init
 from perk.convergence.init import skills as _skills_mod
@@ -56,6 +59,58 @@ def test_report_to_dict_shape(tmp_path):
     data = report_to_dict(run_init(tmp_path, verify=False))
     assert data["success"] is True
     assert set(data) >= {"success", "mode", "env", "github", "capabilities", "changes", "handoff"}
+
+
+# --- the write admission (init refuses a foreign / outdated perk before any write) -----------
+
+
+def _tree_snapshot(root: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and ".git" not in path.relative_to(root).parts
+    }
+
+
+def test_init_refuses_an_outdated_perk_before_any_write(git_repo, monkeypatch, stub_env):
+    monkeypatch.setattr(init_mod, "write_refusal", write_admission.write_refusal)
+    pin = git_repo / ".perk" / "required-perk-version"
+    pin.parent.mkdir(parents=True)
+    pin.write_text("99.0.0\n", encoding="utf-8")
+    before = _tree_snapshot(git_repo)
+    report = run_init(git_repo, verify=True)
+    assert not report.ok
+    assert report.error_type == "perk_outdated" and report.exit_code == 2
+    assert report.message is not None and "99.0.0" in report.message
+    assert not (git_repo / ".pi" / "settings.json").exists()
+    assert _tree_snapshot(git_repo) == before
+    data = report_to_dict(report)
+    assert (data["success"], data["error_type"]) == (False, "perk_outdated")
+
+
+def test_init_refuses_a_foreign_perk_in_a_self_repo(git_repo, monkeypatch, stub_env):
+    monkeypatch.setattr(init_mod, "write_refusal", write_admission.write_refusal)
+    (git_repo / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
+    before = _tree_snapshot(git_repo)
+    report = run_init(git_repo, verify=True)
+    assert report.error_type == "foreign_perk" and report.exit_code == 2
+    assert report.message is not None and str(git_repo.resolve()) in report.message
+    assert _tree_snapshot(git_repo) == before
+
+
+def test_init_with_an_older_pin_converges_it_forward(git_repo, monkeypatch, stub_env):
+    monkeypatch.setattr(init_mod, "write_refusal", write_admission.write_refusal)
+    pin = git_repo / ".perk" / "required-perk-version"
+    pin.parent.mkdir(parents=True)
+    pin.write_text("0.0.1\n", encoding="utf-8")
+    report = run_init(git_repo, verify=True)
+    assert report.ok
+    assert pin.read_text(encoding="utf-8") == f"{perk.__version__}\n"
+
+
+def test_unverified_init_is_never_gated(tmp_path, monkeypatch):
+    monkeypatch.setattr(init_mod, "write_refusal", lambda root, *, self_repo: pytest.fail("gated"))
+    assert run_init(tmp_path, verify=False).ok
 
 
 # --- skills sync orchestration (§2.7) ----------------------------------------

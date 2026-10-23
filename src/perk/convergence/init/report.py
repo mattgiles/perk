@@ -67,6 +67,8 @@ class InitReport:
             "skills_conflict",
             "skills_sync_failed",
             "legacy_config",
+            "foreign_perk",
+            "perk_outdated",
         ):
             return 2  # environment-not-ready (§3.2 supervisor taxonomy)
         return 1

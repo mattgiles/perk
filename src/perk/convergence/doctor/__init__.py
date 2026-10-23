@@ -12,7 +12,8 @@ Principles:
   never a silent `ok`.
 - **GitHub is non-fatal**: unauthed / no-access / `gh` errored ⇒ `warn`, never `fail`.
 - **Report, don't refuse**: a missing required tool is a failing check (exit 1); only
-  `not_a_repo` blocks (exit 2).
+  `not_a_repo` and, under `--fix`, the write admission (`foreign_perk` / `perk_outdated`)
+  block (exit 2).
 
 **Package layout.** This ``__init__`` keeps the orchestration (``_build_checks``,
 ``workflow_checks``, ``run_doctor``, ``report_to_dict``) and re-exports every submodule symbol
@@ -266,6 +267,19 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
     non-destructive (re-converge managed blocks; seed *missing* config only) so it never prompts.
     """
     self_repo = init.is_self_repo(root)
+    if fix and verify:
+        # Write admission before any check or repair (bare doctor only reports, never refused):
+        # a foreign or outdated perk would converge the managed files backward. Read through the
+        # `init.` facade so the conftest stub covers both writers.
+        refusal = init.write_refusal(root, self_repo=self_repo)
+        if refusal is not None:
+            return DoctorReport(
+                checks=[],
+                fixed=[],
+                self_repo=self_repo,
+                error_type=refusal.error_type,
+                message=refusal.message,
+            )
     checks = _build_checks(root, self_repo, verify=verify)
     artifact_rows, health = _artifact_health_check(root, self_repo)
     checks.append(health)

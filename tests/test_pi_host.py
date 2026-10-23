@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _pi_layout import CODEMODE, INCIDENT_DETAIL, MCP, install_fake_pi
 
 from perk.run import workflow_artifacts
 from perk.substrate import pi_host
@@ -174,55 +175,15 @@ def test_admission_never_reads_the_repos_dev_sdk_install() -> None:
 
 # --- the companion family ------------------------------------------------------------------
 
-CODEMODE = "@earendil-works/pi-codemode"
-MCP = "@earendil-works/pi-mcp"
-INCIDENT_DETAIL = f"{CODEMODE} does not resolve, {MCP} resolves to 1.4.0"
-
-
-def _write_manifest(directory: Path, name: str, version: str) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "package.json").write_text(
-        json.dumps({"name": name, "version": version}), encoding="utf-8"
-    )
-
-
-def _pi_layout(prefix: Path, *, broken: bool) -> str:
-    """A global npm prefix with the Pi CLI installed; returns the ``bin/pi`` symlink path.
-
-    The CLI entry is a shell script answering the adopted version, so the REAL probe runs
-    against it. ``broken`` models the incident host: five companions at the global root,
-    ``pi-codemode`` a dangling symlink, ``pi-mcp@1.4.0`` nested under the Pi package only.
-    """
-    global_root = prefix / "lib" / "node_modules"
-    package = global_root / PI_NPM_SPEC
-    _write_manifest(package, PI_NPM_SPEC, PI_ADOPTED_VERSION)
-    bundle = package / "dist" / "bundle"
-    bundle.mkdir(parents=True)
-    (bundle / "package.json").write_text('{"type": "module"}', encoding="utf-8")
-    cli = bundle / "cli.js"
-    cli.write_text(f"#!/bin/sh\necho {PI_ADOPTED_VERSION}\n", encoding="utf-8")
-    cli.chmod(0o755)
-    bin_dir = prefix / "bin"
-    bin_dir.mkdir()
-    (bin_dir / "pi").symlink_to(Path("../lib/node_modules") / PI_NPM_SPEC / "dist/bundle/cli.js")
-    for name in PI_COMPANION_PACKAGES:
-        if broken and name == CODEMODE:
-            (global_root / name).symlink_to(prefix / "gone" / "pi-codemode")
-        elif broken and name == MCP:
-            _write_manifest(package / "node_modules" / name, name, "1.4.0")
-        else:
-            _write_manifest(global_root / name, name, PI_ADOPTED_VERSION)
-    return str(bin_dir / "pi")
-
 
 @pytest.fixture
 def broken_pi_layout(tmp_path: Path) -> str:
-    return _pi_layout(tmp_path / "broken", broken=True)
+    return str(install_fake_pi(tmp_path / "broken", broken=True))
 
 
 @pytest.fixture
 def repaired_pi_layout(tmp_path: Path) -> str:
-    return _pi_layout(tmp_path / "repaired", broken=False)
+    return str(install_fake_pi(tmp_path / "repaired"))
 
 
 def test_admit_companions_all_adopted_is_coherent() -> None:
@@ -262,7 +223,11 @@ def test_resolve_prefers_the_nested_copy_and_reports_the_dangling_link(
     package = locate_pi_package(broken_pi_layout)
     assert package is not None
     # A global-root sibling at the adopted version does not shadow the nested copy.
-    _write_manifest(package.parent.parent / MCP, MCP, PI_ADOPTED_VERSION)
+    sibling = package.parent.parent / MCP
+    sibling.mkdir(parents=True)
+    (sibling / "package.json").write_text(
+        json.dumps({"name": MCP, "version": PI_ADOPTED_VERSION}), encoding="utf-8"
+    )
     resolved = resolve_companions(Path(broken_pi_layout).resolve().parent)
     assert list(resolved) == list(PI_COMPANION_PACKAGES)
     assert resolved[CODEMODE] is None

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from _launch_helpers import _PLAN_REF, _PLAN_REF_MODEL, _config, _request, _stage
+from _pi_layout import install_fake_pi
 
 from perk import __version__
 from perk.backends.issue_backend import IssueBackendError, PlanState
@@ -368,7 +369,9 @@ def test_exec_pi_admits_a_pi_at_the_floor_and_execs_its_absolute_path(
 ):
     events: list[object] = []
     floor = load_host_floor().pi_min_version
-    script = _pi_script(tmp_path, monkeypatch, f"echo {floor}")
+    # A full fake install: the probe family-checks a Pi answering the adopted version.
+    script = install_fake_pi(tmp_path / "prefix", body=f"echo {floor}")
+    monkeypatch.setenv("PATH", f"{script.parent}{os.pathsep}{os.environ.get('PATH', '')}")
     monkeypatch.setattr(pi_exec.os, "chdir", lambda path: events.append("chdir"))
     monkeypatch.setattr(
         pi_exec.os, "execvpe", lambda program, argv, env: events.append(("exec", program))

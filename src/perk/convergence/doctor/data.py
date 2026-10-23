@@ -55,7 +55,8 @@ class DoctorReport:
 
     @property
     def exit_code(self) -> int:
-        if self.error_type == "not_a_repo":
+        # Every typed refusal (`not_a_repo`, the `--fix` write admission) is environment-not-ready.
+        if self.error_type is not None:
             return 2
         return 1 if any(c.status == "fail" for c in self.checks) else 0
 
