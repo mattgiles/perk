@@ -40,7 +40,7 @@ def test_install_global_forwards_the_pinned_set_in_one_npm_invocation(monkeypatc
     assert [(argv, timeout) for argv, timeout, _ in calls] == [
         (["npm", "install", "-g", *PI_INSTALL_SPECS], 600)
     ]
-    assert len(PI_INSTALL_SPECS) == 8
+    assert len(PI_INSTALL_SPECS) == 1
     (_, _, env) = calls[0]
     assert env["npm_config_loglevel"] == "error"  # the quiet overlay rides every install
 
@@ -77,4 +77,5 @@ def test_install_global_real_spawn_receives_every_spec(monkeypatch, tmp_path: Pa
     monkeypatch.setenv("FAKE_NPM_LOG", str(log))
     npm.install_global(*PI_INSTALL_SPECS, timeout=30)
     argv_blocks = log.read_text(encoding="utf-8").splitlines()
-    assert argv_blocks == ["install", "-g", *PI_INSTALL_SPECS, "--"]  # one invocation, all eight
+    # One invocation carrying the one exact spec.
+    assert argv_blocks == ["install", "-g", *PI_INSTALL_SPECS, "--"]

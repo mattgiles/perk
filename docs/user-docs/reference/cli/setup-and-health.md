@@ -40,9 +40,9 @@ The managed `.gitignore` block also carries the perk library rules `/docs/librar
 
 Run **interactively**, `perk init` is also a guided onboarding flow. It offers to install the
 missing *supported* required tools — `gh` via `brew install gh` (when brew is on PATH), `pi` via
-the pinned install command — one `npm install -g` naming Pi 1.1.0 plus its seven companion
-packages at exactly 1.1.0 (when the `node` check passes; the same command upgrades a Pi older than
-the 1.1.0 floor; the exact command is in
+the pinned install command — one `npm install -g` of the exact Pi 1.4.0 package, which places its
+six companion packages at exactly 1.4.0 (when the `node` check passes; the same command upgrades a
+Pi older than the 1.4.0 floor; the exact command is in
 [Requirements and compatibility](../requirements-and-compatibility.md#version-compatibility)), `skills` via
 its official installer script on macOS / `go install` elsewhere, and `cloc` via `brew install
 cloc` (when brew is on PATH) or `npm install -g cloc` (when the `node` check passes) (`git` and
@@ -58,7 +58,7 @@ or `--json` (a machine surface — nothing may interleave with the stdout JSON);
 *check* itself still runs on every verified init — non-interactively it only degrades to a
 report warning carrying the manual `git config` commands.
 
-When the `pi` on your PATH is admitted (at or above the floor) but is not the adopted Pi 1.1.0,
+When the `pi` on your PATH is admitted (at or above the floor) but is not the adopted Pi 1.4.0,
 an interactive `perk init` offers to install the adopted set (`Install the adopted Pi set via
 npm install -g …?`); declining is fine. A successful `perk init` that still finds a non-adopted Pi
 converges, marks the `pi` line `⚠️` and adds one warning naming the pinned install command (also
@@ -92,7 +92,7 @@ Diagnose the perk-managed repo, reporting a grouped health view. `--fix` re-conv
 managed pieces (and seeds missing config) without ever mutating GitHub or overwriting your config
 edits. `--fix` also **reconciles perk's own npm version pin** (`npm:@mgiles/perk`) in
 `.pi/settings.json` to the version this perk wants (e.g. a stale `npm:@mgiles/perk@0.0.0` → the
-pinned `@{version}`), and the borrowed `npm:pi-subagents` entry to its pin (`npm:pi-subagents@0.76.1`
+pinned `@{version}`), and the borrowed `npm:pi-subagents` entry to its pin (`npm:pi-subagents@0.81.0`
 — an unpinned or differently pinned entry is rewritten in place; perk's report waves send the
 `script` RPC spawn key, which releases before 0.74.0 do not accept). perk's own extension is delivered as the pinned `npm:@mgiles/perk` install
 (below); the older `git:`-clone delivery path has been retired. If your repo was previously on the
@@ -161,8 +161,9 @@ pi-subagents version. `info` when the package is not installed (pi lazy-installs
 version perk's guidance was verified against (`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`). The install
 itself is pinned by `settings-wiring` (repaired by `--fix`); the guidance stamp is a distinct fact —
 what perk's guidance was re-read against, not what consumers install — so a mismatch says
-"re-verify" (`docs/developers/pi-subagents-reverify.md`), not "broken". Today the pin (0.76.1) is
-ahead of the stamp (0.75.0). The stamp stayed at 0.75.0 after the live certification
+"re-verify" (`docs/developers/pi-subagents-reverify.md`), not "broken". Today the pin (0.81.0) is
+ahead of the stamp (0.75.0): Pi 1.4.0 + pi-subagents 0.81.0 are adopted and their live
+certification is owed. The stamp stayed at 0.75.0 after the previous pair's live certification
 (`docs/design/archive/pi-1.1.0-certification.md`) because W4, W6 and W7a failed and S3, S4a-live,
 U-bg, X5a and X5b were not run. So `subagent-compat` warns by design on a converged checkout.
 The `package` group also carries the report-only `subagent-package-scope` check: it reads the
@@ -224,26 +225,28 @@ The
 `environment` group reports required tools as `fail` when missing and optional tools
 (e.g. `ast-grep`) as `warn`; the `node` and `pi` rows also compare against the host floor
 (Node.js on a supported release line — 22.23.4+, 24.22.1+ or 26.12.1+
-(`shared/host-floor.yaml`) — and Pi ≥ 1.1.0; see
+(`shared/host-floor.yaml`) — and Pi ≥ 1.4.0; see
 [Requirements and compatibility](../requirements-and-compatibility.md)), so an outdated,
 unverifiable or unsupported-line Node/Pi is a `fail` whose remediation names the floor to reach,
 exactly like a missing one (and a `missing_tool` exit 2 for `perk init`). A Node major outside
 the supported lines reports `<version> (unsupported release line)`. The `pi` row also checks the
-**companion family** of the adopted Pi 1.1.0: each of its seven `@earendil-works/*` companion
-packages must resolve from the installed `pi` — the way Node loads them — at exactly 1.1.0. A
+**companion family** of the adopted Pi 1.4.0: each of its six `@earendil-works/*` companion
+packages must resolve from the installed `pi` — the way Node loads them — at exactly 1.4.0. A
 missing companion, a dangling link or a mismatched copy is a `fail` whose detail reads
-`1.1.0 (floor >= 1.1.0) — companions: <offenders>` and whose remediation tells you to run
+`1.4.0 (floor >= 1.4.0) — companions: <offenders>` and whose remediation tells you to run
 `perk doctor --fix` (a `pi` outside any installed Pi package fails as unverifiable with the same
 remediation). An admitted Pi that is not
-the adopted Pi 1.1.0 is a `warn` (`pi ok, with a caution`) whose remediation names the pinned
+the adopted Pi 1.4.0 is a `warn` (`pi ok, with a caution`) whose remediation names the pinned
 install command — never a `fail`, so the report stays healthy and the exit code is unchanged.
 **`perk doctor --fix` repairs the `pi` row** whenever it is not green — absent, below the floor,
 unverifiable, a broken companion family, or the not-adopted caution — by running the pinned
-eight-package `npm install -g` itself, then re-probing: success lands on the fixed list
-(`pi: installed the adopted Pi 1.1.0 set (npm -g, 8 packages)`); an npm failure, or a `pi` on PATH
-that still is not the install npm wrote (a PATH-order problem — fix the order or remove the other
-`pi`), lands on the fix errors. A failing `node` row stops it: install Node.js on a supported line
-first. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.
+install command (the one exact spec, `npm install -g @earendil-works/pi-coding-agent@1.4.0`)
+itself, then re-probing: success lands on the fixed list (`pi: installed the adopted Pi 1.4.0
+(npm -g @earendil-works/pi-coding-agent@1.4.0)`); an npm failure, or a `pi` on PATH that still is
+not the install npm wrote (a PATH-order problem — fix the order or remove the other `pi`), lands on
+the fix errors. A failing `node` row stops it: install Node.js on a supported line first. The
+repair replaces the global Pi for every checkout and every running session on this machine —
+finish or cancel outstanding waves and close your perk sessions before running it. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.
 This is a group whose bare invocation runs the health report.
 
 ### `perk doctor workflow`

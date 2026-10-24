@@ -34,8 +34,8 @@ tree; **re-verification** is this whole ritual. The **Adopted Pi pin**, **Pinned
 |---|---|---|---|
 | Dev pins | the four `@earendil-works/*` `devDependencies` in `package.json` + `package-lock.json` | `tests/test_packaging.py::test_pi_toolchain_pin_lockstep` | `just bump-pi <v>` (`justfile::bump-pi` moves only these four) |
 | Host floor | `shared/host-floor.yaml` (`pi.min_version`; `node.min_version` + `node.line_floors`) | `tests/test_host_floor.py::test_real_host_floor_loads_validates_and_pins_the_floors`; `extension/substrate/hostFloor.test.ts` | by hand, with the adopted pin, never above it |
-| Adopted Pi pin + pinned install set (= the remote install pin) | `src/perk/substrate/pi_host.py` (`PI_ADOPTED_VERSION`, `PI_COMPANION_PACKAGES`, `PI_INSTALL_SPECS`, `PI_INSTALL_COMMAND`); `src/perk/run/workflow_artifacts.py` (`REMOTE_PI_VERSION`, `_PI_GLOBAL_INSTALL`, the consumer worker install with `--save-exact`) | `tests/test_pi_host.py::test_install_command_is_the_pinned_set`, `::test_pinned_install_family_is_closed_against_the_characterized_lockfile`, `::test_remote_install_pin_is_the_adopted_pin`; `tests/test_workflow_artifacts.py::test_committed_self_repo_remote_artifacts_are_the_owners_render` | by hand; `perk doctor --fix`'s `runner-workflow` convergence regenerates `.github/actions/perk-remote-setup/action.yml` and its `.perk/managed-state.toml` digest |
-| Supplier pin | `src/perk/convergence/init/settings.py::SUBAGENTS_PACKAGE`; `.pi/settings.json`; the `settings-wiring` digest in `.perk/managed-state.toml` | `tests/test_init_idempotent.py::test_subagents_borrow_is_version_pinned`; the two pin-bound assertions `tests/test_native_sdk_bridge_live.py::test_the_installed_pi_subagents_is_the_managed_pin` and `::test_real_pi_selfcheck_reports_the_bridge_installed_and_both_consumers_loaded` | by hand; `perk doctor --fix` converges `.pi/settings.json` and the digest |
+| Adopted Pi pin + pinned install set (= the remote install pin) | `src/perk/substrate/pi_host.py` (`PI_ADOPTED_VERSION`; `PI_COMPANION_PACKAGES`, the six-name coherence family; `PI_INSTALL_SPECS`, the one exact spec; `PI_INSTALL_COMMAND`); `src/perk/run/workflow_artifacts.py` (`REMOTE_PI_VERSION`, `_PI_GLOBAL_INSTALL`, the consumer worker install with `--save-exact`) | `tests/test_pi_host.py::test_install_command_is_the_pinned_set`, `::test_pinned_install_family_is_closed_against_the_characterized_lockfile`, `::test_the_family_declares_itself_exactly_in_the_characterized_lockfile`, `::test_remote_install_pin_is_the_adopted_pin`; `tests/test_workflow_artifacts.py::test_committed_self_repo_remote_artifacts_are_the_owners_render` | by hand; `uv run perk init --no-interactive` regenerates `.github/actions/perk-remote-setup/action.yml` and its `.perk/managed-state.toml` digest (`perk doctor --fix` converges them too, but also installs the pinned set into the global prefix whenever the PATH `pi` is not the adopted pin) |
+| Supplier pin | `src/perk/convergence/init/settings.py::SUBAGENTS_PACKAGE`; `.pi/settings.json`; the `settings-wiring` digest in `.perk/managed-state.toml` | `tests/test_init_idempotent.py::test_subagents_borrow_is_version_pinned`; the two pin-bound assertions `tests/test_native_sdk_bridge_live.py::test_the_installed_pi_subagents_is_the_managed_pin` and `::test_real_pi_selfcheck_reports_the_bridge_installed_and_both_consumers_loaded` | by hand; `uv run perk init --no-interactive` converges `.pi/settings.json` and the digest (same `doctor --fix` caveat as above) |
 | Guidance stamp | `src/perk/convergence/doctor/checks.py::_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` | `tests/test_doctor.py::test_subagent_compat_verified_version_stamp_is_pinned` | last, only on a certification whose every required supplier row passes |
 
 One lockstep surface rides beside them: the extension refusal's public URL,
@@ -66,11 +66,20 @@ the stamp the same way; the stamp moves only on certification evidence.
    characterization-record shape: `docs/design/archive/pi-1.1.0-characterization.md`). Read the
    release notes either way.
 
-   **The Pi half.** The packaging facts: Pi ships no `npm-shrinkwrap.json` since 1.0.1, and its
-   `@earendil-works/*` companions are declared at caret ranges. Is the family still closed at the
-   eight names? A new `@earendil-works/*` dependency is a new `PI_COMPANION_PACKAGES` member; a
-   dropped one (as `chord` was in 1.4.0) breaks pi-subagents' background children. Then the SDK
-   surfaces perk binds: the census drift guard (`extension/substrate/nativeSdkBridge.test.ts`),
+   **The Pi half.** The packaging facts: since Pi 1.3.0 the package declares its
+   `@earendil-works/*` companions at exact versions (no `npm-shrinkwrap.json` — none needed), so
+   the one exact spec places the whole family. Is the family still closed at the seven names, and
+   is every declaration still exact? A new `@earendil-works/*` dependency is a new
+   `PI_COMPANION_PACKAGES` member; a dropped one (as `chord` was in 1.2.0) leaves the tuple and is
+   checked against the supplier's host aliases (`src/runs/background/runner-aliases.js` — 0.76.1
+   required Chord on every 1.x host; 0.78.0 made it conditional); a return to ranged declarations
+   fails `test_the_family_declares_itself_exactly_in_the_characterized_lockfile` and means the
+   install must name the family again. Then the SDK surfaces perk binds: the census drift guard
+   (`extension/substrate/nativeSdkBridge.test.ts`), the `before_agent_start` event shape (since Pi
+   1.2.0 a discriminated union: a user start, `messageType: "user"`, carries `prompt`; a custom
+   start, `messageType: "custom"` — pi-subagents' completion wake, any idle
+   `sendMessage(…, { triggerTurn: true })` — carries `message` and no prompt; perk's two hooks scan
+   the prompt only on a user start, contracts §8.9 and §8.31),
    `extension/piAiCompatGuard.test.ts`, `McpExtensionOptions` (the worker's factory-scoped
    isolation, contracts §8.11), `agent_settled.aborted` (the driven-compaction seam,
    `extension/pi/v1/drivenCompaction.ts`), codemode exposure (`model-only` for the bounded
@@ -147,8 +156,8 @@ the stamp the same way; the stamp moves only on certification evidence.
      a still-running `runs.all` lane (it appears only in `workflowChildren`), and `/reload` stops
      in-process workflows, so a later RPC `stop` answers `invalid_state` while a
      `writer-close-unverified` terminal proof stays `unknown`. Re-read both at the next release;
-     their repair or re-specification belongs to the re-certification node (node 7.3 of objective
-     #2707), not to this procedure;
+     with W4 they are the three held cells, re-specified or repaired by objective #2767's
+     lifecycle node (2.1) and measured by its certification node (3.1) — not by this procedure;
    - the **awaited-child event** (`subagent-executor.ts::emitWorkflowAwaitedChildComplete`): a
      per-child `subagent:async-complete` payload carrying the CHILD's `id`/`asyncDir` on the
      wave's channel. perk correlates by identity only and must never match it to the workflow
@@ -197,14 +206,17 @@ the stamp the same way; the stamp moves only on certification evidence.
    Keep MEASURED observations and SOURCE-DERIVED design apart in the record, and hand a gap the
    source establishes to a repair design — never record it as a measured result.
 3. **Update every pin surface, in this order.**
-   1. **Dev pins** — `just bump-pi <v>`; commit the lockfile as npm produces it. A registry
-      preflight ties it to the characterized graph: no published `^<v>`-satisfying release of the
-      caret-floating companions other than `<v>`; `npm install --package-lock-only`
-      byte-identical; `npm ci` green.
+   1. **Dev pins** — `just bump-pi <v>`; commit the lockfile as npm produces it (trimmed per
+      `docs/learned/toolchain/worktree-node-modules.md` § "Pi pin-bump mechanics"). It IS the
+      characterized single-spec graph: the family's exact declarations leave nothing to float, so
+      no registry caret preflight is needed; `npm install --package-lock-only` byte-identical;
+      `npm ci` green; `npm prune` drops an orphan a departed member leaves.
    2. **The adopted pin and the family tuple** in `src/perk/substrate/pi_host.py`
       (`PI_ADOPTED_VERSION`, `PI_COMPANION_PACKAGES`).
       `tests/test_pi_host.py::test_pinned_install_family_is_closed_against_the_characterized_lockfile`
-      pins the family closed against the lockfile, so a new member fails it first.
+      pins the family closed against the lockfile, so a new member fails it first;
+      `::test_the_family_declares_itself_exactly_in_the_characterized_lockfile` pins the
+      single-spec premise (every declaration exact).
    3. **The floor** in `shared/host-floor.yaml` — the floor guards in the table, plus the
       hard-coded refusal strings in `tests/test_launch.py`, `tests/test_plain_session.py`,
       `tests/test_resume_session_cmd.py`, `tests/test_session_resume.py`,
@@ -212,31 +224,36 @@ the stamp the same way; the stamp moves only on certification evidence.
       `extension/entryAdmission.test.ts`, `extension/index.test.ts`,
       `extension/pi/v1/selfcheck.test.ts` and `extension/substrate/hostAdmission.test.ts`.
       Historical fixtures and CHANGELOG fixtures stay as written.
-   4. **The managed remote artifacts**, regenerated through their owner (`perk doctor --fix`):
-      one `action.yml` line and the `.perk/managed-state.toml` digest move, while `perk-run.yml`
-      stays byte-identical;
+   4. **The managed remote artifacts**, regenerated through their owner
+      (`uv run perk init --no-interactive`, run with the target `pi` first on PATH — init's
+      preflight probes PATH `pi` against the new floor; never `perk doctor --fix` before landing,
+      see "Pre-land gating" below): one `action.yml` line and the `.perk/managed-state.toml`
+      digest move, while `perk-run.yml` stays byte-identical; revert any other hunk init leaves;
       `tests/test_workflow_artifacts.py::test_committed_self_repo_remote_artifacts_are_the_owners_render`
       is the lockstep pin. Never revert an owner's output by hand.
    5. **Measure placement** in throwaway prefixes, on the host toolchain AND under the composite's
       Node line (`mise exec node@<node.min_version> --` prefixing every npm/node call): the
-      control (the bare exact package, whose companions float), the treatment
-      (`PI_INSTALL_COMMAND`: eight top-level siblings, `pi --version` answers, the module link
-      succeeds), the consumer shape (`--save-exact`), and pi-subagents' alias resolver answering
-      `missing: []` / `outside: []`. The procedure is
-      `docs/design/archive/pi-1.1.0-install-pins.md` § The preflight matrix.
+      treatment (`PI_INSTALL_COMMAND`: seven packages from one spec, every one at `<v>` — nested
+      inside the global package under `-g`, hoisted under `--prefix` — `pi --version` answers, the
+      module link succeeds, and `probe_pi_host` admits the result), the consumer shape
+      (`--save-exact`), and pi-subagents' alias resolver answering `missing: []` /
+      `outside: []`. The matrix shape is `docs/design/archive/pi-1.1.0-install-pins.md` § The
+      preflight matrix (its caret-float control is 1.1.0-era).
    6. **The refusal URL's page and heading** — move the heading and `hostAdmission.test.ts`
       together.
-   7. **The supplier pin** (`SUBAGENTS_PACKAGE`). `perk doctor --fix` converges
+   7. **The supplier pin** (`SUBAGENTS_PACKAGE`). `uv run perk init --no-interactive` converges
       `.pi/settings.json` and the `settings-wiring` digest. Install the exact version the way Pi
-      does — `npm install pi-subagents@<v> --prefix <checkout>/.pi/npm --legacy-peer-deps`, with
-      Pi stopped — and in a worktree only on an independent `.pi/npm` (a clonefile stage is
-      independent; otherwise copy the tree first, as `pi-subagents-0.76.1-pin.md` did).
+      does — remove the stale `.pi/npm/node_modules/pi-subagents` first, then
+      `npm install pi-subagents@<v> --prefix <checkout>/.pi/npm --legacy-peer-deps`, with no
+      `/reload` afterwards in the running session — and in a worktree only on an independent
+      `.pi/npm` (a clonefile stage is independent; otherwise copy the tree first, as
+      `pi-subagents-0.76.1-pin.md` did).
    8. **The stamp, LAST**, and only on step 5's evidence.
 
    None of the pins upgrades the PATH `pi`. `perk doctor --fix` installs the pinned set when the
-   `pi` row fails or is not the adopted pin, and doctor's companion check covers only the adopted
-   version's family — so run every live leg in a fresh host process whose PATH `pi` is the
-   target.
+   `pi` row fails or is not the adopted pin — which is why it is forbidden before landing — and
+   doctor's companion check covers only the adopted version's family, so run every live leg in a
+   fresh host process whose PATH `pi` is the target.
 4. **Run the compatibility, identity and policy tests.** Use targeted checks while iterating; in a
    perk session the gate is ONE run-all `run_ci` immediately before submitting (never bare
    `just ci` in bash, `AGENTS.md` § Developing perk). The run-all gate carries only the fast JS
@@ -248,8 +265,13 @@ the stamp the same way; the stamp moves only on certification evidence.
      `NATIVE_SDK_CENSUS` and bump `BRIDGE_SCHEMA` in `extension/substrate/nativeSdkBridge.ts`
      (contracts §8.73); a vanished one is a stale entry;
    - **the live bridge smoke**, `tests/test_native_sdk_bridge_live.py`, on both the PATH `pi` and
-     the pinned CLI, each with a captured `/perk-selfcheck`; exactly its two
-     `SUBAGENTS_PACKAGE`-bound assertions move with the supplier pin;
+     the pinned CLI, each with a captured `/perk-selfcheck`: its two positive tests
+     (`test_the_installed_pi_subagents_is_the_managed_pin`,
+     `test_real_pi_selfcheck_reports_the_bridge_installed_and_both_consumers_loaded`) must RUN and
+     pass — a skip of either means the gate environment is wrong (PATH `pi` not admitted, or a
+     consumer missing under `.pi/npm`); the negative control
+     `test_a_below_floor_real_pi_refuses_to_load_perk` skips by design on an admitted host.
+     Exactly its two `SUBAGENTS_PACKAGE`-bound assertions move with the supplier pin;
    - **the in-process child identity proof** — one blocking `perk.scout` through
      `dispatchForeground` under the module tracer, with the bridge-off control
      (`PERK_DISABLE_NATIVE_SDK_BRIDGE=1`), as `docs/design/archive/pi-subagents-0.76.1-pin.md`
@@ -276,7 +298,8 @@ the stamp the same way; the stamp moves only on certification evidence.
    re-read + the doctor/scout/offline halves — an explicit, recorded decision (the plan's
    `## Assumptions` + the archive record's verdict line), never a default. That was done at
    0.68.0, 0.70.1 and 0.75.0; 0.73.1 waited for every half; 0.76.1 was adopted ahead of its
-   certification and the certification HELD. The record — and the `## Sources` provenance line of
+   certification and the certification HELD; 0.81.0 was adopted with Pi 1.4.0 ahead of its
+   certification, which is owed. The record — and the `## Sources` provenance line of
    `docs/learned/pi/subagents.md` — then names the browser-door half as **owed**.
 
    **The self-referential gate.** A leg scheduled on the bump PR's own review door waits on the
@@ -321,20 +344,50 @@ the stamp the same way; the stamp moves only on certification evidence.
    `pi-subagents-0.73.1-reverify.md`, `pi-subagents-0.75.0-reverify.md` (with the trust matrix
    and the headless-exit rows on a Pi 1.0.0 throwaway), `pi-subagents-0.76.1-pin.md` (adoption
    ahead of certification), `pi-subagents-0.76.1-lifecycle.md` (live legs deferred),
-   `pi-1.1.0-characterization.md`, `pi-1.1.0-install-pins.md` and `pi-1.1.0-certification.md`
-   (HELD).
+   `pi-1.1.0-characterization.md`, `pi-1.1.0-install-pins.md`, `pi-1.1.0-certification.md`
+   (HELD) and `pi-1.4.0-adoption.md` (the pair adopted ahead of certification, single-spec
+   install).
+
+## Pre-land gating and the post-land cutover
+
+The global `pi` is one shared host: every checkout, every worktree and every running session on
+the machine uses it. A bump PR therefore gates against an **isolated** Pi and leaves the global
+one alone until the change lands.
+
+**Pre-land (the implement session).** Install the target into a throwaway prefix —
+`npm install --prefix <tmp> @earendil-works/pi-coding-agent@<v>` — and put `<tmp>/node_modules/.bin`
+first on PATH, with the host Node line selected, before launching the implement session; the
+session, `run_ci` (each row runs through a login shell that keeps the PATH prefix), `perk init`
+and the live PATH-`pi` tests then all see the target. Install the supplier into the worktree's own
+`.pi/npm` (step 3.7). **Never `perk doctor --fix` before landing:** `env.repair_pi` would install
+the pinned set into the global prefix while the main checkout and sibling worktrees still load the
+previous supplier — a running previous-supplier session resolves the host package by path at its
+next background-runner launch and breaks against the new host.
+
+**Post-land (the operator, in a fresh process).** Prerequisite: finish or cancel every outstanding
+wave or child and close every perk session on the machine. Then run `PI_INSTALL_COMMAND` (or
+`perk doctor --fix` from the main checkout) and check that `perk doctor`'s `pi` row reads the
+target; the earlier top-level companions may be removed with `npm uninstall -g` when convenient.
+Run `npm ci` in the main checkout (its `node_modules` lags the manifest until then — never run the
+suites from it before), and its supplier walks forward at the next Pi launch through the committed
+`.pi/settings.json` pin. A sibling worktree still on a pre-bump branch (the old supplier pin and
+hooks) is rebased onto main before waves run there, or closed — perk keeps no separate old-host
+prefix, and the pre-land `<tmp>` prefix is a gate fixture, not a fallback host.
 
 ## The standing pin decision
 
-pi-subagents is **pinned** to exact 0.76.1 (`SUBAGENTS_PACKAGE =
-"npm:pi-subagents@0.76.1"` in `src/perk/convergence/init/settings.py`). perk's report waves send
-the inline script text under the RPC spawn key `script`, which pi-subagents accepts since 0.74.0
-(`docs/design/archive/pi-subagents-0.75.0-reverify.md`). The pin currently **leads** the
-guidance stamp (0.75.0). 0.76.1 was adopted on the characterization record, the offline and doctor
-halves and the in-process identity proof (`docs/design/archive/pi-subagents-0.76.1-pin.md`). The
-live certification (`docs/design/archive/pi-1.1.0-certification.md`) then HELD the pair and kept
-the stamp at 0.75.0, because W4, W6 and W7a failed and S3, S4a-live, U-bg, X5a and X5b were not
-run. So `subagent-compat` warns by design. Node 7.3 of objective #2707 owns the re-certification.
+pi-subagents is **pinned** to exact 0.81.0 (`SUBAGENTS_PACKAGE =
+"npm:pi-subagents@0.81.0"` in `src/perk/convergence/init/settings.py`), adopted with Pi 1.4.0 on
+characterization + offline evidence (`docs/planning/pi-and-subagents-assessment-2026-10-24.md`,
+`docs/design/archive/pi-1.4.0-adoption.md`). perk's report waves send the inline script text under
+the RPC spawn key `script`, which pi-subagents accepts since 0.74.0
+(`docs/design/archive/pi-subagents-0.75.0-reverify.md`). The pin currently **leads** the guidance
+stamp (0.75.0). The previous pair's live certification
+(`docs/design/archive/pi-1.1.0-certification.md`) HELD Pi 1.1.0 + 0.76.1 and kept the stamp at
+0.75.0, because W4, W6 and W7a failed and S3, S4a-live, U-bg, X5a and X5b were not run. So
+`subagent-compat` warns by design. The three held cells are re-specified or repaired by objective
+#2767's lifecycle node (2.1) and measured by its certification node (3.1), which owns the live
+certification of the adopted pair.
 `perk init` writes the pinned spec and reconciles an existing unpinned or differently pinned
 entry forward; `perk doctor --fix` repairs the same drift through `settings-wiring`. Pi installs
 whatever the checkout's own committed `.pi/settings.json` names, so the pin reaches a branch only

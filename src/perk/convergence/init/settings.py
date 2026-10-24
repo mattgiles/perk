@@ -93,13 +93,15 @@ def _perk_npm_entry() -> str:
 # entry (`_merge_static_packages`), and Pi reinstalls a ranged npm source whose installed version
 # no longer matches its OWN checkout's configured spec
 # (`package-manager.ts::installedNpmMatchesConfiguredVersion`, verified at Pi v1.0.0 and re-read
-# at Pi 1.1.0's `dist/core/package-manager.js` — the same `satisfies(installed, range)` rule), so
-# the pin walks any older install (0.73.1, which cannot accept `script`, or 0.75.0 alike) forward
-# once the checkout's settings carry it. The doctor `subagent-compat` stamp records what perk's
-# guidance was last fully re-verified against — a distinct fact that may lag this pin while a
-# newer supplier is adopted on characterization evidence ahead of its live certification; the
-# stamp's WARN is the truthful signal of that gap.
-SUBAGENTS_PACKAGE = "npm:pi-subagents@0.76.1"
+# at Pi 1.4.0's `dist/core/package-manager.js` — the same `satisfies(installed, range)` rule), so
+# the pin walks any older install (0.73.1, which cannot accept `script`, or 0.76.1 alike) forward
+# once the checkout's settings carry it. 0.81.0 is the release characterized against Pi 1.4.0
+# (docs/planning/pi-and-subagents-assessment-2026-10-24.md) and runs on that exact-dependency host
+# (0.78.0 made its Chord peer aliases conditional; 0.80+ requires Pi >= 1.2.0). The doctor
+# `subagent-compat` stamp records what perk's guidance was last fully re-verified against — a
+# distinct fact that may lag this pin while a newer supplier is adopted on characterization
+# evidence ahead of its live certification; the stamp's WARN is the truthful signal of that gap.
+SUBAGENTS_PACKAGE = "npm:pi-subagents@0.81.0"
 PONYTAIL_PACKAGE = "npm:@dietrichgebert/ponytail"
 PONYTAIL_NPM_NAME = "@dietrichgebert/ponytail"
 PACKAGE_RESOURCE_FILTERS = ("extensions", "skills", "prompts", "themes")

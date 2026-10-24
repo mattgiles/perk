@@ -21,7 +21,7 @@ actually runs may be a different install (contracts.md §8.76(f)), which is why 
 SDK-boundary refusal names the public requirements reference rather than this row.
 
 ``repair_pi`` is the one Pi repair gesture (``perk doctor --fix``): gap-driven over the ``pi``
-row, it runs the pinned eight-spec install as an argument list, then re-probes — the only
+row, it runs the pinned install set (one exact spec), then re-probes — the only
 function here with a side effect, and never called by a check.
 """
 
@@ -45,7 +45,7 @@ from perk.substrate.pi_host import (
 from perk.substrate.proc import ProcFailure, run_captured, which_absolute
 from perk.substrate.semver import parse_semver, satisfies_floor
 
-# The pinned install downloads eight packages over the network.
+# The pinned install downloads the whole Pi family (seven packages) over the network.
 _PI_INSTALL_TIMEOUT = 600
 _PI_FIX_REMEDIATION = f"Run `perk doctor --fix` (it runs: {PI_INSTALL_COMMAND})."
 
@@ -195,7 +195,7 @@ def repair_pi(checks: list[EnvCheck]) -> tuple[list[str], list[str]]:
     A no-op ``([], [])`` unless the ``pi`` row is not ok (absent / unsupported / unverifiable /
     incoherent) or carries the advisory (admitted, not the adopted Pi). A failing ``node`` row
     stops it with the install-Node-first warning (nothing installed). Otherwise one
-    ``npm install -g`` of the pinned eight-spec set (an argument list), then a re-probe: green →
+    ``npm install -g`` of the pinned install set (one exact spec), then a re-probe: green →
     one fixed line; an ``NpmError`` → the manual-command error; still not green → the PATH-order
     error (the ``pi`` PATH finds is not the install npm wrote). Reads ``_check_pi`` /
     ``which_absolute`` / ``npm`` as module globals (the test seams).
@@ -214,8 +214,8 @@ def repair_pi(checks: list[EnvCheck]) -> tuple[list[str], list[str]]:
     if after.ok and not after.advisory:
         return (
             [
-                f"pi: installed the adopted Pi {PI_ADOPTED_VERSION} set "
-                f"(npm -g, {len(PI_INSTALL_SPECS)} packages)"
+                f"pi: installed the adopted Pi {PI_ADOPTED_VERSION} "
+                f"(npm -g {' '.join(PI_INSTALL_SPECS)})"
             ],
             [],
         )

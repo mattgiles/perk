@@ -46,6 +46,14 @@ export const TOOL_FIELD_POLICIES = {
     kind: "non-prose",
     reason: "boolean behavior hints for permission policy, not model-facing prose",
   },
+  // A runtime tool-reachability hint (which tools a `codemode`/`tool_search` call may reach),
+  // consulted by late-registering extensions before a call runs — never model-facing text and
+  // never an authorization grant: perk's nested-call and MCP restrictions are decided elsewhere.
+  reachesTools: {
+    kind: "non-prose",
+    reason:
+      "runtime tool-reachability hint for late-registering extensions, not model-facing prose",
+  },
   defaultActive: { kind: "non-prose", reason: "activation default, not model-facing prose" },
   prepareLoadout: { kind: "model-facing-prose", collector: "field" },
   executionMode: {

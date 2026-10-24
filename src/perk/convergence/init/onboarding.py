@@ -88,7 +88,9 @@ def _resolve_installer(name: str, *, node_ok: bool) -> _Installer | None:
     if name == "pi" and node_ok:
         return _Installer(
             label=PI_INSTALL_COMMAND,
-            detail=f"npm -g {PI_NPM_SPEC}@{PI_ADOPTED_VERSION} + pinned companions",
+            detail=(
+                f"npm -g {PI_NPM_SPEC}@{PI_ADOPTED_VERSION} (one exact spec placing its companions)"
+            ),
             run=lambda: npm.install_global(*PI_INSTALL_SPECS, timeout=_INSTALL_TIMEOUT),
         )
     if name == "cloc":

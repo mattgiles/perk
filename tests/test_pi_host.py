@@ -36,21 +36,22 @@ FLOOR = Semver(1, 0, 0)
 PI = "/opt/bin/pi"
 
 
-PINNED_INSTALL_COMMAND = (
-    "npm install -g @earendil-works/pi-coding-agent@1.1.0 @earendil-works/chord@1.1.0 "
-    "@earendil-works/pi-agent-core@1.1.0 @earendil-works/pi-ai@1.1.0 "
-    "@earendil-works/pi-codemode@1.1.0 @earendil-works/pi-mcp@1.1.0 "
-    "@earendil-works/pi-telemetry@1.1.0 @earendil-works/pi-tui@1.1.0"
-)
+PINNED_INSTALL_COMMAND = "npm install -g @earendil-works/pi-coding-agent@1.4.0"
 
 
 def test_install_command_is_the_pinned_set() -> None:
     assert PI_INSTALL_COMMAND == PINNED_INSTALL_COMMAND
     assert PI_VERSION_PROBE_TIMEOUT == 20
-    assert len(PI_INSTALL_SPECS) == 8
-    assert PI_INSTALL_SPECS[0] == f"{PI_NPM_SPEC}@{PI_ADOPTED_VERSION}"
-    companions = [spec.removesuffix(f"@{PI_ADOPTED_VERSION}") for spec in PI_INSTALL_SPECS[1:]]
-    assert companions == sorted(companions) == list(PI_COMPANION_PACKAGES)
+    assert (f"{PI_NPM_SPEC}@{PI_ADOPTED_VERSION}",) == PI_INSTALL_SPECS
+    assert PI_COMPANION_PACKAGES == (
+        "@earendil-works/pi-agent-core",
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-codemode",
+        "@earendil-works/pi-mcp",
+        "@earendil-works/pi-telemetry",
+        "@earendil-works/pi-tui",
+    )
+    assert list(PI_COMPANION_PACKAGES) == sorted(PI_COMPANION_PACKAGES)
     adopted = parse_semver(PI_ADOPTED_VERSION)
     assert adopted is not None
     assert str(adopted) == PI_ADOPTED_VERSION  # a plain release: no `v`, prerelease or build
@@ -80,6 +81,26 @@ def test_pinned_install_family_is_closed_against_the_characterized_lockfile() ->
         assert declared <= family, (name, declared - family)
         peers = _family_keys(entry.get("peerDependencies", {}))
         assert not peers, (name, peers)
+
+
+def test_the_family_declares_itself_exactly_in_the_characterized_lockfile() -> None:
+    # The single-spec install's premise, kept apart from the closed-names test on purpose: every
+    # family member sits at the adopted version and declares each `@earendil-works/*` dependency at
+    # exactly that version (no `^`/`~`). A Pi that returns to ranged declarations fails here — the
+    # one exact spec would then float its companions and the install must name the family again.
+    lock = json.loads((REPO_ROOT / "package-lock.json").read_text(encoding="utf-8"))
+    packages: dict[str, dict] = lock["packages"]
+    top = {
+        key.removeprefix("node_modules/"): entry
+        for key, entry in packages.items()
+        if re.fullmatch(r"node_modules/@earendil-works/[^/]+", key)
+    }
+    assert set(top) == {PI_NPM_SPEC, *PI_COMPANION_PACKAGES}
+    for name, entry in top.items():
+        assert entry["version"] == PI_ADOPTED_VERSION, (name, entry["version"])
+        deps: dict[str, str] = entry.get("dependencies", {})
+        ranged = {dep: deps[dep] for dep in _family_keys(deps) if deps[dep] != PI_ADOPTED_VERSION}
+        assert not ranged, (name, ranged)
 
 
 def test_remote_install_pin_is_the_adopted_pin() -> None:
@@ -132,14 +153,15 @@ def test_the_dev_pin_satisfies_the_floor_and_the_cli_is_admitted_independently()
     assert pinned is not None, sdk_pin
     assert satisfies_floor(pinned, floor), sdk_pin
     assert admit_pi_version(PI, "0.99.2\n", floor).outcome == "unsupported"
-    assert admit_pi_version(PI, "1.0.0\n", floor).outcome == "unsupported"
-    assert admit_pi_version(PI, "1.1.0-rc.1\n", floor).outcome == "unsupported"
-    at_floor = admit_pi_version(PI, "1.1.0\n", floor)
+    assert admit_pi_version(PI, "1.1.0\n", floor).outcome == "unsupported"
+    assert admit_pi_version(PI, "1.3.0\n", floor).outcome == "unsupported"
+    assert admit_pi_version(PI, "1.4.0-rc.1\n", floor).outcome == "unsupported"
+    at_floor = admit_pi_version(PI, "1.4.0\n", floor)
     assert at_floor.outcome == "admitted"
-    assert at_floor.observed == "1.1.0"
-    later = admit_pi_version(PI, "1.2.0\n", floor)
+    assert at_floor.observed == "1.4.0"
+    later = admit_pi_version(PI, "1.5.0\n", floor)
     assert later.outcome == "admitted"
-    assert later.observed == "1.2.0"
+    assert later.observed == "1.5.0"
     assert later.observed != sdk_pin
 
 
@@ -192,7 +214,7 @@ def test_admit_companions_all_adopted_is_coherent() -> None:
 
 def test_admit_companions_lists_every_offender_in_family_order() -> None:
     resolved: dict[str, str | None] = dict.fromkeys(PI_COMPANION_PACKAGES, PI_ADOPTED_VERSION)
-    resolved[MCP] = "1.4.0"
+    resolved[MCP] = "1.5.0"
     resolved[CODEMODE] = None
     assert admit_pi_companions(resolved) == INCIDENT_DETAIL
 
@@ -213,7 +235,7 @@ def test_locate_follows_the_bin_symlink_to_the_package(broken_pi_layout: str) ->
 
 
 def test_locate_is_none_for_a_bare_script(tmp_path: Path) -> None:
-    assert locate_pi_package(_script(tmp_path, "echo 1.1.0")) is None
+    assert locate_pi_package(_script(tmp_path, "echo 1.4.0")) is None
     assert locate_pi_package(str(tmp_path / "absent-pi")) is None
 
 
@@ -231,7 +253,7 @@ def test_resolve_prefers_the_nested_copy_and_reports_the_dangling_link(
     resolved = resolve_companions(Path(broken_pi_layout).resolve().parent)
     assert list(resolved) == list(PI_COMPANION_PACKAGES)
     assert resolved[CODEMODE] is None
-    assert resolved[MCP] == "1.4.0"
+    assert resolved[MCP] == "1.5.0"
     others = {name: v for name, v in resolved.items() if name not in {CODEMODE, MCP}}
     assert set(others.values()) == {PI_ADOPTED_VERSION}
 
@@ -239,11 +261,11 @@ def test_resolve_prefers_the_nested_copy_and_reports_the_dangling_link(
 def test_resolve_reads_a_versionless_manifest_as_unresolved(repaired_pi_layout: str) -> None:
     package = locate_pi_package(repaired_pi_layout)
     assert package is not None
-    (package.parent.parent / "@earendil-works/chord/package.json").write_text(
+    (package.parent.parent / "@earendil-works/pi-tui/package.json").write_text(
         "[]", encoding="utf-8"
     )
     resolved = resolve_companions(Path(repaired_pi_layout).resolve().parent)
-    assert resolved["@earendil-works/chord"] is None
+    assert resolved["@earendil-works/pi-tui"] is None
 
 
 def test_a_nested_directory_without_a_manifest_shadows_the_outer_copy(
@@ -266,13 +288,13 @@ def test_real_probe_of_the_broken_layout_is_incoherent(
     # The repo root holds a dev SDK install; the probe still reads only the executable's graph.
     monkeypatch.chdir(REPO_ROOT)
     host = probe_pi_host(broken_pi_layout)
-    assert host == PiHost(broken_pi_layout, "incoherent", "1.1.0", "1.1.0", INCIDENT_DETAIL)
+    assert host == PiHost(broken_pi_layout, "incoherent", "1.4.0", "1.4.0", INCIDENT_DETAIL)
     assert pi_refusal_error_type(host) == "pi_companions_incoherent"
 
 
 def test_real_probe_of_the_repaired_layout_is_admitted(repaired_pi_layout: str) -> None:
     host = probe_pi_host(repaired_pi_layout)
-    assert host == PiHost(repaired_pi_layout, "admitted", "1.1.0", "1.1.0", "")
+    assert host == PiHost(repaired_pi_layout, "admitted", "1.4.0", "1.4.0", "")
 
 
 def test_an_admitted_non_adopted_version_is_not_family_checked(
@@ -282,9 +304,9 @@ def test_an_admitted_non_adopted_version_is_not_family_checked(
         raise AssertionError("the family is read only for the adopted version")
 
     monkeypatch.setattr(pi_host, "locate_pi_package", unreachable)
-    monkeypatch.setattr(pi_host, "run_captured", lambda argv, *, timeout: _completed(0, "1.4.0"))
+    monkeypatch.setattr(pi_host, "run_captured", lambda argv, *, timeout: _completed(0, "1.5.0"))
     host = probe_pi_host(broken_pi_layout)
-    assert (host.outcome, host.observed, host.detail) == ("admitted", "1.4.0", "")
+    assert (host.outcome, host.observed, host.detail) == ("admitted", "1.5.0", "")
 
 
 def test_an_adopted_pi_outside_any_package_is_unverifiable(tmp_path: Path) -> None:
@@ -300,9 +322,9 @@ def test_an_adopted_pi_outside_any_package_is_unverifiable(tmp_path: Path) -> No
 
 
 def test_incoherent_refusal_text_and_error_type() -> None:
-    host = PiHost(PI, "incoherent", "1.1.0", "1.1.0", INCIDENT_DETAIL)
+    host = PiHost(PI, "incoherent", "1.4.0", "1.4.0", INCIDENT_DETAIL)
     assert format_pi_refusal(host) == (
-        "pi at /opt/bin/pi is Pi 1.1.0, but its companion packages are not the 1.1.0 family: "
+        "pi at /opt/bin/pi is Pi 1.4.0, but its companion packages are not the 1.4.0 family: "
         f"{INCIDENT_DETAIL}. perk requires the matching family — run: perk doctor --fix "
         f"(it runs: {PINNED_INSTALL_COMMAND})."
     )
@@ -323,12 +345,12 @@ def test_probe_runs_version_once_with_the_bounded_timeout(
 
     def fake_run(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
         calls.append((list(argv), timeout))
-        return _completed(0, "1.1.0\n")
+        return _completed(0, "1.4.0\n")
 
     monkeypatch.setattr(pi_host, "run_captured", fake_run)
     host = probe_pi_host(repaired_pi_layout)  # no floor argument: the bundled floor
     assert calls == [([repaired_pi_layout, "--version"], 20)]
-    assert host == PiHost(repaired_pi_layout, "admitted", "1.1.0", "1.1.0", "")
+    assert host == PiHost(repaired_pi_layout, "admitted", "1.4.0", "1.4.0", "")
 
 
 def test_probe_defaults_to_the_bundled_floor(monkeypatch: pytest.MonkeyPatch) -> None:

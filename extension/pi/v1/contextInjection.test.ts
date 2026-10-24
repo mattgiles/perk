@@ -1,7 +1,8 @@
 // The shared context-injection mechanism's DISTINCT policies — owned ONCE here, for every
 // `installInjectedContext` caller (gist, plan, objective-authoring, refinement, plannotator,
 // tombell): the scan-before-construct content thunk, the two guarded reads' failure semantics,
-// the submitting-prompt check, the selection-driven retention filter shape (owned copies only —
+// the submitting-prompt check (user starts only — a custom start carries no prompt and the
+// projection alone decides), the selection-driven retention filter shape (owned copies only —
 // user input is preserved byte-for-byte), the runner fence, the `isPlanGuidanceStage` registry
 // guard, one registered-extension composition smoke, and the supplier's completion notice + wake
 // prompt surviving the whole registered `context` chain in both gate states. Drives the installer
@@ -133,7 +134,23 @@ function assistantTurn(manager: SessionManager, text: string): string {
   } as never);
 }
 
-const EMPTY_EVENT = { prompt: "" };
+const EMPTY_EVENT = { messageType: "user", prompt: "" };
+
+/**
+ * A custom start (`sendMessage(…, { triggerTurn: true })` while idle — pi-subagents' completion
+ * wake). Deliberately WITHOUT a `prompt` property: a hook that scans `event.prompt`
+ * unconditionally throws on it.
+ */
+const CUSTOM_EVENT = {
+  messageType: "custom",
+  message: {
+    role: "custom",
+    customType: "subagent-notify",
+    content: "lane done",
+    display: false,
+    timestamp: 1,
+  },
+};
 
 test("injects when eligible and no live marker (display:false, the owned customType)", async () => {
   const { spec, counts } = countingSpec();
@@ -238,7 +255,7 @@ test("the submitting prompt carrying the SELECTED marker suppresses (cold delive
     },
   });
   const result = await inject(
-    { prompt: `Do the work.\n\n${MARKER}\nseeded by the cold door` },
+    { messageType: "user", prompt: `Do the work.\n\n${MARKER}\nseeded by the cold door` },
     ctx,
   );
   assert.equal(result, undefined, "the cold seed is the delivery on the launch turn");
@@ -257,12 +274,72 @@ test("the submitting prompt carrying ANOTHER flavor's marker does not suppress t
     },
   });
   const { inject } = hooksFor(spec);
-  const result = (await inject({ prompt: `${SECOND_MARKER} rides the prompt` }, ctxOver())) as {
-    message?: { content: string };
-  };
+  const result = (await inject(
+    { messageType: "user", prompt: `${SECOND_MARKER} rides the prompt` },
+    ctxOver(),
+  )) as { message?: { content: string } };
   assert.ok(result?.message !== undefined, "the selected flavor still injects");
   assert.ok(result.message.content.includes(MARKER));
   assert.equal(counts.content, 1);
+});
+
+// --- custom starts: no prompt to scan, the projection decides --------------------------------------
+
+test("a custom start injects when no live copy exists (no prompt scan, the projection decides)", async () => {
+  const { spec, counts } = countingSpec();
+  const { inject } = hooksFor(spec);
+  const result = (await inject(CUSTOM_EVENT, ctxOver())) as {
+    message: { customType: string; content: string; display: boolean };
+  };
+  assert.equal(result.message.customType, CONTEXT_TYPE);
+  assert.ok(result.message.content.includes(MARKER));
+  assert.equal(result.message.display, false);
+  assert.equal(counts.content, 1);
+});
+
+test("a custom start dedups against a persisted user seed carrying the marker in Pi's projection", async () => {
+  const { spec, counts } = countingSpec();
+  const { inject } = hooksFor(spec);
+  const manager = SessionManager.inMemory("/nowhere");
+  manager.appendMessage({
+    role: "user",
+    content: `Do the work.\n\n${MARKER}\nseeded by the cold door`,
+    timestamp: 1,
+  } as never);
+  assert.equal(await inject(CUSTOM_EVENT, ctxOver(manager)), undefined);
+  assert.equal(counts.content, 0, "the persisted cold seed is the live delivery");
+});
+
+test("a custom start dedups against a live owned copy", async () => {
+  const { spec, counts } = countingSpec();
+  const { inject } = hooksFor(spec);
+  const manager = SessionManager.inMemory("/nowhere");
+  priorCopy(manager);
+  assert.equal(await inject(CUSTOM_EVENT, ctxOver(manager)), undefined);
+  assert.equal(counts.content, 0, "the content thunk never ran on the dedup-suppressed turn");
+});
+
+test("a custom start after compaction summarized the prior copy out re-injects — even when the custom message itself quotes the marker", async () => {
+  const { spec } = countingSpec();
+  const { inject } = hooksFor(spec);
+  const manager = SessionManager.inMemory("/nowhere");
+  priorCopy(manager);
+  const kept = assistantTurn(manager, "recent work");
+  manager.appendCompaction("summary without the marker", kept, 100);
+  const quoting = {
+    ...CUSTOM_EVENT,
+    message: { ...CUSTOM_EVENT.message, content: `lane report quoting ${MARKER}` },
+  };
+  const result = (await inject(quoting, ctxOver(manager))) as { message?: unknown } | undefined;
+  assert.ok(result?.message !== undefined, "the custom message is never scanned for the marker");
+});
+
+test("a runner child selects nothing on a custom start", async () => {
+  const { spec, counts } = countingSpec();
+  const { inject } = hooksFor(spec, () => true);
+  assert.equal(await inject(CUSTOM_EVENT, ctxOver()), undefined);
+  assert.equal(counts.select, 0, "the fence precedes every selector read");
+  assert.equal(counts.content, 0);
 });
 
 test("a THROWING branch read: injection short-circuits (no select call, no throw); retention fails closed and removes the owned copy", async () => {
@@ -636,12 +713,34 @@ test("composition: the bound extension injects, dedups on the live copy, re-inje
   }
 });
 
+test("composition: a custom start through the real runner injects the bound context when no live copy exists and nothing once it is live", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.inMemory(cwd),
+    env: { PERK_RUN_ID: "01RID" },
+  });
+  try {
+    const expected = planAuthoringContextContent(undefined);
+    const planContexts = (injected: { customType?: string; content?: unknown }[]) =>
+      injected.filter((m) => m.customType === PLAN_CONTEXT_TYPE).map((m) => m.content);
+    const wake = { customType: "subagent-notify", content: "lane done", display: false };
+
+    assert.deepEqual(planContexts(await h.emitBeforeAgentStartCustom(wake)), [expected]);
+    h.session.sessionManager.appendCustomMessageEntry(PLAN_CONTEXT_TYPE, expected, false);
+    assert.deepEqual(planContexts(await h.emitBeforeAgentStartCustom(wake)), []);
+  } finally {
+    h.dispose();
+  }
+});
+
 // --- the supplier's wake prompt survives perk's whole `context` chain -----------------------------
 
 /**
- * pi-subagents 0.76.1's completion notice (`notify.js`: `customType: "subagent-notify"`) and the
- * idle-parent wake prompt it steers after it (`parent-wake.js::PARENT_WAKE_TEXT`, delivered through
- * `sendUserMessage` — a plain user turn). perk's `context` hooks filter only their own customTypes;
+ * pi-subagents' completion notice (`notify.js`: `customType: "subagent-notify"` — since 0.80 it
+ * also starts the idle parent's wake turn itself, via `triggerTurn`) and the idle-parent wake
+ * prompt 0.76.1 steered after it (`parent-wake.js::PARENT_WAKE_TEXT`, delivered through
+ * `sendUserMessage` — a plain user turn; kept because any user turn must survive too). perk's `context` hooks filter only their own customTypes;
  * the gate-OFF arm additionally drops user turns carrying a `[READ-ONLY MODE]` marker — neither
  * may touch these.
  */
