@@ -9,7 +9,7 @@ import { loadHostFloor, parseHostFloor } from "./hostFloor.ts";
 test("loadHostFloor: returns the shipped floors", () => {
   assert.deepEqual(loadHostFloor(), {
     schemaVersion: 1,
-    piMinVersion: "1.1.0",
+    piMinVersion: "1.4.0",
     nodeMinVersion: "22.23.4",
   });
 });

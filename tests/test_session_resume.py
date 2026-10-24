@@ -543,7 +543,7 @@ def test_exec_pi_outdated_refuses_typed_before_any_chdir(
 ):
     def _outdated(pi_path: str):
         raise UserFacingCliError(
-            f"pi at {pi_path} is version 0.99.2; perk requires Pi >= 1.1.0.",
+            f"pi at {pi_path} is version 0.99.2; perk requires Pi >= 1.4.0.",
             error_type="pi_version_unsupported",
         )
 

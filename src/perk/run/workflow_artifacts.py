@@ -175,10 +175,10 @@ _PERK_INSTALL_CONSUMER = f"uv tool install perk=={__version__}"
 # pinned install set. Distinct from the host floor (a minimum, `shared/host-floor.yaml`), the
 # development pins (`package.json` devDependencies) and the pi-subagents supplier pin. It moves with
 # the floor on characterization + offline evidence; the live certification of the pair follows as
-# its own record; it is never below the floor (a test pins that). The install names every
-# `@earendil-works/*` family member as an exact spec — Pi ships no shrinkwrap since 1.0.1 and
-# neither remote install uses a lockfile, so a bare package spec would float its caret-ranged
-# companions — and the registry preflight at each move checks the family stays closed.
+# its own record; it is never below the floor (a test pins that). Neither remote install uses a
+# lockfile, and none is needed: since Pi 1.3.0 the package declares its `@earendil-works/*`
+# companions at exact versions, so the one exact spec places the whole family at the adopted
+# version (a lockfile test pins the family closed and every declaration exact).
 REMOTE_PI_VERSION = PI_ADOPTED_VERSION
 _PI_GLOBAL_INSTALL = PI_INSTALL_COMMAND
 
@@ -199,10 +199,9 @@ REMOTE_UV_VERSION_SPEC = ">=0.13.4"
 # (`run_worker._stage_consumer_entry`). Proven live in
 # `docs/design/archive/remote-runner-consumer-dogfood.md` (defects B-pre-c/B8). The consumer
 # worker SDK IS the remote wave host, so it carries the same pinned install set as the global CLI
-# (hoisted at `.pi/npm/node_modules/@earendil-works/*`, where the package's `^` ranges resolve to
-# them) — pinning only the CLI, or only the package, would leave consumer waves floating on
-# whatever companions were latest — and `--save-exact` records the pins as exact in
-# `.pi/npm/package.json`.
+# — the one exact spec, whose exact internal declarations hoist the companions at
+# `.pi/npm/node_modules/@earendil-works/*` — so the remote wave host matches the CLI, and
+# `--save-exact` records the pin as exact in `.pi/npm/package.json`.
 _WORKER_DEPS_SELF = "npm ci"
 _WORKER_DEPS_CONSUMER = (
     f"npm install {_NPM_NAME}@{__version__} {' '.join(PI_INSTALL_SPECS)}"
@@ -273,7 +272,7 @@ def remote_setup_action(self_repo: bool) -> str:
 
     Node is set up at exactly the shared host floor's lowest supported line, so every remote run
     exercises the declared minimum; uv at ``REMOTE_UV_VERSION_SPEC``; pi at the exact adopted pin
-    (``REMOTE_PI_VERSION``) with its pinned companion set.
+    (``REMOTE_PI_VERSION``) through the pinned install set.
     """
     install = _PERK_INSTALL_SELF if self_repo else _PERK_INSTALL_CONSUMER
     worker_deps = _WORKER_DEPS_SELF if self_repo else _WORKER_DEPS_CONSUMER

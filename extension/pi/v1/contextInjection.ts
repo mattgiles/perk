@@ -14,9 +14,13 @@
 // typed predicate whether the selected flavor's marker is still delivered — as user content (a
 // cold prompt) or as the owned customType's content (a prior hidden copy). A copy Pi has
 // compacted or edited out of context re-injects on the next turn even though the historical
-// entry still sits on the branch; a summary quoting the marker never counts. The submitting
-// `event.prompt` is checked BEFORE the projection read: at `before_agent_start` a cold launch's
-// prompt is not yet persisted, so only that check sees a cold seed on the launch turn.
+// entry still sits on the branch; a summary quoting the marker never counts. On a user start
+// (`messageType: "user"`) the submitting `event.prompt` is checked BEFORE the projection read:
+// at `before_agent_start` a cold launch's prompt is not yet persisted, so only that check sees a
+// cold seed on the launch turn. A custom start (`messageType: "custom"` — pi-subagents'
+// completion wake and any `sendMessage(…, { triggerTurn: true })`) carries no prompt and
+// proceeds straight to the projection read; its `message` is never scanned (the typed projection
+// predicate decides).
 //
 // RETENTION follows SELECTION on the `context` event, and touches ONLY the owned customType: a
 // null selection (ineligible, or eligibility could not be established — a failed branch read or
@@ -145,8 +149,10 @@ function carriesMarker(content: unknown, marker: string): boolean {
  *
  * - `before_agent_start`: guarded branch read (a failed read short-circuits — no `select` call,
  *   no injection) → the runner fence (a runner child selects nothing — no `select` call) →
- *   `spec.select` (null → no injection) → the submitting prompt carrying the SELECTED marker
- *   suppresses (cold delivery before persistence; another flavor's marker does not) → guarded
+ *   `spec.select` (null → no injection) → on a user start (`messageType: "user"`) only, the
+ *   submitting prompt carrying the SELECTED marker suppresses (cold delivery before persistence;
+ *   another flavor's marker does not) — a custom start (`messageType: "custom"`, e.g.
+ *   pi-subagents' completion wake) has no prompt and its `message` is never scanned → guarded
  *   projection read (a failed read returns — nothing constructed, nothing injected) → a live
  *   owned copy of the selected marker suppresses (the content thunk is never invoked) → inject
  *   `{ customType, content, display: false }`.
@@ -180,7 +186,7 @@ export function installInjectedContext<K extends string>(
     const marker = selectedMarker(ctx, branch);
     if (marker === null) return;
     const content = spec.flavors[marker as K];
-    if (event.prompt.includes(marker)) return;
+    if (event.messageType === "user" && event.prompt.includes(marker)) return;
     let live: readonly ContextMessage[];
     try {
       live = activeContextMessages(ctx);

@@ -20,14 +20,15 @@ The decision is split from the I/O so it is testable without a process:
 
 The version admission reads only the PATH CLI's own answer, and the companion read is anchored at
 the resolved executable — never the repo's dev SDK install or a loaded SDK. Those are independent
-observations, and equality between them is never required (a CLI ``1.1.0`` beside a ``1.0.0`` dev
-SDK pin is admitted on the CLI's own reading). Only the adopted version's family is checked: perk
+observations, and equality between them is never required (a CLI ``1.4.0`` beside a ``1.4.1`` dev
+SDK is admitted on the CLI's own reading). Only the adopted version's family is checked: perk
 knows exactly one companion family, and a floor-satisfying Pi at another version is admitted on
 its version alone (the environment row's advisory covers it).
 
 This module also declares the **adopted Pi pin** (``PI_ADOPTED_VERSION``) and its **pinned install
-set** (``PI_INSTALL_SPECS`` / ``PI_INSTALL_COMMAND``): the exact Pi perk adopted, installed together
-with its companion packages at that same exact version. It lives here, below ``perk.run``, so the
+set** (``PI_INSTALL_SPECS`` / ``PI_INSTALL_COMMAND``): the one exact spec of the Pi perk adopted,
+whose own exact internal declarations place its companion packages at that same version. It
+lives here, below ``perk.run``, so the
 launch refusal, the environment rows, the guided install and the remote install pin all name the
 same version and the same command. The floor admits any Pi at or above it; the adopted pin is what
 every install-guidance string installs.
@@ -49,15 +50,15 @@ PI_NPM_SPEC = "@earendil-works/pi-coding-agent"
 # supplier pin and the guidance stamp; it moves on characterization + offline evidence (the live
 # certification follows) and never below the floor.
 #
-# Pi ships no `npm-shrinkwrap.json` since 1.0.1 and declares its `@earendil-works/*` companions at
-# caret ranges, so any lockfile-free install of an exact Pi would float the companions to the newest
-# `^` satisfier — a graph Pi was never published against. The install therefore names the whole
-# family as exact specs: one global command places the eight packages as siblings under the global
-# root, which the package's own ranges, Node's module resolvers and pi-subagents' peer-alias
-# resolver all reach. The tuple is pinned closed against the committed lockfile by test.
-PI_ADOPTED_VERSION = "1.1.0"
+# Since Pi 1.3.0 the package declares its `@earendil-works/*` companions at exact versions (no
+# shrinkwrap — none needed), so a lockfile-free install of the one exact spec places the whole
+# family at the adopted version, where Node's module resolvers and pi-subagents' peer-alias
+# resolver reach it. The companion tuple remains the coherence family the probe verifies: exact
+# declarations do not prove an INSTALLED family is intact (a dangling link, a stale nested copy).
+# The tuple is pinned closed against the committed lockfile by test, and a separate test pins
+# every family declaration exact there.
+PI_ADOPTED_VERSION = "1.4.0"
 PI_COMPANION_PACKAGES: tuple[str, ...] = (
-    "@earendil-works/chord",
     "@earendil-works/pi-agent-core",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-codemode",
@@ -65,9 +66,7 @@ PI_COMPANION_PACKAGES: tuple[str, ...] = (
     "@earendil-works/pi-telemetry",
     "@earendil-works/pi-tui",
 )
-PI_INSTALL_SPECS: tuple[str, ...] = tuple(
-    f"{pkg}@{PI_ADOPTED_VERSION}" for pkg in (PI_NPM_SPEC, *PI_COMPANION_PACKAGES)
-)
+PI_INSTALL_SPECS: tuple[str, ...] = (f"{PI_NPM_SPEC}@{PI_ADOPTED_VERSION}",)
 PI_INSTALL_COMMAND = f"npm install -g {' '.join(PI_INSTALL_SPECS)}"
 # `pi --version` answers before any extension/settings load (well under a second measured); the
 # generous bound only catches a wedged binary, which reads as unverifiable.

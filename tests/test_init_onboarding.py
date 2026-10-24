@@ -147,10 +147,11 @@ def test_guide_installs_pi_happy_path(monkeypatch):
     )
     changes, warnings = onboarding.guide_missing_tools(_env("pi"))
     assert confirms == [f"Install pi via {PI_INSTALL_COMMAND}?"]
-    assert installed == [(PI_INSTALL_SPECS, 600)]  # the whole pinned set, in one install
+    assert installed == [(PI_INSTALL_SPECS, 600)]  # the pinned install set, in one install
     assert changes == [
         "tool pi: installed (npm -g "
-        f"@earendil-works/pi-coding-agent@{PI_ADOPTED_VERSION} + pinned companions)"
+        f"@earendil-works/pi-coding-agent@{PI_ADOPTED_VERSION} (one exact spec placing its "
+        "companions))"
     ]
     assert warnings == []
 
@@ -257,7 +258,7 @@ def test_guide_pi_without_node_notes_node_first(monkeypatch):
 
 def _advisory_pi_env() -> list[EnvCheck]:
     return [
-        EnvCheck("pi", True, "1.4.0 (floor >= 1.1.0)", "", advisory="not the adopted Pi")
+        EnvCheck("pi", True, "1.5.0 (floor >= 1.4.0)", "", advisory="not the adopted Pi")
         if c.name == "pi"
         else c
         for c in _ALL_OK
@@ -281,7 +282,8 @@ def test_guide_offers_the_adopted_set_on_the_advisory_row(monkeypatch):
     assert installed == [PI_INSTALL_SPECS]
     assert changes == [
         "tool pi: installed (npm -g "
-        f"@earendil-works/pi-coding-agent@{PI_ADOPTED_VERSION} + pinned companions)"
+        f"@earendil-works/pi-coding-agent@{PI_ADOPTED_VERSION} (one exact spec placing its "
+        "companions))"
     ]
     assert warnings == []
 
@@ -670,7 +672,7 @@ def test_guided_pass_runs_once(git_repo, stub_env, monkeypatch):
 
 
 _PI_ADVISORY = (
-    "Pi 1.4.0 is admitted (floor >= 1.1.0) but is not the adopted Pi 1.1.0: perk's subagent "
+    "Pi 1.5.0 is admitted (floor >= 1.4.0) but is not the adopted Pi 1.4.0: perk's subagent "
     "waves are characterized only on the adopted Pi with its pinned companions and can be "
     f"refused on another. Install the adopted set: {PI_INSTALL_COMMAND}."
 )
@@ -678,7 +680,7 @@ _PI_ADVISORY = (
 
 def _env_with_pi_advisory() -> list[EnvCheck]:
     return [
-        EnvCheck("pi", True, "1.4.0 (floor >= 1.1.0)", "", advisory=_PI_ADVISORY)
+        EnvCheck("pi", True, "1.5.0 (floor >= 1.4.0)", "", advisory=_PI_ADVISORY)
         if c.name == "pi"
         else c
         for c in _ALL_OK
@@ -700,7 +702,7 @@ def test_init_warns_on_an_admitted_pi_that_is_not_the_adopted_pin(git_repo, stub
     assert _json_env_row(report, "pi") == {
         "name": "pi",
         "ok": True,
-        "detail": "1.4.0 (floor >= 1.1.0)",
+        "detail": "1.5.0 (floor >= 1.4.0)",
         "remediation": "",
     }
 
@@ -783,7 +785,7 @@ def test_init_failure_reports_carry_no_pi_advisory(git_repo, stub_env, monkeypat
     assert _json_env_row(report, "pi") == {
         "name": "pi",
         "ok": True,
-        "detail": "1.4.0 (floor >= 1.1.0)",
+        "detail": "1.5.0 (floor >= 1.4.0)",
         "remediation": "",
     }
 
@@ -1077,6 +1079,6 @@ def test_success_render_marks_an_advisory_env_row_with_a_caution(capsys):
     )
     _render_human(report)
     err = capsys.readouterr().err
-    assert "  ⚠️ pi 1.4.0 (floor >= 1.1.0)" in err
+    assert "  ⚠️ pi 1.5.0 (floor >= 1.4.0)" in err
     assert "  ✓ git ok" in err  # a plain ok row keeps its check mark
     assert f"⚠️ pi: {_PI_ADVISORY}" in err

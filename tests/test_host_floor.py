@@ -62,10 +62,10 @@ def test_real_host_floor_loads_validates_and_pins_the_floors() -> None:
     floor = load_host_floor()
     assert validate(floor) == []
     assert floor.schema_version == 1
-    assert floor.pi_min_version == "1.1.0"
+    assert floor.pi_min_version == "1.4.0"
     assert floor.node_min_version == "22.23.4"
     assert floor.node_line_floors == ("24.22.1", "26.12.1")
-    assert required_pi_version(floor) == Semver(1, 1, 0)
+    assert required_pi_version(floor) == Semver(1, 4, 0)
     assert required_node_version(floor) == Semver(22, 23, 4)
     assert supported_node_lines(floor) == (Semver(22, 23, 4), Semver(24, 22, 1), Semver(26, 12, 1))
 

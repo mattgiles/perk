@@ -31,9 +31,12 @@
 // compaction drops the original from model context it re-delivers, and a summary quoting the
 // header never suppresses). The prompt scan is load-bearing on the launch turn: at
 // `before_agent_start` the just-submitted prompt is NOT yet persisted, so the projection alone
-// would miss a cold seed's binding suffix and double-deliver. The full branch is read only for
-// the trigger (`activeRender` — one read yields both `stage` and `mode`) — eligibility survives
-// compaction; delivery evidence is Pi's. A projection read failure escapes the hook to Pi's
+// would miss a cold seed's binding suffix and double-deliver. Only a user start
+// (`messageType: "user"`) carries a prompt; a custom start (`messageType: "custom"` —
+// pi-subagents' completion wake, any `sendMessage(…, { triggerTurn: true })`) has none, so it
+// proceeds straight to the projection check and its `message` is never scanned. The full branch
+// is read only for the trigger (`activeRender` — one read yields both `stage` and `mode`) —
+// eligibility survives compaction; delivery evidence is Pi's. A projection read failure escapes the hook to Pi's
 // hook-error reporting rather than injecting a guessed copy.
 //
 // The runner fence: Mechanism A never fires in a runner child (the composition root's
@@ -247,13 +250,15 @@ export function registerBindingDelivery(pi: ExtensionAPI, runnerChild: () => boo
   // live delivery (a door-seeded user turn's header, or an owned copy of this exact render) — the
   // cold↔warm idempotency guard. The `event.prompt` scan covers the launch turn, where the
   // just-submitted prompt is not yet persisted; a worker prompt carries no header, so Mechanism A
-  // still fires there (contracts.md §8.38). Render-before-dedup: an inert session never reads the
+  // still fires there (contracts.md §8.38). Only a user start (`messageType: "user"`) has a
+  // prompt to scan: a custom start (pi-subagents' completion wake) skips the scan — never
+  // reading its `message` — and still dedups against the projection. Render-before-dedup: an inert session never reads the
   // projection; a runner child reads nothing at all.
   pi.on("before_agent_start", async (event, ctx) => {
     if (runnerChild()) return;
     const rendered = activeRender(ctx.cwd, branchOf(ctx));
     if (rendered === null || rendered.text === null) return;
-    if (event.prompt.includes(BINDING_HEADER)) return;
+    if (event.messageType === "user" && event.prompt.includes(BINDING_HEADER)) return;
     if (deliveryIsLive(ctx, rendered.text)) return;
     for (const warning of rendered.warnings) console.error(`perk: ${warning}`);
     return {

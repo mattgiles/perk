@@ -236,7 +236,8 @@ stays active for the packages it already serves, and this copy installed none.
 
 ## Keep pi-subagents out of user-scope settings (`subagent-package-scope`)
 
-perk converges `npm:pi-subagents@0.76.1` (pinned — the release characterized against Pi 1.1.0;
+perk converges `npm:pi-subagents@0.81.0` (pinned — the release characterized against Pi 1.4.0;
+adopted, its live certification owed;
 perk's `script` RPC spawn targets ≥ 0.74.0) into the
 **project** `.pi/settings.json` on purpose: the engine is a per-repo borrow perk's `perk.*` agent
 definitions and wave RPC ride on, so it belongs beside the other project packages `perk init`

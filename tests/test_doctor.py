@@ -120,13 +120,13 @@ def test_admitted_pi_other_than_the_adopted_pin_maps_to_warn(monkeypatch):
 
     monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
     monkeypatch.setattr(
-        env, "probe_pi_host", lambda path: PiHost(path, "admitted", "1.4.0", "1.1.0", "")
+        env, "probe_pi_host", lambda path: PiHost(path, "admitted", "1.5.0", "1.4.0", "")
     )
     monkeypatch.setattr(doctor_mod.env, "check_environment", lambda: [env._check_pi()])
     (pi,) = doctor_mod._env_checks()
     assert (pi.name, pi.group, pi.status) == ("pi", "environment", "warn")
     assert pi.message == "pi ok, with a caution"
-    assert pi.detail == "1.4.0 (floor >= 1.1.0)"
+    assert pi.detail == "1.5.0 (floor >= 1.4.0)"
     assert pi.remediation == env._check_pi().advisory
     assert pi.remediation.endswith(f"Install the adopted set: {PI_INSTALL_COMMAND}.")
     report = DoctorReport(checks=[pi], fixed=[], self_repo=False)
@@ -141,7 +141,7 @@ def test_admitted_pi_at_the_adopted_pin_maps_to_ok(monkeypatch):
     monkeypatch.setattr(
         env,
         "probe_pi_host",
-        lambda path: PiHost(path, "admitted", PI_ADOPTED_VERSION, "1.1.0", ""),
+        lambda path: PiHost(path, "admitted", PI_ADOPTED_VERSION, "1.4.0", ""),
     )
     monkeypatch.setattr(doctor_mod.env, "check_environment", lambda: [env._check_pi()])
     (pi,) = doctor_mod._env_checks()
@@ -1061,12 +1061,12 @@ def test_incoherent_pi_env_check_maps_to_fail_naming_doctor_fix(monkeypatch):
     detail = "@earendil-works/pi-codemode does not resolve"
     monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
     monkeypatch.setattr(
-        env, "probe_pi_host", lambda path: PiHost(path, "incoherent", "1.1.0", "1.1.0", detail)
+        env, "probe_pi_host", lambda path: PiHost(path, "incoherent", "1.4.0", "1.4.0", detail)
     )
     monkeypatch.setattr(doctor_mod.env, "check_environment", lambda: [env._check_pi()])
     (pi,) = doctor_mod._env_checks()
     assert (pi.name, pi.status, pi.message) == ("pi", "fail", "pi missing/outdated")
-    assert pi.detail == f"1.1.0 (floor >= 1.1.0) — companions: {detail}"
+    assert pi.detail == f"1.4.0 (floor >= 1.4.0) — companions: {detail}"
     assert pi.remediation == f"Run `perk doctor --fix` (it runs: {PI_INSTALL_COMMAND})."
 
 
