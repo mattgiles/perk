@@ -51,7 +51,8 @@ export const TOOL_FIELD_POLICIES = {
   // never an authorization grant: perk's nested-call and MCP restrictions are decided elsewhere.
   reachesTools: {
     kind: "non-prose",
-    reason: "runtime tool-reachability hint for late-registering extensions, not model-facing prose",
+    reason:
+      "runtime tool-reachability hint for late-registering extensions, not model-facing prose",
   },
   defaultActive: { kind: "non-prose", reason: "activation default, not model-facing prose" },
   prepareLoadout: { kind: "model-facing-prose", collector: "field" },

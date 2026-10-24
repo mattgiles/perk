@@ -15,12 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # The pinned install set, spelled out (version-honest): the package first, then its seven
 # companions, each at the exact adopted Pi version.
-PINNED_SPECS = (
-    "@earendil-works/pi-coding-agent@1.1.0 @earendil-works/chord@1.1.0 "
-    "@earendil-works/pi-agent-core@1.1.0 @earendil-works/pi-ai@1.1.0 "
-    "@earendil-works/pi-codemode@1.1.0 @earendil-works/pi-mcp@1.1.0 "
-    "@earendil-works/pi-telemetry@1.1.0 @earendil-works/pi-tui@1.1.0"
-)
+PINNED_SPECS = "@earendil-works/pi-coding-agent@1.4.0"
 
 
 def test_workflow_path_matches_the_locked_dispatch_filename():

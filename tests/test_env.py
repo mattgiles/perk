@@ -197,12 +197,12 @@ def test_pi_admitted_at_the_adopted_pin_carries_no_advisory(monkeypatch):
 def test_pi_admitted_at_another_version_carries_the_advisory(monkeypatch):
     monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
     monkeypatch.setattr(
-        env, "probe_pi_host", lambda path: PiHost("/opt/bin/pi", "admitted", "1.4.0", "1.1.0", "")
+        env, "probe_pi_host", lambda path: PiHost("/opt/bin/pi", "admitted", "1.5.0", "1.4.0", "")
     )
     pi = env._check_pi()
-    assert (pi.ok, pi.detail, pi.remediation) == (True, "1.4.0 (floor >= 1.1.0)", "")
+    assert (pi.ok, pi.detail, pi.remediation) == (True, "1.5.0 (floor >= 1.4.0)", "")
     assert pi.advisory == (
-        "Pi 1.4.0 is admitted (floor >= 1.1.0) but is not the adopted Pi 1.1.0: perk's subagent "
+        "Pi 1.5.0 is admitted (floor >= 1.4.0) but is not the adopted Pi 1.4.0: perk's subagent "
         "waves are characterized only on the adopted Pi with its pinned companions and can be "
         f"refused on another. Install the adopted set: {PI_INSTALL_COMMAND}."
     )
@@ -260,13 +260,13 @@ def _unreachable_probe(path):
 
 def test_pi_incoherent_is_not_ok(monkeypatch):
     detail = (
-        "@earendil-works/pi-codemode does not resolve, @earendil-works/pi-mcp resolves to 1.4.0"
+        "@earendil-works/pi-codemode does not resolve, @earendil-works/pi-mcp resolves to 1.5.0"
     )
     monkeypatch.setattr(env, "which_absolute", lambda name: "/opt/bin/pi")
-    monkeypatch.setattr(env, "probe_pi_host", lambda path: _pi_host("incoherent", "1.1.0", detail))
+    monkeypatch.setattr(env, "probe_pi_host", lambda path: _pi_host("incoherent", "1.4.0", detail))
     pi = env._check_pi()
     assert not pi.ok
-    assert pi.detail == f"1.1.0 (floor >= 1.0.0) — companions: {detail}"
+    assert pi.detail == f"1.4.0 (floor >= 1.0.0) — companions: {detail}"
     assert pi.remediation == PI_FIX_REMEDIATION
     assert "perk doctor --fix" in pi.remediation
     assert pi.advisory == ""
@@ -276,9 +276,9 @@ def test_pi_incoherent_is_not_ok(monkeypatch):
 # --- repair_pi: the `perk doctor --fix` gesture ----------------------------------------------
 
 _NODE_OK = EnvCheck("node", True, "v26.12.1", "")
-_PI_GREEN = EnvCheck("pi", True, "1.1.0 (floor >= 1.1.0)", "")
-_PI_ADVISORY = EnvCheck("pi", True, "1.4.0 (floor >= 1.1.0)", "", advisory="caution")
-_PI_INCOHERENT = EnvCheck("pi", False, "1.1.0 (floor >= 1.1.0) — companions: x", PI_FIX_REMEDIATION)
+_PI_GREEN = EnvCheck("pi", True, "1.4.0 (floor >= 1.4.0)", "")
+_PI_ADVISORY = EnvCheck("pi", True, "1.5.0 (floor >= 1.4.0)", "", advisory="caution")
+_PI_INCOHERENT = EnvCheck("pi", False, "1.4.0 (floor >= 1.4.0) — companions: x", PI_FIX_REMEDIATION)
 _PI_ABSENT = EnvCheck("pi", False, "not found", PI_ABSENT_REMEDIATION)
 
 
@@ -307,7 +307,9 @@ def test_repair_pi_installs_the_set_and_reports_the_green_reprobe(
     monkeypatch.setattr(env, "_check_pi", lambda: _PI_GREEN)
     fixed, errors = env.repair_pi([_NODE_OK, row])
     assert install_recorder == [(PI_INSTALL_SPECS, 600)]
-    assert fixed == [f"pi: installed the adopted Pi {PI_ADOPTED_VERSION} set (npm -g, 8 packages)"]
+    assert fixed == [
+        "pi: installed the adopted Pi 1.4.0 (npm -g @earendil-works/pi-coding-agent@1.4.0)"
+    ]
     assert errors == []
 
 
@@ -324,7 +326,7 @@ def test_repair_pi_install_failure_names_the_manual_command(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "after", [_PI_ADVISORY, EnvCheck("pi", False, "1.1.0 (floor >= 1.1.0) — companions: y", "")]
+    "after", [_PI_ADVISORY, EnvCheck("pi", False, "1.4.0 (floor >= 1.4.0) — companions: y", "")]
 )
 def test_repair_pi_still_not_green_names_the_path_order(monkeypatch, install_recorder, after):
     monkeypatch.setattr(env, "_check_pi", lambda: after)

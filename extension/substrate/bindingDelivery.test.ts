@@ -853,7 +853,8 @@ test("Mechanism A: a failed projection read escapes the hook (no guessed copy); 
 
   // Over a REAL session (Pi's projection is live): the exact render injects when nothing is live…
   const render = renderBindings(cwd, "stage:save").text;
-  assert.ok(render !== null && render.includes(pointer("my-skill")));
+  assert.ok(render !== null);
+  assert.ok(render.includes(pointer("my-skill")));
   const stagedSession = (): SessionManager => {
     const manager = SessionManager.inMemory(cwd);
     manager.appendCustomEntry("perk:workflow-state", {

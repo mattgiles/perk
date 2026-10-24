@@ -15,7 +15,7 @@ from perk.substrate.pi_host import PI_ADOPTED_VERSION, PI_COMPANION_PACKAGES, PI
 CODEMODE = "@earendil-works/pi-codemode"
 MCP = "@earendil-works/pi-mcp"
 # The broken layout's offenders, as `admit_pi_companions` lists them.
-INCIDENT_DETAIL = f"{CODEMODE} does not resolve, {MCP} resolves to 1.4.0"
+INCIDENT_DETAIL = f"{CODEMODE} does not resolve, {MCP} resolves to 1.5.0"
 
 
 def _write_manifest(directory: Path, name: str, version: str) -> None:
@@ -29,8 +29,8 @@ def install_fake_pi(prefix: Path, *, body: str | None = None, broken: bool = Fal
     """Lay out a global npm prefix with the Pi CLI installed; return the ``<prefix>/bin/pi`` link.
 
     The CLI entry (``dist/bundle/cli.js``) is a shell script running ``body`` (default: answer the
-    adopted version). ``broken`` models the incident host: five companions at the global root,
-    ``pi-codemode`` a dangling symlink, ``pi-mcp@1.4.0`` nested under the Pi package only.
+    adopted version). ``broken`` models the incident host: the other companions at the global
+    root, ``pi-codemode`` a dangling symlink, ``pi-mcp@1.5.0`` nested under the Pi package only.
     """
     global_root = prefix / "lib" / "node_modules"
     package = global_root / PI_NPM_SPEC
@@ -50,7 +50,7 @@ def install_fake_pi(prefix: Path, *, body: str | None = None, broken: bool = Fal
         if broken and name == CODEMODE:
             (global_root / name).symlink_to(prefix / "gone" / "pi-codemode")
         elif broken and name == MCP:
-            _write_manifest(package / "node_modules" / name, name, "1.4.0")
+            _write_manifest(package / "node_modules" / name, name, "1.5.0")
         else:
             _write_manifest(global_root / name, name, PI_ADOPTED_VERSION)
     return link

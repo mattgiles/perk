@@ -49,9 +49,10 @@ def install_global(spec: str, *more: str, timeout: int = 300) -> None:
     ``NpmError``).
 
     Runs ``npm install -g <spec> [<more>…]`` — for global CLI binaries: the pinned Pi install set
-    (``perk.substrate.pi_host.PI_INSTALL_SPECS``) is the multi-spec caller, so the package and its
-    companions resolve together in one tree; the review surface's ``hunkdiff`` → ``hunk`` and
-    ``cloc`` are the single-spec ones. Callers are best-effort: they swallow ``NpmError`` as a
+    (``perk.substrate.pi_host.PI_INSTALL_SPECS`` — one exact spec whose exact internal declarations
+    place its companions), the review surface's ``hunkdiff`` → ``hunk`` and ``cloc`` are all
+    single-spec callers; the variadic form stays for a caller that must resolve several specs
+    together in one tree. Callers are best-effort: they swallow ``NpmError`` as a
     warning, never fatal.
     """
     _run(["install", "-g", spec, *more], timeout=timeout)

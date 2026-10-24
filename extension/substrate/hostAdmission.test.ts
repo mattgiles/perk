@@ -162,19 +162,19 @@ test("the shipped floor: the previous floor and its prerelease are refused; the 
   // floor it replaced, a prerelease of the new floor stays below it, and a later release unequal
   // to the floor and to the dev pin is admitted on its own reading — never equality.
   const floor = loadHostFloor().piMinVersion;
-  for (const observed of ["1.0.0", "1.1.0-rc.1"]) {
+  for (const observed of ["1.1.0", "1.3.0", "1.4.0-rc.1"]) {
     assert.deepEqual(admitHostSdk(observed, floor), {
       outcome: "unsupported",
       observed,
-      required: "1.1.0",
+      required: "1.4.0",
       detail: "",
     });
   }
-  for (const observed of ["1.1.0", "1.2.0"]) {
+  for (const observed of ["1.4.0", "1.5.0"]) {
     assert.deepEqual(admitHostSdk(observed, floor), {
       outcome: "admitted",
       observed,
-      required: "1.1.0",
+      required: "1.4.0",
       detail: "",
     });
   }
