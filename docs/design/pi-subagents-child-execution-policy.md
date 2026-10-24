@@ -32,7 +32,7 @@ properties inert. `createReportWave(bus)` takes no supplier and has no capture-f
 `decodeReadOnlyFloor(runner, raw)` over `PI_SUBAGENT_EXTENSION_BINDINGS` has three outcomes:
 
 - **No packet ⇒ no floor.** `raw === undefined`, or an object envelope with no
-  `perk.parent-restrictions/…` key at all (the delegation-dispatched writer's case).
+  `perk.parent-restrictions/…` key at all (the delegation-dispatched writers' case).
 - **Malformed ⇒ floor (fail closed).** Invalid JSON, a non-object envelope, any
   `perk.parent-restrictions/` key other than exactly `/1`, or `/1` with anything but exactly
   `{readOnly: boolean}`. The unsupported-family-version clause stays because an envelope carrying
@@ -44,7 +44,7 @@ properties inert. `createReportWave(bus)` takes no supplier and has no capture-f
 
 A non-runner never gets a floor, whatever the envelope. Unrelated namespaces are opaque.
 
-`extension/index.ts` (now `extension/pi/activation.ts::activatePerk`) reads both booleans at the top of every `session_start` and **latches** the
+`extension/pi/activation.ts::activatePerk` reads both booleans at the top of every `session_start` and **latches** the
 floor for the activation (`readOnlyFloor ||= …`): a same-activation `session_start` re-emit, a
 gate `exit()`, or a `session_tree` navigation cannot clear it; a `/reload` re-runs the factory and
 re-reads the env. The floor composes into `extension/substrate/toolGating.ts` unchanged:
@@ -53,7 +53,7 @@ backstop that blocks anything the eligibility formula makes ineligible under the
 even if the toolset rebuild failed. A
 throwing floor supplier is restrictive for that observation.
 
-`session/lifecycle.ts::reflectSessionReadOnlyFloor` keeps the child's persisted mode honest: on an
+`extension/session/lifecycle.ts::reflectSessionReadOnlyFloor` keeps the child's persisted mode honest: on an
 established non-read-only outcome it appends one verified `{mode: "read-only"}`; an unexpected
 failure is reported once (`could not persist child read-only restriction; in-memory restriction
 remains active`) and startup continues — enforcement never depended on the reflection.
@@ -141,12 +141,28 @@ reviews viable at the cost of one prompt-sized re-injection per compaction.
 
 Two layers of invariant apply, and they have different owners.
 
-**Definition-level (the def owns it).** Every report agent — the ten shipped `agents/*.md`
-definitions other than the writer, plus the repo-local `perk-dev.session-auditor` at
-`.pi/agents/perk-dev/session-auditor.md` — is `async: true`, `systemPromptMode: replace`, inherits no global/project context or skills, sets no
-`defaultContext`, and has the read-only tool posture `read, grep, find, ls, bash`. The shipped
-ten are pinned by `tests/test_subagent_agents.py::test_native_child_profile`; the auditor by
+**Definition-level (the def owns it).** Every report agent — every shipped `agents/*.md`
+definition with `async: true` (all of them but the two foreground writers, `conflict-resolver`
+and `librarian`), plus the repo-local `perk-dev.session-auditor` at
+`.pi/agents/perk-dev/session-auditor.md` — is `async: true`, `systemPromptMode: replace`, inherits
+no global/project context or skills, sets no `defaultContext`, and has the read-only tool posture
+`read, grep, find, ls, bash`. The shipped set is closed by
+`tests/test_subagent_agents.py::test_closed_shipped_profile_census` and each def is pinned by
+`tests/test_subagent_agents.py::test_native_child_profile`; the auditor by
 `tests/test_repo_local_agents.py::test_auditor_is_a_background_report_outside_delivery`.
+
+**The descendant ceiling (definition-level, every def).** Every shipped def — the writers
+included — and the repo-local auditor carry one blank `allowedAgents:` line directly after
+`tools:`. pi-subagents' parser reads the blank value as the empty list, which denies every launch
+FROM the child; a literal `allowedAgents: []` is not equivalent — it parses as a one-item list and
+fails the engine's ceiling name validation at load. None of the defs grants nesting (no
+`subagent` tool, no `allowNestedSubagents`), so the ceiling is the engine backstop behind the
+prose prohibition, and a def's ceiling never narrows its own launch. The engine's enforcement was
+measured live on foreground and background children
+(`docs/design/archive/pi-subagents-descendant-ceilings.md`); the layout is pinned offline by
+`tests/_agent_defs.py::assert_descendant_ceiling`, run through `test_native_child_profile`,
+`test_auditor_is_a_background_report_outside_delivery` and the packed census
+`tests/test_packaging.py::test_packed_package_declares_discoverable_agent_census`.
 
 **Spawn-level (the perk-owned wave owns it).** Every `ReportWave` spawn adds `context: "fresh"`,
 `mission: false`, `WAVE_ACCEPTANCE` (acceptance disabled) and the report restriction packet —
@@ -160,12 +176,40 @@ floor (see "Not claimed"). The former repo-local `perk-dev.analyst`, which carri
 block in its frontmatter, was retired when it was promoted into `perk.scout`; those two facts moved
 from the def to the caller so the def fits the closed profile.
 
-## The writer
+Two more spawn-level facts ride every wave spawn (`extension/waves/transport.ts::startWaveScript`):
 
-`perk.conflict-resolver` is dispatched foreground through the delegation door with no
-`extensionBindings` at all, so it never gets a floor (the request-shape assertion in
-`extension/pi/v1/delivery/conflictResolverEngine.test.ts` pins the packet's absence); it edits and
-writes by design.
+- **The bridge-off invariant.** `intercomBridge: WAVE_INTERCOM_BRIDGE` (`{mode: "off"}`), spread
+  onto every workflow child: the engine discards a child's `progress_update` on the parent side,
+  and perk children never ask decisions, so no perk child ever sees `contact_supervisor` or the
+  bridge's progress-update template. Fixed by the transport — never a per-wave knob.
+- **The launch token.** `args: { launch: randomUUID() }`, fresh per spawn. It is never identity
+  and never read back; its only job is to keep pi-subagents' workflow reuse (which re-attaches a
+  relaunch to a runtime-replaced workflow with the same script and args digests) from ever
+  matching a perk wave, so a relaunch after `/reload` is a fresh wave.
+
+## MCP under the floor
+
+A tool Pi's MCP builtin registers carries a name outside the builtin rows, so
+`extension/substrate/toolPolicy.ts::postureFor` classifies it `unknown`: hidden and blocked under
+the gate, direct and nested (`nestedPostureFor` blocks every `unknown` tool). A def's `tools:`
+allowlist is never an MCP exclusion — Pi keeps MCP tools registered beside an allowlist that names
+no `mcp__` entry, and a supplier `excludeTools` is inert beside an explicit allowlist — so the
+`tool_call` backstop is the control. perk's report children name no `mcp:` selector, and
+pi-subagents attaches `builtin:mcp` only for `mcp:` selectors, so they register no MCP tool in the
+first place. `extension/substrate/mcpReadOnlyFloor.test.ts` proves the floor on real Pi sessions
+that do register one.
+
+## The writers
+
+`perk.conflict-resolver` and `perk.librarian` (`agents/librarian.md`, dispatched by
+`extension/pi/v1/librarianEngine.ts`) both ride `extension/pi/v1/foregroundDelegation.ts`'s
+`dispatchForeground` with no `extensionBindings` at all, so neither ever gets a floor; they edit
+and write by design. Both spawn with `context: "fresh"` and `intercomBridge:
+FOREGROUND_INTERCOM_BRIDGE` (`{mode: "off"}`), byte-equal to the waves' constant
+(`extension/pi/v1/foregroundDelegation.test.ts` "perk's two spawn surfaces carry the same bridge
+disable, byte for byte"). The request-shape assertions in
+`extension/pi/v1/delivery/conflictResolverEngine.test.ts` and `extension/pi/v1/librarian.test.ts`
+pin the packet's absence and the bridge disable.
 
 ## Not claimed
 
@@ -174,16 +218,17 @@ writes by design.
 - Foreground children have no perk activation; manual `subagent` calls are outside the channel.
 - User-shadowed definitions and installations missing the consumer are not certified.
 - Losing the runner env across a `/reload` is unsupported (the reload re-reads what is there).
-- pi-subagents ≥ 0.70.0 no longer intersects a child's declared tools with the **host**
-  session's builtin tools (the 0.67.x–0.69.x `child-tool-plan` intersection that failed
+- pi-subagents ≥ 0.70.0 (re-read at 0.76.1) no longer intersects a child's declared tools with
+  the **host** session's builtin tools (the 0.67.x–0.69.x `child-tool-plan` intersection that failed
   review/scout-named agents closed on a pi-fff `override`-shadowed `grep`/`find` is gone), so
   pi-fff's search mode is irrelevant to lane launch: perk injects no `PI_FFF_MODE`, and the
   retired `subagent-host-tools` doctor check has no successor. The floor described here never
   depended on it.
-- Pi 0.87's fork / pruned-fork context repair (the checkout-only fix in pi-subagents'
-  development tree) is NOT in the installed 0.70.1 artifact. perk's waves and the conflict
-  resolver spawn with `context: "fresh"`; fork context is unsupported for perk children until a
-  pi-subagents release contains that fix — a support boundary, not a perk defect.
+- Fork context. Pi 0.87's fork / pruned-fork context repair shipped in pi-subagents 0.71.0
+  (`src/shared/fork-context.js`, `src/shared/pruned-fork.js` in the installed package). perk's
+  waves and both writers spawn with `context: "fresh"` by choice (`extension/waves/transport.ts`,
+  `extension/pi/v1/foregroundDelegation.ts`), and fork context stays uncertified for perk
+  children — a boundary never measured, not a wait on upstream.
 
 ## Dropped mechanisms
 
@@ -206,6 +251,10 @@ writes by design.
 | Runner children provision no scratch | `extension/substrate/agentScratch.test.ts` "a runner child provisions no scratch even without a floor" |
 | Plan-bound readers run in the caller checkout; the packet is constant | `extension/waves/reportWave.test.ts` profile + hostile-fields tests; `reportWaveRpc.test.ts` round-trip |
 | Producer → consumer composition | `extension/pi/v1/waveIsolation.test.ts` "real composition: the rendered packet floors a child…" (fake RPC bus → rendered item → child session → `write` blocked, parent and handoff untouched) |
-| Report agents keep async/fresh/mission/acceptance posture | `tests/test_subagent_agents.py::test_native_child_profile` (the ten shipped defs); `tests/test_repo_local_agents.py::test_auditor_is_a_background_report_outside_delivery` (`perk-dev.session-auditor`); `reportWave.test.ts` spawn pins |
+| Report agents keep async/fresh/mission/acceptance posture | `tests/test_subagent_agents.py::test_closed_shipped_profile_census` (the closed shipped set) + `::test_native_child_profile` (every shipped def with `async: true`); `tests/test_repo_local_agents.py::test_auditor_is_a_background_report_outside_delivery` (`perk-dev.session-auditor`); `reportWave.test.ts` spawn pins |
+| Every def carries the blank descendant ceiling | `tests/_agent_defs.py::assert_descendant_ceiling` via `test_native_child_profile`, `test_auditor_is_a_background_report_outside_delivery` and `tests/test_packaging.py::test_packed_package_declares_discoverable_agent_census` |
+| A relaunch never reuses a perk wave | `extension/waves/reportWave.test.ts` "startWaveScript: every launch mints a fresh token…"; `extension/pi/v1/waveIsolation.test.ts` same-version reload pairs |
+| Waves and writers carry the same bridge disable | `extension/pi/v1/foregroundDelegation.test.ts` "perk's two spawn surfaces carry the same bridge disable, byte for byte" |
+| MCP tools stay blocked under the floor, direct and nested | `extension/substrate/mcpReadOnlyFloor.test.ts` |
 | Reflection failure stays loud | `extension/sessionLifecycle.test.ts` "escaping reflection exception reports safely…" |
 | A compacted report child gets its task back; an accepted report is never restarted | `extension/substrate/childTaskRestore.test.ts` verdict table; `extension/pi/v1/childTaskRestore.test.ts` (planted compactions + two faux-runtime turns through Pi's real post-run compaction) |

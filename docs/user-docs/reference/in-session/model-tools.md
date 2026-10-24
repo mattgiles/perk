@@ -478,8 +478,9 @@ before.
 One composition limit: `codemode` writes its own description from every callable tool, so in a
 read-write stage session that description may name a tool the diet hides, and in a read-only
 stage in `only` mode it may list `edit`/`write`. This affects only what the model reads — the
-gate still refuses them. The bounded writers are never listed. A script's `store()`/`load()`
-append `codemode-store` entries to the session and `image()` writes a temp file — outside the
+gate still refuses them. The bounded writers are never listed. A script's `store()` appends
+`codemode-store` entries to the session (`load()` only reads them) and `image()` writes a temp
+file — outside the
 worktree, outside the gate's guarantee — and the interactive builtin's `models.*` calls spend
 model budget; perk sets no budget for them.
 

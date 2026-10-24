@@ -98,8 +98,7 @@ door, or model tool; they are human-facing only.
   reported locally rather than injected into the model conversation.
 - **Transcript markers** — workflow moments such as run claims, read-only/read-write flips,
   objective activation and budget start, node claims, and `/btw` exchanges render as durable
-  one-line markers in the interactive transcript. They are display-only, TUI-only, and require
-  Pi ≥ 0.80.4; older hosts silently omit them.
+  one-line markers in the interactive transcript. They are display-only and TUI-only.
 - **Session names** — every session perk launches carries a perk-owned Pi session name,
   `<stage> | plan #N | objective #O / <node> | <title>` (segments omitted when unknown), so Pi's
   session picker (`pi --resume`, [`perk resume`](./cli/remote-and-utility.md#perk-resume-target))

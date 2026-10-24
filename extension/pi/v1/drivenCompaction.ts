@@ -19,8 +19,9 @@
 //   - A driven run that settles `aborted: true` — Pi sets it only when the run was stopped
 //     through `session.abort()`, which is Escape while the model streams or tools run — settles
 //     into a loud skip: no compaction, no continuation, the record consumed. The user stopped the
-//     agent; compacting and auto-starting a new turn would override that. Value-detected, so a
-//     host without the field settles as before. Escape during a retry wait or an automatic
+//     agent; compacting and auto-starting a new turn would override that. Value-detected; every
+//     admitted host (floor >= 1.1.0) carries the field — widen the arm if Pi widens
+//     `agent_settled.aborted`. Escape during a retry wait or an automatic
 //     compaction aborts only that controller (`abortRetry()` / `abortCompaction()`), never the
 //     run, so such a run settles `aborted: false` and takes the ordinary settle path — a known
 //     residual, not handled here.
