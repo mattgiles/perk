@@ -171,10 +171,11 @@ pi-subagents is **pinned** to exact 0.76.1 (`SUBAGENTS_PACKAGE =
 "npm:pi-subagents@0.76.1"` in `src/perk/convergence/init/settings.py`). perk's report waves send
 the inline script text under the RPC spawn key `script`, which pi-subagents accepts since 0.74.0
 (`docs/design/archive/pi-subagents-0.75.0-reverify.md`). The pin currently **leads** the
-guidance stamp (0.75.0): 0.76.1 was adopted on the characterization record, the offline and
-doctor halves and the in-process identity proof (`docs/design/archive/pi-subagents-0.76.1-pin.md`),
-and the stamp moves on the live certification (step 4), so `subagent-compat` warns by design until
-then. `perk init` writes the pinned spec and reconciles an existing unpinned or differently pinned
+guidance stamp (0.75.0). 0.76.1 was adopted on the characterization record, the offline and doctor
+halves and the in-process identity proof (`docs/design/archive/pi-subagents-0.76.1-pin.md`). The
+live certification (`docs/design/archive/pi-1.1.0-certification.md`) then kept the stamp at
+0.75.0, because W4, W6 and W7a failed and S3, S4a-live, U-bg, X5a and X5b were not run. So
+`subagent-compat` warns by design. `perk init` writes the pinned spec and reconciles an existing unpinned or differently pinned
 entry forward; `perk doctor --fix` repairs the same drift through `settings-wiring`. Pi installs
 whatever the checkout's own committed `.pi/settings.json` names, so the pin reaches a branch only
 with the change that moves it.

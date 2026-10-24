@@ -168,8 +168,9 @@ its remote name) for both the global CLI and the consumer worker SDK (the worker
 required-version`). Pi 1.1.0 is the enforced host floor and
 the remote install pin, **adopted** — not certified — on the characterization record
 (`docs/design/archive/pi-1.1.0-characterization.md`) plus the development-pin and pi-subagents-pin
-records (`pi-1.1.0-dev-pins.md`, `pi-subagents-0.76.1-pin.md`); its live certification on landed
-code is a later, separate record, still pending. The earlier 1.0.0 certification record
+records (`pi-1.1.0-dev-pins.md`, `pi-subagents-0.76.1-pin.md`). The pair is adopted; the
+certification record (`docs/design/archive/pi-1.1.0-certification.md`, 2026-10-24) holds 3
+required FAILs (W4, W6, W7a), so the support claim is held. The earlier 1.0.0 certification record
 (`docs/design/archive/pi-1.0.0-certification.md`, verdict PENDING — its three PR-door rows X5b, S7,
 I7b's launch proof were deferred by an operator decision and 4.0.0 shipped with that verdict) is
 historical and certifies nothing about 1.1.0. A newer Pi is admitted when at or above the floor
@@ -211,10 +212,10 @@ matrix passed, and the doctor and scout waves and both browser-door waves, plan 
 passed on the Pi 0.99.2 host; on the Pi 1.0.0 host the plan door passed and the PR door was
 deferred unmeasured — PENDING in `docs/design/archive/pi-1.0.0-certification.md`) records what
 perk's guidance was verified against — a separate fact from this pin
-(`docs/design/archive/pi-subagents-0.75.0-reverify.md`) — today behind the pin: 0.76.1 is
-installed on characterization evidence while the stamp waits for the live certification, so
-`subagent-compat` warns on every converged checkout by design
-(`docs/design/archive/pi-subagents-0.76.1-pin.md`).
+(`docs/design/archive/pi-subagents-0.75.0-reverify.md`) — today behind the pin. The guidance
+stamp stays 0.75.0 (`docs/design/archive/pi-1.1.0-certification.md`) because W4, W6 and W7a
+failed and S3, S4a-live, U-bg, X5a and X5b were not run. So `subagent-compat` warns by design on
+every converged checkout.
 
 **The perk-managed `.pi/settings.json` slice keeps a load order.** Besides converging the
 `packages` set (perk's pinned entry, the borrowed set, the provider-selected packages), `perk init`
