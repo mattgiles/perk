@@ -164,7 +164,20 @@ export interface WaveCompletion {
   children?: WaveChildReceipt[];
   terminalOutcome?: { state: "partial"; reason: "timeout" | "budget_exhausted" };
   retainedEntries?: unknown[];
+  /**
+   * The assignment keys the correlated `workflowChildren` roster still reports `running` at
+   * explicit native partial settlement; present only beside `terminalOutcome` and only when
+   * nonempty; identity only, never report DATA.
+   */
+  unfinishedLanes?: string[];
 }
+
+/**
+ * The retained-entry error for a lane the engine projected as still running at native partial
+ * settlement — the `results` running row AND a roster-only running lane share it (contracts.md
+ * §8.35).
+ */
+export const LANE_STILL_RUNNING_ERROR = "lane still running at native partial settlement";
 
 /**
  * The explicit acceptance-disable every wave spawn carries. Without it, pi-subagents
@@ -323,7 +336,17 @@ export interface WaveScriptSpec {
 /** A script outcome: durable value on success; explicit partial evidence never erases failure. */
 export type WaveScriptResult =
   | { ok: true; value: unknown; receipt: WaveScriptReceipt }
-  | { ok: false; failure: WaveRunFailure; receipt: WaveScriptReceipt; value?: unknown[] };
+  | {
+      ok: false;
+      failure: WaveRunFailure;
+      receipt: WaveScriptReceipt;
+      value?: unknown[];
+      /**
+       * Roster-correlated lanes still running at explicit native partial settlement — identity
+       * only; present only when nonempty beside `value`.
+       */
+      unfinishedLanes?: string[];
+    };
 
 /**
  * A launched (or launch-refused) script run. On `ok: true` the run is LIVE: `handle` is the
@@ -583,6 +606,9 @@ export async function startWaveScript(
             value: Array.isArray(aggregate.value)
               ? aggregate.value
               : (matched.retainedEntries ?? []),
+            ...(matched.unfinishedLanes !== undefined && matched.unfinishedLanes.length > 0
+              ? { unfinishedLanes: matched.unfinishedLanes }
+              : {}),
             receipt: receiptOf("failed", spawned, matched),
           };
         }
