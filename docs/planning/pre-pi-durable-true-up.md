@@ -56,14 +56,14 @@ The release-source checks used Pi's [MCP factory][pi-mcp],
 [parent-wake implementation][supplier-wake], and [RPC handlers][supplier-rpc].
 These links are fixed to the audited releases, not a moving source mirror.
 
-| Version fact | Current state | Target / rule |
-| --- | --- | --- |
-| Development SDK pins | Four `@earendil-works/*` development dependencies at 1.0.0; installed root SDK agrees | All four at exact 1.1.0, installed and verified in the resolving checkout |
-| Host floor | Pi ≥1.0.0 in `shared/host-floor.yaml` | Pi ≥1.1.0, applied independently to the PATH CLI and each loaded SDK |
-| Remote installation pin | `REMOTE_PI_VERSION = "1.0.0"` | Exact 1.1.0 for the global CLI and consumer worker SDK; self-repo worker uses the development pins |
-| Supplier installation pin | `SUBAGENTS_PACKAGE = "npm:pi-subagents@0.75.0"` and matching committed Pi settings | Exact 0.76.1 through the existing convergence owner |
-| Supplier guidance stamp | `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.75.0"` | 0.76.1 only after required reverification passes |
-| Node / TypeBox | Node ≥22.19.0; TypeBox 1.3.27 | Unchanged; the published Pi 1.1.0 requirements agree |
+| Version fact | Current state | Target / rule | As landed (node 7.2, 2026-10-24) |
+| --- | --- | --- | --- |
+| Development SDK pins | Four `@earendil-works/*` development dependencies at 1.0.0; installed root SDK agrees | All four at exact 1.1.0, installed and verified in the resolving checkout | Exact 1.1.0 (node 1.2, PR #2712); npm's 1.1.0 lockfile kept whole (deviations 2, 4) |
+| Host floor | Pi ≥1.0.0 in `shared/host-floor.yaml` | Pi ≥1.1.0, applied independently to the PATH CLI and each loaded SDK | Pi ≥1.1.0 (node 1.4, PR #2716); the Node lines 22.23.4 / 24.22.1 / 26.12.1 (PR #2747, outside the objective) |
+| Remote installation pin | `REMOTE_PI_VERSION = "1.0.0"` | Exact 1.1.0 for the global CLI and consumer worker SDK; self-repo worker uses the development pins | `REMOTE_PI_VERSION = PI_ADOPTED_VERSION`: the adopted Pi pin 1.1.0 with its eight-spec pinned install set (node 1.5, PR #2751; deviation 10) |
+| Supplier installation pin | `SUBAGENTS_PACKAGE = "npm:pi-subagents@0.75.0"` and matching committed Pi settings | Exact 0.76.1 through the existing convergence owner | `npm:pi-subagents@0.76.1` (node 1.3, PR #2714) |
+| Supplier guidance stamp | `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.75.0"` | 0.76.1 only after required reverification passes | 0.75.0 — HELD (node 7.1, PR #2763: FAIL W4, W6, W7a); node 7.3 owns the move |
+| Node / TypeBox | Node ≥22.19.0; TypeBox 1.3.27 | Unchanged; the published Pi 1.1.0 requirements agree | TypeBox 1.3.27 unchanged; Node is now a supported-line table (the host-floor row) |
 
 An exact pin, a minimum, and a guidance stamp remain different facts. Admission
 does not require the CLI and SDK versions to equal each other. Wildcard host
@@ -88,6 +88,8 @@ supported limitation and the evidence needed to revisit it.
 
 ### Existing integration and completed work
 
+Rows reading *Implement* describe the seed state; the landed state per row is the WP's dated *As landed* note below and the objective's landed record.
+
 | Proposal and source | Current evidence / disposition | Owner or acceptance |
 | --- | --- | --- |
 | Establish a real compatibility baseline — [v3 R1][v3], [deep opportunities][deep] | **Implement.** Existing pins/floor are real; the target pair is not yet certified | WP1, WP7: actual installations and full target-pair matrix |
@@ -107,6 +109,8 @@ supported limitation and the evidence needed to revisit it.
 | perk 4.0.0 publication — #2656's former non-goal | **Completed.** Release commit follows certification work | Do not schedule the old release again |
 
 ### Unfinished work, narrowed proposals, and exclusions
+
+Rows reading *Implement* describe the seed state; the landed state per row is the WP's dated *As landed* note below and the objective's landed record.
 
 | Proposal and source | Current evidence / disposition | Owner or acceptance |
 | --- | --- | --- |
@@ -196,6 +200,17 @@ The guidance stamp remains 0.75.0 until both browser legs and the other required
 reverification evidence pass; WP7 owns any still-outstanding live legs. An interim
 doctor warning is truthful, not grounds for an unevidenced stamp advance.
 
+> **As landed (node 7.2, 2026-10-24).** The chain 1.1 → 1.5 landed: the
+characterization ([record][characterization-1.1.0]); the dev pins at exact 1.1.0 with npm's 1.1.0
+lockfile kept whole ([record][dev-pins-1.1.0]; deviations 2 and 4); the supplier pin at exact
+0.76.1 with the in-process identity proof ([record][pin-0.76.1]); the floor and the remote pin at
+1.1.0 ([record][host-floor-1.1.0]); and the adopted Pi pin with its pinned install set, which
+closed the install float ([record][install-pins-1.1.0]; deviation 10). Outside the objective,
+PR #2758 added the runtime companion-family check
+(`src/perk/substrate/pi_host.py::admit_pi_companions` → `pi_companions_incoherent`) and made
+`perk doctor --fix` install the pinned set when the `pi` row fails or is not the adopted pin. The
+guidance stamp stays 0.75.0 (WP7).
+
 ### WP2 — Enforce supplier policy and close lifecycle gaps
 
 Use `ReportWave`, `WaveSpawnParams`, the existing RPC adapter, and foreground
@@ -235,6 +250,17 @@ remain incomplete evidence, and reload/relaunch never silently presents reused
 old reports as a fresh inspection. Preserve the no-collection-across-reload rule;
 any freshness correction must stay within supported launch controls.
 
+> **As landed (node 7.2, 2026-10-24).** Descendant ceilings on every def and the
+repository auditor, and the bridge-off writers (node 2.1, four live legs PASS —
+[record][descendant-ceilings]). The lifecycle proven offline, with the live legs W1–W7b fully
+specified and deferred to node 7.1, and terminal diagnostics narrowed to failure and uncertain
+termination (node 2.2 — [record][lifecycle-0.76.1]; deviation 5). The launch token
+(`extension/waves/transport.ts::startWaveScript`), `ok`-only partials and the MCP report floor,
+measured live (node 2.3 — [record][collection-mcp-floor-1.1.0]). **#2660, measured (node 2.4):**
+LOOPS / LOOPS against the no-perk control — an attributed upstream limitation outside perk's
+`worktree: false` report path; no perk repair, and the issue was closed on 2026-10-19
+([record][headless-print-mode-1.1.0]).
+
 ### WP3 — Truthful access/save outcomes and shared browser ownership
 
 Change `ToolGating.enter`, `exit`, and `syncFromState` to report the effective
@@ -267,6 +293,15 @@ are tested. Test existing feedback coordinates/text and distinct findings at one
 anchor; change metadata/dedupe behavior only for a demonstrated loss. No new rich
 feedback product or persistent review recovery is part of the package.
 
+> **As landed (node 7.2, 2026-10-24).** The "full tool access restored" /
+`gateExited` sentence above is now the implemented invariant: `ToolGating.enter`, `exit` and
+`syncFromState` return a typed `GateTransition` (`extension/substrate/toolPolicy.ts`) with the
+arms applied / restricted / failed, rendered by `extension/pi/v1/gateTransitions.ts`, and
+`gateExited` is reported only for an applied read-write release (node 3.1). The save
+reconciliations (`linkage`, `claimClear`) ride the save result (node 3.2). One browser-operation
+owner (`extension/pi/v1/browserOperation.ts::createBrowserOperationOwner`) serves all four doors
+(nodes 3.3 and 3.4).
+
 ### WP4 — Useful restricted composition for planning
 
 *Deviation 3 (below) narrows the `only` arm.*
@@ -297,6 +332,14 @@ adds no model-budget mechanism or report-child model capability.
 modes; direct and nested writes, unsafe bash, terminal/orchestration calls, unknown
 tools, and MCP remain denied. Child floors, stage transitions, reload/tree restore,
 and discovery opt-outs keep their existing guarantees.
+
+> **As landed (node 7.2, 2026-10-24).** `objective_stack_status` is gate-eligible in
+`PLANNING_READ_STAGES` (`extension/substrate/toolPolicy.ts`) plus the worktree family, and its one
+fetch is bounded to remote-tracking refs (node 4.1). Nested calls under the gate follow
+`nestedPostureFor` (node 4.2). The codemode suspension lifts across `READ_ONLY_STAGES` — wider
+than the planning/refinement sessions named above — with `only` conditional on no stranded writer
+(node 4.3 — [record][codemode-lift-1.1.0]; deviations 3 and 6). The live codemode-composition leg
+was NOT RUN at node 7.1 ([record][certification-1.1.0]).
 
 ### WP5 — Project-only MCP in the SDK worker
 
@@ -331,6 +374,13 @@ registration, reconnect, cancellation, and shutdown close transports before
 cleanup. Existing provider selection, model authentication, retry/compaction,
 count-once usage, and no-extra-request budget tests remain green.
 
+> **As landed (node 7.2, 2026-10-24).** Factory-scoped isolation through Pi's
+public `McpExtensionOptions` replaced the process-wide override (node 5.1,
+`extension/worker/sdkAdapter.ts`; deviations 1 and 7). The matrix is pinned on the real runtime,
+and headless problem reporting is recorded silence (node 5.2). The worker's abort latches across
+Pi's prompt preflight, re-firing on `agent_start` and `compaction_start` (node 5.3; deviation 8).
+The live subagent-under-worker cell (U-bg) was NOT RUN at node 7.1.
+
 ### WP6 — Better existing evidence and classifier correctness
 
 Extend `session_jsonl.py` and its existing projection pipeline to interpret bounded
@@ -363,6 +413,12 @@ inconsistent/negative supplied counts, resolved/outdated feedback, and discussio
 comments. Existing classification vocabulary and authorization/terminal rules stay
 unchanged. No alternative classifier benchmark is required.
 
+> **As landed (node 7.2, 2026-10-24).** `/learn` evidence projects a bounded
+system state (`src/perk/learn/session_jsonl.py`, node 6.1; deviation 9). `/perk-selfcheck` and the
+worker's run report carry selected-vs-dispatched model identity and once-counted usage, with wave
+cost a fixed `unavailable` (node 6.2). The `/address` classifier is bound to the parent-prepared
+feedback snapshot (`perk pr feedback --json`), with the counts derived in code (node 6.3).
+
 ### WP7 — Complete live certification and maintain the release procedure
 
 Give the live legs a dedicated node using already-landed changes and an available
@@ -392,22 +448,31 @@ run compatibility/identity/policy tests, elect live-leg owners, recheck adaptati
 retirement conditions, and update evidence-contingent documentation. Do not add a
 parallel dependency-update service or silently refresh version stamps.
 
+> **As landed (node 7.2, 2026-10-24).** The certification HELD (node 7.1 —
+[record][certification-1.1.0]): FAIL W4, W6 and W7a, 12 required cells NOT RUN, and the guidance
+stamp stays 0.75.0 (deviation 11). Node 7.2 consolidated the upkeep into the
+[re-verification guide][reverify] — now the one procedure for both halves of the pair — and
+reconciled the documentation; node 7.3 repairs or re-specifies the FAILs and re-certifies.
+
 ## Deviations recorded by Objective #2707
 
-Items 1–3 recorded by node 1.1 ([characterization record][characterization-1.1.0]); item 4 by node 1.2 ([dev-pins record][dev-pins-1.1.0]); item 10 by node 1.5 ([install-pins record][install-pins-1.1.0]); the prose above is the seed as written and is not rewritten here.
+Items 1–3 recorded by node 1.1 ([characterization record][characterization-1.1.0]); item 4 by node 1.2 ([dev-pins record][dev-pins-1.1.0]); item 3's resolution and item 6 by node 4.3 ([codemode-lift record][codemode-lift-1.1.0]); item 10 by node 1.5 ([install-pins record][install-pins-1.1.0]); items 5, 7, 8, 9 and 11 by node 7.2's ledger reconciliation; the prose above is the seed as written and is not rewritten here (each WP's dated *As landed* note annotates it).
 
 1. **Phase 5 mechanism (WP5).** Factory-scoped isolation through Pi's public `McpExtensionOptions` (`loadConfig`, `credentials`, `logPath`, `openUrl`, `updateConfig`) replaces the process-wide `PI_CODING_AGENT_DIR` override and the explicit `ModelRuntime.create({authPath, modelsPath})` — the seed assumed those options were private; they are public, and the override would break supplier-child model auth (pi-subagents' child factory calls a bare `ModelRuntime.create()` and `getAgentDir()`; background children inherit the process env) and worker session persistence (`SessionManager.create(worktree)` places the transcript under the directory the worker deletes at disposal).
 2. **Lockfile rule in node 1.2 (WP1).** Pi ≥ 1.0.1 ships no `npm-shrinkwrap.json` (1.1.0 `_hasShrinkwrap: false`; the current lock's `hasShrinkwrap: true` describes the installed 1.0.0): the nested pi-coding-agent tree's removal/dedup is an intentional upgrade change to keep, not churn to revert; the learned pin-bump mechanics' "keep the shrinkwrapped tree" clause is 1.0.0-era and is corrected through `/learn`.
 3. **Codemode `only` in node 4.3 (WP4).** Conditional: `only` is lifted only if a supported exposure/loadout treatment keeps the bounded writers (`plan_draft`, `objective_draft`, `objective_refinement_draft`) directly declared — Pi's `prepareCodemodeLoadout` hides every direct-exposure declared tool in `only` — instead of the seed's unconditional "on and only". **Resolved 2026-10-21 (node 4.3, operator decision):** the condition is met — every bounded writer (the five carve-outs) registers `exposure: "model-only"`, Pi's own "declared, never callable through another tool", so `only` cannot hide it and no script or nesting tool can reach it. `only` lifts by the stranded-writer rule (no registered, gate-eligible, direct, nested-blocked perk tool in the landing): it lifts in discovery-cohort sessions, while a nonparticipant keeps `only` suspended in every gated stage (its mode-over-stage `push_annotations`/`collect_draft_review_wave` stay direct). Record: [`docs/design/archive/pi-1.1.0-codemode-lift.md`][codemode-lift-1.1.0].
 4. **Lockfile reverts in node 1.2 (WP1).** The node text's "revert only re-resolutions the edited lockfile's own declarations do not force" (node 1.1 classed 7 of the 24 non-Pi version moves revertable) was set aside at planning on 2026-10-09 by operator decision: node 1.2 commits the dependency graph npm produces for the 1.1.0 pins whole — no non-Pi entry is reverted, the 15-entry `@aws-sdk/*`/`@smithy/*` chain stays as one unit — and records the revertable/forced classification as evidence in [`docs/design/archive/pi-1.1.0-dev-pins.md`][dev-pins-1.1.0]. The committed lockfile is npm's own `npm install --package-lock-only` output (byte-identical), and a registry preflight (no `^1.1.0`-satisfying release of `chord`/`pi-codemode`/`pi-mcp`/`pi-telemetry` other than 1.1.0) is what ties it to the characterized graph.
 
-Item 5 (node 2.2's live legs, deferred to node 7.1) is recorded in the objective; its entry here is owed by node 7.2's ledger reconciliation.
+5. **Live legs in node 2.2 (WP2).** Node 2.2's text implied live supplier-lifecycle measurements; at planning the operator deferred every live leg to node 7.1 (decision 2026-10-19), so node 2.2 landed offline evidence plus fully specified protocols (W1–W7b), which node 7.1's description absorbed. Record: [`docs/design/archive/pi-subagents-0.76.1-lifecycle.md`][lifecycle-0.76.1].
 
 6. **Codemode lift scope and live leg in node 4.3 (WP4).** Two operator decisions, 2026-10-21: (a) the node text's "proven useful through codemode scripts in real sessions" leg is deferred to node 7.1's "planning composition per enabled codemode mode" row — 4.3 lands on offline real-Pi-1.1.0 session-harness evidence, and the live leg stays an explicit, dated 7.1 obligation, never reported as met; (b) the lift family is every registry read-only stage (`READ_ONLY_STAGES`: `gist-author`, `objective-author`, `objective-plan`, `plan`, `audit`, `objective-refine`), wider than the node text's "planning/refinement" sessions — `audit` included, whose draft loop runs through the mode-over-stage `plan_draft` (reachable there, unsaveable — the `objective-refine` precedent), so the draft/review/revision acceptance holds in all six stages.
 
-Items 7–9 are recorded in the objective; their entries here are owed by node 7.2's ledger reconciliation.
+7. **Credential store and child auth in node 5.1 (WP5).** Two operator decisions at planning, 2026-10-21: (a) the node text's "`logPath` + refresh state under the throwaway dir" became a stateless headless store — headless OAuth never obtains a token, so the throwaway dir holds `mcp.log` only, and "reports sign-in-required" is met on the one decision the store can observe, the empty-store 401 refresh (`insufficient_scope` is Pi's to decide without the store — measured silent by node 5.2); (b) the node text's "model auth still resolves … for a worker-spawned pi-subagents child on both execution paths" is pinned by stand-ins — the exact construction calls run mid-drive on both paths, because committed tests may not load the engine. The live subagent-under-worker cell is node 7.1's and is never reported met (it was NOT RUN there).
+8. **The abort latch's reach in node 5.3 (WP5).** The node text and its plan latched the worker's abort on `agent_start` only, and the plan (operator decision) declined a `compaction_start` arm on a source-derived reason: no auto-compaction could precede the first request's refusal on the worker's fresh session. The `/pr-review` round falsified that reason against Pi 1.1.0: the worker's own `before_agent_start` messages (the run's scratch guidance; a skill binding's delivery) follow the user message and are compaction cut points, and Pi's agent loop still runs `prepareRequest` after the abort, so a virtual model's routing check can start a turn-1 threshold compaction with a controller Pi mints after the trip. Reproduced red (the compaction completed after the abort), the latch now re-fires on `compaction_start` as well, and contracts §8.11 states the case as reachable and covered.
+9. **The implement host at node 6.1 (WP6).** The evidence discipline runs every dogfood leg in a fresh host process whose PATH `pi` is the target version; node 6.1 was implemented, and its dogfood captured, under a PATH `pi` 1.4.0 — an accidental global upgrade the operator caught after `/submit`. The node's code never loads Pi (a Python parser over saved JSONL; the run-all gate used the lockfile-pinned 1.1.0 tree), so the deviation was closed by a post-hoc check against 1.1.0 rather than a re-run: the lockfile-pinned 1.1.0 types and writers match the projection, and a session written through the 1.1.0 SDK's own writers parsed and rendered with 0 malformed lines. The operator's global install was then repaired to the 1.1.0 graph (item 10's float) before the covered review wave.
 
 10. **The 1.1.0 install float in node 1.5.** The seed and node 1.4 assumed an exact `@1.1.0` spec pinned the remote installs. Pi's shrinkwrap-free packaging (its companions declared at `^1.1.0`) plus the 1.2.0–1.4.0 releases falsified that: every lockfile-free install of `pi-coding-agent@1.1.0` resolved the 1.4.0 companions, where `pi-codemode` no longer exports a symbol 1.1.0's codemode extension imports, and a bare `npm install -g @earendil-works/pi-coding-agent` — what every guidance string named — installed Pi 1.4.0, which dropped `chord` and so fails pi-subagents 0.76.1's background children. Both remote installs and every guidance string now name the **pinned install set** (the package and its seven companions at exactly 1.1.0, declared once as the adopted Pi pin in `perk/substrate/pi_host.py`). Guidance decision (operator, 2026-10-22): the pinned command everywhere, plus an advisory on an admitted PATH `pi` that is not the adopted pin — a `perk doctor` `warn` and a successful-`perk init` warning, never a refusal — and the extension's SDK-boundary refusal links the public requirements reference rather than a PATH-dependent surface. Measured offline under the operator's toolchain and the remote Node line: [`docs/design/archive/pi-1.1.0-install-pins.md`][install-pins-1.1.0]. A later Pi pair stays node 7.2's procedure.
+11. **The certification at node 7.1 held (WP7).** The seed's "the pair is certified" did not land: the record holds 3 required FAILs (W4, W6, W7a) and 12 NOT RUN cells, so the guidance stamp stays 0.75.0. Three operator decisions shaped the run: `OPENAI_API_KEY` stays absent (2026-10-23), so U-bg is NOT RUN; R1 and R2 are reclassified to NOT RUN (prerequisite) on the runner PAT checkout rejection instead of rotating the PATs (2026-10-24); and the owner ended the owner legs before S3 and the codemode `only` session (2026-10-24). Node 7.3 was added at node 7.1's reconcile for the repair or re-specification and the re-certification. Record: [`docs/design/archive/pi-1.1.0-certification.md`][certification-1.1.0].
 
 ### Dispositions the characterization falsified
 
@@ -415,18 +480,18 @@ None — every disposition above survived the characterization.
 
 ## Retained adaptations and retirement conditions
 
-| Adaptation or limitation | Why it stays / evidence needed to retire it |
-| --- | --- |
-| Host SDK bridge and consumer ordering | Pi 1.1.0's loader change adds renderer registration, not shared native-import identity. Require an actual replacement identity proof, including an in-process child and lazy imports. |
-| `/btw` live-runtime probe and core-only resources | No public replacement preserves the parent's runtime auth overrides/providers. New image/classifier APIs do not supply that side-session contract. |
-| Canonical projection plus perk delivery predicates | Pi owns projection; perk owns evidence that its guidance/task was delivered. Existing diagnostics do not collapse those responsibilities. |
-| MCP restoration-window reconciliation | Remove only against a real delayed-registration control showing the supported host preserves selections without it. |
-| Contextless/stale RPC responder guards | Reproduce duplicate supplier loading and prove removal safe. A fix in Pi's separate RPC client is insufficient. |
-| Worker `finishTurn` cap | Pi 1.1.0 still lacks the required equivalent no-extra-provider-request guarantee. New settlement metadata is not a replacement. |
-| Worker `models: false`, image/classifier refusal | Token usage still arrives at script completion; no public mid-script token meter or factory call bound exists. Preserve the absence-of-usage test and the current token/turn/time budget. |
-| Activation-owned wave references | Public targeted status has terminal information and a preview, not the validated complete report aggregate. A new supported recovery contract is required; do not persist refs or scan artifacts here. |
-| Unavailable RPC-wave spend | Native supplier cost discovery is not authoritative attribution for arbitrary perk RPC waves. Require an owned-run usage API before claiming totals. |
-| Plannotator readiness, port, decision, and source-identity adaptations | Consolidate ownership in WP3; delete a workaround only after the installed provider demonstrates its exact replacement. |
+| Adaptation or limitation | Why it stays / evidence needed to retire it | Re-checked (7.1 K rows / 7.2 source read) |
+| --- | --- | --- |
+| Host SDK bridge and consumer ordering | Pi 1.1.0's loader change adds renderer registration, not shared native-import identity. Require an actual replacement identity proof, including an in-process child and lazy imports. | K1 RETAINED; the bridge-off control still observed 33 escapes at 0.76.1 ([pin record][pin-0.76.1]) — the condition is unmet |
+| `/btw` live-runtime probe and core-only resources | No public replacement preserves the parent's runtime auth overrides/providers. New image/classifier APIs do not supply that side-session contract. | K2 RETAINED — still no public runtime accessor |
+| Canonical projection plus perk delivery predicates | Pi owns projection; perk owns evidence that its guidance/task was delivered. Existing diagnostics do not collapse those responsibilities. | K3 RETAINED |
+| MCP restoration-window reconciliation | Remove only against a real delayed-registration control showing the supported host preserves selections without it. | No K row. Re-read 2026-10-24: `extension/substrate/restorationWindow.test.ts` green on 1.1.0 (certification E4), the window kept by the codemode lift (node 4.3); no delayed-registration control has run — RETAINED |
+| Contextless/stale RPC responder guards | Reproduce duplicate supplier loading and prove removal safe. A fix in Pi's separate RPC client is insufficient. | K4 RETAINED |
+| Worker `finishTurn` cap | Pi 1.1.0 still lacks the required equivalent no-extra-provider-request guarantee. New settlement metadata is not a replacement. | K5 RETAINED (constrained) |
+| Worker `models: false`, image/classifier refusal | Token usage still arrives at script completion; no public mid-script token meter or factory call bound exists. Preserve the absence-of-usage test and the current token/turn/time budget. | K5 RETAINED |
+| Activation-owned wave references | Public targeted status has terminal information and a preview, not the validated complete report aggregate. A new supported recovery contract is required; do not persist refs or scan artifacts here. | No K row. Node 2.3 measured the engine's workflow reuse and opted perk out with the launch token; no supported recovery contract exists — RETAINED |
+| Unavailable RPC-wave spend | Native supplier cost discovery is not authoritative attribution for arbitrary perk RPC waves. Require an owned-run usage API before claiming totals. | No K row. Node 6.2 made it a reported constant, and contracts §8.35 states perk reads no supplier accounting field — RETAINED |
+| Plannotator readiness, port, decision, and source-identity adaptations | Consolidate ownership in WP3; delete a workaround only after the installed provider demonstrates its exact replacement. | K6 RETAINED — consolidated into the browser-operation owner (nodes 3.3, 3.4); none deleted |
 
 ## Acceptance and completion
 
@@ -439,6 +504,10 @@ None — every disposition above survived the characterization.
 | Worker MCP | Project resources work without user-global MCP access; model auth remains intact; headless auth refusal, opt-outs, delayed connections, cancellation, and disposal are proven |
 | Evidence and classification | Bounded tolerant system-data interpretation; honest projection/model/usage output; classifier membership/coverage bound to prepared feedback |
 | Live certification | Both browser doors meet their receipt criteria; repeated collection and PR-wave launch pass on the new pair; no required row remains pending |
+
+*As landed (node 7.2, 2026-10-24):* the *Live certification* row is unmet — the certification
+HELD at node 7.1 ([record][certification-1.1.0]) — and is node 7.3's; every other row has landed
+evidence in the objective's landed record.
 
 Use targeted pytest and node:test checks during implementation. In perk sessions,
 the submission gate is one run-all `run_ci` immediately before submitting; its
@@ -493,5 +562,12 @@ pi-durable program is a separate planning decision.
 [dev-pins-1.1.0]: ../design/archive/pi-1.1.0-dev-pins.md
 [codemode-lift-1.1.0]: ../design/archive/pi-1.1.0-codemode-lift.md
 [install-pins-1.1.0]: ../design/archive/pi-1.1.0-install-pins.md
+[host-floor-1.1.0]: ../design/archive/pi-1.1.0-host-floor.md
+[pin-0.76.1]: ../design/archive/pi-subagents-0.76.1-pin.md
+[descendant-ceilings]: ../design/archive/pi-subagents-descendant-ceilings.md
+[lifecycle-0.76.1]: ../design/archive/pi-subagents-0.76.1-lifecycle.md
+[collection-mcp-floor-1.1.0]: ../design/archive/pi-1.1.0-collection-and-mcp-floor.md
+[headless-print-mode-1.1.0]: ../design/archive/pi-1.1.0-headless-print-mode.md
+[certification-1.1.0]: ../design/archive/pi-1.1.0-certification.md
 [certification]: ../design/archive/pi-1.0.0-certification.md
 [mcp-restoration]: ../design/archive/pi-1.0.0-mcp-restoration.md

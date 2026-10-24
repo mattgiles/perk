@@ -130,7 +130,7 @@ stages:
     command: objective plan   # P2.T10: dedicated cold door (perk objective plan) + /objective-plan
     requires: [github.objective]                        # an objective issue must exist
     reads: [github.objective]                           # roadmap nodes + next-node selection
-    writes: [github.objective, session.workflow-state, cache.session-data, cache.scratch]  # mark node planning; set active_objective; #339 Node 2.1: plan_draft writes the working-plan artifact + its session_artifacts pointer; eligible turns may provision agent scratch
+    writes: [github.objective, session.workflow-state, cache.session-data, cache.scratch]  # mark node planning; the planning claim (objective_node_claim) — active_objective is the /objective command's and the objective save's write; plan_draft writes the working-plan artifact + its session_artifacts pointer; eligible turns may provision agent scratch
     predecessors: [objective-save]                      # P3.T2: objective-save now precedes planning
     successors: [plan]
 

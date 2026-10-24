@@ -8894,8 +8894,8 @@ the posture table makes ineligible.
 **Ordering facts.** `before_agent_start` handlers run in extension order over a copy of the prompt
 options; afterwards an explicit edit to `event.systemPromptOptions.selectedTools` wins, otherwise
 the live loadout is authoritative, so perk's pre-request install is not undone. The installed
-owners edit `selectedTools` only when their loader is absent from it (pi-subagents 0.75.0, which
-under an eager `toolActivation` does not edit it at all;
+owners edit `selectedTools` only when their loader is absent from it (pi-subagents'
+`tool-activation`, re-read at 0.76.1, which under an eager `toolActivation` does not edit it at all;
 pi-web-access re-adds its loader only when selected and absent); under own-names-only the loader
 is never absent. Residual: on a pre-change transcript where a later handler does edit
 `selectedTools`, perk's deactivation of an ineligible deferred tool takes effect one request later
@@ -8917,8 +8917,9 @@ in a read-write stage session, and gate-blocked ones (`edit`/`write`) under a li
 accepted, presentation-only: the backstop refuses them, nested or direct. The carve-out writers
 and every model-only kind are outside the callable set, so they are never listed, and mode `on`'s
 `Codemode: tools.<name>(args)` description rewrite never touches them. Two script effects sit
-outside the gate's worktree guarantee and are recorded, not policed: `store()`/`load()` append
-`codemode-store` session entries, and `image()` writes a temp file. The CLI builtin's `models.*`
+outside the gate's worktree guarantee and are recorded, not policed: `store()` appends
+`codemode-store` session entries (only for a non-empty write set; `load()` only reads them), and
+`image()` writes a temp file. The CLI builtin's `models.*`
 script API (classifiers, image generation) is model spend outside the read-only guarantee too —
 perk adds no model-budget mechanism (the worker's own codemode factory passes `models: false`,
 §8.11). A nested `ctx.executeTool()` from any gate-allowed tool still goes through the `tool_call`

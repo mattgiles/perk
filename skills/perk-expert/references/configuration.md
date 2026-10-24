@@ -141,7 +141,9 @@ companions at exactly that version — `npm install -g @earendil-works/pi-coding
 @earendil-works/pi-tui@1.1.0` — because Pi ships no shrinkwrap and declares its companions at
 `^1.1.0`, so a lockfile-free install of the package alone floats them to the newest releases
 (`pi-codemode` ≥ 1.2.0 breaks Pi 1.1.0's codemode extension at module link; Pi 1.4.0 itself no
-longer ships `chord`, which pi-subagents 0.76.1 refuses). `--dry-run` never probes; `perk init`, `perk doctor`
+longer ships `chord`, which pi-subagents 0.76.1 refuses). A later bare `npm install -g
+@earendil-works/pi-coding-agent@<version>` re-floats the companions beside the stale pinned ones,
+so always upgrade with the pinned command (`perk doctor --fix` runs it). `--dry-run` never probes; `perk init`, `perk doctor`
 and `--help` are never gated by it. Instead the environment checks report the same floor: the `pi`
 row is presence + version + (at the adopted version) the companion family, and the `node` row
 checks the major against the supported lines (`node.min_version` plus `node.line_floors`) and the

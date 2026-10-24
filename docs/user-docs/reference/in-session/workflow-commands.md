@@ -476,8 +476,7 @@ compaction never dispatches the continuation. If you stop the driven turn with E
 model is working (streaming or running tools), perk reports the abort and skips both the compaction
 and the continuation — even when a commit already landed — leaving `/compact` as the escape hatch.
 Escape during a retry wait or an automatic compaction cancels only that wait or compaction, not the
-run, so the turn then settles normally. (Pi 1.1.0 or newer reports the abort; an older host settles
-as before.) If a compaction already landed during the driven turn (Pi's automatic
+run, so the turn then settles normally. If a compaction already landed during the driven turn (Pi's automatic
 threshold/overflow compaction, or perk's objective threshold compaction), perk skips its own
 compaction and starts the continuation directly. Pi's `/compact` remains the escape hatch. No paired
 tool.

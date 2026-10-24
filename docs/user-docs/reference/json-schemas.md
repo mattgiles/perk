@@ -62,7 +62,7 @@ category directory.
 | `pr-stats.schema.json` | `PrStatsOut` | `serialization` | Read-only change stats for the current branch. |
 | `pr-ready.schema.json` | `PrReadyOut` | `serialization` | Draft-to-ready transition result. |
 | `pr-land.schema.json` | `PrLandOut` | `serialization` | Pull-request landing and plan-finalization result. |
-| `pr-feedback.schema.json` | `PrFeedbackOut` | `serialization` | Classified PR feedback and thread inventory. |
+| `pr-feedback.schema.json` | `PrFeedbackOut` | `serialization` | The prepared PR feedback snapshot (`/address`'s classifier input) and thread inventory. |
 | `pr-review-context.schema.json` | `PrReviewContextOut` | `serialization` | Read-only PR review context. |
 | `pr-review-stack-context.schema.json` | `PrReviewStackContextOut` | `serialization` | Read-only PR review context, `--stack` arm. |
 | `pr-review-checkout.schema.json` | `PrReviewCheckoutOut` | `serialization` | Isolated PR review checkout result. |
