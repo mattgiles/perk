@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The compatibility docs now report the live certification of Pi 1.1.0 with pi-subagents 0.76.1. The pair is adopted, but the certification record holds 3 required failures in pi-subagents' lifecycle legs (W4, W6, W7a), so the support claim is held. `subagent-compat`'s guidance stamp stays at 0.75.0, and the check keeps warning by design on a converged checkout. (65414684)
 - `perk doctor --fix` now repairs the `pi` row itself: whenever the PATH `pi` is missing, below the floor, unverifiable, has a broken companion family or is not the adopted Pi 1.1.0 (and Node passes), it runs the pinned eight-package `npm install -g` and re-checks the `pi` on your PATH, reporting a PATH-order problem when the `pi` it finds is not the one npm wrote; interactive `perk init` also offers that install when your Pi is admitted but not the adopted one. (0899296)
 - `perk init` and `perk doctor --fix` refuse, with exit 2 and before writing anything, to converge a repo from a perk older than its `.perk/required-perk-version` (`perk_outdated`) or, in perk's own repository, from a perk installed in a different checkout (`foreign_perk`), so a stale perk can no longer rewrite managed files backward; bare `perk doctor` and every other command still only warn. (e974828)
 

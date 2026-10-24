@@ -675,7 +675,9 @@ _Avoid_: version check, gate
 The exact Pi version perk adopted (`PI_ADOPTED_VERSION`, `perk/substrate/pi_host.py`), named by
 every install-guidance string and carried by the remote install pin; never below the host floor;
 an exact pin, not a minimum. A PATH `pi` admitted at another version is not refused, only reported
-(an environment-row advisory).
+(an environment-row advisory). Pi 1.1.0 + pi-subagents 0.76.1 is adopted; its certification record
+(`docs/design/archive/pi-1.1.0-certification.md`) holds 3 required FAILs (W4, W6, W7a), so the
+support claim is held.
 _Avoid_: floor, latest
 
 **Pinned install set**:

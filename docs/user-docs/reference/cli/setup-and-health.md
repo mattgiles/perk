@@ -162,7 +162,9 @@ version perk's guidance was verified against (`_SUBAGENTS_GUIDANCE_VERIFIED_VERS
 itself is pinned by `settings-wiring` (repaired by `--fix`); the guidance stamp is a distinct fact —
 what perk's guidance was re-read against, not what consumers install — so a mismatch says
 "re-verify" (`docs/developers/pi-subagents-reverify.md`), not "broken". Today the pin (0.76.1) is
-ahead of the stamp (0.75.0), so on a converged checkout the warning is the expected state.
+ahead of the stamp (0.75.0). The stamp stayed at 0.75.0 after the live certification
+(`docs/design/archive/pi-1.1.0-certification.md`) because W4, W6 and W7a failed and S3, S4a-live,
+U-bg, X5a and X5b were not run. So `subagent-compat` warns by design on a converged checkout.
 The `package` group also carries the report-only `subagent-package-scope` check: it reads the
 user-scope `settings.json` in the launch-precedence agent dir (`PI_CODING_AGENT_DIR` → `[pi]
 agent_dir` → `~/.pi/agent`) beside the project `.pi/settings.json`, and warns — never fails, no

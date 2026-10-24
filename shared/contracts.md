@@ -16028,8 +16028,10 @@ worker SDK, each naming the pinned install set). Every install-guidance string �
 refusal ((c)), `pi_cli_missing`, the `pi` environment remediations and the guided install ((e)) —
 names `PI_INSTALL_COMMAND`; an admitted PATH `pi` at another version is never refused but is
 reported (the (e) advisory). The adopted pin moves with the floor on characterization + offline
-evidence; the live certification of the pair follows as its own later record (adopted is not
-certified), and it is never below the floor (a test pins it). Every host observation — the PATH `pi` CLI,
+evidence; for Pi 1.1.0 + pi-subagents 0.76.1 it is adopted, and the certification record
+(`docs/design/archive/pi-1.1.0-certification.md`, 2026-10-24) holds 3 required FAILs (W4, W6, W7a) —
+the support claim is held (adopted is not certified). The pin is never below the floor (a test
+pins it). Every host observation — the PATH `pi` CLI,
 a loaded SDK — is admitted **independently** against the same floor; equality between
 observations is never required (a floor-satisfying CLI beside an older dev SDK pin is admitted on
 the CLI's own reading). **The companion-family rule:** the launch admission below reads no loaded
