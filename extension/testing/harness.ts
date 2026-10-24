@@ -182,9 +182,18 @@ export interface PerkSession {
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<{ block?: boolean; reason?: string } | undefined>;
-  /** Fire `before_agent_start` (optionally with the submitting turn's prompt); returns the
-   * injected custom messages (customType + content). */
+  /** Fire `before_agent_start` as a USER start (`messageType: "user"` — a submitted prompt or
+   * `sendUserMessage`; optionally with the submitting turn's prompt); returns the injected custom
+   * messages (customType + content). */
   emitBeforeAgentStart(prompt?: string): Promise<{ customType?: string; content?: unknown }[]>;
+  /** Fire `before_agent_start` as a CUSTOM start (`messageType: "custom"` — an idle
+   * `sendMessage(…, { triggerTurn: true })`, e.g. pi-subagents' completion wake): the trigger
+   * carries the custom message and no prompt; returns the injected custom messages. */
+  emitBeforeAgentStartCustom(message: {
+    customType: string;
+    content: string;
+    display: boolean;
+  }): Promise<{ customType?: string; content?: unknown }[]>;
   /** Run messages through the `context` filter chain; returns the surviving messages. */
   emitContext(messages: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
   /**
@@ -1548,17 +1557,20 @@ export async function loadPerkSession(opts: {
       return result as { block?: boolean; reason?: string } | undefined;
     },
     async emitBeforeAgentStart(prompt?: string) {
-      const runner = session.extensionRunner as unknown as {
-        emitBeforeAgentStart: (
-          prompt: string,
-          images: undefined,
-          systemPrompt: string,
-          systemPromptOptions: unknown,
-        ) => Promise<{ messages?: { customType?: string; content?: unknown }[] } | undefined>;
-      };
-      const result = await runner.emitBeforeAgentStart(prompt ?? "", undefined, "", {} as never);
+      const result = await session.extensionRunner.emitBeforeAgentStart(
+        { messageType: "user", prompt: prompt ?? "" },
+        { cwd },
+      );
       await tick();
-      return result?.messages ?? [];
+      return result.messages;
+    },
+    async emitBeforeAgentStartCustom(message) {
+      const result = await session.extensionRunner.emitBeforeAgentStart(
+        { messageType: "custom", message: { role: "custom", ...message, timestamp: Date.now() } },
+        { cwd },
+      );
+      await tick();
+      return result.messages;
     },
     async emitContext(messages) {
       const runner = session.extensionRunner as unknown as {

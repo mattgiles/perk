@@ -20,7 +20,7 @@ import {
   ModelRegistry,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { renderFakeCursor, visibleWidth } from "@earendil-works/pi-tui";
 import {
   AGENT_SCRATCH_CONTEXT_TYPE,
   renderAgentScratchBlock,
@@ -773,17 +773,41 @@ const hasCodeIn = (text: string, lo: number, hi: number): boolean =>
   });
 
 /**
+ * Pi's zero-width fake-cursor APC markers around the cursor cell. The TUI renderer resolves them
+ * to reverse video (`resolveFakeCursors`, protected) — never the overlay — so the overlay's input
+ * row carries them raw. Pinned to `renderFakeCursor` below (pi-tui does not export the literals).
+ */
+const FAKE_CURSOR_START = "\u001b_pi:fc\u0007";
+const FAKE_CURSOR_END = "\u001b_pi:/fc\u0007";
+
+/** The input row's index under the `overlayRegions` rule, or -1 without two separators. */
+function inputRowIndex(rows: readonly string[]): number {
+  const separators = rows.flatMap((row, index) => (row.includes("├") ? [index] : []));
+  const second = separators[1];
+  return separators.length === 2 && second !== undefined ? second + 2 : -1;
+}
+
+/**
  * The all-rows law: no row carries a LF; no raw row carries a C1 byte; once SGR styling is
- * removed, no ESC or other C0 byte remains anywhere.
+ * removed, no ESC or other C0 byte remains anywhere — except Pi's two fake-cursor markers, which
+ * are stripped from the INPUT row only before that check.
  */
 function assertCleanRows(rows: readonly string[]): void {
-  for (const row of rows) {
+  const inputRow = inputRowIndex(rows);
+  rows.forEach((row, index) => {
     assert.ok(!row.includes("\n"), `row carries a LF: ${JSON.stringify(row)}`);
     assert.ok(!hasCodeIn(row, 0x80, 0x9f), `row carries a C1 byte: ${JSON.stringify(row)}`);
-    const plain = unstyled(row);
+    const plain =
+      index === inputRow
+        ? unstyled(row).replaceAll(FAKE_CURSOR_START, "").replaceAll(FAKE_CURSOR_END, "")
+        : unstyled(row);
     assert.ok(!hasCodeIn(plain, 0x00, 0x1f), `non-SGR control survives: ${JSON.stringify(row)}`);
-  }
+  });
 }
+
+test("the fake-cursor markers this suite normalizes are exactly pi-tui's", () => {
+  assert.equal(renderFakeCursor("x"), `${FAKE_CURSOR_START}x${FAKE_CURSOR_END}`);
+});
 
 /** Row regions: the transcript window sits between the two `├…┤` separators; status, then input. */
 function overlayRegions(rows: readonly string[]): {
@@ -1055,6 +1079,12 @@ test("overlay: a pasted draft is scrubbed of control bytes on entry; typed keys 
   assertCleanRows(rows);
   const { input } = overlayRegions(rows);
   assert.ok(unstyled(input).includes("abc"), JSON.stringify(input));
+  // The overlay leaves the fake-cursor pair on the live input row (the normalization above is
+  // exercised, not vacuous).
+  assert.ok(
+    input.includes(FAKE_CURSOR_START) && input.includes(FAKE_CURSOR_END),
+    JSON.stringify(input),
+  );
   assert.ok(!rows.some((row) => row.includes("PASTE-PAYLOAD")), rows.join("\n"));
   component.handleInput("x");
   assert.equal(component.getDraft(), "abcx", "the scrub is inert without controls");

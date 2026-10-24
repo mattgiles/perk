@@ -64,6 +64,24 @@ function writeSkill(cwd: string, skill: string, body: string): void {
   writeFileSync(join(dir, "SKILL.md"), body, "utf8");
 }
 
+/** A user start with an empty prompt (a submitted turn carrying no header). */
+const USER_START = { messageType: "user", prompt: "" };
+
+/**
+ * A custom start (an idle `sendMessage(…, { triggerTurn: true })` — pi-subagents' completion
+ * wake). Deliberately WITHOUT a `prompt` property: an unconditional `event.prompt` scan throws.
+ */
+const CUSTOM_START = {
+  messageType: "custom",
+  message: {
+    role: "custom",
+    customType: "subagent-notify",
+    content: "lane done",
+    display: false,
+    timestamp: 1,
+  },
+};
+
 // --- The cross-plane literal pin (mirror of the sibling pin in tests/test_binding_delivery.py) ---
 
 test("BINDING_HEADER is the exact cross-plane dedup marker (== the Python cold _HEADER)", () => {
@@ -743,9 +761,9 @@ test("the context strip KEEPS a cold user prompt carrying the header even after 
 
 test("Mechanism A: a failed projection read escapes the hook (no guessed copy); an inert stage never reads it", async () => {
   type Hook = (
-    event: { prompt: string },
+    event: unknown,
     ctx: unknown,
-  ) => Promise<{ message?: { customType?: string } } | undefined>;
+  ) => Promise<{ message?: { customType?: string; content?: unknown } } | undefined>;
   const hooksFor = (runnerChild: boolean): Map<string, Hook> => {
     const hooks = new Map<string, Hook>();
     registerBindingDelivery(
@@ -784,14 +802,14 @@ test("Mechanism A: a failed projection read escapes the hook (no guessed copy); 
 
   // A binding stage: the render succeeds, the prompt carries no header, the projection throws —
   // the exception reaches the hook boundary (Pi's hook-error reporter), nothing is injected.
-  await assert.rejects(inject({ prompt: "" }, ctxFor("save")), /adversarial projection read/);
+  await assert.rejects(inject(USER_START, ctxFor("save")), /adversarial projection read/);
   assert.deepEqual(reads, ["projection"]);
 
   // The stage-less read-only arm (plan mode → stage:plan) renders too, so a header-less prompt
   // reaches the same throwing projection read.
   reads.length = 0;
   await assert.rejects(
-    inject({ prompt: "" }, ctxFor(undefined, "read-only")),
+    inject(USER_START, ctxFor(undefined, "read-only")),
     /adversarial projection read/,
   );
   assert.deepEqual(reads, ["projection"]);
@@ -799,14 +817,14 @@ test("Mechanism A: a failed projection read escapes the hook (no guessed copy); 
   // The prompt check settles a cold launch turn BEFORE any projection read.
   reads.length = 0;
   assert.equal(
-    await inject({ prompt: `${BINDING_HEADER}\n\ncold seed` }, ctxFor("save")),
+    await inject({ messageType: "user", prompt: `${BINDING_HEADER}\n\ncold seed` }, ctxFor("save")),
     undefined,
   );
   assert.deepEqual(reads, [], "a cold-seed prompt never reads the projection");
 
   // No stage / nothing rendered: render-before-dedup means the projection is never touched.
-  assert.equal(await inject({ prompt: "" }, ctxFor(undefined)), undefined);
-  assert.equal(await inject({ prompt: "" }, ctxFor("implement-nothing-binds")), undefined);
+  assert.equal(await inject(USER_START, ctxFor(undefined)), undefined);
+  assert.equal(await inject(USER_START, ctxFor("implement-nothing-binds")), undefined);
   assert.deepEqual(reads, [], "an inert stage never reads the projection");
 
   // A runner child reads nothing at all — not even the branch.
@@ -820,5 +838,79 @@ test("Mechanism A: a failed projection read escapes the hook (no guessed copy); 
       },
     },
   };
-  assert.equal(await fenced({ prompt: "" }, unreadable), undefined);
+  assert.equal(await fenced(USER_START, unreadable), undefined);
+
+  // --- custom starts (`messageType: "custom"` — pi-subagents' completion wake): no prompt to
+  // scan, so the projection alone decides; the read-error policy is the user start's.
+
+  // A throwing projection read still escapes the hook.
+  reads.length = 0;
+  await assert.rejects(inject(CUSTOM_START, ctxFor("save")), /adversarial projection read/);
+  assert.deepEqual(reads, ["projection"], "a custom start goes straight to the projection read");
+
+  // A runner child reads nothing at all on a custom start either.
+  assert.equal(await fenced(CUSTOM_START, unreadable), undefined);
+
+  // Over a REAL session (Pi's projection is live): the exact render injects when nothing is live…
+  const render = renderBindings(cwd, "stage:save").text;
+  assert.ok(render !== null && render.includes(pointer("my-skill")));
+  const stagedSession = (): SessionManager => {
+    const manager = SessionManager.inMemory(cwd);
+    manager.appendCustomEntry("perk:workflow-state", {
+      run_id: "01RID",
+      mode: "read-write",
+      stage: "save",
+    });
+    return manager;
+  };
+  const injected = await inject(CUSTOM_START, { cwd, sessionManager: stagedSession() });
+  assert.deepEqual(injected?.message, {
+    customType: BINDING_CONTEXT_TYPE,
+    content: render,
+    display: false,
+  });
+
+  // …an owned copy of the current render live suppresses…
+  const withCopy = stagedSession();
+  withCopy.appendCustomMessageEntry(BINDING_CONTEXT_TYPE, render, false);
+  assert.equal(await inject(CUSTOM_START, { cwd, sessionManager: withCopy }), undefined);
+
+  // …and so does a persisted cold-seed user turn carrying the header.
+  const withSeed = stagedSession();
+  withSeed.appendMessage({
+    role: "user",
+    content: `Implement the plan.\n\n${BINDING_HEADER}\n\n${pointer("my-skill")}`,
+    timestamp: 1,
+  });
+  assert.equal(await inject(CUSTOM_START, { cwd, sessionManager: withSeed }), undefined);
+});
+
+test("Mechanism A on a custom start through the real runner: injects the render once, dedups on the second call", async () => {
+  const cwd = scaffoldRepo();
+  writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write", stage: "save" }]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const wake = { customType: "subagent-notify", content: "lane done", display: false };
+    const copies = (await h.emitBeforeAgentStartCustom(wake)).filter(isBindingCopy);
+    assert.equal(copies.length, 1, "the custom start receives the warm delivery");
+    assert.ok(String(copies[0]?.content).includes(pointer("my-skill")));
+    // The harness does not persist the returned custom — append it the way Pi would.
+    h.session.sessionManager.appendCustomMessageEntry(
+      BINDING_CONTEXT_TYPE,
+      String(copies[0]?.content),
+      false,
+    );
+    assert.equal(
+      (await h.emitBeforeAgentStartCustom(wake)).some(isBindingCopy),
+      false,
+      "the live copy suppresses the second custom start",
+    );
+  } finally {
+    h.dispose();
+  }
 });
