@@ -118,32 +118,34 @@ machine-local store behind the one-line post-upgrade notice (the `perk release-n
 the max perk version this user has run interactively. Self-healing (missing/garbled content is
 silently re-recorded) and safe to delete; no doctor check or init convergence touches it.
 
-**The host floor (Pi ≥ 1.1.0; Node.js on a supported release line — 22.23.4+, 24.22.1+ or
+**The host floor (Pi ≥ 1.4.0; Node.js on a supported release line — 22.23.4+, 24.22.1+ or
 26.12.1+).** perk declares its minimum supported host
 versions once in the bundled `shared/host-floor.yaml` and compares with semver precedence (a
-`1.1.0-rc.1` prerelease is below the floor; 1.1.1 or 1.10.0 is admitted). Every local launch (bare `perk`, a stage launch, `perk resume`) runs `pi --version`
+`1.4.0-rc.1` prerelease is below the floor; 1.4.1 or 1.10.0 is admitted). Every local launch (bare `perk`, a stage launch, `perk resume`) runs `pi --version`
 once (20 s timeout) as the first exec-phase step, before any lock sweep, chdir or exec, and refuses
 `pi_version_unsupported` (older or a floor prerelease) or `pi_version_unverifiable` (non-zero exit,
 timeout, spawn failure, output that is not a version, or a `pi` answering the adopted version whose
 realpath is not inside an installed `@earendil-works/pi-coding-agent` package) — exit 1, naming the
 executable, the observed version (or the reason), the required version and the pinned install
-command; no override. **The companion-family check:** a `pi` answering exactly the adopted 1.1.0
-must also resolve its seven `@earendil-works/*` companions — the way Node does, from the resolved
+command; no override. **The companion-family check:** a `pi` answering exactly the adopted 1.4.0
+must also resolve its six `@earendil-works/*` companions (`pi-agent-core`, `pi-ai`,
+`pi-codemode`, `pi-mcp`, `pi-telemetry`, `pi-tui`) — the way Node does, from the resolved
 executable (a copy nested under the Pi package shadows the global-root sibling; a dangling link
-does not resolve) — at exactly 1.1.0, else it is refused `pi_companions_incoherent`, naming each
+does not resolve) — at exactly 1.4.0, else it is refused `pi_companions_incoherent`, naming each
 offender (`<name> resolves to <version>` / `<name> does not resolve`) and `perk doctor --fix`. A
 floor-satisfying Pi at another version is not family-checked (the advisory below covers it). **The adopted Pi pin and its pinned install set** (`PI_ADOPTED_VERSION`,
-`PI_INSTALL_COMMAND` in `perk/substrate/pi_host.py`): perk adopts exactly Pi 1.1.0, and every
-install-guidance string names one command installing Pi and its seven `@earendil-works/*`
-companions at exactly that version — `npm install -g @earendil-works/pi-coding-agent@1.1.0
-@earendil-works/chord@1.1.0 @earendil-works/pi-agent-core@1.1.0 @earendil-works/pi-ai@1.1.0
-@earendil-works/pi-codemode@1.1.0 @earendil-works/pi-mcp@1.1.0 @earendil-works/pi-telemetry@1.1.0
-@earendil-works/pi-tui@1.1.0` — because Pi ships no shrinkwrap and declares its companions at
-`^1.1.0`, so a lockfile-free install of the package alone floats them to the newest releases
-(`pi-codemode` ≥ 1.2.0 breaks Pi 1.1.0's codemode extension at module link; Pi 1.4.0 itself no
-longer ships `chord`, which pi-subagents 0.76.1 refuses). A later bare `npm install -g
-@earendil-works/pi-coding-agent@<version>` re-floats the companions beside the stale pinned ones,
-so always upgrade with the pinned command (`perk doctor --fix` runs it). `--dry-run` never probes; `perk init`, `perk doctor`
+`PI_INSTALL_COMMAND` in `perk/substrate/pi_host.py`): perk adopts exactly Pi 1.4.0, and every
+install-guidance string names the one exact spec — `npm install -g
+@earendil-works/pi-coding-agent@1.4.0` — because since Pi 1.3.0 the package declares its
+companions at exact versions (no shrinkwrap — none needed), so that one spec places all six at
+exactly 1.4.0 (a `-g` install nests them inside the global package); `@earendil-works/chord` left
+the family in Pi 1.2.0. The 1.1.0-era command named eight exact specs (Pi 1.1.0 declared its
+companions at caret ranges) and is history. The companion tuple stays the coherence family the
+probe verifies: exact declarations do not prove an installed family intact. Upgrade with the
+pinned command (`perk doctor --fix` runs it) — and because the global `pi` serves every checkout and
+running session on the machine, finish or cancel outstanding waves and close perk sessions first;
+the earlier top-level 1.1.0 companions and `@earendil-works/chord` may then be removed with
+`npm uninstall -g` when convenient. `--dry-run` never probes; `perk init`, `perk doctor`
 and `--help` are never gated by it. Instead the environment checks report the same floor: the `pi`
 row is presence + version + (at the adopted version) the companion family, and the `node` row
 checks the major against the supported lines (`node.min_version` plus `node.line_floors`) and the
@@ -158,25 +160,27 @@ is unchanged; interactive init first offers to install the adopted set, and a de
 second warning) and `perk doctor` reports the row `warn` (`pi ok, with a caution`), never `fail`.
 **`perk doctor --fix` repairs the `pi` row** (verify-gated, before the skills steps) whenever it is
 not green — absent, below the floor, unverifiable, incoherent, or the advisory — by running the
-pinned eight-spec `npm install -g` itself and re-probing: `fixed` gets `pi: installed the adopted
-Pi 1.1.0 set (npm -g, 8 packages)`; an npm failure (`pi: adopted-set install failed (…); run
+pinned install command (the one exact spec) itself and re-probing: `fixed` gets `pi: installed the
+adopted Pi 1.4.0 (npm -g @earendil-works/pi-coding-agent@1.4.0)`; an npm failure (`pi: adopted-set install failed (…); run
 manually: …`) or a `pi` on PATH that still is not the install npm wrote (`pi: still … — fix PATH
 order or remove the other pi`) lands on `fix_errors`; a failing `node` row stops it with the
-install-Node-first warning. `engines.node` mirrors the lines as `^22.23.4 || ^24.22.1 || ^26.12.1`. The
+install-Node-first warning. The repair replaces the global Pi for every checkout and running
+session on the machine (the shared-host caveat above). `engines.node` mirrors the lines as `^22.23.4 || ^24.22.1 || ^26.12.1`. The
 managed remote runner installs the pinned install set (`REMOTE_PI_VERSION`, the adopted pin under
 its remote name) for both the global CLI and the consumer worker SDK (the worker install adds
-`--save-exact`, recording exact pins in `.pi/npm/package.json`), sets up exactly Node 22.23.4 (the lowest supported line) and pins
+`--save-exact`, recording the exact pin in `.pi/npm/package.json`), sets up exactly Node 22.23.4 (the lowest supported line) and pins
 `setup-uv` to `>=0.13.4` (`REMOTE_UV_VERSION_SPEC`, mirroring perk's own `[tool.uv]
-required-version`). Pi 1.1.0 is the enforced host floor and
-the remote install pin, **adopted** — not certified — on the characterization record
-(`docs/design/archive/pi-1.1.0-characterization.md`) plus the development-pin and pi-subagents-pin
-records (`pi-1.1.0-dev-pins.md`, `pi-subagents-0.76.1-pin.md`). The pair is adopted; the
-certification record (`docs/design/archive/pi-1.1.0-certification.md`, 2026-10-24) holds 3
-required FAILs (W4, W6, W7a), so the support claim is held. The earlier 1.0.0 certification record
+required-version`). Pi 1.4.0 is the enforced host floor and
+the remote install pin, **adopted** — not certified — together with pi-subagents 0.81.0, on the
+characterization + offline evidence in `docs/planning/pi-and-subagents-assessment-2026-10-24.md`
+and the adoption record `docs/design/archive/pi-1.4.0-adoption.md`; their live certification is
+owed. The previous pair's certification record (`docs/design/archive/pi-1.1.0-certification.md`,
+2026-10-24, Pi 1.1.0 + pi-subagents 0.76.1) holds 3 required FAILs (W4, W6, W7a), so the support
+claim stays held. The earlier 1.0.0 certification record
 (`docs/design/archive/pi-1.0.0-certification.md`, verdict PENDING — its three PR-door rows X5b, S7,
 I7b's launch proof were deferred by an operator decision and 4.0.0 shipped with that verdict) is
-historical and certifies nothing about 1.1.0. A newer Pi is admitted when at or above the floor
-but is uncertified at 1.1.0 and after (and warned about, above). The floor is a minimum,
+historical and certifies nothing about 1.1.0 or later. A newer Pi is admitted when at or above the
+floor but is uncertified at 1.1.0 and after (and warned about, above). The floor is a minimum,
 separate from the development pins, the pi-subagents pin below, and that remote install pin. The same floor is
 admitted at the SDK boundary, independently of the PATH `pi`: the loaded extension checks the Pi
 SDK it runs in and refuses to load (Pi reports a failed extension load carrying perk's refusal;
@@ -197,9 +201,10 @@ Pi). The user docs' Security reference (`docs/user-docs/reference/security.md`) 
 enforced-versus-operator-required split and each advisory that moved a floor.
 
 **The perk-managed `.pi/settings.json` slice pins pi-subagents.** The borrowed set is unpinned
-except `npm:pi-subagents@0.76.1`, the release characterized against Pi 1.1.0: perk's report waves
-send the inline script text under the RPC spawn key `script`, which is accepted since 0.74.0, and
-0.75.0 was the first release whose background children start on Pi 1.0.0. `perk init` writes the
+except `npm:pi-subagents@0.81.0`, the release characterized against Pi 1.4.0: perk's report waves
+send the inline script text under the RPC spawn key `script`, which is accepted since 0.74.0;
+0.78.0 made the Chord peer aliases conditional (repairing background launch on Pi 1.2+), and 0.80+
+requires Pi ≥ 1.2.0. `perk init` writes the
 pinned spec and rewrites an existing unpinned or differently pinned entry in place (an object-form
 entry keeps its filter keys; only `source` changes); `perk doctor` reports such an entry as
 `settings-wiring` drift and `perk doctor --fix` repairs it. Pi installs the version the checkout's
@@ -214,9 +219,10 @@ matrix passed, and the doctor and scout waves and both browser-door waves, plan 
 passed on the Pi 0.99.2 host; on the Pi 1.0.0 host the plan door passed and the PR door was
 deferred unmeasured — PENDING in `docs/design/archive/pi-1.0.0-certification.md`) records what
 perk's guidance was verified against — a separate fact from this pin
-(`docs/design/archive/pi-subagents-0.75.0-reverify.md`) — today behind the pin. The guidance
-stamp stays 0.75.0 (`docs/design/archive/pi-1.1.0-certification.md`) because W4, W6 and W7a
-failed and S3, S4a-live, U-bg, X5a and X5b were not run. So `subagent-compat` warns by design on
+(`docs/design/archive/pi-subagents-0.75.0-reverify.md`) — today behind the 0.81.0 pin, whose live
+certification on Pi 1.4.0 is owed. The guidance stamp stayed 0.75.0 after the previous pair's
+certification (`docs/design/archive/pi-1.1.0-certification.md`) because W4, W6 and W7a failed and
+S3, S4a-live, U-bg, X5a and X5b were not run. So `subagent-compat` warns by design on
 every converged checkout.
 
 **The perk-managed `.pi/settings.json` slice keeps a load order.** Besides converging the

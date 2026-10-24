@@ -18,7 +18,7 @@ local or remote execution.
 | `git` | Required | perk uses git repositories, branches, commits, and worktrees. No minimum git version is enforced. |
 | `gh` | Version 2.48.0 or newer, authenticated | A GitHub account is mandatory for the GitHub workflow. perk reaches GitHub only through the authenticated GitHub CLI; it does not make raw GitHub HTTPS requests. Exhaustive issue reads use `gh api --slurp` (gh 2.48.0); an older gh fails those reads loudly rather than silently truncating. |
 | `node` | A supported release line — 22.23.4+, 24.22.1+ or 26.12.1+ (`shared/host-floor.yaml`) | `perk init`/`perk doctor` check the major against the supported lines and the full version against that line's floor. An older or unreadable Node fails the environment check, and so does a Node on an unsupported line (for example 23.x, 25.x or a 27.0.0 prerelease), reported as `(unsupported release line)`. `engines.node` mirrors the same lines, so `npm ci` refuses under `engine-strict`. The Pi extension relies on Node's native TypeScript type stripping. |
-| `pi` | Version 1.1.0 or newer | Pi is the agent harness perk launches. perk refuses to launch a session (plain, staged or resumed) on an older Pi, a 1.1.0 prerelease, or a `pi` whose `--version` cannot be read, naming the executable, the observed version, the required version and the upgrade command — the pinned install set for the adopted Pi 1.1.0 (see [Version compatibility](#version-compatibility)). At the adopted 1.1.0, perk also verifies that the installed `pi` resolves its seven companion packages at exactly 1.1.0 and refuses a broken family (`pi_companions_incoherent`). `perk init` and `perk doctor` report the same requirement and `perk doctor --fix` installs the pinned set; a newer Pi is admitted, but `perk init` and `perk doctor` warn that it is not the adopted Pi (interactive `perk init` offers the install). |
+| `pi` | Version 1.4.0 or newer | Pi is the agent harness perk launches. perk refuses to launch a session (plain, staged or resumed) on an older Pi, a 1.4.0 prerelease, or a `pi` whose `--version` cannot be read, naming the executable, the observed version, the required version and the upgrade command — the pinned install command for the adopted Pi 1.4.0 (see [Version compatibility](#version-compatibility)). At the adopted 1.4.0, perk also verifies that the installed `pi` resolves its six companion packages at exactly 1.4.0 and refuses a broken family (`pi_companions_incoherent`). `perk init` and `perk doctor` report the same requirement and `perk doctor --fix` installs the pinned set; a newer Pi is admitted, but `perk init` and `perk doctor` warn that it is not the adopted Pi (interactive `perk init` offers the install). |
 | `skills` | Required | perk uses the skills CLI to synchronize its workflow skills. perk does not enforce a separate skills version gate. |
 | `cloc` | Required | `perk pr submit` and `perk pr stats` count the PR's change stats with it. No version gate is enforced. A missing `cloc` fails `perk init` / `perk doctor` like any required tool, but submit degrades to an "unavailable" note in the PR body rather than failing. |
 
@@ -113,68 +113,71 @@ otherwise runs normally:
 
 ## Version compatibility
 
-**Host floor.** perk declares its minimum supported host versions once — Pi ≥ 1.1.0 and
+**Host floor.** perk declares its minimum supported host versions once — Pi ≥ 1.4.0 and
 Node.js on a supported release line — 22.23.4+, 24.22.1+ or 26.12.1+ — in the bundled
 `shared/host-floor.yaml`, and compares against them with semver precedence. A Node major outside
 the supported lines fails the environment check as an unsupported release line. Every local launch (bare `perk`, a stage launch such as `perk plan`, `perk resume`)
 runs `pi --version` once before anything else in the launch's exec phase and ends in one of four
-outcomes: *admitted* (the version is at or above the floor — later releases such as 1.1.1 or 1.10.0
+outcomes: *admitted* (the version is at or above the floor — later releases such as 1.4.1 or 1.10.0
 are admitted), *unsupported* (`pi_version_unsupported` —
-an older version or a prerelease of the floor such as `1.1.0-rc.1`), *unverifiable*
+an older version or a prerelease of the floor such as `1.4.0-rc.1`), *unverifiable*
 (`pi_version_unverifiable` — the command failed, timed out after 20 s, or printed something that
-is not a version, or a `pi` answering 1.1.0 is not inside an installed
+is not a version, or a `pi` answering 1.4.0 is not inside an installed
 `@earendil-works/pi-coding-agent` package), or *incoherent* (`pi_companions_incoherent` — the
-`pi` answers 1.1.0 but one of its companion packages does not resolve, or resolves at another
+`pi` answers 1.4.0 but one of its companion packages does not resolve, or resolves at another
 version, from the installed package the way Node loads it; the refusal names each offender and
 `perk doctor --fix`). Every refusal exits 1 and there is no override. `--dry-run` previews never
 probe, and `perk init`, `perk doctor` and `--help` are never gated by the launch check — the
 environment checks report the floor instead, so the repair path stays reachable. The managed
-remote runner installs the pinned install set below — exactly Pi 1.1.0 with its companions at
-1.1.0 — for both the global `pi` CLI and the consumer worker's SDK (the worker install also
-records the pins as exact in `.pi/npm/package.json`), and sets up exactly Node 22.23.4, the lowest
-supported line's floor. Pi 1.1.0 is the enforced host floor and the remote install
-pin, **adopted** — not certified — on the characterization record
-`docs/design/archive/pi-1.1.0-characterization.md` plus the development-pin and pi-subagents-pin
-records (`pi-1.1.0-dev-pins.md`, `pi-subagents-0.76.1-pin.md`, same directory). The pair is
-adopted, and its certification record, `docs/design/archive/pi-1.1.0-certification.md`
-(2026-10-24), holds 3 required FAILs (W4, W6, W7a), so the support claim is held. The earlier
-`docs/design/archive/pi-1.0.0-certification.md` stays historical — its verdict is PENDING (its
-three PR-door rows, X5b, S7 and I7b's launch proof, were deferred by an operator decision, and perk
-4.0.0 shipped with that verdict) — and certifies nothing about 1.1.0.
+remote runner installs the pinned install command below — exactly Pi 1.4.0, whose companions
+follow at 1.4.0 — for both the global `pi` CLI and the consumer worker's SDK (the worker install
+also records the pin as exact in `.pi/npm/package.json`), and sets up exactly Node 22.23.4, the
+lowest supported line's floor. Pi 1.4.0 is the enforced host floor and the remote install pin,
+**adopted** — not certified — together with pi-subagents 0.81.0, on the characterization and
+offline evidence in `docs/planning/pi-and-subagents-assessment-2026-10-24.md` and the adoption
+record `docs/design/archive/pi-1.4.0-adoption.md`. Their live certification is owed. The previous
+pair's certification record, `docs/design/archive/pi-1.1.0-certification.md` (2026-10-24, for Pi
+1.1.0 with pi-subagents 0.76.1), holds 3 required FAILs (W4, W6, W7a), so the support claim stays
+held. The earlier `docs/design/archive/pi-1.0.0-certification.md` stays historical — its verdict is PENDING
+(its three PR-door rows, X5b, S7 and I7b's launch proof, were deferred by an operator decision, and
+perk 4.0.0 shipped with that verdict) — and certifies nothing about 1.1.0 or later.
 
-**The adopted Pi and its pinned install set.** perk adopts exactly Pi 1.1.0 together with its
-seven companion packages at exactly 1.1.0, and **verifies the family**: a `pi` answering 1.1.0
-whose companions do not all resolve at 1.1.0 fails `perk doctor` and is refused at launch.
-`perk doctor --fix` installs the set for you — it repairs any Pi perk refuses or warns about
-(when Node passes), then re-checks the `pi` on your PATH. This is the one command it runs, which
-you can also run yourself:
+**The adopted Pi and its pinned install command.** perk adopts exactly Pi 1.4.0, whose six
+companion packages (`pi-agent-core`, `pi-ai`, `pi-codemode`, `pi-mcp`, `pi-telemetry`, `pi-tui`)
+it pins at exactly 1.4.0, and **verifies the family**: a `pi` answering 1.4.0 whose companions do
+not all resolve at 1.4.0 fails `perk doctor` and is refused at launch. `perk doctor --fix`
+installs the adopted Pi for you — it repairs any Pi perk refuses or warns about (when Node
+passes), then re-checks the `pi` on your PATH. This is the one command it runs, which you can also
+run yourself:
 
 ```sh
-npm install -g @earendil-works/pi-coding-agent@1.1.0 @earendil-works/chord@1.1.0 @earendil-works/pi-agent-core@1.1.0 @earendil-works/pi-ai@1.1.0 @earendil-works/pi-codemode@1.1.0 @earendil-works/pi-mcp@1.1.0 @earendil-works/pi-telemetry@1.1.0 @earendil-works/pi-tui@1.1.0
+npm install -g @earendil-works/pi-coding-agent@1.4.0
 ```
 
-Why all eight: Pi ships no lockfile of its own (no `npm-shrinkwrap.json` since 1.0.1), and
-`@earendil-works/pi-coding-agent@1.1.0` declares its companions at `^1.1.0`, so installing the
-package alone pulls the newest companion releases instead of the ones Pi 1.1.0 was published with.
-That graph is broken: `@earendil-works/pi-codemode` 1.2.0 and later no longer export a symbol Pi
-1.1.0's codemode extension imports, so pi-subagents' background runners fail when their modules
-link. A bare `npm install -g @earendil-works/pi-coding-agent` is worse — it installs the newest
-Pi (1.4.0 at this writing), which no longer ships `@earendil-works/chord`, so pi-subagents 0.76.1
-refuses every background child there. The floor still admits such a Pi (it is a minimum), but
+Why one spec: since Pi 1.3.0, `@earendil-works/pi-coding-agent` declares its companions at exact
+versions, so installing the one exact package places every companion at 1.4.0 (npm nests them
+inside the global package, where `pi` resolves them), and `@earendil-works/chord` left the family in
+Pi 1.2.0. Before that, Pi 1.1.0 declared its companions at caret ranges and shipped no lockfile, so
+perk named all eight packages — the package, Chord and six companions — as exact specs; that
+eight-package command is history. The floor still admits a newer Pi (it is a minimum), but
 `perk doctor` reports its `pi` row as a warning — and a successful `perk init` prints the same
-warning — naming the pinned command. perk admits any release at or above the floor, but no
-release is certified at 1.1.0 or after. Pi 1.1.0 is adopted, and its certification record holds 3
-required FAILs (W4, W6, W7a), so the support claim is held.
+warning — naming the pinned command. perk admits any release at or above the floor, but no release
+is certified at 1.1.0 or after: Pi 1.4.0 is adopted, its certification is owed, and the previous
+certification record's 3 required FAILs keep the support claim held.
 
-The command installs eight top-level global packages side by side — `pi` resolves its companions
-from there — and also links the `pi-ai` package's own `pi-ai` command beside `pi`. A later bare
-`npm install -g @earendil-works/pi-coding-agent@<version>` floats the companions again (beside the
-stale pinned ones): always upgrade with the pinned command.
+**Upgrading from the earlier eight-package install.** The global `pi` serves every checkout and
+every running session on the machine, so first finish or cancel outstanding waves and close your
+perk sessions. Then run the command above (or `perk doctor --fix`), and `perk doctor` verifies the
+family through its `pi` row. The earlier top-level 1.1.0 companions and `@earendil-works/chord`
+stay in the global root, unused by the new `pi`; remove them when convenient with
+`npm uninstall -g @earendil-works/chord @earendil-works/pi-agent-core @earendil-works/pi-ai
+@earendil-works/pi-codemode @earendil-works/pi-mcp @earendil-works/pi-telemetry
+@earendil-works/pi-tui`.
 
 **The same floor at the SDK boundary.** The perk extension checks the Pi it is loaded into (the
 SDK's `VERSION`) before it registers anything, and refuses to load on an older Pi or a prerelease
-of the floor such as `1.1.0-rc.1`. Pi reports that as a failed extension load whose message
-carries perk's refusal (`perk requires Pi >= 1.1.0; the Pi running this session is <version> …
+of the floor such as `1.4.0-rc.1`. Pi reports that as a failed extension load whose message
+carries perk's refusal (`perk requires Pi >= 1.4.0; the Pi running this session is <version> …
 Upgrade that Pi to perk's adopted Pi version with its pinned companion set — the exact npm command
 is in perk's "Requirements and compatibility" reference (<link to this section>) …`) and, on Pi
 0.99 and 1.0, exits with its `pi -ne` hint — so a plain `pi` in a perk-wired repo never runs with
@@ -190,7 +193,7 @@ run's outcome note on the plan issue shows the failed status, the terminal signa
 refusal summary. The three observations — the `pi` on your PATH, the extension's Pi, the
 worker's SDK — are checked independently against the one minimum and need not be equal: a
 passing `pi --version` says nothing about the other two. `/perk-selfcheck` shows the admitted
-version as `host sdk: <version> (floor >= 1.1.0)`.
+version as `host sdk: <version> (floor >= 1.4.0)`.
 
 The perk CLI and the `@mgiles/perk` Pi extension are expected to have matching versions. A
 mismatch produces a soft, non-fatal launch warning. `perk doctor --fix` reconverges the
@@ -199,13 +202,14 @@ repo-managed package pin and reinstalls the matching extension. The repo's commi
 `perk init` and `perk doctor --fix` refuse to run from an older perk (`perk_outdated`) — see
 [Setup and health](./cli/setup-and-health.md#perk-init).
 
-`pi-subagents` is pinned to 0.76.1: `perk init` writes `npm:pi-subagents@0.76.1` into
+`pi-subagents` is pinned to 0.81.0: `perk init` writes `npm:pi-subagents@0.81.0` into
 `.pi/settings.json` and rewrites an existing unpinned or differently pinned entry in place, and
 `perk doctor` reports such an entry as `settings-wiring` drift that `perk doctor --fix` repairs.
 The pin exists because perk's report waves send the inline script text under pi-subagents' RPC
-spawn key `script`, which releases before 0.74.0 do not accept; 0.75.0 was the first release
-whose background children start on Pi 1.0.0, and 0.76.1 is the release characterized against
-Pi 1.1.0 (`docs/design/archive/pi-1.1.0-characterization.md`). Pi installs the version that the
+spawn key `script`, which releases before 0.74.0 do not accept; 0.78.0 repaired background
+launch on Pi 1.2.0 and later by making its Chord aliases conditional, 0.80.0 and later require
+Pi 1.2.0 or newer, and 0.81.0 is the release characterized against Pi 1.4.0
+(`docs/planning/pi-and-subagents-assessment-2026-10-24.md`). Pi installs the version that the
 checkout's own committed `.pi/settings.json` names, at launch. An existing repo gets the new entry
 from `perk init` or `perk doctor --fix` after you upgrade perk. An older branch or worktree keeps
 its own committed entry (and its older perk) until it is rebased.
@@ -223,12 +227,12 @@ source was re-verified, the Pi 1.0.0 trust matrix passed, and the doctor and sco
 browser-door waves (the plan door and the PR door) passed on the Pi 0.99.2 host. See
 `docs/design/archive/pi-subagents-0.75.0-reverify.md`. On the Pi 1.0.0 host, the plan door
 passed and the PR door was deferred unmeasured, so
-`docs/design/archive/pi-1.0.0-certification.md` records its verdict as PENDING. With the 0.76.1
+`docs/design/archive/pi-1.0.0-certification.md` records its verdict as PENDING. With the 0.81.0
 pin installed, `perk doctor` therefore reports `subagent-compat` as a warning on every converged
-checkout. The live certification of 0.76.1 has run
-(`docs/design/archive/pi-1.1.0-certification.md`). The guidance stamp stays 0.75.0 because W4, W6
-and W7a failed and S3, S4a-live, U-bg, X5a and X5b were not run. So `subagent-compat` warns by
-design.
+checkout. The live certification of Pi 1.4.0 + pi-subagents 0.81.0 is owed. Its predecessor, the
+live certification of 0.76.1 on Pi 1.1.0 (`docs/design/archive/pi-1.1.0-certification.md`), is
+history: its verdict is HELD because W4, W6 and W7a failed and S3, S4a-live, U-bg, X5a and X5b
+were not run. The guidance stamp stays 0.75.0, so `subagent-compat` warns by design.
 
 Plannotator 0.27.16 or newer is required by the stack review browser (`/stack-review-browser`,
 `perk objective stack review`), which opens Plannotator's static-patch mode over the pinned

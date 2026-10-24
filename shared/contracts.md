@@ -2877,8 +2877,8 @@ install pass before it is a host install) — `write_refusal(root, self_repo=…
 
 **Interactive onboarding gestures.** Interactive `perk init` is a guided onboarding flow: a
 confirm-then-install pass over the failing *supported* required tools (`gh` via brew, `pi` via
-the pinned install set (§8.76(b): one `npm install -g` naming the adopted Pi and its seven companions
-at the same exact version) — which also upgrades a `pi` the §8.76 floor reports outdated, unverifiable or incoherent, and is offered on the `pi` row's advisory too (§8.76(e)), `skills` via its official installer script on macOS / `go install` elsewhere, `cloc`
+the pinned install set (§8.76(b): one `npm install -g` naming the adopted Pi — one exact spec
+placing its six companions at the same exact version) — which also upgrades a `pi` the §8.76 floor reports outdated, unverifiable or incoherent, and is offered on the `pi` row's advisory too (§8.76(e)), `skills` via its official installer script on macOS / `go install` elsewhere, `cloc`
 via brew else `npm -g` when node works — `git`/`node` stay guide-only), an offered interactive `gh auth login` (re-probed afterward; the
 re-probe is the authority), a git `user.name`/`user.email` check with a prompted setup (scope
 confirm, global default), and — when the committed backend is `linear` with a `team` and no key
@@ -3090,7 +3090,7 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   exists but the full spec differs from the desired pin — so a stale `npm:@mgiles/perk@0.0.0` is
   reconciled to `@{__version__}` (extra string duplicates of that identity collapse to one).
   perk's own identity and any **version-carrying** desired borrowed spec (today
-  `npm:pi-subagents@0.76.1` — `SUBAGENTS_PACKAGE`, the release characterized against Pi 1.1.0
+  `npm:pi-subagents@0.81.0` — `SUBAGENTS_PACKAGE`, the release characterized against Pi 1.4.0
   that perk's `script` RPC spawn targets; the doctor guidance stamp is a separate fact that may
   lag it) are version-reconciled
   forward through the same in-place rewrite (`_reconcile_pinned_entry`, selected by the desired
@@ -3467,7 +3467,10 @@ already puts `stage:<id>` bindings in a cold-launched session's **initial prompt
 `before_agent_start` fires for that same session, so Mechanism A injects **iff** the session
 is not a runner child, it resolves a trigger (read from the **full branch** — eligibility survives
 compaction), the resolved render is non-empty (render-before-dedup: an inert session reads no
-projection), the submitting turn's prompt (`event.prompt`) does not carry `BINDING_HEADER`,
+projection), on a **user** start (`messageType: "user"`) the submitting turn's prompt
+(`event.prompt`) does not carry `BINDING_HEADER` — a **custom** start (`messageType: "custom"`,
+pi-subagents' completion wake or any idle `sendMessage(…, { triggerTurn: true })`) carries no
+prompt, is never scanned and proceeds to the projection check, so injection continues there —
 **and** Pi's **live context projection** does not already carry a live delivery. Live evidence
 is Pi-owned and typed (`extension/pi/v1/contextEvidence.ts`):
 `sessionManager.buildSessionProjection().messages` — Pi's canonical projection of the current
@@ -3741,7 +3744,7 @@ ignores the keys (the documented fail-safe posture, pinned by test on both plane
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
 `_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
-`npm:pi-subagents@0.76.1` (the one version-pinned borrow, §8.6a), `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
+`npm:pi-subagents@0.81.0` (the one version-pinned borrow, §8.6a), `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
 perk injects **no** pi-fff search mode at either spawn site (local `_exec_pi`, remote
 `_spawn_worker`): pi-fff runs under its own precedence (CLI flag → `PI_FFF_MODE` → `pi-fff.json`
 → its additive `tools-and-ui` default, which keeps pi's builtin `find`/`grep` beside
@@ -4717,29 +4720,29 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   an exact-version-pinned PyPI install `uv tool install perk=={__version__}` for a consumer,
   baked in at `perk init` time so the runner reproduces the wiring perk version), pi (the interior the
   worker drives — the **pinned install set** `PI_INSTALL_COMMAND` (§8.76(b)), exactly
-  `npm install -g @earendil-works/pi-coding-agent@1.1.0 @earendil-works/chord@1.1.0
-  @earendil-works/pi-agent-core@1.1.0 @earendil-works/pi-ai@1.1.0 @earendil-works/pi-codemode@1.1.0
-  @earendil-works/pi-mcp@1.1.0 @earendil-works/pi-telemetry@1.1.0 @earendil-works/pi-tui@1.1.0`
-  — the package at `REMOTE_PI_VERSION` and its seven companions at the same exact version), the **skills CLI** (`go install github.com/mattgiles/skills/cmd/skills@latest`
+  `npm install -g @earendil-works/pi-coding-agent@1.4.0` — the one exact spec at
+  `REMOTE_PI_VERSION`, whose exact internal declarations place its six companions at the same
+  version), the **skills CLI** (`go install github.com/mattgiles/skills/cmd/skills@latest`
   — built from source because its release binaries are darwin-only; the runner's preinstalled Go +
   `GOTOOLCHAIN=auto` suffice, and the step is **fatal**: a failed install fails the job — no
   skills, no drive), the Node worker's peer deps, and a final **git-identity** step (`perk[bot]`,
   `--global`) so the worker's commits succeed on a fresh runner. The worker-deps step is repo-kind
   aware: **self** uses `npm ci` (the self-repo has the `package.json`/lockfile/devDeps the worker
   resolves; the committed pins); **consumer** installs the pinned `@mgiles/perk` **plus the pi SDK's
-  pinned install set** (`npm install @mgiles/perk@{__version__} <the same eight exact specs>
+  pinned install set** (`npm install @mgiles/perk@{__version__} <the same one exact spec>
   --prefix .pi/npm --legacy-peer-deps --save-exact`, the perk pin baked in at `perk init` time so
   the runner reproduces the wiring perk version; the consumer worker SDK is the remote wave host, so
-  it carries the same pinned set as the global CLI, and `--save-exact` records the pins as exact in
-  `.pi/npm/package.json`). **The family is closed and every member exact:** Pi ships no
-  `npm-shrinkwrap.json` since 1.0.1 and declares its `@earendil-works/*` companions at `^` ranges,
-  and neither remote install uses a lockfile, so a bare package spec would float the companions to
-  the newest `^` satisfier (at 1.1.0 that graph fails to link). The global install places the eight
-  as siblings under the global root — which the package's ranges, Node's module resolvers and
-  pi-subagents' peer-alias resolver all reach — and the consumer install hoists them under
-  `.pi/npm/node_modules/`; the registry preflight at each pin move checks the family stays closed,
-  and the placement is measured under the composite's Node line
-  (`docs/design/archive/pi-1.1.0-install-pins.md`). `@mgiles/perk` ships **zero** runtime `dependencies` (the pi packages are peers) and
+  it carries the same pinned set as the global CLI, and `--save-exact` records the pin as exact in
+  `.pi/npm/package.json`). **The family is closed and every declaration exact:** since Pi 1.3.0 the
+  package declares its `@earendil-works/*` companions at exact versions (no shrinkwrap — none
+  needed), so neither remote install needs a lockfile: the one exact spec places the seven-package
+  family at the adopted version — under the global root for the CLI, hoisted under
+  `.pi/npm/node_modules/` for the consumer — where Node's module resolvers and pi-subagents'
+  peer-alias resolver reach it. Two lockfile tests pin the family closed and every declaration
+  exact (§8.76(b)); the single-spec placement was measured on a fresh prefix
+  (`docs/planning/pi-and-subagents-assessment-2026-10-24.md`). The 1.1.0-era measurement of the
+  eight-spec install (caret-ranged companions, Chord in the family) is
+  `docs/design/archive/pi-1.1.0-install-pins.md`. `@mgiles/perk` ships **zero** runtime `dependencies` (the pi packages are peers) and
   `--legacy-peer-deps` makes npm skip peer installation entirely — the SDK spec is what lands the
   worker's imports: its real deps (pi-ai, pi-tui, typebox) close the worker graph's bare-import set
   under `.pi/npm/node_modules/`, resolvable from the staged `consumer-npm` entry (step 5 below).
@@ -7066,10 +7069,13 @@ nothing, the subset being shared).
   live copy under a shared customType never suppresses the selected flavor. Installer order:
   guarded full-branch read (failure → return, `select` never called) → the runner fence (a runner
   child selects nothing — `select` never called) → `select` (eligibility + flavor from
-  full-branch state) → off-table key refused → the submitting `event.prompt` carrying
-  the **selected** marker suppresses (cold delivery before persistence; another flavor's marker
-  does not) → guarded projection read (failure → return, nothing constructed) → the typed live
-  check → the content thunk runs only on a miss. **Retention follows selection** — `spec.select`
+  full-branch state) → off-table key refused → on a **user** start (`messageType: "user"`) only,
+  the submitting `event.prompt` carrying the **selected** marker suppresses (cold delivery before
+  persistence; another flavor's marker does not) — a **custom** start (`messageType: "custom"`,
+  pi-subagents' completion wake or any idle `sendMessage(…, { triggerTurn: true })`) carries no
+  prompt, its `message` is never scanned, and it proceeds straight on — → guarded projection read
+  (failure → return, nothing constructed) → the typed live check → the content thunk runs only on
+  a miss. Injection therefore continues for custom starts, deduped by the projection alone. **Retention follows selection** — `spec.select`
   is the ONE eligibility/retention decision (there is no separate liveness closure): on the
   `context` event the same guarded full-branch read + `select` run (a failed read or a throwing
   selector fails CLOSED to "nothing selected"), and the filter touches ONLY the owned customType —
@@ -7958,9 +7964,10 @@ Collection is per activation: a wave launched before a `/reload` or a session sw
 collectable afterwards (pending records live in the activation's wave instance); any browser
 door's browser is marked detached at that shutdown (§8.23 "The browser-operation owner") — a
 browser-side notice only, never collection, resume or reuse. A same-session
-`/reload` still delivers the engine's queued completion notice and its `Subagent updates above.`
-wake prompt to the new runtime (a session switch does not); the collect tools answer `no_wave`
-with a detail naming the rule.
+`/reload` still delivers the engine's queued completion notice to the new runtime — since 0.80 the
+notice itself is the waking custom message (0.76.1 followed it with a steered `Subagent updates
+above.` prompt) — while a session switch does not; the collect tools answer `no_wave` with a
+detail naming the rule.
 
 **Relaunch freshness (the launch token).** pi-subagents reuses a workflow's children when a
 launch matches a run the extension runtime replaced: `/reload`'s runtime `cleanup()` stops every
@@ -15972,7 +15979,7 @@ The fourth parsed cross-plane contract (beside `registry.yaml`, `bindings.yaml`,
 ```yaml
 schema_version: 1
 pi:
-  min_version: "1.1.0"
+  min_version: "1.4.0"
 node:
   min_version: "22.23.4"
   line_floors:
@@ -15981,8 +15988,8 @@ node:
 ```
 
 A **floor** is a minimum (`>=`) compared with semver 2.0.0 precedence: a prerelease of the floor
-triple (`1.1.0-rc.1`) is below it, build metadata carries no precedence, and a later release
-(`1.1.1`, `1.10.0`) is admitted. Each entry is a plain release `MAJOR.MINOR.PATCH` string. The
+triple (`1.4.0-rc.1`) is below it, build metadata carries no precedence, and a later release
+(`1.4.1`, `1.10.0`) is admitted. Each entry is a plain release `MAJOR.MINOR.PATCH` string. The
 Python reader is authoritative: `load_host_floor` raises `HostFloorError` for structural failures
 (missing file, YAML error, not a mapping, unsupported `schema_version`, a wrong-typed present
 field), and `validate()` returns findings for content (missing, not semver, not a plain release).
@@ -16018,20 +16025,27 @@ the **development pins** (`package.json` `devDependencies` — exact); the **pi-
 pin** (§8.10 settings wiring); the **doctor guidance stamp** (`subagent-compat`); and the **adopted
 Pi pin** `PI_ADOPTED_VERSION` (`perk/substrate/pi_host.py`) — exact, the **adopted** published
 subject. Beside it the same module declares the **pinned install set**: `PI_COMPANION_PACKAGES`
-(the seven `@earendil-works/*` companions — `chord`, `pi-agent-core`, `pi-ai`, `pi-codemode`,
-`pi-mcp`, `pi-telemetry`, `pi-tui` — pinned closed against the committed lockfile by test),
-`PI_INSTALL_SPECS` (the package then the companions, each `@<PI_ADOPTED_VERSION>`) and
-`PI_INSTALL_COMMAND` (`npm install -g <the eight specs>`): Pi ships no shrinkwrap and declares its
-companions at `^` ranges, so any lockfile-free install names the whole family exactly. The
+(the six `@earendil-works/*` companions — `pi-agent-core`, `pi-ai`, `pi-codemode`, `pi-mcp`,
+`pi-telemetry`, `pi-tui` — pinned closed against the committed lockfile by test),
+`PI_INSTALL_SPECS` (the one exact spec `@earendil-works/pi-coding-agent@<PI_ADOPTED_VERSION>`) and
+`PI_INSTALL_COMMAND` (`npm install -g @earendil-works/pi-coding-agent@<PI_ADOPTED_VERSION>`): since
+Pi 1.3.0 the package declares its companions at exact versions (no shrinkwrap — none needed), so
+the one exact spec places the whole family at the adopted version. The companion tuple remains
+the coherence family the probe verifies — exact declarations do not prove an INSTALLED family
+intact (a dangling link, a stale nested copy) — and a second lockfile test pins every family
+member at the adopted version with every `@earendil-works/*` declaration exact. The
 **remote install pin** `REMOTE_PI_VERSION` (`perk/run/workflow_artifacts.py`, §8.14) is that same
 fact under its remote name, used by both remote installs (the global `pi` CLI and the consumer
 worker SDK, each naming the pinned install set). Every install-guidance string — the launch
 refusal ((c)), `pi_cli_missing`, the `pi` environment remediations and the guided install ((e)) —
 names `PI_INSTALL_COMMAND`; an admitted PATH `pi` at another version is never refused but is
 reported (the (e) advisory). The adopted pin moves with the floor on characterization + offline
-evidence; for Pi 1.1.0 + pi-subagents 0.76.1 it is adopted, and the certification record
-(`docs/design/archive/pi-1.1.0-certification.md`, 2026-10-24) holds 3 required FAILs (W4, W6, W7a) —
-the support claim is held (adopted is not certified). The pin is never below the floor (a test
+evidence: Pi 1.4.0 + pi-subagents 0.81.0 are adopted on that evidence
+(`docs/planning/pi-and-subagents-assessment-2026-10-24.md`,
+`docs/design/archive/pi-1.4.0-adoption.md`); their live certification is owed, and the last
+certification record (`docs/design/archive/pi-1.1.0-certification.md`, 2026-10-24, for Pi 1.1.0 +
+pi-subagents 0.76.1) holds 3 required FAILs (W4, W6, W7a) — the support claim stays held (adopted is
+not certified). The pin is never below the floor (a test
 pins it). Every host observation — the PATH `pi` CLI,
 a loaded SDK — is admitted **independently** against the same floor; equality between
 observations is never required (a floor-satisfying CLI beside an older dev SDK pin is admitted on
@@ -16039,7 +16053,7 @@ the CLI's own reading). **The companion-family rule:** the launch admission belo
 SDK and never the repo's dev install; only when the PATH `pi` answers exactly
 `PI_ADOPTED_VERSION` does it read that install's companion graph — `locate_pi_package` follows the
 resolved executable's realpath up to the first ancestor whose `package.json` names
-`@earendil-works/pi-coding-agent`, and `resolve_companions` resolves each of the seven
+`@earendil-works/pi-coding-agent`, and `resolve_companions` resolves each of the six
 `PI_COMPANION_PACKAGES` the way Node's ESM lookup does from the resolved executable's directory
 (for each ancestor not itself named `node_modules`, the directory
 `<ancestor>/node_modules/<name>`; the first one that exists, symlinks followed, **wins** and the
@@ -16127,9 +16141,10 @@ is not serialized there). The row reads the PATH `pi` only; the Pi a session run
 raising: a no-op unless the row is not ok (absent, unsupported, unverifiable, incoherent) or
 carries the advisory. A not-ok `node` row stops it with one warning (`pi: install Node.js on a
 supported release line (<lines>) first, then: <PI_INSTALL_COMMAND>` — the guided install's
-sentence) and installs nothing. Otherwise it runs the pinned eight-spec `npm install -g` (an
-argument list, 600 s) under the `installing the adopted Pi set` step, then re-probes: a now-ok,
-advisory-free row → `fixed` `pi: installed the adopted Pi <adopted> set (npm -g, 8 packages)`; an
+sentence) and installs nothing. Otherwise it runs the pinned install set's `npm install -g` (the
+one exact spec, an argument list, 600 s) under the `installing the adopted Pi set` step, then
+re-probes: a now-ok, advisory-free row → `fixed` `pi: installed the adopted Pi <adopted> (npm -g
+<PI_INSTALL_SPECS>)`; an
 npm failure → `fix_errors` `pi: adopted-set install failed (<exc>); run manually:
 <PI_INSTALL_COMMAND>`; a re-probe still not green → `fix_errors` `pi: still <detail> after
 installing the adopted set — the pi on PATH (<path>) is not the install npm wrote; fix PATH order
@@ -16194,7 +16209,7 @@ floor that cannot be read is a precondition failure (`perk worker: host floor un
 exit 2).
 
 **Independence.** Three observations — the PATH CLI ((c)), the extension's host SDK, the worker's
-SDK — against one minimum, never equality: a `1.1.0` CLI beside a `1.1.1` SDK is admitted on each
+SDK — against one minimum, never equality: a `1.4.0` CLI beside a `1.4.1` SDK is admitted on each
 reading, and a passing `pi --version` certifies neither runtime.
 
 **Not checked.** Node (its floor is the environment rows' and `engines.node`'s); the remote

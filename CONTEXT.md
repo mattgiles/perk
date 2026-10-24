@@ -319,11 +319,13 @@ children over current inputs, never the earlier wave's finished or still-running
 _Avoid_: re-attach, resume
 
 **Wake turn**:
-The parent run that pi-subagents (≥ 0.76.1) starts after it delivers a completion notice to an
-idle parent. The notice goes in with `triggerTurn: false`, followed by the steered user message
-`Subagent updates above.`. In print mode the wake turn runs while a command handler is still
-pending; if the handler returns first, the host's dispose aborts it.
-_Avoid_: wake message (the user text alone), completion turn
+The parent run that pi-subagents (≥ 0.80.0) starts by sending its `subagent-notify` completion
+notice with `triggerTurn: true` while the parent is idle — a custom-message start
+(`before_agent_start` with `messageType: "custom"`, no prompt) whose notice carries a
+`Parent action:` line. A held parent (Escape) gets the notice appended without a wake. In print
+mode the wake turn runs while a command handler is still pending; if the handler returns first,
+the host's dispose aborts it.
+_Avoid_: wake message (the notice text alone), completion turn
 
 **Pre-spawn lane failure**:
 A `runs.all` item that fails in the parent before any runner process exists — for example at
@@ -675,17 +677,18 @@ _Avoid_: version check, gate
 The exact Pi version perk adopted (`PI_ADOPTED_VERSION`, `perk/substrate/pi_host.py`), named by
 every install-guidance string and carried by the remote install pin; never below the host floor;
 an exact pin, not a minimum. A PATH `pi` admitted at another version is not refused, only reported
-(an environment-row advisory). Pi 1.1.0 + pi-subagents 0.76.1 is adopted; its certification record
-(`docs/design/archive/pi-1.1.0-certification.md`) holds 3 required FAILs (W4, W6, W7a), so the
-support claim is held.
+(an environment-row advisory). Pi 1.4.0 + pi-subagents 0.81.0 are adopted
+(`docs/design/archive/pi-1.4.0-adoption.md`); their live certification is owed, and the previous
+certification record (`docs/design/archive/pi-1.1.0-certification.md`, Pi 1.1.0 + pi-subagents
+0.76.1) holds 3 required FAILs (W4, W6, W7a), so the support claim stays held.
 _Avoid_: floor, latest
 
 **Pinned install set**:
-The eight `@earendil-works/*` packages — `pi-coding-agent` plus its seven caret-floating
-companions — named as exact specs at the adopted Pi pin in one install command
-(`PI_INSTALL_COMMAND`), because Pi ships no shrinkwrap and a lockfile-free install would float the
-companions to the newest `^` satisfier.
-_Avoid_: companions alone, dependencies
+The one exact `@earendil-works/pi-coding-agent` spec at the adopted Pi pin (`PI_INSTALL_SPECS`,
+installed by `PI_INSTALL_COMMAND`) whose exact internal declarations place its six companions at
+the same version — since Pi 1.3.0 the package declares them exactly, so no shrinkwrap or sibling
+specs are needed. The companions remain the coherence family the host probe verifies.
+_Avoid_: eight packages, sibling specs, companions alone, dependencies
 
 **Remote install pin**:
 The exact Pi the managed remote artifacts install (`REMOTE_PI_VERSION`) for both the global CLI
