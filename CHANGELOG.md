@@ -7,23 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of 10de81a -->
+<!-- As of 6139d59 -->
+
+## [4.1.0] - 2026-10-24
+
+### Major Changes
+
+- **Pi 1.1.0 and pi-subagents 0.76.1.** Upgrade Pi with the pinned eight-package install command in [Requirements and compatibility](docs/user-docs/reference/requirements-and-compatibility.md#version-compatibility), then run `perk init` or `perk doctor --fix` to update the repo’s supplier pin. Remote runs install the same exact Pi companion set. The pair is adopted, but its live certification is HELD: reload/wake, deadline-partial and cancellation checks failed (W4, W6, W7a), and `subagent-compat` continues to warn by design.
+
+### Added
+
+- Connect project MCP servers in the headless worker from `.pi/mcp.json`, including extension-registered servers, with direct, codemode or deferred tool exposure. Supply credentials explicitly in project configuration; the worker never reads global MCP configuration or saved OAuth credentials. Failed startup connections can leave tools absent without a diagnostic; see [Models and compaction](docs/user-docs/reference/configuration/models-and-compaction.md#models).
+- Show selected and dispatched models, response counts, token usage, cache usage and recorded cost in `/perk-selfcheck` and worker run reports. Worker usage is counted once toward the token budget; report-wave child usage remains unavailable.
 
 ### Changed
 
-- The in-session reference no longer describes an older-host fallback for `/commit-and-compact` and `/draft-and-compact` (every admitted host is Pi 1.1.0 or newer, which reports a driven turn's abort), and the transcript markers drop their Pi 0.80.4 qualifier; the codemode composition note now says a script's `store()` writes `codemode-store` session entries while `load()` only reads them; and `json-schemas.md` describes `pr-feedback.schema.json` as the prepared PR feedback snapshot the `/address` classifier is bound to. (f67c5727)
-- The compatibility docs now report the live certification of Pi 1.1.0 with pi-subagents 0.76.1. The pair is adopted, but the certification record holds 3 required failures in pi-subagents' lifecycle legs (W4, W6, W7a), so the support claim is held. `subagent-compat`'s guidance stamp stays at 0.75.0, and the check keeps warning by design on a converged checkout. (65414684)
-- `perk doctor --fix` now repairs the `pi` row itself: whenever the PATH `pi` is missing, below the floor, unverifiable, has a broken companion family or is not the adopted Pi 1.1.0 (and Node passes), it runs the pinned eight-package `npm install -g` and re-checks the `pi` on your PATH, reporting a PATH-order problem when the `pi` it finds is not the one npm wrote; interactive `perk init` also offers that install when your Pi is admitted but not the adopted one. (0899296)
-- `perk init` and `perk doctor --fix` refuse, with exit 2 and before writing anything, to converge a repo from a perk older than its `.perk/required-perk-version` (`perk_outdated`) or, in perk's own repository, from a perk installed in a different checkout (`foreign_perk`), so a stale perk can no longer rewrite managed files backward; bare `perk doctor` and every other command still only warn. (e974828)
+- The in-session reference no longer describes an older-host fallback for `/commit-and-compact` and `/draft-and-compact` (every admitted host is Pi 1.1.0 or newer, which reports a driven turn's abort), and the transcript markers drop their Pi 0.80.4 qualifier; the codemode composition note now says a script's `store()` writes `codemode-store` session entries while `load()` only reads them; and `json-schemas.md` describes `pr-feedback.schema.json` as the prepared PR feedback snapshot the `/address` classifier is bound to.
+- The compatibility docs now report the live certification of Pi 1.1.0 with pi-subagents 0.76.1. The pair is adopted, but the certification record holds 3 required failures in pi-subagents' lifecycle legs (W4, W6, W7a), so the support claim is held. `subagent-compat`'s guidance stamp stays at 0.75.0, and the check keeps warning by design on a converged checkout.
+- `perk doctor --fix` now repairs the `pi` row itself: whenever the PATH `pi` is missing, below the floor, unverifiable, has a broken companion family or is not the adopted Pi 1.1.0 (and Node passes), it runs the pinned eight-package `npm install -g` and re-checks the `pi` on your PATH, reporting a PATH-order problem when the `pi` it finds is not the one npm wrote; interactive `perk init` also offers that install when your Pi is admitted but not the adopted one.
+- `perk init` and `perk doctor --fix` refuse, with exit 2 and before writing anything, to converge a repo from a perk older than its `.perk/required-perk-version` (`perk_outdated`) or, in perk's own repository, from a perk installed in a different checkout (`foreign_perk`), so a stale perk can no longer rewrite managed files backward; bare `perk doctor` and every other command still only warn.
+- Keep enabled codemode available in read-only authoring, planning, audit and refinement stages. Scripts can use permitted reads and queries while writes, draft writers, MCP tools and unsafe shell commands remain blocked; `only` mode stays off when it would hide required direct tools.
+- Allow `objective_stack_status` in read-only planning and refinement sessions, including discovery through `tool_search`. Stacked status fetches origin’s remote-tracking refs; it does not change the working tree, index, local branches or tags.
+- Render prompt-section changes, tool additions and removals, and compaction prompt snapshots in `/learn` evidence, with bounded text and malformed-record counts.
+- GitHub: bind `/address` classification to a parent-prepared feedback snapshot and resolve only classified open threads. If new feedback arrives during the pass, classify again before finalizing.
+- Report stop requests separately from confirmed child termination when a report wave times out or is cancelled. Wave collection remains scoped to its activation; after `/reload`, launch a fresh wave instead of collecting the earlier children.
 
 ### Fixed
 
-- Verify the adopted Pi's companion packages: a `pi` answering 1.1.0 whose seven `@earendil-works/*` companions do not all resolve at 1.1.0 the way Node loads them (a dangling link, a nested newer copy) is now refused at launch (`pi_companions_incoherent`) and fails `perk doctor`'s `pi` row, instead of passing and crashing pi-subagents' background children later. (a3e6bc1)
-- Stage each worktree's `.pi/npm` without shared metadata — a copy-on-write clone on macOS, else hardlinks whose install-root metadata files get their own copies — so an extension install in one worktree no longer rewrites the `package.json` and lockfiles of every other worktree and the main checkout; every launch (including `perk resume`) detaches metadata a worktree staged by an older perk still shares, and a stage launch warns when a staged extension does not match the worktree's own `.pi/settings.json`. (8fdd8f9)
+- Verify the adopted Pi's companion packages: a `pi` answering 1.1.0 whose seven `@earendil-works/*` companions do not all resolve at 1.1.0 the way Node loads them (a dangling link, a nested newer copy) is now refused at launch (`pi_companions_incoherent`) and fails `perk doctor`'s `pi` row, instead of passing and crashing pi-subagents' background children later.
+- Stage each worktree's `.pi/npm` without shared metadata — a copy-on-write clone on macOS, else hardlinks whose install-root metadata files get their own copies — so an extension install in one worktree no longer rewrites the `package.json` and lockfiles of every other worktree and the main checkout; every launch (including `perk resume`) detaches metadata a worktree staged by an older perk still shares, and a stage launch warns when a staged extension does not match the worktree's own `.pi/settings.json`.
+- Detach replaced, aborted or reloaded browser reviews so stale tabs cannot route decisions. A browser that never becomes ready falls back to the in-session review and ignores later decisions; stack reviews recheck the pinned patch before opening.
+- Report read-only gate transitions truthfully: failed transitions and inherited restrictions keep the gate closed, saves report a held release, and `/implement-here` starts no implementation when the gate cannot open.
+- Warn when a saved plan’s session link, planning-claim clear or objective-node advance needs repair, including after browser approval, and give the appropriate save retry without treating the plan itself as unsaved.
+- Preserve worker cancellation requested during Pi’s prompt preflight, and avoid echoing credential-bearing input in invalid-JSON MCP diagnostics.
 
 ### Security
 
-- Require Node.js on a supported release line (22.23.4+, 24.22.1+ or 26.12.1+) and `certifi` 2026.10.19 or newer after the eMudhra intermediate-CA compromise, and expect uv 0.13.4 or newer to install perk: `perk init` refuses and `perk doctor` fails on an outdated Node or one on an unsupported line, and CI, the `perk-remote-setup` action and `engines.node` move with the floor. Restart every running Pi session after upgrading Node; see the new [Security](docs/user-docs/reference/security.md) reference page. (cc1b049)
+- Require Node.js on a supported release line (22.23.4+, 24.22.1+ or 26.12.1+) and `certifi` 2026.10.19 or newer after the eMudhra intermediate-CA compromise, and expect uv 0.13.4 or newer to install perk: `perk init` refuses and `perk doctor` fails on an outdated Node or one on an unsupported line, and CI, the `perk-remote-setup` action and `engines.node` move with the floor. Restart every running Pi session after upgrading Node; see the new [Security](docs/user-docs/reference/security.md) reference page.
+- Prevent perk-defined subagent children from launching descendants, and disable intercom for both report waves and foreground writer dispatches (`resolve_submit_conflicts` and `run_librarian`).
 
 ## [4.0.0] - 2026-10-08
 
