@@ -4,7 +4,6 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type {
   ConflictResolutionRequest,
   ConflictResolutionResult,
-  ConflictResolver,
   RetainedConflictResolutionRequest,
 } from "../../../delivery/conflictResolution.ts";
 import type { SyncResolutionOutcome } from "../../../delivery/stackConflict.ts";
@@ -15,6 +14,13 @@ import {
   conflictResolutionAttempts,
   rebuildWorkflowState,
 } from "../../../substrate/workflowState.ts";
+import {
+  ACTIVITY_LABEL_CONFLICT_RESOLVER,
+  type ActivityHandle,
+  createDelegationActivity,
+  type DelegationActivity,
+} from "../../../surfaces/surfaces.ts";
+import type { ConflictResolverWithProgress } from "./conflictResolverEngine.ts";
 
 type Prepared = Extract<SyncResolutionOutcome, { kind: "dispatched" }>;
 export type StackResolutionOutcome =
@@ -50,8 +56,9 @@ interface Invocation {
 }
 
 export function createStackConflictResolver(
-  resolver: ConflictResolver,
+  resolver: ConflictResolverWithProgress,
   readOnly: () => boolean,
+  status: ActivityHandle,
 ): StackConflictResolver {
   let current: ExtensionContext | undefined;
   let generation = 0;
@@ -145,6 +152,8 @@ export function createStackConflictResolver(
       if (!isCurrent()) return refusal(`retained resolver preparation ${revoked()}`);
       const invocation: Invocation = { controller, isCurrent };
       active = invocation;
+      // Begun only on the dispatched path: a refusal or a non-dispatched preparation shows nothing.
+      let activity: DelegationActivity | undefined;
       try {
         const prepared = await prepare(isCurrent);
         if (prepared.kind !== "dispatched") return { ...prepared, isCurrent };
@@ -157,7 +166,8 @@ export function createStackConflictResolver(
           model: subagentModel(snapshot.cwd, "conflict-resolver"),
         });
         invocation.request = request;
-        const received = await resolver.resolve(request, combined);
+        activity = createDelegationActivity(status, ctx, ACTIVITY_LABEL_CONFLICT_RESOLVER);
+        const received = await resolver.resolve(request, combined, activity.observe);
         const resolution: ConflictResolutionResult = !isCurrent()
           ? { kind: "failed", reason: revoked(), receipt: received.receipt }
           : received.kind === "resolved"
@@ -166,6 +176,7 @@ export function createStackConflictResolver(
         return { kind: "executed", dispatch, attempt, cap: prepared.cap, resolution, isCurrent };
       } finally {
         active = undefined;
+        activity?.end();
       }
     },
   };

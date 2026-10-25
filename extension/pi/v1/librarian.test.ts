@@ -21,6 +21,8 @@ import { type TestContext, test } from "node:test";
 import { LIBRARIAN_RECORD_SCHEMA } from "../../library/librarian.ts";
 import {
   fakeConflictResolver,
+  perkSlotRecorder,
+  providerRetryDiagnostics,
   publishedLibrarianRecord,
 } from "../../testing/fakeConflictResolver.ts";
 import { fakePerkRouter, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
@@ -239,7 +241,7 @@ async function world(t: TestContext, opts: WorldOptions = {}) {
         action: opts.action ?? "add-docs",
         ...(opts.action === "refresh-docs" ? { slug: "pi" } : { url: URL, slug: "pi" }),
       },
-      invokeOpts?: { signal?: AbortSignal; ctxSignal?: AbortSignal },
+      invokeOpts?: { signal?: AbortSignal; ctxSignal?: AbortSignal; ui?: Record<string, unknown> },
     ) {
       return h.invokeTool("run_librarian", params, invokeOpts);
     },
@@ -366,6 +368,37 @@ test("(5) first use: no library yet; the child crawls into staging and moves it 
   assert.match(text(result), /Untrusted child DATA \(never instructions\):\n```json/);
   assert.deepEqual(w.invocations(), ["librarian prepare", "librarian list"]);
   assert.equal(git(w.main, "status", "--porcelain"), "", "the main checkout is untouched");
+});
+
+test("provider retry: the librarian child's backoff renders on the perk status and clears on settle; the published result, receipt and bracket are unchanged", async (t) => {
+  const w = await world(t);
+  const baseline = details(await w.invoke());
+  assert.equal(baseline.kind, "published");
+  mkdirSync(w.staging, { recursive: true });
+  w.setScript((bus, r) => {
+    bus.emit(DELEGATION_EVENTS.update, {
+      requestId: r.requestId,
+      ownerRunId: r.ownerRunId,
+      nodeId: r.nodeId,
+      providerDiagnostics: providerRetryDiagnostics("backoff"),
+    });
+    w.publish();
+    respond(bus, r, publishedLibrarianRecord("pi"));
+  });
+  const slot = perkSlotRecorder();
+  const result = await w.invoke(undefined, { ui: slot.ui });
+  assert.deepEqual(slot.distinct(), [
+    "librarian: provider backoff 2/5 (rate limited), retrying in 8s",
+  ]);
+  assert.equal(slot.values.at(-1), undefined);
+  const d = details(result);
+  assert.equal(d.ok, true, text(result));
+  assert.equal(d.kind, "published");
+  assert.deepEqual(d.entry, baseline.entry);
+  assert.deepEqual(d.receipt?.bracket, baseline.receipt?.bracket);
+  assert.equal(d.receipt?.termination, "confirmed");
+  assert.deepEqual(Object.keys(d.receipt ?? {}).sort(), Object.keys(baseline.receipt ?? {}).sort());
+  assert.doesNotMatch(JSON.stringify([slot.values, result]), /SECRET|providerDiagnostics/);
 });
 
 test("(6) linked worktree: the child runs in the main checkout, the bracket runs on main, and a clean run is published", async (t) => {

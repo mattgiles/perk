@@ -18,6 +18,7 @@ import {
 import { acquireWorktreeResolverLock } from "../../../substrate/worktreeResolverLock.ts";
 import {
   type DelegationEvents,
+  type DelegationProgressSink,
   dispatchForeground,
   nativeWorktreeConfigPath,
   readNativeWorktreeDefault,
@@ -28,12 +29,27 @@ export {
   CANCEL_GRACE_MS,
   DELEGATION_EVENTS,
   type DelegationEvents,
+  type DelegationProgressSink,
   nativeWorktreeConfigPath,
   REQUEST_TIMEOUT_MS,
   START_ACK_MS,
 } from "../foregroundDelegation.ts";
 
 export const RESOLVER_AGENT = "perk.conflict-resolver";
+
+/**
+ * The engine's resolver surface: the Pi-free `ConflictResolver` plus the transport's optional
+ * display stream (`progress` — the child's provider diagnostics, never part of the result).
+ * Declared here, not on the Pi-free interface, because `delivery/conflictResolution.ts` stays
+ * substrate-free while the sink's vocabulary lives in `substrate/providerDiagnostics.ts`.
+ */
+export interface ConflictResolverWithProgress extends ConflictResolver {
+  resolve(
+    request: ConflictResolutionRequest,
+    signal?: AbortSignal,
+    progress?: DelegationProgressSink,
+  ): Promise<ConflictResolutionResult>;
+}
 
 export interface ConflictResolverEngineOptions {
   events: DelegationEvents;
@@ -51,7 +67,7 @@ export interface ConflictResolverEngineOptions {
 
 export function createConflictResolverEngine(
   options: ConflictResolverEngineOptions,
-): ConflictResolver & { shutdown(): Promise<void> } {
+): ConflictResolverWithProgress & { shutdown(): Promise<void> } {
   const configPath = options.configPath ?? nativeWorktreeConfigPath();
   const nativeWorktree = readNativeWorktreeDefault(configPath);
   let disposed = false;
@@ -73,6 +89,7 @@ export function createConflictResolverEngine(
   async function dispatch(
     request: ConflictResolutionRequest,
     signal: AbortSignal,
+    progress?: DelegationProgressSink,
   ): Promise<ConflictResolutionResult> {
     const receipt: ConflictResolutionReceipt & { requestId: string; ownerRunId: string } = {
       parentSessionId: request.parent.sessionId,
@@ -142,6 +159,7 @@ export function createConflictResolverEngine(
       },
       { requestId: receipt.requestId, ownerRunId: receipt.ownerRunId, nodeId: receipt.nodeId },
       signal,
+      progress,
     );
     // Construct each whitelisted receipt field explicitly, never spread native data.
     receipt.termination = result.termination;
@@ -164,10 +182,10 @@ export function createConflictResolverEngine(
     );
   }
   return {
-    resolve(request, signal) {
+    resolve(request, signal, progress) {
       const controller = new AbortController();
       const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-      const result = dispatch(request, combined);
+      const result = dispatch(request, combined, progress);
       active.set(controller, result);
       void result.finally(() => active.delete(controller));
       return result;

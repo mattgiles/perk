@@ -364,11 +364,15 @@ _Avoid_: change request, posting confirmation
 
 **Activity**:
 The optional second half of perk's one composed `perk` status value (`<objective> · <activity>`):
-a short plain-text phrase naming a Perk-owned wait the operator cannot otherwise see — today only
-`waiting on browser review`, begun by the two plannotator browser waits (the browser doors' open
-core on readiness, the warm `plan_review` bridge on entry), ended when each wait settles, and
-shown while any begun wait is unended. Never a spinner, a working state, a liveness signal, or a
-per-interaction record.
+a short plain-text phrase naming a Perk-owned wait the operator cannot otherwise see. Three live
+waits: `waiting on browser review`, begun by the two plannotator browser waits (the browser doors'
+open core on readiness, the warm `plan_review` bridge on entry); `simplifier running (…)`, begun
+by the `/simplify` doors; and a foreground writer's provider-retry wait (`<label>: provider
+backoff …` / `… in flight`, `<label>` = `conflict resolver` or `librarian`), begun on the
+supplier's `retry` snapshot and ended when it clears or the dispatch settles. Each ends when its
+wait settles; the newest live wait's text shows while any begun wait is unended. Never a spinner,
+a working state, a liveness signal, or a per-interaction record — a provider-retry wait names the
+supplier's observed backoff, not a liveness guess.
 _Avoid_: status, working indicator, spinner, liveness
 
 **Browser-operation owner**:

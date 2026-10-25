@@ -1076,10 +1076,14 @@ skill): the plan's `## Steps` list is the **initial seed of a dynamic, model-own
 item per step, in order; the implementer derives its own short checklist for a prose plan) —
 the checklist is discipline, not enforcement. Legacy `perk:checkpoint` entries render as
 generic custom entries (no renderer, no shim). The `perk` status slot carries **one composed
-value** — the objective segment plus, while a plannotator browser review is waiting on the human,
-the `waiting on browser review` activity (`<objective> · <activity>`, either half optional; a
-set of live waits, so overlapping browser waits keep it until the last ends and a settled or
-reset wait's late end is inert) — and keeps its RPC `setStatus` dual-publish.
+value** — the objective segment plus the activity of the live Perk-owned waits: the
+`waiting on browser review` wait while a plannotator browser review is waiting on the human, the
+`simplifier running (…)` wait of the `/simplify` doors, and a foreground writer's provider-retry
+wait (`<label>: provider backoff …` / `… in flight`, the delegation transport below)
+(`<objective> · <activity>`, either half optional; a set of live waits, so overlapping waits keep
+it until the last ends — the newest live wait's text shows — and a settled or reset wait's late
+end is inert; a wait whose first publish throws is never admitted) — and keeps its RPC
+`setStatus` dual-publish.
 
 **The objective transition surface (TS tool ↔ Python CLI).** The genuinely cross-plane shapes:
 
@@ -1213,7 +1217,27 @@ Subscribe before emission. Start acknowledgment (started or terminal) has a five
 the request deadline is 30 minutes; abort/deadline/no-ack sends the exact cancellation tuple and
 waits five seconds of grace. Matching completion during grace may release but never promotes
 local cancellation to success. Unrelated/duplicate/late events are ignored. Updates contribute
-only observed run id, never output or tool arguments. Engine capacity/slot state (a freed slot,
+the observed run id and, to the dispatch's optional **progress sink**, the supplier's optional
+`providerDiagnostics` snapshot validated ONCE in the transport
+(`extension/substrate/providerDiagnostics.ts::decodeProviderDiagnostics`: `errorCount`,
+`lastError {kind ∈ rate_limited|transient_other|unknown, at}`, `retry {phase ∈ backoff|in_flight,
+attempt, maxAttempts, delayMs, scheduledAt}`; absent or malformed = unavailable, the key omitted;
+the supplier's `message` text never carried; unknown keys ignored) — never output, tool arguments
+or usage. The sink is called for every correlated update between emission and **settlement** (the
+cancellation grace included; a synchronous update that follows a synchronously parked terminal in
+the same emission still arrives), never after settlement (a terminal completing, a malformed
+result or grace expiry); a throwing sink is contained. Diagnostics carry no termination, lock or
+spend meaning: `release` and the receipts ignore them, a terminal's `providerDiagnostics` is an
+ignored decoration like every non-whitelisted terminal field, and terminal `usage` stays
+authoritative. The three ctx-holders (the `resolve_submit_conflicts` tool, the retained
+`/objective-sync` drive, the `run_librarian` tool) render the stream as the `perk` activity
+`<label>: provider backoff a/m (kind), retrying in Ns` / `<label>: provider retry a/m (kind) in
+flight` (`conflict resolver` / `librarian`) through `surfaces.ts::createDelegationActivity` —
+shown only while a validated `retry` is present (replace-not-merge per update; same text = no
+republish), ended when retry clears or the dispatch settles, headless no-op, and exception-safe (a
+rendering failure never alters a writer's result, lock disposition, receipt or the librarian's
+end-state bracket). The Pi-free `ConflictResolver` interface stays substrate-free; the sink rides
+the engine's `ConflictResolverWithProgress` surface. Engine capacity/slot state (a freed slot,
 `abandonedSlotReleaseAfterMs`), a stop acknowledgement or a sealed paused run is never termination
 evidence for a writer lock: `release` derives from the correlated terminal `status` alone
 (process/capacity fields decorating a terminal are ignored, fake-bus-pinned). Reload, counter reset and pending clear are

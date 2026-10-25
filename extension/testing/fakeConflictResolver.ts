@@ -46,6 +46,52 @@ export function librarianTaskFacts(task: unknown): {
     : "add-docs";
   return { slug, action };
 }
+/**
+ * A native `providerDiagnostics` snapshot in Pi's provider retry (`phase`), as pi-subagents
+ * projects it onto a structured-delegation update. The `SECRET` message stands in for supplier
+ * text perk must never carry: every consumer asserts it reaches no status value, decoded object,
+ * receipt or tool result. Its rendered activity reads `<label>: provider backoff 2/5 (rate
+ * limited), retrying in 8s` / `<label>: provider retry 2/5 (rate limited) in flight`.
+ */
+export function providerRetryDiagnostics(
+  phase: "backoff" | "in_flight",
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    errorCount: 1,
+    lastError: { kind: "rate_limited", message: "SECRET provider body", at: 1 },
+    retry: { phase, attempt: 2, maxAttempts: 5, delayMs: 8000, scheduledAt: 1 },
+    ...overrides,
+  };
+}
+/** The same child's history-only snapshot once the retry sequence ended (`retry` cleared). */
+export function providerHistoryDiagnostics() {
+  return {
+    errorCount: 1,
+    lastError: { kind: "rate_limited", message: "SECRET provider body", at: 1 },
+  };
+}
+/**
+ * A per-test `perk` status-slot recorder for a tool invocation's `ui` override (the harness's
+ * tool context records `setStatus` into a private array, never `h.statuses`). `distinct()` is the
+ * defined values with adjacent repeats collapsed — the sequence a footer reader would see.
+ */
+export function perkSlotRecorder() {
+  const values: (string | undefined)[] = [];
+  return {
+    values,
+    ui: {
+      setStatus: (slot: string, value: string | undefined) => {
+        if (slot === "perk") values.push(value);
+      },
+    },
+    distinct(): string[] {
+      return values
+        .filter((value): value is string => value !== undefined)
+        .filter((value, index, all) => index === 0 || value !== all[index - 1]);
+    },
+  };
+}
 export function retainedDispatch(worktree: string) {
   return {
     operationId: RETAINED_OPERATION,

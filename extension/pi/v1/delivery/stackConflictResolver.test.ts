@@ -7,11 +7,15 @@ import {
   type ConflictResolutionRequest,
   classifyConflictResolution,
 } from "../../../delivery/conflictResolution.ts";
+import { decodeProviderDiagnostics } from "../../../substrate/providerDiagnostics.ts";
 import { resolverLockDir } from "../../../substrate/resolverLease.ts";
+import { createPerkStatus } from "../../../surfaces/surfaces.ts";
 import {
   completedResolution,
   completedRetainedResolution,
   deferred,
+  providerHistoryDiagnostics,
+  providerRetryDiagnostics,
   retainedDispatch,
 } from "../../../testing/fakeConflictResolver.ts";
 import { scaffoldRepo } from "../../../testing/harness.ts";
@@ -24,8 +28,16 @@ function setup() {
     mode: "read-write",
     conflict_resolution_attempts: 1,
   };
+  // The `perk` slot values the run ctx publishes (the activity owner renders on the run's ctx).
+  const statuses: (string | undefined)[] = [];
   const ctx = {
     cwd: "/parent",
+    hasUI: true,
+    ui: {
+      setStatus: (slot: string, value: string | undefined) => {
+        if (slot === "perk") statuses.push(value);
+      },
+    },
     sessionManager: {
       getSessionId: () => "session",
       getBranch: () => [{ type: "custom", customType: "perk:workflow-state", data: state }],
@@ -49,7 +61,7 @@ function setup() {
     attempt: 1,
     cap: 2,
   };
-  return { state, ctx, receipt, ready, prepared };
+  return { state, ctx, receipt, ready, prepared, statuses, status: createPerkStatus() };
 }
 
 test("entry authorization: an undefined mode is writable unless the effective floor is on; every invalid entry refuses before preparation and never authorizes either mode", async () => {
@@ -65,6 +77,7 @@ test("entry authorization: an undefined mode is writable unless the effective fl
         },
       },
       () => floor,
+      w.status,
     );
     c.setContext(w.ctx);
     const r = await c.run(w.ctx, async () => w.prepared);
@@ -92,6 +105,7 @@ test("entry authorization: an undefined mode is writable unless the effective fl
         },
       },
       () => false,
+      w.status,
     );
     if (invalid !== "unbound") c.setContext(w.ctx);
     const signal = new AbortController();
@@ -128,6 +142,87 @@ test("entry authorization: an undefined mode is writable unless the effective fl
   }
 });
 
+const BACKOFF_TEXT = "conflict resolver: provider backoff 2/5 (rate limited), retrying in 8s";
+
+test("provider-retry wait: the dispatched path hands resolve a progress sink; a backoff renders on the run ctx and the slot clears when run settles", async () => {
+  const w = setup();
+  const backoff = decodeProviderDiagnostics(providerRetryDiagnostics("backoff"));
+  const history = decodeProviderDiagnostics(providerHistoryDiagnostics());
+  assert.ok(backoff && history);
+  let sinkType = "";
+  const c = createStackConflictResolver(
+    {
+      resolve: async (_request, _signal, progress) => {
+        sinkType = typeof progress;
+        progress?.({ diagnostics: backoff });
+        assert.equal(w.statuses.at(-1), BACKOFF_TEXT, "rendered while the child is in backoff");
+        progress?.({ diagnostics: backoff });
+        assert.equal(w.statuses.length, 1, "an identical snapshot republishes nothing");
+        progress?.({ diagnostics: history });
+        assert.equal(w.statuses.at(-1), undefined, "a cleared retry ends the wait at once");
+        progress?.({ diagnostics: backoff });
+        return w.ready;
+      },
+    },
+    () => false,
+    w.status,
+  );
+  c.setContext(w.ctx);
+  const r = await c.run(w.ctx, async () => w.prepared);
+  assert.equal(r.kind, "executed");
+  assert.equal(sinkType, "function");
+  assert.deepEqual(w.statuses, [BACKOFF_TEXT, undefined, BACKOFF_TEXT, undefined]);
+  assert.equal(w.status.get(), undefined);
+  assert.doesNotMatch(JSON.stringify([w.statuses, r]), /SECRET/);
+});
+
+test("provider-retry wait: a resolve that throws after publishing still clears the slot and the active invocation", async () => {
+  const w = setup();
+  const backoff = decodeProviderDiagnostics(providerRetryDiagnostics("backoff"));
+  assert.ok(backoff);
+  let calls = 0;
+  const c = createStackConflictResolver(
+    {
+      resolve: async (_request, _signal, progress) => {
+        calls++;
+        if (calls > 1) return w.ready;
+        progress?.({ diagnostics: backoff });
+        throw new Error("boom");
+      },
+    },
+    () => false,
+    w.status,
+  );
+  c.setContext(w.ctx);
+  await assert.rejects(
+    c.run(w.ctx, async () => w.prepared),
+    /boom/,
+  );
+  assert.deepEqual(w.statuses, [BACKOFF_TEXT, undefined]);
+  assert.equal(w.status.get(), undefined);
+  const again = await c.run(w.ctx, async () => w.prepared);
+  assert.equal(again.kind, "executed", "the thrown run left no active invocation behind");
+});
+
+test("provider-retry wait: a refusal or a non-dispatched preparation begins no wait", async () => {
+  const w = setup();
+  const resolver = {
+    resolve: async () => assert.fail("nothing launches"),
+  };
+  const c = createStackConflictResolver(resolver, () => false, w.status);
+  c.setContext(w.ctx);
+  const skipped = await c.run(w.ctx, async () => ({
+    kind: "no_continuation" as const,
+    reason: "nothing retained",
+  }));
+  assert.equal(skipped.kind, "no_continuation");
+  const gated = createStackConflictResolver(resolver, () => true, w.status);
+  gated.setContext(w.ctx);
+  const refused = await gated.run(w.ctx, async () => w.prepared);
+  assert.equal(refused.kind, "state_error");
+  assert.deepEqual(w.statuses, []);
+});
+
 test("revocation during execution: overlap refuses; a context change settles unauthorized with the actual receipt preserved", async () => {
   const w = setup();
   const launched = deferred<ConflictResolutionRequest>();
@@ -141,6 +236,7 @@ test("revocation during execution: overlap refuses; a context change settles una
       },
     },
     () => false,
+    w.status,
   );
   c.setContext(w.ctx);
   const running = c.run(w.ctx, async () => w.prepared);
@@ -226,6 +322,7 @@ test("preparation rechecks at the synchronous mutation ports: a revocation queue
       },
     },
     () => false,
+    w.status,
   );
   c.setContext(ctx);
   const pi = {
@@ -260,6 +357,7 @@ test("the stack consumer refuses a PR-shaped success as malformed-result", async
         classifyConflictResolution("pr-rebase", "completed", completedResolution, w.receipt),
     },
     () => false,
+    w.status,
   );
   c.setContext(w.ctx);
   const r = await c.run(w.ctx, async () => w.prepared);

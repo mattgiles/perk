@@ -69,8 +69,11 @@ door, or model tool; they are human-facing only.
 
 - **The perk footer** — the one-line footer perk owns in the interactive TUI (it supersedes Pi's
   default footer wholesale): perk identity · 🎯 objective (joined by ` · waiting on browser review`
-  while a plannotator browser review — plan, objective, gist or code — awaits your decision) on
-  the left; branch · model · thinking ·
+  while a plannotator browser review — plan, objective, gist or code — awaits your decision, or
+  ` · conflict resolver: provider backoff 2/5 (rate limited), retrying in 8s` / `… in flight`
+  while a foreground writer child (`resolve_submit_conflicts`, the retained stack-sync resolver,
+  `run_librarian`) is in the supplier's provider retry — so a stalled-looking turn can be told
+  apart from a backoff; it clears when the retry ends) on the left; branch · model · thinking ·
   **cache-hit rate** · context · guest-extension statuses right-aligned. The cache segment
   (`CH42.3%`) restores Pi's default-footer `CH` prompt-cache-hit display and stays absent until the
   session shows cache activity. For per-miss detail, enable Pi's `showCacheMissNotices` setting

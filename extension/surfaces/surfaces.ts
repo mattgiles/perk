@@ -43,6 +43,21 @@ export const MARK_OBJECTIVE = "🎯";
 // Plain text, no emoji (D3 keeps emoji as identity marks): a Perk-owned wait the operator
 // cannot otherwise see.
 export const ACTIVITY_BROWSER_REVIEW = "waiting on browser review";
+/** The provider-retry wait labels of the foreground writers (both conflict modes share one). */
+export const ACTIVITY_LABEL_CONFLICT_RESOLVER = "conflict resolver";
+export const ACTIVITY_LABEL_LIBRARIAN = "librarian";
+/**
+ * Structural slices of the substrate's provider-diagnostics vocabulary
+ * (`substrate/providerDiagnostics.ts`): surfaces.ts takes structural params rather than importing
+ * feature or mechanism homes, and `surfaces.test.ts` pins the substrate shape assignable to them.
+ */
+export type DelegationErrorKindLike = "rate_limited" | "transient_other" | "unknown";
+export interface DelegationRetryLike {
+  phase: "backoff" | "in_flight";
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+}
 /** The slice an activity owner takes: begin a wait with its text, receive the matching `end`. */
 export type ActivitySink = (text: string) => () => void;
 /**
@@ -179,7 +194,14 @@ export function createPerkStatus(): PerkStatusHandle {
       if (!target.hasUI) return () => {};
       const token = { text };
       live.add(token);
-      publish(target);
+      try {
+        publish(target);
+      } catch (error) {
+        // A wait whose first publish threw is not live, so no ghost text survives a rendering
+        // failure; the throw still reaches the caller.
+        live.delete(token);
+        throw error;
+      }
       return () => {
         // Already ended, or reset by `clearActivity`: nothing to remove, nothing to publish.
         if (!live.delete(token)) return;
@@ -197,6 +219,103 @@ export function createPerkStatus(): PerkStatusHandle {
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+  };
+}
+
+// --- the foreground writers' provider-retry wait -----------------------------------------------
+
+const DELEGATION_ERROR_WORDS: Record<DelegationErrorKindLike, string> = {
+  rate_limited: "rate limited",
+  transient_other: "transient error",
+  unknown: "request failed",
+};
+
+/**
+ * The activity text of a provider retry: `<label>: provider backoff a/m (kind), retrying in Ns`
+ * (`retrying now` for a zero delay) or `<label>: provider retry a/m (kind) in flight`; the kind
+ * is omitted when no error was observed. Static per snapshot (no countdown), plain text, one line.
+ */
+export function formatDelegationRetry(
+  label: string,
+  retry: DelegationRetryLike,
+  lastErrorKind?: DelegationErrorKindLike,
+): string {
+  const kind = lastErrorKind !== undefined ? ` (${DELEGATION_ERROR_WORDS[lastErrorKind]})` : "";
+  const attempts = `${retry.attempt}/${retry.maxAttempts}${kind}`;
+  if (retry.phase === "in_flight") return `${label}: provider retry ${attempts} in flight`;
+  const when =
+    retry.delayMs === 0 ? "retrying now" : `retrying in ${Math.ceil(retry.delayMs / 1000)}s`;
+  return `${label}: provider backoff ${attempts}, ${when}`;
+}
+
+/**
+ * A foreground writer's provider-retry wait. `observe` takes each progress snapshot (replacing,
+ * never merging, the prior one); `end` closes the owner. Both are arrow properties, so
+ * `activity.observe` passes unbound as the dispatch's progress sink, and neither ever throws.
+ */
+export interface DelegationActivity {
+  observe: (progress: {
+    diagnostics?: { retry?: DelegationRetryLike; lastError?: { kind: DelegationErrorKindLike } };
+  }) => void;
+  end: () => void;
+}
+
+/**
+ * Own one foreground writer's provider-retry wait on the composed `perk` status: shown only while
+ * the supplier reports a live `retry`, so it names an observed backoff, never a liveness guess.
+ * One live token at a time — same text = no publish (idempotent against coalesced heartbeats);
+ * a new text begins its token BEFORE retiring the old one (the newest live wait shows throughout
+ * — no intermediate blank, at the cost of a second publish of the new text); no `retry` ends
+ * the wait. Display-only and exception-safe: every begin/end is contained, so a throwing
+ * `setStatus` or footer subscriber never reaches the writer flow (a begin that throws records no
+ * token). The owner reads only the retry facts and the error kind — never output, tool
+ * arguments, usage or the supplier's message. Headless targets publish nothing (the handle's
+ * no-op).
+ */
+export function createDelegationActivity(
+  status: ActivityHandle,
+  target: StandingTarget,
+  label: string,
+): DelegationActivity {
+  let current: { text: string; end: () => void } | undefined;
+  let closed = false;
+  const begin = (text: string): (() => void) | undefined => {
+    try {
+      return status.beginActivity(target, text);
+    } catch {
+      return undefined;
+    }
+  };
+  const retire = (wait: { end: () => void }): void => {
+    try {
+      wait.end();
+    } catch {
+      /* Display only: a failed repaint never reaches the writer flow. */
+    }
+  };
+  return {
+    observe: (progress) => {
+      if (closed) return;
+      const retry = progress.diagnostics?.retry;
+      const text =
+        retry !== undefined
+          ? formatDelegationRetry(label, retry, progress.diagnostics?.lastError?.kind)
+          : undefined;
+      if (text === current?.text) return;
+      const previous = current;
+      if (text === undefined) current = undefined;
+      else {
+        const end = begin(text);
+        current = end ? { text, end } : undefined;
+      }
+      if (previous) retire(previous);
+    },
+    end: () => {
+      closed = true;
+      const previous = current;
+      current = undefined;
+      if (previous) retire(previous);
     },
   };
 }

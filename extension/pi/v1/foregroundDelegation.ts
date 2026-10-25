@@ -6,6 +6,16 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import {
+  type DelegationProgressSink,
+  decodeProviderDiagnostics,
+} from "../../substrate/providerDiagnostics.ts";
+
+export type {
+  DelegationProgress,
+  DelegationProgressSink,
+  ProviderDiagnostics,
+} from "../../substrate/providerDiagnostics.ts";
 
 export const DELEGATION_EVENTS = {
   request: "prompt-template:subagent:request",
@@ -214,12 +224,21 @@ function terminal(value: Record<string, unknown>): NativeTerminal | null {
  * event on the exact tuple, honor a synchronous response delivered during `emit`, cancel with
  * the tuple on abort / missing start-ack / deadline / emission error, and settle after the
  * cancellation grace as `termination-unconfirmed` when no terminal arrives.
+ *
+ * The optional `progress` sink is a display stream: it is called once for every correlated update
+ * between emission and settlement — the cancellation grace included, and a synchronous update that
+ * follows a synchronously parked terminal within the same `emit` (terminal arrival is not the
+ * cutoff; settlement is) — and never after settlement. It carries only the supplier's
+ * `providerDiagnostics` validated once here (`decodeProviderDiagnostics`; absent or malformed =
+ * unavailable, the key omitted) — never the run id, output, tool arguments or usage. A throwing
+ * sink is contained and never changes the outcome.
  */
 export function dispatchForeground(
   events: DelegationEvents,
   launch: ForegroundLaunch,
   tuple: DelegationTuple,
   signal: AbortSignal,
+  progress?: DelegationProgressSink,
 ): Promise<ForegroundOutcome> {
   if (signal.aborted)
     return Promise.resolve({ failure: "cancelled", release: true, termination: "not-requested" });
@@ -305,6 +324,14 @@ export function dispatchForeground(
           if (!emitted || !r || settled) return;
           started = true;
           if (identifier(r.runId)) observedRunId = r.runId;
+          if (progress) {
+            const diagnostics = decodeProviderDiagnostics(r.providerDiagnostics);
+            try {
+              progress({ ...(diagnostics !== undefined ? { diagnostics } : {}) });
+            } catch {
+              /* A throwing sink is the caller's rendering fault; the outcome never depends on it. */
+            }
+          }
         }),
       );
       subscriptions.push(

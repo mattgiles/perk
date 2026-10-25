@@ -292,6 +292,14 @@ export function activatePerk(
   const waveNotices = createWaveNoticeReporter();
   const reportWave = createReportWave(pi.events, { onNotice: waveNotices.onNotice });
 
+  // The composed `perk` status handle (charter D2): one slot carrying the objective segment +
+  // the ref-counted activity facet. Created once here (no hidden module state), ahead of the
+  // foreground writers, and threaded into the objective publisher, the plan installer (the warm
+  // plannotator arm), the browser doors, the simplify doors and the foreground writer drives
+  // (`resolve_submit_conflicts`, the retained stack-sync resolver, `run_librarian` — their
+  // provider-retry wait); the footer reads it back via get/subscribe.
+  const perkStatus = createPerkStatus();
+
   const conflictResolver = createConflictResolverEngine({
     events: pi.events,
     enginePresent: () => pi.getAllTools().some((tool) => tool.name === "subagent"),
@@ -302,10 +310,17 @@ export function activatePerk(
         : stackConflict.authorized(request),
     ...options.resolverEngine,
   });
-  const submitConflict = installSubmitConflictBindings(pi, conflictResolver, () =>
-    gating.isActive(),
+  const submitConflict = installSubmitConflictBindings(
+    pi,
+    conflictResolver,
+    () => gating.isActive(),
+    perkStatus,
   );
-  const stackConflict = createStackConflictResolver(conflictResolver, () => gating.isActive());
+  const stackConflict = createStackConflictResolver(
+    conflictResolver,
+    () => gating.isActive(),
+    perkStatus,
+  );
   // The library writer's engine (contracts.md §8.75(l)): the same presence census, no lock and no
   // read-only refusal — the parent may stay gated; the tool's end-state bracket proves the child.
   const librarianEngine = createLibrarianEngine({
@@ -329,12 +344,6 @@ export function activatePerk(
   // per-activation current-review slot + unconfirmed-save latch every review surface shares
   // (§8.23 "Draft-review guards") — in-memory, nothing persisted.
   const draftReviews = createDraftReviewSlot(pi);
-
-  // The composed `perk` status handle (charter D2): one slot carrying the objective segment +
-  // the ref-counted browser-wait activity. Created once here (no hidden module state) and
-  // threaded into the objective publisher, the plan installer (the warm plannotator arm) and
-  // the browser doors; the footer reads it back via get/subscribe.
-  const perkStatus = createPerkStatus();
 
   // The per-activation plannotator port selection (the mirror of plannotator's own rule:
   // `PLANNOTATOR_PORT` single or range, `19432` when remote, else ephemeral), resolved ONCE here,
@@ -820,7 +829,7 @@ export function activatePerk(
   // The library writer launcher (`run_librarian`, contracts.md §8.75(l)): prepare → the
   // foreground `perk.librarian` child in the main checkout → the fail-closed end-state bracket →
   // corroboration against the catalog. Reachable gated (only the child writes, only the library).
-  installLibrarianBindings(pi, librarianEngine);
+  installLibrarianBindings(pi, librarianEngine, perkStatus);
 
   // The flow-scoped draft-review-wave pair (`start_draft_review_wave`/
   // `collect_draft_review_wave`) the draft-review door drives: non-blocking draft-review

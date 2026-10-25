@@ -8,6 +8,9 @@ import {
   completedRetainedResolution,
   deferred,
   fakeConflictResolver,
+  perkSlotRecorder,
+  providerHistoryDiagnostics,
+  providerRetryDiagnostics,
 } from "../../../testing/fakeConflictResolver.ts";
 import {
   addressClassifyFixture,
@@ -153,6 +156,64 @@ test("single-use authorization: parameterless/sequential; bound to counter and i
     assert.equal(w.engine.requests.length, 2);
     assert.equal(details(await w.h.invokeTool("resolve_submit_conflicts", {})).ok, false);
     assert.equal(w.engine.requests.length, 2);
+  } finally {
+    w.h.dispose();
+  }
+});
+
+test("provider retry renders on the perk status while the resolver child backs off, and clears when the retry ends or the dispatch settles", async () => {
+  let arm: "recovers" | "fails" = "recovers";
+  const w = await setup((bus, r) => {
+    const id = { requestId: r.requestId, ownerRunId: r.ownerRunId, nodeId: r.nodeId };
+    bus.emit(DELEGATION_EVENTS.started, id);
+    bus.emit(DELEGATION_EVENTS.update, {
+      ...id,
+      providerDiagnostics: providerRetryDiagnostics("backoff"),
+    });
+    if (arm === "fails") {
+      bus.emit(DELEGATION_EVENTS.response, { ...id, status: "failed" });
+      return;
+    }
+    bus.emit(DELEGATION_EVENTS.update, {
+      ...id,
+      providerDiagnostics: providerRetryDiagnostics("in_flight"),
+    });
+    bus.emit(DELEGATION_EVENTS.update, {
+      ...id,
+      providerDiagnostics: providerHistoryDiagnostics(),
+    });
+    bus.emit(DELEGATION_EVENTS.response, {
+      ...id,
+      status: "completed",
+      result: { kind: "structured", value: completedResolution },
+    });
+  });
+  try {
+    await w.h.invokeTool("submit", {});
+    const recovered = perkSlotRecorder();
+    const resolved = await w.h.invokeTool("resolve_submit_conflicts", {}, { ui: recovered.ui });
+    assert.deepEqual(recovered.distinct(), [
+      "conflict resolver: provider backoff 2/5 (rate limited), retrying in 8s",
+      "conflict resolver: provider retry 2/5 (rate limited) in flight",
+    ]);
+    assert.equal(recovered.values.at(-1), undefined);
+    assert.equal(details(resolved).kind, "resolved");
+    assert.match(text(resolved), /call canonical submit again/i);
+    assert.doesNotMatch(JSON.stringify([recovered.values, resolved]), /SECRET/);
+    assert.equal(w.engine.requests.length, 1);
+
+    arm = "fails";
+    await w.h.invokeTool("submit", {});
+    const failed = perkSlotRecorder();
+    const withheld = await w.h.invokeTool("resolve_submit_conflicts", {}, { ui: failed.ui });
+    assert.deepEqual(failed.distinct(), [
+      "conflict resolver: provider backoff 2/5 (rate limited), retrying in 8s",
+    ]);
+    assert.equal(failed.values.at(-1), undefined, "the settle ends the wait on failure too");
+    assert.equal(details(withheld).ok, false);
+    assert.equal(details(withheld).receipt?.lock.disposition, "retained");
+    assert.doesNotMatch(JSON.stringify([failed.values, withheld]), /SECRET/);
+    assert.equal(w.engine.requests.length, 2, "rendering never adds a request");
   } finally {
     w.h.dispose();
   }
