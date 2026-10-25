@@ -9,6 +9,8 @@ import { resolverLockDir } from "../../../substrate/resolverLease.ts";
 import {
   completedRetainedResolution,
   fakeConflictResolver,
+  perkSlotRecorder,
+  providerRetryDiagnostics,
   RETAINED_OPERATION,
 } from "../../../testing/fakeConflictResolver.ts";
 import { gitInit, loadPerkSession, scaffoldRepo, spyInjections } from "../../../testing/harness.ts";
@@ -188,6 +190,43 @@ test("retained dispatch: one public request at the retained worktree; the offer 
     assert.equal(details(capped).error_type, "attempt_cap");
     assert.equal(details(capped).resolution, undefined);
     assert.equal(w.engine.requests.length, 2);
+  } finally {
+    w.h.dispose();
+  }
+});
+
+test("retained dispatch renders the resolver child's provider backoff on the perk status and clears it on settle; the sync outcome is unchanged", async () => {
+  const w = await setup({
+    script: (bus, r) => {
+      const id = { requestId: r.requestId, ownerRunId: r.ownerRunId, nodeId: r.nodeId };
+      bus.emit(DELEGATION_EVENTS.update, {
+        ...id,
+        providerDiagnostics: providerRetryDiagnostics("backoff"),
+      });
+      bus.emit(DELEGATION_EVENTS.response, {
+        ...id,
+        status: "completed",
+        runId: "native-retained",
+        result: { kind: "structured", value: completedRetainedResolution },
+      });
+    },
+  });
+  try {
+    const slot = perkSlotRecorder();
+    const result = await w.h.invokeTool(
+      "objective_stack_sync",
+      { objective: "7", resolve: true },
+      { ui: slot.ui },
+    );
+    assert.deepEqual(slot.distinct(), [
+      "conflict resolver: provider backoff 2/5 (rate limited), retrying in 8s",
+    ]);
+    assert.equal(slot.values.at(-1), undefined);
+    assert.equal(details(result).ok, true);
+    assert.equal(details(result).resolution?.kind, "continuation-ready");
+    assert.equal(w.engine.requests.length, 1);
+    assert.match(w.injected[0] ?? "", /NEW explicit human approval/);
+    assert.doesNotMatch(JSON.stringify([slot.values, result, w.injected]), /SECRET/);
   } finally {
     w.h.dispose();
   }

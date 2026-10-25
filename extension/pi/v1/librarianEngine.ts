@@ -5,6 +5,7 @@
 import { LIBRARIAN_RECORD_SCHEMA } from "../../library/librarian.ts";
 import {
   type DelegationEvents,
+  type DelegationProgressSink,
   type DelegationTuple,
   dispatchForeground,
   type ForegroundOutcome,
@@ -33,10 +34,12 @@ export type LibrarianDispatch = LibrarianRefusal | { kind: "outcome"; outcome: F
 export interface LibrarianEngine {
   /** Presence then the native verdict; `null` = a dispatch may launch. */
   preflight(): LibrarianRefusal | null;
+  /** `progress` is a display stream of the child's provider diagnostics, never part of the result. */
   dispatch(
     launch: { task: string; cwd: string; model?: string },
     tuple: DelegationTuple,
     signal: AbortSignal,
+    progress?: DelegationProgressSink,
   ): Promise<LibrarianDispatch>;
 }
 
@@ -66,6 +69,7 @@ export function createLibrarianEngine(
     launch: { task: string; cwd: string; model?: string },
     tuple: DelegationTuple,
     signal: AbortSignal,
+    progress?: DelegationProgressSink,
   ): Promise<LibrarianDispatch> {
     // The pre-launch cancellation guard at the engine boundary; the transport repeats it.
     if (signal.aborted)
@@ -86,14 +90,15 @@ export function createLibrarianEngine(
       },
       tuple,
       signal,
+      progress,
     );
     return { kind: "outcome", outcome };
   }
   return {
     preflight,
-    dispatch(launch, tuple, signal) {
+    dispatch(launch, tuple, signal, progress) {
       const controller = new AbortController();
-      const result = run(launch, tuple, AbortSignal.any([signal, controller.signal]));
+      const result = run(launch, tuple, AbortSignal.any([signal, controller.signal]), progress);
       active.set(controller, result);
       void result.finally(() => active.delete(controller));
       return result;

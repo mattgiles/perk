@@ -53,9 +53,14 @@ import {
 import { failFor, ok } from "../../substrate/result.ts";
 import { AUTHORING_STAGES, WORKTREE_STAGES } from "../../substrate/toolPolicy.ts";
 import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
+import {
+  ACTIVITY_LABEL_LIBRARIAN,
+  type ActivityHandle,
+  createDelegationActivity,
+} from "../../surfaces/surfaces.ts";
 import { registerPerkTool } from "../perkTool.ts";
 import { nativeWorktreeFix } from "./foregroundDelegation.ts";
-import type { LibrarianEngine, LibrarianRefusal } from "./librarianEngine.ts";
+import type { LibrarianDispatch, LibrarianEngine, LibrarianRefusal } from "./librarianEngine.ts";
 import { boundedDetail, fencedJson } from "./scoutWave.ts";
 
 const TOOL_NAME = "run_librarian";
@@ -199,6 +204,7 @@ async function runLibrarian(
   ctx: ExtensionContext,
   request: LibrarianRequest,
   cancel: AbortSignal,
+  status: ActivityHandle,
 ) {
   const fail = failFor<LibrarianDetails>(ctx, TOOL_NAME);
   const receipt: LibrarianReceipt = {
@@ -303,11 +309,20 @@ async function runLibrarian(
   receipt.ownerRunId = tuple.ownerRunId;
   receipt.requestId = tuple.requestId;
   const model = subagentModel(ctx.cwd, "librarian");
-  const dispatched = await engine.dispatch(
-    { task, cwd: main, ...(model !== undefined ? { model } : {}) },
-    tuple,
-    cancel,
-  );
+  // The child's provider-retry wait on the `perk` status — display only. The `finally` wraps ONLY
+  // the dispatch await, so the receipt and the end-state bracket below always run.
+  const activity = createDelegationActivity(status, ctx, ACTIVITY_LABEL_LIBRARIAN);
+  let dispatched: LibrarianDispatch;
+  try {
+    dispatched = await engine.dispatch(
+      { task, cwd: main, ...(model !== undefined ? { model } : {}) },
+      tuple,
+      cancel,
+      activity.observe,
+    );
+  } finally {
+    activity.end();
+  }
   if (dispatched.kind === "refused") {
     if (dispatched.nativeWorktreeConfig)
       receipt.nativeWorktreeConfig = dispatched.nativeWorktreeConfig;
@@ -441,7 +456,11 @@ async function runLibrarian(
 // ------------------------------------------------------------------------------ the installer
 
 /** Install the library writer launcher: the `run_librarian` tool over the given engine. */
-export function installLibrarianBindings(pi: ExtensionAPI, engine: LibrarianEngine): void {
+export function installLibrarianBindings(
+  pi: ExtensionAPI,
+  engine: LibrarianEngine,
+  status: ActivityHandle,
+): void {
   let active = false;
   registerPerkTool(
     pi,
@@ -523,7 +542,7 @@ export function installLibrarianBindings(pi: ExtensionAPI, engine: LibrarianEngi
           const signals = [signal, ctx.signal].filter((s): s is AbortSignal => s !== undefined);
           const cancel =
             signals.length > 0 ? AbortSignal.any(signals) : new AbortController().signal;
-          return await runLibrarian(pi, engine, ctx, request, cancel);
+          return await runLibrarian(pi, engine, ctx, request, cancel, status);
         } finally {
           active = false;
         }

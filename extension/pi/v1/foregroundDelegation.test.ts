@@ -5,11 +5,17 @@ import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { nativeWorktreeRefusal } from "../../delivery/conflictResolution.ts";
-import { FakeDelegationBus, fakeConflictResolver } from "../../testing/fakeConflictResolver.ts";
+import {
+  FakeDelegationBus,
+  fakeConflictResolver,
+  providerHistoryDiagnostics,
+  providerRetryDiagnostics,
+} from "../../testing/fakeConflictResolver.ts";
 import { WAVE_INTERCOM_BRIDGE } from "../../waves/transport.ts";
 import {
   CANCEL_GRACE_MS,
   DELEGATION_EVENTS,
+  type DelegationProgress,
   type DelegationTuple,
   dispatchForeground,
   FOREGROUND_INTERCOM_BRIDGE,
@@ -40,6 +46,24 @@ function cancels(bus: FakeDelegationBus): unknown[] {
 function respond(bus: FakeDelegationBus, fields: Record<string, unknown>) {
   bus.emit(DELEGATION_EVENTS.response, { ...TUPLE, ...fields });
 }
+function update(bus: FakeDelegationBus, fields: Record<string, unknown> = {}) {
+  bus.emit(DELEGATION_EVENTS.update, { ...TUPLE, ...fields });
+}
+/** A recording progress sink. */
+function recorder(): { seen: DelegationProgress[]; sink: (p: DelegationProgress) => void } {
+  const seen: DelegationProgress[] = [];
+  return { seen, sink: (p) => seen.push(p) };
+}
+// The decoded shape of `providerRetryDiagnostics(phase)` (independent literals: the supplier's
+// `message` is gone, everything else is carried field for field).
+function decodedRetry(phase: "backoff" | "in_flight", attempt = 2) {
+  return {
+    errorCount: 1,
+    lastError: { kind: "rate_limited", at: 1 },
+    retry: { phase, attempt, maxAttempts: 5, delayMs: 8000, scheduledAt: 1 },
+  };
+}
+const DECODED_HISTORY = { errorCount: 1, lastError: { kind: "rate_limited", at: 1 } };
 
 test("an already-aborted signal emits nothing and leaves no subscription", async () => {
   const bus = new FakeDelegationBus();
@@ -295,11 +319,192 @@ test("a completed terminal decorated the same way still releases on status alone
   assert.deepEqual(outcome.terminal, { status: "completed", runId: "native-run" });
 });
 
+test("provider diagnostics on a terminal are an ignored decoration: a failed terminal still retains, a completed one releases, and only the whitelist survives", async () => {
+  for (const status of ["failed", "completed"] as const) {
+    const bus = new FakeDelegationBus();
+    const running = dispatchForeground(bus, LAUNCH, TUPLE, new AbortController().signal);
+    bus.emit(DELEGATION_EVENTS.started, TUPLE);
+    respond(bus, {
+      status,
+      runId: "native-run",
+      providerDiagnostics: providerRetryDiagnostics("backoff"),
+    });
+    const outcome = await running;
+    assert.equal(outcome.release, status === "completed", status);
+    assert.equal(outcome.termination, status === "completed" ? "confirmed" : "unconfirmed");
+    assert.deepEqual(outcome.terminal, { status, runId: "native-run" });
+    assert.doesNotMatch(JSON.stringify(outcome), /SECRET|providerDiagnostics/);
+  }
+});
+
 test("source pin: the writer transport never names engine capacity/slot state; release derives from the terminal status", () => {
   const source = readFileSync(new URL("./foregroundDelegation.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /\b(capacity|abandonedSlot\w*|slotReleased)\b/);
   // The positive arm: the release rule reads the correlated terminal's status.
   assert.match(source, /const release = t\.status === "completed"/);
+});
+
+test("old payloads: an update without diagnostics reaches the sink as unavailable and still contributes the run id; a decorated terminal is unchanged", async () => {
+  for (const status of ["completed", "failed"] as const) {
+    const bus = new FakeDelegationBus();
+    const progress = recorder();
+    const running = dispatchForeground(
+      bus,
+      LAUNCH,
+      TUPLE,
+      new AbortController().signal,
+      progress.sink,
+    );
+    update(bus, {
+      runId: "observed-run",
+      recentOutput: "SECRET output",
+      currentToolArgs: "SECRET",
+    });
+    respond(bus, { status, providerDiagnostics: providerRetryDiagnostics("in_flight") });
+    const outcome = await running;
+    assert.deepEqual(progress.seen, [{}], status);
+    assert.equal(Object.hasOwn(progress.seen[0] ?? {}, "diagnostics"), false);
+    assert.equal(outcome.observedRunId, "observed-run");
+    assert.deepEqual(outcome.terminal, { status });
+    assert.equal(outcome.release, status === "completed");
+    assert.doesNotMatch(JSON.stringify([outcome, progress.seen]), /SECRET/);
+  }
+});
+
+test("backoff and in-flight transitions arrive in order and replace, never merge; a malformed snapshot is unavailable", async () => {
+  const bus = new FakeDelegationBus();
+  const progress = recorder();
+  const running = dispatchForeground(
+    bus,
+    LAUNCH,
+    TUPLE,
+    new AbortController().signal,
+    progress.sink,
+  );
+  update(bus, { providerDiagnostics: providerRetryDiagnostics("backoff") });
+  update(bus, { providerDiagnostics: providerRetryDiagnostics("in_flight") });
+  update(bus, { providerDiagnostics: { ...providerRetryDiagnostics("backoff"), errorCount: -1 } });
+  update(bus, { providerDiagnostics: providerHistoryDiagnostics() });
+  update(bus, {
+    providerDiagnostics: providerRetryDiagnostics("backoff", {
+      retry: { phase: "backoff", attempt: 3, maxAttempts: 5, delayMs: 8000, scheduledAt: 1 },
+    }),
+  });
+  update(bus, {
+    ...TUPLE,
+    requestId: "foreign",
+    providerDiagnostics: providerHistoryDiagnostics(),
+  });
+  respond(bus, { status: "completed" });
+  const outcome = await running;
+  assert.deepEqual(progress.seen, [
+    { diagnostics: decodedRetry("backoff") },
+    { diagnostics: decodedRetry("in_flight") },
+    {},
+    { diagnostics: DECODED_HISTORY },
+    { diagnostics: decodedRetry("backoff", 3) },
+  ]);
+  assert.equal(outcome.release, true);
+  assert.doesNotMatch(JSON.stringify(progress.seen), /SECRET/);
+});
+
+test("listener cleanup: nothing reaches the sink after settlement; subscriptions are released", async () => {
+  for (const terminal of [{ status: "completed" }, { status: "bogus" }]) {
+    const bus = new FakeDelegationBus();
+    const progress = recorder();
+    const running = dispatchForeground(
+      bus,
+      LAUNCH,
+      TUPLE,
+      new AbortController().signal,
+      progress.sink,
+    );
+    update(bus, { providerDiagnostics: providerRetryDiagnostics("backoff") });
+    respond(bus, terminal);
+    update(bus, { providerDiagnostics: providerRetryDiagnostics("in_flight") });
+    const outcome = await running;
+    update(bus, { providerDiagnostics: providerRetryDiagnostics("in_flight") });
+    assert.equal(progress.seen.length, 1, terminal.status);
+    assert.equal(bus.count(), 0, terminal.status);
+    assert.equal(outcome.failure, terminal.status === "bogus" ? "malformed-result" : undefined);
+  }
+});
+
+test("terminal races during emit: the cutoff is settlement, not terminal arrival", async () => {
+  for (const order of ["response-first", "update-first"] as const) {
+    const bus = new FakeDelegationBus();
+    const progress = recorder();
+    bus.on(DELEGATION_EVENTS.request, () => {
+      if (order === "update-first")
+        update(bus, { providerDiagnostics: providerRetryDiagnostics("in_flight") });
+      respond(bus, { status: "completed" });
+      if (order === "response-first")
+        update(bus, { providerDiagnostics: providerRetryDiagnostics("in_flight") });
+    });
+    const outcome = await dispatchForeground(
+      bus,
+      LAUNCH,
+      TUPLE,
+      new AbortController().signal,
+      progress.sink,
+    );
+    // response-first: the terminal was parked during emit, so the following update still passes.
+    assert.deepEqual(progress.seen, [{ diagnostics: decodedRetry("in_flight") }], order);
+    assert.equal(outcome.termination, "confirmed", order);
+    assert.equal(outcome.release, true, order);
+    update(bus, { providerDiagnostics: providerRetryDiagnostics("backoff") });
+    assert.equal(progress.seen.length, 1, `${order}: nothing after settlement`);
+    assert.equal(bus.count(), 1, `${order}: only the test's own request handler remains`);
+  }
+});
+
+test("cancellation grace: updates still reach the sink until grace expiry settles; a terminal inside the grace stops them", async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const bus = new FakeDelegationBus();
+  const first = new AbortController();
+  const expired = recorder();
+  const one = dispatchForeground(bus, LAUNCH, TUPLE, first.signal, expired.sink);
+  bus.emit(DELEGATION_EVENTS.started, TUPLE);
+  first.abort();
+  update(bus, { providerDiagnostics: providerRetryDiagnostics("backoff") });
+  assert.equal(expired.seen.length, 1, "an update during the grace is still observed");
+  t.mock.timers.tick(CANCEL_GRACE_MS);
+  const lapsed = await one;
+  assert.equal(lapsed.failure, "termination-unconfirmed");
+  update(bus, { providerDiagnostics: providerRetryDiagnostics("in_flight") });
+  assert.equal(expired.seen.length, 1, "nothing after grace expiry");
+
+  const second = new AbortController();
+  const cancelled = recorder();
+  const two = dispatchForeground(bus, LAUNCH, TUPLE, second.signal, cancelled.sink);
+  second.abort();
+  update(bus, { providerDiagnostics: providerRetryDiagnostics("backoff") });
+  respond(bus, { status: "completed" });
+  update(bus, { providerDiagnostics: providerRetryDiagnostics("in_flight") });
+  const outcome = await two;
+  assert.deepEqual(cancelled.seen, [{ diagnostics: decodedRetry("backoff") }]);
+  assert.equal(outcome.failure, "cancelled");
+  assert.equal(outcome.release, true);
+  assert.equal(bus.count(), 0);
+});
+
+test("a throwing sink is contained: the dispatch still completes on the response", async () => {
+  const bus = new FakeDelegationBus();
+  let calls = 0;
+  const running = dispatchForeground(bus, LAUNCH, TUPLE, new AbortController().signal, () => {
+    calls++;
+    throw new Error("SECRET render failure");
+  });
+  update(bus, { runId: "observed-run", providerDiagnostics: providerRetryDiagnostics("backoff") });
+  update(bus, { providerDiagnostics: providerRetryDiagnostics("in_flight") });
+  respond(bus, { status: "completed" });
+  const outcome = await running;
+  assert.equal(calls, 2);
+  assert.equal(outcome.termination, "confirmed");
+  assert.equal(outcome.release, true);
+  assert.equal(outcome.observedRunId, "observed-run");
+  assert.equal(bus.count(), 0);
+  assert.doesNotMatch(JSON.stringify(outcome), /SECRET/);
 });
 
 test("no start-ack cancels with the exact tuple and settles termination-unconfirmed after the grace", async (t: TestContext) => {

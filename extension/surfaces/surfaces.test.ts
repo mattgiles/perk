@@ -8,17 +8,23 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
+import type { DelegationProgress } from "../substrate/providerDiagnostics.ts";
 import {
   ACTIVITY_BROWSER_REVIEW,
+  ACTIVITY_LABEL_CONFLICT_RESOLVER,
+  ACTIVITY_LABEL_LIBRARIAN,
   btwThreadEntryRenderer,
   btwThreadResetEntryRenderer,
   composeFooterLine,
+  createDelegationActivity,
   createPerkStatus,
   createReportDetailSink,
+  type DelegationActivity,
   FOOTER_MAX_LINES,
   type FooterDataLike,
   type FooterParts,
   formatBudgetLine,
+  formatDelegationRetry,
   GLYPHS,
   installPerkFooter,
   Key,
@@ -269,6 +275,255 @@ test("createPerkStatus: the ref-counted activity composes with the objective int
   assert.deepEqual(headless.calls, []);
   assert.equal(calls.length, publishes);
   assert.equal(fired, firedBeforeHeadless);
+});
+
+test("createPerkStatus: a subscriber that throws after the slot published rolls the slot back to the restored composition and rethrows the original error", () => {
+  const { target, calls } = fakeTarget(true);
+  const status = createPerkStatus();
+  status.set(target, "🎯 251");
+  let failures = 0;
+  status.subscribe(() => {
+    failures += 1;
+    throw new Error(`subscriber failure ${failures}`);
+  });
+  assert.throws(() => status.beginActivity(target, "waiting on X"), /subscriber failure 1$/);
+  assert.equal(status.get(), "🎯 251", "the failed wait is not live");
+  assert.deepEqual(
+    calls.map((call) => call.value),
+    ["🎯 251", "🎯 251 · waiting on X", "🎯 251"],
+    "the published slot no longer shows the rolled-back wait",
+  );
+  assert.equal(failures, 2, "the rollback repaint's own subscriber failure is contained");
+});
+
+test("createPerkStatus: a throwing publish during beginActivity propagates and admits no live token", () => {
+  const calls: (string | undefined)[] = [];
+  let throwNext = true;
+  const target: StandingTarget = {
+    hasUI: true,
+    ui: {
+      setStatus(_slot, value) {
+        if (throwNext) {
+          throwNext = false;
+          throw new Error("render failure");
+        }
+        calls.push(value);
+      },
+    },
+  };
+  const status = createPerkStatus();
+  assert.throws(() => status.beginActivity(target, "waiting on X"), /render failure/);
+  assert.equal(status.get(), undefined, "the failed wait is not live");
+  status.set(target, "🎯 251");
+  // The rollback repaints the restored (empty) composition, then the objective composes alone.
+  assert.deepEqual(calls, [undefined, "🎯 251"], "no ghost activity text composes afterwards");
+});
+
+// --- the foreground writers' provider-retry wait -------------------------------------------
+
+const RETRY_BACKOFF = { phase: "backoff", attempt: 2, maxAttempts: 5, delayMs: 8000 } as const;
+const RETRY_IN_FLIGHT = { ...RETRY_BACKOFF, phase: "in_flight" } as const;
+const RETRY_B = "conflict resolver: provider backoff 2/5 (rate limited), retrying in 8s";
+const RETRY_I = "conflict resolver: provider retry 2/5 (rate limited) in flight";
+// Typed as the substrate's decoded progress: each use is also an assignability check.
+const PROGRESS_BACKOFF: DelegationProgress = {
+  diagnostics: {
+    errorCount: 1,
+    lastError: { kind: "rate_limited", at: 1 },
+    retry: { ...RETRY_BACKOFF, scheduledAt: 1 },
+  },
+};
+const PROGRESS_IN_FLIGHT: DelegationProgress = {
+  diagnostics: {
+    errorCount: 1,
+    lastError: { kind: "rate_limited", at: 1 },
+    retry: { ...RETRY_IN_FLIGHT, scheduledAt: 1 },
+  },
+};
+const PROGRESS_HISTORY: DelegationProgress = {
+  diagnostics: { errorCount: 1, lastError: { kind: "rate_limited", at: 1 } },
+};
+
+test("formatDelegationRetry: the exact backoff and in-flight texts", () => {
+  assert.equal(ACTIVITY_LABEL_CONFLICT_RESOLVER, "conflict resolver");
+  assert.equal(ACTIVITY_LABEL_LIBRARIAN, "librarian");
+  const label = ACTIVITY_LABEL_CONFLICT_RESOLVER;
+  assert.equal(formatDelegationRetry(label, RETRY_BACKOFF, "rate_limited"), RETRY_B);
+  assert.equal(
+    formatDelegationRetry(label, RETRY_BACKOFF, "transient_other"),
+    "conflict resolver: provider backoff 2/5 (transient error), retrying in 8s",
+  );
+  assert.equal(
+    formatDelegationRetry(label, RETRY_BACKOFF, "unknown"),
+    "conflict resolver: provider backoff 2/5 (request failed), retrying in 8s",
+  );
+  assert.equal(
+    formatDelegationRetry(label, RETRY_BACKOFF),
+    "conflict resolver: provider backoff 2/5, retrying in 8s",
+  );
+  assert.equal(formatDelegationRetry(label, RETRY_IN_FLIGHT, "rate_limited"), RETRY_I);
+  assert.equal(
+    formatDelegationRetry(ACTIVITY_LABEL_LIBRARIAN, {
+      ...RETRY_IN_FLIGHT,
+      attempt: 1,
+      maxAttempts: 3,
+    }),
+    "librarian: provider retry 1/3 in flight",
+  );
+  assert.equal(
+    formatDelegationRetry(label, { ...RETRY_BACKOFF, delayMs: 500 }),
+    "conflict resolver: provider backoff 2/5, retrying in 1s",
+  );
+  assert.equal(
+    formatDelegationRetry(label, { ...RETRY_BACKOFF, delayMs: 0 }),
+    "conflict resolver: provider backoff 2/5, retrying now",
+  );
+});
+
+test("createDelegationActivity: the raw publication sequence — idempotent repeats, begin-before-end transitions, a cleared retry ends the wait", () => {
+  const { target, calls } = fakeTarget(true);
+  const status = createPerkStatus();
+  // Arrow properties: `observe` works unbound, exactly as it is passed as the progress sink.
+  const { observe } = createDelegationActivity(status, target, ACTIVITY_LABEL_CONFLICT_RESOLVER);
+  const values = () => calls.map((call) => call.value);
+  observe(PROGRESS_BACKOFF);
+  assert.deepEqual(values(), [RETRY_B]);
+  observe(PROGRESS_BACKOFF);
+  assert.deepEqual(values(), [RETRY_B], "an identical snapshot publishes nothing");
+  observe(PROGRESS_IN_FLIGHT);
+  // Begin-new publishes I, retiring the old republishes I: never blank or B in between.
+  assert.deepEqual(values(), [RETRY_B, RETRY_I, RETRY_I]);
+  observe(PROGRESS_HISTORY);
+  assert.deepEqual(values(), [RETRY_B, RETRY_I, RETRY_I, undefined]);
+  observe({});
+  assert.deepEqual(values(), [RETRY_B, RETRY_I, RETRY_I, undefined], "no wait, nothing to end");
+  observe(PROGRESS_BACKOFF);
+  observe({});
+  assert.deepEqual(values().slice(4), [RETRY_B, undefined], "an unavailable snapshot ends it");
+  assert.ok(calls.every((call) => call.slot === "perk"));
+  assert.equal(status.get(), undefined);
+});
+
+test("createDelegationActivity: end closes the owner — one clearing publish, idempotent, later snapshots inert", () => {
+  const { target, calls } = fakeTarget(true);
+  const status = createPerkStatus();
+  const activity = createDelegationActivity(status, target, ACTIVITY_LABEL_CONFLICT_RESOLVER);
+  activity.observe(PROGRESS_BACKOFF);
+  activity.end();
+  assert.deepEqual(
+    calls.map((call) => call.value),
+    [RETRY_B, undefined],
+  );
+  activity.end();
+  activity.observe(PROGRESS_BACKOFF);
+  assert.equal(calls.length, 2, "a closed owner publishes nothing");
+  assert.equal(status.get(), undefined);
+  // An owner that never saw a retry ends without publishing.
+  const quiet = createDelegationActivity(status, target, ACTIVITY_LABEL_LIBRARIAN);
+  quiet.observe(PROGRESS_HISTORY);
+  quiet.end();
+  assert.equal(calls.length, 2);
+});
+
+test("createDelegationActivity (headless): no setStatus calls at all", () => {
+  const { target, calls } = fakeTarget(false);
+  const status = createPerkStatus();
+  const activity = createDelegationActivity(status, target, ACTIVITY_LABEL_LIBRARIAN);
+  activity.observe(PROGRESS_BACKOFF);
+  activity.observe(PROGRESS_IN_FLIGHT);
+  activity.end();
+  assert.deepEqual(calls, []);
+  assert.equal(status.get(), undefined);
+});
+
+test("createDelegationActivity composes with the objective half and restores another live wait when it ends", () => {
+  const { target, calls } = fakeTarget(true);
+  const status = createPerkStatus();
+  const last = () => calls.at(-1)?.value;
+  status.set(target, "🎯 251");
+  const simplifier = "simplifier running (quality) on the working draft";
+  const endSimplifier = status.beginActivity(target, simplifier);
+  const activity = createDelegationActivity(status, target, ACTIVITY_LABEL_CONFLICT_RESOLVER);
+  activity.observe(PROGRESS_BACKOFF);
+  assert.equal(last(), `🎯 251 · ${RETRY_B}`);
+  activity.observe(PROGRESS_HISTORY);
+  assert.equal(last(), `🎯 251 · ${simplifier}`);
+  activity.observe(PROGRESS_IN_FLIGHT);
+  assert.equal(last(), `🎯 251 · ${RETRY_I}`);
+  activity.end();
+  assert.equal(last(), `🎯 251 · ${simplifier}`);
+  endSimplifier();
+  assert.equal(last(), "🎯 251");
+});
+
+test("createDelegationActivity is exception-safe: a throwing begin admits no token, a throwing end is swallowed, a throwing subscriber never escapes", () => {
+  // (1) setStatus throws on the FIRST publish: observe swallows it and no wait is admitted.
+  const published: (string | undefined)[] = [];
+  let failFirst = true;
+  const first: StandingTarget = {
+    hasUI: true,
+    ui: {
+      setStatus(_slot, value) {
+        if (failFirst) {
+          failFirst = false;
+          throw new Error("render failure");
+        }
+        published.push(value);
+      },
+    },
+  };
+  const one = createPerkStatus();
+  const a = createDelegationActivity(one, first, ACTIVITY_LABEL_CONFLICT_RESOLVER);
+  assert.doesNotThrow(() => a.observe(PROGRESS_BACKOFF));
+  assert.equal(one.get(), undefined);
+  one.set(first, "🎯 251");
+  assert.deepEqual(
+    published,
+    [undefined, "🎯 251"],
+    "the rollback repaint, then the objective without the retry text",
+  );
+  assert.doesNotThrow(() => a.end());
+
+  // (2) setStatus throws only once the wait is live: transitions and end are swallowed.
+  let failing = false;
+  const second: StandingTarget = {
+    hasUI: true,
+    ui: {
+      setStatus() {
+        if (failing) throw new Error("render failure");
+      },
+    },
+  };
+  const two = createPerkStatus();
+  const b = createDelegationActivity(two, second, ACTIVITY_LABEL_CONFLICT_RESOLVER);
+  b.observe(PROGRESS_BACKOFF);
+  assert.equal(two.get(), RETRY_B);
+  failing = true;
+  assert.doesNotThrow(() => b.end());
+  assert.equal(two.get(), undefined, "the ended wait is gone even though its repaint threw");
+
+  // (3) A throwing footer subscriber.
+  // The slot itself published before the subscriber threw, so the rollback must repaint it: the
+  // owner holds no `end` for a rejected wait, and nothing else would ever clear the retry text.
+  const { target, calls } = fakeTarget(true);
+  const three = createPerkStatus();
+  three.subscribe(() => {
+    throw new Error("subscriber failure");
+  });
+  const c = createDelegationActivity(three, target, ACTIVITY_LABEL_LIBRARIAN);
+  assert.doesNotThrow(() => c.observe(PROGRESS_BACKOFF));
+  assert.equal(calls.at(-1)?.value, undefined, "no stuck backoff text in the published slot");
+  assert.doesNotThrow(() => c.observe(PROGRESS_IN_FLIGHT));
+  assert.equal(calls.at(-1)?.value, undefined, "no stuck in-flight text in the published slot");
+  assert.doesNotThrow(() => c.observe(PROGRESS_HISTORY));
+  assert.doesNotThrow(() => c.end());
+  assert.equal(three.get(), undefined);
+  assert.equal(calls.at(-1)?.value, undefined);
+});
+
+test("the structural observe slice accepts the substrate's decoded progress (compile-time pin)", () => {
+  const pinned: Parameters<DelegationActivity["observe"]>[0] = {} as DelegationProgress;
+  assert.deepEqual(pinned, {});
 });
 
 // --- composeFooterLine (charter D2/D9) -------------------------------------------------

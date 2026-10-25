@@ -203,7 +203,16 @@ the stamp the same way; the stamp moves only on certification evidence.
      one is `extension/substrate/mcpReadOnlyFloor.test.ts`;
    - the **`disabledFeatures` surfaces** (`src/shared/disabled-features.ts`): the features whose
      parameters perk sends (`workflow-scripts`, `missions`, `extension-bindings`) refuse every
-     wave with the engine's own setting-naming message — surfaced verbatim, never mapped.
+     wave with the engine's own setting-naming message — surfaced verbatim, never mapped;
+   - the **structured-delegation `providerDiagnostics` snapshot**
+     (`src/api/delegation.d.ts::SubagentDelegationProviderDiagnostics`, produced by
+     `src/shared/provider-diagnostics.js` and projected onto updates by
+     `src/slash/delegation-adapters.js`): perk's `extension/substrate/providerDiagnostics.ts`
+     mirrors the closed `lastError.kind`/`retry.phase` vocabularies and the numeric bounds and
+     treats any other shape as unavailable (display-only — the foreground writers' `perk` status
+     activity; never termination, lock or spend evidence). Re-read the unions and the `message`
+     policy at the next bump; a vocabulary change is a decoder update + test pin
+     (`providerDiagnostics.test.ts`), never a wire break.
 
    Keep MEASURED observations and SOURCE-DERIVED design apart in the record, and hand a gap the
    source establishes to a repair design — never record it as a measured result.

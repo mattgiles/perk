@@ -21,9 +21,11 @@ import {
   completedResolution,
   completedRetainedResolution,
   FakeDelegationBus,
+  providerRetryDiagnostics,
   RETAINED_OPERATION,
   retainedDispatch,
 } from "../../../testing/fakeConflictResolver.ts";
+import type { DelegationProgress } from "../foregroundDelegation.ts";
 import {
   CANCEL_GRACE_MS,
   type ConflictResolverEngineOptions,
@@ -253,6 +255,64 @@ for (const mode of ["pr-rebase", "retained-continuation"] as const) {
       assert.ok(result.kind === "failed" && result.reason === "malformed-result");
       assert.equal(result.receipt.lock.disposition, "retained");
       assert.doesNotMatch(JSON.stringify(result), /SECRET/);
+    }
+  });
+
+  test(`[${mode}] progress: an update's validated diagnostics reach the resolve-time sink; terminal diagnostics never change the lock disposition or the receipt`, async (t) => {
+    for (const status of ["failed", "completed"] as const) {
+      const w = world(t);
+      const seen: DelegationProgress[] = [];
+      const before = w.requests.length;
+      const running = w.engine.resolve(w.request, undefined, (progress) => seen.push(progress));
+      const r = w.requests[before] as Record<string, unknown>;
+      w.bus.emit(DELEGATION_EVENTS.update, {
+        ...tuple(r),
+        providerDiagnostics: providerRetryDiagnostics("backoff"),
+      });
+      w.bus.emit(DELEGATION_EVENTS.response, {
+        ...tuple(r),
+        status,
+        runId: "native-run",
+        agent: "perk.conflict-resolver",
+        exitCode: 0,
+        result: { kind: "structured", value: completion },
+        providerDiagnostics: providerRetryDiagnostics("in_flight"),
+      });
+      const result = await running;
+      assert.deepEqual(seen, [
+        {
+          diagnostics: {
+            errorCount: 1,
+            lastError: { kind: "rate_limited", at: 1 },
+            retry: { phase: "backoff", attempt: 2, maxAttempts: 5, delayMs: 8000, scheduledAt: 1 },
+          },
+        },
+      ]);
+      assert.equal(result.kind, status === "completed" ? successKind : "failed", status);
+      assert.equal(
+        result.receipt.lock.disposition,
+        status === "completed" ? "released" : "retained",
+        status,
+      );
+      assert.equal(existsSync(w.lockPath), status !== "completed", status);
+      assert.deepEqual(
+        Object.keys(result.receipt).sort(),
+        [
+          "agent",
+          "cwd",
+          "exitCode",
+          "lock",
+          "nativeStatus",
+          "nodeId",
+          "ownerRunId",
+          "parentSessionId",
+          "requestId",
+          "runId",
+          "termination",
+        ],
+        status,
+      );
+      assert.doesNotMatch(JSON.stringify(result), /SECRET|providerDiagnostics|rate_limited/);
     }
   });
 

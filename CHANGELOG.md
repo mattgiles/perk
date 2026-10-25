@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 6139d59 -->
 
+### Added
+
+- **The perk footer shows a foreground writer's provider retry state.** While `resolve_submit_conflicts`, the retained stack-sync resolver or `run_librarian` runs a child that pi-subagents reports in provider backoff or a retry in flight, the composed `perk` status reads e.g. `conflict resolver: provider backoff 2/5 (rate limited), retrying in 8s`, clearing when the retry ends — so a stalled-looking turn can be told apart from a backoff. Display only: nothing is recorded, retried or counted toward spend. (41e153c7)
+
 ### Changed
 
 - **Pi 1.4.0 and pi-subagents 0.81.0 are adopted (certification owed).** The host floor is Pi 1.4.0; the install command is the single exact spec `npm install -g @earendil-works/pi-coding-agent@1.4.0` (Pi declares its six companions exactly; `@earendil-works/chord` is gone), which `perk doctor --fix` runs when the PATH `pi` is not the adopted 1.4.0 — finish waves and close perk sessions before upgrading the shared host; `perk init` / `perk doctor --fix` move the repo's supplier pin to `npm:pi-subagents@0.81.0`; perk's context hooks now serve pi-subagents' custom-message wake turns. The 1.1.0 certification's W4/W6/W7a cells stay held and `subagent-compat` keeps warning at the 0.75.0 stamp. (afe63ad4)

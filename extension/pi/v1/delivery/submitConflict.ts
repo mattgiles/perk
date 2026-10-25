@@ -3,7 +3,6 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   type ConflictResolutionReceipt,
   type ConflictResolutionRequest,
-  type ConflictResolver,
   nativeWorktreeRefusal,
   type PrConflictResolutionRequest,
 } from "../../../delivery/conflictResolution.ts";
@@ -17,7 +16,13 @@ import {
   conflictResolutionAttempts,
   rebuildWorkflowState,
 } from "../../../substrate/workflowState.ts";
+import {
+  ACTIVITY_LABEL_CONFLICT_RESOLVER,
+  type ActivityHandle,
+  createDelegationActivity,
+} from "../../../surfaces/surfaces.ts";
 import { registerPerkTool } from "../../perkTool.ts";
+import type { ConflictResolverWithProgress } from "./conflictResolverEngine.ts";
 
 interface Authorization {
   request: PrConflictResolutionRequest;
@@ -33,8 +38,9 @@ export interface SubmitConflictController {
 
 export function installSubmitConflictBindings(
   pi: ExtensionAPI,
-  resolver: ConflictResolver,
+  resolver: ConflictResolverWithProgress,
   readOnly: () => boolean,
+  status: ActivityHandle,
 ): SubmitConflictController {
   let current: ExtensionContext | undefined;
   let pending: Authorization | undefined;
@@ -149,10 +155,12 @@ export function installSubmitConflictBindings(
           );
         }
         active = authorization;
+        // The child's provider-retry wait on the `perk` status — display only, ended on settle.
+        const activity = createDelegationActivity(status, ctx, ACTIVITY_LABEL_CONFLICT_RESOLVER);
         try {
           const model = subagentModel(ctx.cwd, "conflict-resolver");
           if (model !== undefined) authorization.request.model = model;
-          const received = await resolver.resolve(authorization.request, signal);
+          const received = await resolver.resolve(authorization.request, signal, activity.observe);
           const result =
             received.kind === "continuation-ready"
               ? {
@@ -183,6 +191,7 @@ export function installSubmitConflictBindings(
           return fail(diagnostic + report, reason, result);
         } finally {
           active = undefined;
+          activity.end();
         }
       },
     },
