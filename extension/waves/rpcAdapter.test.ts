@@ -589,6 +589,14 @@ function statusData(proof: unknown): Record<string, unknown> {
   };
 }
 
+/**
+ * Representative engine proof reasons — each ONE fixture value feeding both the responder's
+ * `statusData(...)` and the expectation: the projection carries the reason verbatim, whatever
+ * text a given engine release (or the instant of the read) yields.
+ */
+const PENDING_REASON = "Workflow dispatch is still open.";
+const UNKNOWN_REASON = "async workflow child a process-terminal proof is missing";
+
 const NO_PROOF = {
   state: "unavailable",
   reason: "status reply carried no workflow terminal proof",
@@ -607,23 +615,15 @@ test("narrowTerminalProof: observed, pending/unknown with the engine's reason, a
   assert.deepEqual(narrowTerminalProof(statusData(observed)), { state: "observed" });
   assert.deepEqual(
     narrowTerminalProof(
-      statusData({
-        state: "pending",
-        dispatchClosed: false,
-        reason: "Workflow dispatch is still open.",
-      }),
+      statusData({ state: "pending", dispatchClosed: false, reason: PENDING_REASON }),
     ),
-    { state: "pending", reason: "Workflow dispatch is still open." },
+    { state: "pending", reason: PENDING_REASON },
   );
   assert.deepEqual(
     narrowTerminalProof(
-      statusData({
-        state: "unknown",
-        dispatchClosed: true,
-        reason: "async workflow child a process-terminal proof is missing",
-      }),
+      statusData({ state: "unknown", dispatchClosed: true, reason: UNKNOWN_REASON }),
     ),
-    { state: "unknown", reason: "async workflow child a process-terminal proof is missing" },
+    { state: "unknown", reason: UNKNOWN_REASON },
   );
   assert.deepEqual(narrowTerminalProof(statusData({ state: "pending" })), {
     state: "pending",
@@ -921,7 +921,7 @@ test("hold: a ghost no_active_session on stop and status then live successes —
     }
     return {
       success: true,
-      data: statusData({ state: "pending", reason: "Workflow dispatch is still open." }),
+      data: statusData({ state: "pending", reason: PENDING_REASON }),
     };
   });
   const events: DuplicateResponderEvent[] = [];
@@ -930,7 +930,7 @@ test("hold: a ghost no_active_session on stop and status then live successes —
   assert.deepEqual(await adapter.stop({ asyncId: "a1", asyncDir: "/d1" }), { acknowledged: true });
   assert.deepEqual(await adapter.terminalProof({ asyncId: "a1", asyncDir: "/d1" }), {
     state: "pending",
-    reason: "Workflow dispatch is still open.",
+    reason: PENDING_REASON,
   });
   assert.deepEqual(events, [
     { method: "stop", superseded: CONTEXTLESS_TEXT },

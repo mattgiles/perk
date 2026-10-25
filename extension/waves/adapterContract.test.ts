@@ -228,7 +228,10 @@ export function assertWaveAdapterContract(
     await adapter.stop(handle);
     const live = await adapter.terminalProof(handle);
     assert.ok(PROOF_STATES.includes(live.state), `unexpected proof state '${live.state}'`);
-    assert.deepEqual(live, { state: "pending", reason: "Workflow dispatch is still open." });
+    // The class is the contract: engine reason text varies across releases and with the instant
+    // of the read, so only the state and a nonempty reason are asserted.
+    assert.equal(live.state, "pending");
+    assert.notEqual(live.reason, "");
     const bogus = await adapter.terminalProof(BOGUS_HANDLE);
     assert.deepEqual(bogus, {
       state: "unavailable",

@@ -36,6 +36,7 @@ import {
   type WaveChildReceipt,
   type WaveCompletion,
   type WaveScriptSpec,
+  type WaveTermination,
 } from "./transport.ts";
 
 const ASSIGNMENTS: ReportAssignment[] = [
@@ -63,6 +64,29 @@ function makeSpec(overrides: Partial<ReportWaveRequest> = {}): ReportWaveRequest
     timeoutMs: 5_000,
     ...overrides,
   };
+}
+
+/**
+ * The memory fake's default post-stop proof reason, read from its exported constant — a
+ * representative engine sample, never retyped as a second literal.
+ */
+function memoryDefaultProofReason(): string {
+  const proof = MEMORY_DEFAULT_TERMINAL_PROOF;
+  assert.ok(proof.state !== "observed");
+  return proof.reason;
+}
+
+/**
+ * The post-stop CLASS contract (contracts.md §8.35): the stop acknowledged and the proof
+ * `pending` with a nonempty engine reason. Engine reason text varies across releases and with the
+ * instant of the read, so the class is what is asserted.
+ */
+function assertAcknowledgedPending(termination: WaveTermination | undefined): void {
+  assert.ok(termination !== undefined);
+  assert.equal(termination.stop.acknowledged, true);
+  const { proof } = termination;
+  assert.ok(proof.state === "pending", `unexpected proof state '${proof.state}'`);
+  assert.notEqual(proof.reason, "");
 }
 
 /** A schema-valid aggregate entry as the rendered script's projection produces it. */
@@ -1564,8 +1588,13 @@ test("startWaveScript: timeout settles result with the stop request and the one 
   assert.equal(result.failure.reason, "timeout");
   assert.match(
     result.failure.detail,
-    /no completion within \d+ms \(engine deadline 20ms \+ 60000ms settlement grace\); stop requested; child termination unconfirmed \(pending: Workflow dispatch is still open\.\)$/,
+    /no completion within \d+ms \(engine deadline 20ms \+ 60000ms settlement grace\); stop requested; child termination unconfirmed \(pending: .+\)$/,
   );
+  assert.ok(
+    result.failure.detail.endsWith(`(pending: ${memoryDefaultProofReason()})`),
+    "the engine's reason rides the detail verbatim",
+  );
+  assertAcknowledgedPending(result.receipt.termination);
   assert.equal(result.receipt.state, "timed-out");
   assert.equal(adapter.calls.stop.length, 1);
   assert.equal(adapter.calls.stop[0]?.asyncId, "wave-async-1");
@@ -1694,10 +1723,15 @@ test("startWaveScript: an abort after launch settles the cancelled arm with the 
     children: [],
     termination: { stop: { acknowledged: true }, proof: MEMORY_DEFAULT_TERMINAL_PROOF },
   });
+  assert.match(
+    result.failure.detail,
+    /^wave 'adversarial-review' was cancelled; stop requested; child termination unconfirmed \(pending: .+\)$/,
+  );
   assert.equal(
     result.failure.detail,
-    "wave 'adversarial-review' was cancelled; stop requested; child termination unconfirmed (pending: Workflow dispatch is still open.)",
+    `wave 'adversarial-review' was cancelled; stop requested; child termination unconfirmed (pending: ${memoryDefaultProofReason()})`,
   );
+  assertAcknowledgedPending(result.receipt.termination);
   assert.equal(adapter.calls.stop.length, 1);
   assert.equal(adapter.proofs.length, 1);
 });

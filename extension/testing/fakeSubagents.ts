@@ -12,8 +12,8 @@
 // Only the RPC surface perk touches is mirrored, with the shapes read from pi-subagents 0.76.1's
 // `src/extension/rpc.js`: `stop` answers the RPC's own `stopAsyncRun` data shape (`state:
 // "stopping"` — a request) or, with the plan's `stopReply`, a typed refusal; `status` answers the
-// plan's `terminalProof` at `details.workflowTerminalProof` (default: the engine's immediate
-// post-stop `pending` shape) or, with `statusReply: "error"`, the engine's unknown-run miss. The
+// plan's `terminalProof` at `details.workflowTerminalProof` (default: a representative immediate
+// post-stop `pending` sample) or, with `statusReply: "error"`, the engine's unknown-run miss. The
 // model-facing stop action's paused-run seal is NOT mirrored — perk's RPC never reaches it.
 //
 // Delivery modes:
@@ -94,8 +94,11 @@ export interface FakeRpcError {
 }
 
 /**
- * The canonical refused-stop fixture: the RPC `stop`'s answer for a workflow whose in-process run
- * controller is gone (e.g. after a reload), with pi-subagents 0.76.1's exact text.
+ * The canonical refused-stop fixture: the RPC `stop`'s typed `invalid_state` answer for a workflow
+ * whose in-process run controller is gone (e.g. after a reload). The message is a representative
+ * engine sample, not a pinned contract: the refusal text varies across releases (0.81.0's
+ * terminal-run refusal differs from 0.76.1's), so tests assert the class (`acknowledged: false`, a
+ * reason starting `invalid_state: `) and compose any verbatim expectation from this helper.
  */
 export function noLiveRunController(runId: string): FakeRpcError {
   return {
@@ -133,7 +136,13 @@ export interface FakeSubagents {
 
 const ASYNC_COMPLETE_EVENT = "subagent:async-complete";
 
-/** The engine's immediate post-stop workflow terminal proof (dispatch still open). */
+/**
+ * A representative immediate post-stop workflow terminal proof (class `pending`). Its reason is a
+ * sample engine text whose live value varies: the immediate read can name dispatch still open or,
+ * once dispatch closed, the still-running child (the 1.1.0 certification observed `async workflow
+ * child lane-long is still running` right after a stop). Tests assert the class and compose any
+ * verbatim expectation from this constant.
+ */
 export const FAKE_DEFAULT_TERMINAL_PROOF = {
   version: 1,
   kind: "workflow",

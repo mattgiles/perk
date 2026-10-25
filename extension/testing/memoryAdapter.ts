@@ -23,8 +23,10 @@ import type {
 type CompletionDetail = Omit<WaveCompletion, "asyncId" | "asyncDir">;
 
 /**
- * The engine's immediate post-stop proof shape (dispatch still open) — the default `terminalProof`
- * answer, mirroring what pi-subagents 0.76.1's `status` reports right after a stop request.
+ * A representative immediate post-stop proof (class `pending`) — the default `terminalProof`
+ * answer. Its reason is a sample engine text whose live value varies across releases and with the
+ * instant of the read (dispatch still open, or the still-running child once dispatch closed), so
+ * tests assert the class and compose any verbatim expectation from this constant.
  */
 export const MEMORY_DEFAULT_TERMINAL_PROOF: WaveTerminationProof = {
   state: "pending",
