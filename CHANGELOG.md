@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Pi 1.4.0 and pi-subagents 0.81.0 are adopted (certification owed).** The host floor is Pi 1.4.0; the install command is the single exact spec `npm install -g @earendil-works/pi-coding-agent@1.4.0` (Pi declares its six companions exactly; `@earendil-works/chord` is gone), which `perk doctor --fix` runs when the PATH `pi` is not the adopted 1.4.0 — finish waves and close perk sessions before upgrading the shared host; `perk init` / `perk doctor --fix` move the repo's supplier pin to `npm:pi-subagents@0.81.0`; perk's context hooks now serve pi-subagents' custom-message wake turns. The 1.1.0 certification's W4/W6/W7a cells stay held and `subagent-compat` keeps warning at the 0.75.0 stamp. (afe63ad4)
+- **Pi 1.4.0 + pi-subagents 0.81.0 — certification PARTIAL; guidance stamp 0.81.0.** The live certification record `docs/design/archive/pi-1.4.0-certification.md` (2026-10-25) measured the adopted pair on the landed tree: no required row failed and 4 required cells were not run (X1, X2, X3, C3-only), so the pair stays adopted, not certified. Every required supplier row passed, so the guidance stamp moves from 0.75.0 to 0.81.0 and `perk doctor`'s `subagent-compat` now reads ok on a converged checkout instead of warning. (b7ed39a5)
 
 ### Fixed
 

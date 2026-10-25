@@ -168,7 +168,7 @@ starts its Pi child is a separate, recorded constrained capability: the engine's
 | O6 | `node --test` I5–I6–E set (nine files) | 01:47:07–01:47:24 | `ℹ tests 101` / `ℹ pass 101` / `ℹ fail 0`; `✔ census drift guard: the installed consumers import exactly NATIVE_SDK_CENSUS` (it RAN) | 0 |
 | O7 | `node --test extension/worker/sdkAdapter.test.ts` (H2) | 01:47:24–01:47:27 | `ℹ tests 50` / `ℹ pass 50` / `ℹ fail 0` | 0 |
 | O8 | `just prose-review-test` / `just prose-review-check` | 01:47:27–01:49:09 | `560 passed, 6 warnings`; `tsc --noEmit` clean, `ℹ tests 367` / `ℹ pass 367` / `ℹ fail 0`, `✓ built` | 0 / 0 |
-| O9 | one run-all `run_ci` immediately before `/submit` on the submitted tree | at submit | green | — |
+| O9 | one run-all `run_ci` immediately before `/submit`, on this record's tree plus the CHANGELOG bullet | at submit | green (`/submit` is gated on it) | — |
 
 Verdict: O1–O9 PASS (MEASURED). No TypeScript source moved after O1, so the slow tier was not
 re-run.
