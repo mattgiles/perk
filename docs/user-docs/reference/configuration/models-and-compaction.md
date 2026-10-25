@@ -121,7 +121,7 @@ MCP support replaces the builtin and is the repo's own choice, outside that guar
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `default` | string (`provider/id`) | _(Pi default)_ | Must be an **exact** `provider/id` pair; Pi's settings default is an exact provider-and-id lookup, not a fuzzy match. It splits on the **first** `/`, so OpenRouter ids retain inner slashes (`openrouter/meta-llama/llama-3-70b` becomes provider `openrouter`, id `meta-llama/llama-3-70b`). A `:thinking` suffix is accepted. |
-| `thinking` | string | _(Pi default)_ | One of `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
+| `thinking` | string | _(Pi default)_ | One of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 
 Either key may be set alone. A `:thinking` suffix on `default`, such as
 `default = "anthropic/claude-opus-4-1:high"`, is split at convergence. The final colon segment
@@ -181,7 +181,7 @@ such as `[models.stages.implement]` or `[models.stages.plan]`.
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `model` | string (model id) | _(Pi default)_ | A free-form Pi model string such as `anthropic/claude-opus-4-1`; perk does not validate it, and Pi resolves it at session start. A `model:thinking` suffix also works because Pi's `--model` accepts it. |
-| `thinking` | string | _(Pi default)_ | One of `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
+| `thinking` | string | _(Pi default)_ | One of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 
 Either key may be set alone. When a stage configures **neither**, perk injects nothing and leaves
 Pi's model and thinking resolution untouched. That resolution falls through to the
@@ -237,8 +237,8 @@ custom subagents, which set their model in frontmatter.
 
 A value may carry a **`:thinking` suffix** to set that agent's thinking level, such as
 `pr-reviewer = "anthropic/claude-sonnet-4-5:high"`. The last colon segment counts as a thinking
-level only when it is one of `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`, so an
-Ollama-style tag such as `llama3:70b` stays part of the model id. The special value **`inherit`**
+level only when it is one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`, so
+an Ollama-style tag such as `llama3:70b` stays part of the model id. The special value **`inherit`**
 makes the agent inherit the parent session's model. `perk doctor` warns on a suspicious suffix:
 an alphabetic final segment that is not a Pi thinking level, such as a `:hgih` typo, would
 otherwise silently become part of the model id.
