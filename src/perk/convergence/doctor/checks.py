@@ -1031,9 +1031,14 @@ _PONYTAIL_SKILLS = (
     ("ponytail", Path("skills") / "ponytail" / "SKILL.md"),
     ("ponytail-review", Path("skills") / "ponytail-review" / "SKILL.md"),
 )
+# The newest Ponytail whose two source-bound skills passed perk's own preflight — the fallback
+# pin the remediation names. Its prose carriers (contracts, user docs, perk-expert) are guarded
+# against drifting from it in tests/test_doctor.py.
+_PONYTAIL_KNOWN_GOOD_VERSION = "5.3.2"
 _PONYTAIL_REMEDIATION = (
     "Set the managed Ponytail entry source to "
-    "npm:@dietrichgebert/ponytail@4.9.0, run 'perk init', and restart the Perk/Pi session."
+    f"npm:@dietrichgebert/ponytail@{_PONYTAIL_KNOWN_GOOD_VERSION}, run 'perk init', "
+    "and restart the Perk/Pi session."
 )
 
 

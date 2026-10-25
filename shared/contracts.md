@@ -2343,8 +2343,9 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   in-process `node:http` review server share one Node process, and plannotator's port resolution
   reads `PLANNOTATOR_PORT` at bind time — so the server URL is KNOWN the moment the port is
   picked, before the server is up. The core picks the port by **mirroring plannotator's own
-  selection** (`plannotatorPort.ts`, pinned at `@plannotator/pi-extension@0.27.22`): an explicit
-  single `PLANNOTATOR_PORT`; the first loopback-bindable port of a `PLANNOTATOR_PORT` range
+  selection** (`plannotatorPort.ts`, pinned at `@plannotator/pi-extension@0.28.30` — the one pin
+  `plannotatorPin.ts::PLANNOTATOR_MIRROR_PIN` owns): an explicit single `PLANNOTATOR_PORT`; the
+  first loopback-bindable port of a `PLANNOTATOR_PORT` range
   (`<start>-<end>`, walked in order; an exhausted range fails the pick loudly); `19432` when
   plannotator's remote detection — `PLANNOTATOR_REMOTE` tri-state, else
   `SSH_TTY`/`SSH_CONNECTION` — says remote; else a free ephemeral port (`PLANNOTATOR_PORT=0`
@@ -3073,7 +3074,7 @@ second `--fix` at `fixed == []`).
   only", or "not configured in either scope"), and
   `ponytail-compat` (exact
   package/`pi.skills`/skill-file/frontmatter;
-  known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` + `perk init` + session restart)
+  known-good remediation `npm:@dietrichgebert/ponytail@5.3.2` + `perk init` + session restart)
   — all report-only probes warn at worst and have no `--fix` arm (`subagent-engine`'s leftover
   arm being the one migration-repaired exception). (The former
   `subagent-bridge-config` probe is retired: perk waves and both foreground writer dispatches

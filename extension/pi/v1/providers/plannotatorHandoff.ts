@@ -13,7 +13,7 @@
 // `plannotator:request` with `action: "code-review"` — which opens the EXACT same browser UI.
 // Same in-process bus perk already uses for plan review (createPlannotatorBridge).
 //
-// EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.27.17`, `plannotator-events.ts` —
+// EVENT ENVELOPE (`plannotator-events.ts`, pinned at `PLANNOTATOR_MIRROR_PIN` — plannotatorPin.ts;
 // the `code-review` request/reply shape is byte-identical to the original 0.21.2 pin; 0.27.16
 // added `patchFile`):
 //   request — pi.events.emit("plannotator:request", { requestId, action: "code-review",
@@ -550,14 +550,14 @@ export const READINESS_PROBE_BUDGET_MS = 120_000;
 /**
  * The code-review readiness route — review-server-only (`server/serverReview.ts`; absent from
  * the plan server), so the probe can never false-positive against a plan server. Pinned at
- * `@plannotator/pi-extension@0.26.4`.
+ * `PLANNOTATOR_MIRROR_PIN` (plannotatorPin.ts).
  */
 export const CODE_REVIEW_READINESS_PROBE_PATH = "/api/diff";
 
 /**
  * The plan-review readiness route — plan-server-only (`server/serverPlan.ts`; absent from the
- * review server), the mirror of the code-review pin. Pinned at
- * `@plannotator/pi-extension@0.26.4`.
+ * review server), the mirror of the code-review pin. Pinned at `PLANNOTATOR_MIRROR_PIN`
+ * (plannotatorPin.ts).
  */
 export const PLAN_REVIEW_READINESS_PROBE_PATH = "/api/plan";
 

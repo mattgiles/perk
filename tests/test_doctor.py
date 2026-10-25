@@ -8,6 +8,7 @@ Three layers:
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -40,7 +41,10 @@ from perk.convergence.doctor import (
     run_doctor,
 )
 from perk.convergence.doctor import checks as doctor_checks
-from perk.convergence.doctor.checks import _SUBAGENTS_GUIDANCE_VERIFIED_VERSION
+from perk.convergence.doctor.checks import (
+    _PONYTAIL_KNOWN_GOOD_VERSION,
+    _SUBAGENTS_GUIDANCE_VERIFIED_VERSION,
+)
 from perk.convergence.init import run_init
 from perk.convergence.init.settings import _npm_version
 from perk.substrate import git, paths
@@ -1545,8 +1549,26 @@ def test_ponytail_compat_malformed_manifest_warns_with_known_good_remediation(
     (package / "package.json").write_text("not json{", encoding="utf-8")
     check = _ponytail_compat_check(scaffolded_perk_repo)
     assert check.status == "warn" and "package.json unreadable" in check.detail
-    assert "npm:@dietrichgebert/ponytail@4.9.0" in check.remediation
+    assert f"npm:@dietrichgebert/ponytail@{_PONYTAIL_KNOWN_GOOD_VERSION}" in check.remediation
     assert "perk init" in check.remediation and "restart" in check.remediation
+
+
+_PONYTAIL_REMEDIATION_PROSE_CARRIERS = (
+    "shared/contracts.md",
+    "docs/user-docs/reference/cli/setup-and-health.md",
+    "skills/perk-expert/references/customization-recipes.md",
+)
+
+
+@pytest.mark.parametrize("rel", _PONYTAIL_REMEDIATION_PROSE_CARRIERS)
+def test_ponytail_known_good_remediation_prose_carriers_name_the_constant(rel):
+    """Every prose copy of the known-good remediation names the one pin doctor emits."""
+    text = (Path(__file__).resolve().parents[1] / rel).read_text(encoding="utf-8")
+    expected = f"npm:@dietrichgebert/ponytail@{_PONYTAIL_KNOWN_GOOD_VERSION}"
+    assert expected in text
+    versions = re.findall(r"@dietrichgebert/ponytail@(\d+\.\d+\.\d+)", text)
+    assert versions, f"{rel}: no pinned ponytail spec found"
+    assert set(versions) == {_PONYTAIL_KNOWN_GOOD_VERSION}, f"{rel}: {versions}"
 
 
 @pytest.mark.parametrize(

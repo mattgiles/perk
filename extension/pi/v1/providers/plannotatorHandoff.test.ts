@@ -1450,7 +1450,7 @@ test("startPlannotatorSurface activity: begun on `ready` while the bridge is pen
   }
 });
 
-test("readiness probe paths: each names a server-flavor-unique route (pinned @ 0.26.4)", () => {
+test("readiness probe paths: each names a server-flavor-unique route (PLANNOTATOR_MIRROR_PIN)", () => {
   assert.equal(CODE_REVIEW_READINESS_PROBE_PATH, "/api/diff");
   assert.equal(PLAN_REVIEW_READINESS_PROBE_PATH, "/api/plan");
 });

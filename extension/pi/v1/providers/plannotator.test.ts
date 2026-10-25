@@ -899,7 +899,8 @@ test("bridge: no review-status request is ever emitted across the live-decision 
 
 // -------------------------------------------------- the Direct Edits feedback extraction
 
-// Mirrors `buildDirectEditsSection` (plannotator packages/editor/directEdits.ts @ v0.26.1):
+// Mirrors `buildDirectEditsSection` (plannotator packages/editor/directEdits.ts, pinned at
+// `PLANNOTATOR_MIRROR_PIN` — plannotatorPin.ts):
 // heading + blank + preamble + blank + a ```diff fence of the trimEnd()'d patch.
 const PREAMBLE_DIRECT =
   "The user edited the document directly. Apply these exact changes — a unified diff against the version you submitted:";

@@ -246,7 +246,7 @@ Ordinary plan and single-PR browser review have no Plannotator floor beyond what
 installs.
 
 perk's browser doors mirror Plannotator's remote detection and port selection as of
-`@plannotator/pi-extension@0.27.22` (`server/network.ts`, `generated/port-range.ts`). A later
+`@plannotator/pi-extension@0.28.30` (`server/network.ts`, `generated/port-range.ts`). A later
 Plannotator that changes that rule makes the doors and Plannotator disagree on the port — a loud
 failure (the readiness probe times out and the door degrades), never a silent one.
 

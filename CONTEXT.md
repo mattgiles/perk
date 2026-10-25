@@ -391,6 +391,13 @@ in the tab's `perk:wave` slot after draining any admitted decision; nothing is p
 resumed, and Plannotator's server is never stopped.
 _Avoid_: superseded review (that is the slot's term), stopped review, closed server
 
+**Mirror pin**:
+The one `@plannotator/pi-extension` version every perk mirror of a Plannotator surface was last
+re-verified against (`PLANNOTATOR_MIRROR_PIN`); it moves only when every mirrored surface is
+re-read at the new version. Distinct from the stack-review browser's Plannotator floor
+(≥ 0.27.16).
+_Avoid_: floor, minimum version, installed version
+
 **Prepared snapshot**:
 The parent-fetched, code-owned feedback set a classifier lane is bound to (`/address`: the
 strictly decoded `perk pr feedback --json` payload); membership, uniqueness, coverage and counts
@@ -717,6 +724,12 @@ self-repo remote worker runs on (its `npm ci` install). They certify nothing and
 the host floor is the admission minimum, and the remote install pin is what consumer repos
 install.
 _Avoid_: floor, supported version, host version, remote pin
+
+**Settings-delivered package**:
+A borrowed Pi package installed into Pi's project package store (`.pi/npm`) from an unversioned
+`.pi/settings.json` entry, so it tracks npm `latest` at install time — deliberately unpinned,
+unlike the managed pi-subagents spec.
+_Avoid_: pinned package, dev dependency, vendored package
 
 ### TUI surfaces
 
