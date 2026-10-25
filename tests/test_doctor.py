@@ -1242,7 +1242,7 @@ def test_subagent_compat_unreadable_package_json_is_warn(scaffolded_perk_repo, m
 
 def test_subagent_compat_verified_version_stamp_is_pinned():
     # Only a full re-verify (docs/developers/pi-subagents-reverify.md) moves the stamp.
-    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.75.0"
+    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.81.0"
 
 
 def test_subagent_compat_on_the_pinned_install_follows_the_stamp(scaffolded_perk_repo):

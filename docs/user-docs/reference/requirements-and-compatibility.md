@@ -133,12 +133,14 @@ remote runner installs the pinned install command below — exactly Pi 1.4.0, wh
 follow at 1.4.0 — for both the global `pi` CLI and the consumer worker's SDK (the worker install
 also records the pin as exact in `.pi/npm/package.json`), and sets up exactly Node 22.23.4, the
 lowest supported line's floor. Pi 1.4.0 is the enforced host floor and the remote install pin,
-**adopted** — not certified — together with pi-subagents 0.81.0, on the characterization and
-offline evidence in `docs/planning/pi-and-subagents-assessment-2026-10-24.md` and the adoption
-record `docs/design/archive/pi-1.4.0-adoption.md`. Their live certification is owed. The previous
+**adopted** together with pi-subagents 0.81.0, on the characterization and offline evidence in
+`docs/planning/pi-and-subagents-assessment-2026-10-24.md` and the adoption record
+`docs/design/archive/pi-1.4.0-adoption.md`. The pair's certification record,
+`docs/design/archive/pi-1.4.0-certification.md` (2026-10-25), holds 4 required cells NOT RUN (X1,
+X2, X3, C3-only) and no required FAIL, so the pair stays adopted, not certified. The previous
 pair's certification record, `docs/design/archive/pi-1.1.0-certification.md` (2026-10-24, for Pi
-1.1.0 with pi-subagents 0.76.1), holds 3 required FAILs (W4, W6, W7a), so the support claim stays
-held. The earlier `docs/design/archive/pi-1.0.0-certification.md` stays historical — its verdict is PENDING
+1.1.0 with pi-subagents 0.76.1), is history: its verdict was HELD on 3 required FAILs (W4, W6,
+W7a). The earlier `docs/design/archive/pi-1.0.0-certification.md` stays historical — its verdict is PENDING
 (its three PR-door rows, X5b, S7 and I7b's launch proof, were deferred by an operator decision, and
 perk 4.0.0 shipped with that verdict) — and certifies nothing about 1.1.0 or later.
 
@@ -162,8 +164,9 @@ perk named all eight packages — the package, Chord and six companions — as e
 eight-package command is history. The floor still admits a newer Pi (it is a minimum), but
 `perk doctor` reports its `pi` row as a warning — and a successful `perk init` prints the same
 warning — naming the pinned command. perk admits any release at or above the floor, but no release
-is certified at 1.1.0 or after: Pi 1.4.0 is adopted, its certification is owed, and the previous
-certification record's 3 required FAILs keep the support claim held.
+is certified at 1.1.0 or after: Pi 1.4.0 is adopted, and its certification record
+(`docs/design/archive/pi-1.4.0-certification.md`, 2026-10-25) holds 4 required cells NOT RUN (X1,
+X2, X3, C3-only).
 
 **Upgrading from the earlier eight-package install.** The global `pi` serves every checkout and
 every running session on the machine, so first finish or cancel outstanding waves and close your
@@ -222,17 +225,17 @@ every wave.
 
 Separately, `perk doctor`'s `subagent-compat` check compares the installed version with the
 version perk's engine guidance was last re-verified against, and warns on any other version. It
-is an early-warning check that never fails the doctor run. The stamp is currently 0.75.0: the
-source was re-verified, the Pi 1.0.0 trust matrix passed, and the doctor and scout waves and both
-browser-door waves (the plan door and the PR door) passed on the Pi 0.99.2 host. See
-`docs/design/archive/pi-subagents-0.75.0-reverify.md`. On the Pi 1.0.0 host, the plan door
+is an early-warning check that never fails the doctor run. The guidance stamp is 0.81.0 (the
+certification's supplier rows passed — `docs/design/archive/pi-1.4.0-certification.md`,
+2026-10-25), and `subagent-compat` reads ok on a converged checkout. History: the stamp was 0.75.0
+before that — the source was re-verified, the Pi 1.0.0 trust matrix passed, and the doctor and
+scout waves and both browser-door waves (the plan door and the PR door) passed on the Pi 0.99.2
+host (`docs/design/archive/pi-subagents-0.75.0-reverify.md`); on the Pi 1.0.0 host the plan door
 passed and the PR door was deferred unmeasured, so
-`docs/design/archive/pi-1.0.0-certification.md` records its verdict as PENDING. With the 0.81.0
-pin installed, `perk doctor` therefore reports `subagent-compat` as a warning on every converged
-checkout. The live certification of Pi 1.4.0 + pi-subagents 0.81.0 is owed. Its predecessor, the
-live certification of 0.76.1 on Pi 1.1.0 (`docs/design/archive/pi-1.1.0-certification.md`), is
-history: its verdict is HELD because W4, W6 and W7a failed and S3, S4a-live, U-bg, X5a and X5b
-were not run. The guidance stamp stays 0.75.0, so `subagent-compat` warns by design.
+`docs/design/archive/pi-1.0.0-certification.md` records its verdict as PENDING. The live
+certification of 0.76.1 on Pi 1.1.0 (`docs/design/archive/pi-1.1.0-certification.md`) was HELD
+because W4, W6 and W7a failed and S3, S4a-live, U-bg, X5a and X5b were not run, so the stamp stayed
+0.75.0 until the Pi 1.4.0 + pi-subagents 0.81.0 certification.
 
 Plannotator 0.27.16 or newer is required by the stack review browser (`/stack-review-browser`,
 `perk objective stack review`), which opens Plannotator's static-patch mode over the pinned

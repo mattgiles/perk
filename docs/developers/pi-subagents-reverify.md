@@ -298,7 +298,9 @@ the stamp the same way; the stamp moves only on certification evidence.
    `## Assumptions` + the archive record's verdict line), never a default. That was done at
    0.68.0, 0.70.1 and 0.75.0; 0.73.1 waited for every half; 0.76.1 was adopted ahead of its
    certification and the certification HELD; 0.81.0 was adopted with Pi 1.4.0 ahead of its
-   certification, which is owed. The record — and the `## Sources` provenance line of
+   certification, whose record (`docs/design/archive/pi-1.4.0-certification.md`, 2026-10-25) then
+   moved the stamp to 0.81.0 (its supplier rows passed) with 4 required cells NOT RUN (X1, X2, X3,
+   C3-only). The record — and the `## Sources` provenance line of
    `docs/learned/pi/subagents.md` — then names the browser-door half as **owed**.
 
    **The self-referential gate.** A leg scheduled on the bump PR's own review door waits on the
@@ -398,13 +400,15 @@ pi-subagents is **pinned** to exact 0.81.0 (`SUBAGENTS_PACKAGE =
 characterization + offline evidence (`docs/planning/pi-and-subagents-assessment-2026-10-24.md`,
 `docs/design/archive/pi-1.4.0-adoption.md`). perk's report waves send the inline script text under
 the RPC spawn key `script`, which pi-subagents accepts since 0.74.0
-(`docs/design/archive/pi-subagents-0.75.0-reverify.md`). The pin currently **leads** the guidance
-stamp (0.75.0). The previous pair's live certification
-(`docs/design/archive/pi-1.1.0-certification.md`) HELD Pi 1.1.0 + 0.76.1 and kept the stamp at
-0.75.0, because W4, W6 and W7a failed and S3, S4a-live, U-bg, X5a and X5b were not run. So
-`subagent-compat` warns by design. W6 is repaired and W4/W7a re-specified (step 5's
-lifecycle-cell table, 2026-10-25); objective #2767's certification node (3.1) measures them and owns
-the live certification of the adopted pair.
+(`docs/design/archive/pi-subagents-0.75.0-reverify.md`). The pin and the guidance stamp agree at
+0.81.0: the pair's certification record (`docs/design/archive/pi-1.4.0-certification.md`,
+2026-10-25) holds 4 required cells NOT RUN (X1, X2, X3, C3-only) and no required FAIL, so the pair
+is adopted, not certified, and the guidance stamp is 0.81.0 (the certification's supplier rows
+passed), so `subagent-compat` reads ok on a converged checkout. The previous pair's live
+certification (`docs/design/archive/pi-1.1.0-certification.md`) HELD Pi 1.1.0 + 0.76.1 and kept
+the stamp at 0.75.0, because W4, W6 and W7a failed and S3, S4a-live, U-bg, X5a and X5b were not
+run; W6 was then repaired and W4/W7a re-specified (step 5's lifecycle-cell table, 2026-10-25), and
+the 1.4.0 certification measured all three.
 `perk init` writes the pinned spec and reconciles an existing unpinned or differently pinned
 entry forward; `perk doctor --fix` repairs the same drift through `settings-wiring`. Pi installs
 whatever the checkout's own committed `.pi/settings.json` names, so the pin reaches a branch only

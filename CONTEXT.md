@@ -687,9 +687,9 @@ The exact Pi version perk adopted (`PI_ADOPTED_VERSION`, `perk/substrate/pi_host
 every install-guidance string and carried by the remote install pin; never below the host floor;
 an exact pin, not a minimum. A PATH `pi` admitted at another version is not refused, only reported
 (an environment-row advisory). Pi 1.4.0 + pi-subagents 0.81.0 are adopted
-(`docs/design/archive/pi-1.4.0-adoption.md`); their live certification is owed, and the previous
-certification record (`docs/design/archive/pi-1.1.0-certification.md`, Pi 1.1.0 + pi-subagents
-0.76.1) holds 3 required FAILs (W4, W6, W7a), so the support claim stays held.
+(`docs/design/archive/pi-1.4.0-adoption.md`); their certification record
+(`docs/design/archive/pi-1.4.0-certification.md`, 2026-10-25) holds 4 required cells NOT RUN (X1,
+X2, X3, C3-only), so the pair is adopted, not certified.
 _Avoid_: floor, latest
 
 **Pinned install set**:

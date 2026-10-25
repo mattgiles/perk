@@ -171,12 +171,13 @@ its remote name) for both the global CLI and the consumer worker SDK (the worker
 `--save-exact`, recording the exact pin in `.pi/npm/package.json`), sets up exactly Node 22.23.4 (the lowest supported line) and pins
 `setup-uv` to `>=0.13.4` (`REMOTE_UV_VERSION_SPEC`, mirroring perk's own `[tool.uv]
 required-version`). Pi 1.4.0 is the enforced host floor and
-the remote install pin, **adopted** — not certified — together with pi-subagents 0.81.0, on the
-characterization + offline evidence in `docs/planning/pi-and-subagents-assessment-2026-10-24.md`
-and the adoption record `docs/design/archive/pi-1.4.0-adoption.md`; their live certification is
-owed. The previous pair's certification record (`docs/design/archive/pi-1.1.0-certification.md`,
-2026-10-24, Pi 1.1.0 + pi-subagents 0.76.1) holds 3 required FAILs (W4, W6, W7a), so the support
-claim stays held. The earlier 1.0.0 certification record
+the remote install pin, **adopted** together with pi-subagents 0.81.0, on the characterization +
+offline evidence in `docs/planning/pi-and-subagents-assessment-2026-10-24.md` and the adoption
+record `docs/design/archive/pi-1.4.0-adoption.md`; the pair's certification record
+(`docs/design/archive/pi-1.4.0-certification.md`, 2026-10-25) holds 4 required cells NOT RUN (X1,
+X2, X3, C3-only) and no required FAIL, so the pair stays adopted, not certified. The previous pair's
+certification record (`docs/design/archive/pi-1.1.0-certification.md`, 2026-10-24, Pi 1.1.0 +
+pi-subagents 0.76.1, HELD on W4, W6, W7a) is history. The earlier 1.0.0 certification record
 (`docs/design/archive/pi-1.0.0-certification.md`, verdict PENDING — its three PR-door rows X5b, S7,
 I7b's launch proof were deferred by an operator decision and 4.0.0 shipped with that verdict) is
 historical and certifies nothing about 1.1.0 or later. A newer Pi is admitted when at or above the
@@ -214,16 +215,17 @@ own committed entry until rebased. perk's waves need pi-subagents' workflow scri
 `disabledFeatures` entry of `workflow-scripts` in pi-subagents' `config.json` fails every wave with
 the engine's own setting-naming message (per the engine source, `missions` and
 `extension-bindings` refuse every wave too). The doctor `subagent-compat` stamp
-(`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`, currently 0.75.0 — source re-verified; the Pi 1.0.0 trust
-matrix passed, and the doctor and scout waves and both browser-door waves, plan door and PR door,
-passed on the Pi 0.99.2 host; on the Pi 1.0.0 host the plan door passed and the PR door was
-deferred unmeasured — PENDING in `docs/design/archive/pi-1.0.0-certification.md`) records what
-perk's guidance was verified against — a separate fact from this pin
-(`docs/design/archive/pi-subagents-0.75.0-reverify.md`) — today behind the 0.81.0 pin, whose live
-certification on Pi 1.4.0 is owed. The guidance stamp stayed 0.75.0 after the previous pair's
-certification (`docs/design/archive/pi-1.1.0-certification.md`) because W4, W6 and W7a failed and
-S3, S4a-live, U-bg, X5a and X5b were not run. So `subagent-compat` warns by design on
-every converged checkout.
+(`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`, currently 0.81.0 — the certification's supplier rows
+passed, `docs/design/archive/pi-1.4.0-certification.md`, 2026-10-25) records what perk's guidance
+was verified against — a separate fact from this pin — today equal to the 0.81.0 pin, so
+`subagent-compat` reads ok on a converged checkout. History: the stamp was 0.75.0 before that
+(source re-verified; the Pi 1.0.0 trust matrix passed, and the doctor and scout waves and both
+browser-door waves, plan door and PR door, passed on the Pi 0.99.2 host; on the Pi 1.0.0 host the
+plan door passed and the PR door was deferred unmeasured — PENDING in
+`docs/design/archive/pi-1.0.0-certification.md`;
+`docs/design/archive/pi-subagents-0.75.0-reverify.md`), and it stayed 0.75.0 after the previous
+pair's certification (`docs/design/archive/pi-1.1.0-certification.md`) because W4, W6 and W7a
+failed and S3, S4a-live, U-bg, X5a and X5b were not run.
 
 **The perk-managed `.pi/settings.json` slice keeps a load order.** Besides converging the
 `packages` set (perk's pinned entry, the borrowed set, the provider-selected packages), `perk init`

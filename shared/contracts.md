@@ -16074,10 +16074,12 @@ names `PI_INSTALL_COMMAND`; an admitted PATH `pi` at another version is never re
 reported (the (e) advisory). The adopted pin moves with the floor on characterization + offline
 evidence: Pi 1.4.0 + pi-subagents 0.81.0 are adopted on that evidence
 (`docs/planning/pi-and-subagents-assessment-2026-10-24.md`,
-`docs/design/archive/pi-1.4.0-adoption.md`); their live certification is owed, and the last
-certification record (`docs/design/archive/pi-1.1.0-certification.md`, 2026-10-24, for Pi 1.1.0 +
-pi-subagents 0.76.1) holds 3 required FAILs (W4, W6, W7a) — the support claim stays held (adopted is
-not certified). The pin is never below the floor (a test
+`docs/design/archive/pi-1.4.0-adoption.md`) and stay adopted: the certification record
+(`docs/design/archive/pi-1.4.0-certification.md`, 2026-10-25) holds 4 required cells NOT RUN (X1,
+X2, X3, C3-only) and no required FAIL — PARTIAL, so adopted is still not certified — and the
+guidance stamp is 0.81.0 (the certification's supplier rows passed). The previous record
+(`docs/design/archive/pi-1.1.0-certification.md`, Pi 1.1.0 + pi-subagents 0.76.1) is history. The
+pin is never below the floor (a test
 pins it). Every host observation — the PATH `pi` CLI,
 a loaded SDK — is admitted **independently** against the same floor; equality between
 observations is never required (a floor-satisfying CLI beside an older dev SDK pin is admitted on
