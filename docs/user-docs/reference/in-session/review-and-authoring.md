@@ -115,14 +115,16 @@ completion does not wake the parent; a failed/paused/stopped child or the workfl
 does, and only the matching workflow-completion notice triggers collection. Only final typed
 reports authorize reconciliation, exactly once.
 
-When the session is idle, the completion notice is followed by the engine's own
-`Subagent updates above.` wake prompt (a plain user turn that starts the next agent turn) — perk
-leaves both untouched. Each per-child completion the engine reports while the wave is still
-running is ignored for collection; only the workflow's own completion counts.
+When the session is idle, the completion notice itself starts the next agent turn
+(pi-subagents ≥ 0.80; the notice ends with a `Parent action:` line) — perk leaves it untouched; a
+parent you stopped with Escape gets the notice appended without a wake until the next turn
+starts. Each per-child completion the engine reports while the wave is still running is ignored
+for collection; only the workflow's own completion counts.
 
-**`/reload` while a wave runs:** the completion notice (and its wake prompt) still arrives in the
-reloaded session, but the wave is **not collectable** there — collection is per activation, so
-`collect_review_wave` / `collect_draft_review_wave` answer `no_wave` naming that rule. Launching
+**`/reload` while a wave runs:** the wave is **not collectable** afterwards — collection is per
+activation, so `collect_review_wave` / `collect_draft_review_wave` answer `no_wave` naming that
+rule — and perk promises no completion notice or wake after the reload (the engine resends an
+undelivered notice only when a *new process* reopens the session). Launching
 again starts a fresh wave over new children: perk never re-attaches to or reuses the earlier
 wave's children (they finish on their own, and their findings are never read). A session switch
 delivers no notice at all. On every browser door (`/plan-review-browser`,

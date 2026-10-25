@@ -7883,7 +7883,20 @@ Keys must be nonempty `workflowKey` strings, not agent names, receipt identities
 artifact paths. A `results[]` row the engine projects as `state: "running"` (a child still
 working when the workflow deadline fired — it carries no `success`) projects to
 `{ok: false, error: "lane still running at native partial settlement", report: null}`
-(`lane-failed` at the normalizer), never `ok: null`. Duplicate keys or a child run ID shared
+(`lane-failed` at the normalizer), never `ok: null`. With a version-1 `workflowChildren`
+inventory bound to the completion's workflow run ID, a roster child the engine reports `running`
+— correlated through the same unique-`runId` → `childId` map the receipts use, its `childId`
+unique in the inventory, and neither its key nor its `runId` carried by any `results[]` row — is
+an **unfinished lane** (0.81.0 builds the partial `results` from the settled children, so a lane
+still running at the deadline can be roster-only). The transport forwards only its KEY beside
+the carrier (`unfinishedLanes`, omitted when empty), for both carriers alike; the normalizer
+consults it solely where the expected key has no carrier row, reporting `lane-failed` with
+`lane still running at native partial settlement` instead of `missing-lane`. A carrier row for
+the key always wins; the roster never contributes a report, an `ok`, or an error text; a
+malformed, mismatched or ambiguous inventory, a roster child without a uniquely correlated
+`runId`, or a non-`running` state diagnose nothing (the key stays `missing-lane`); no receipt
+child is synthesized from the roster. Completeness, ordering and duplicate withholding are
+unchanged. Duplicate keys or a child run ID shared
 across keys withhold those reports as keyed malformed entries at the transport. The expected-assignment normalizer
 (`normalizeAssignments`) restates that rule at the logical tier for whatever array it is
 handed — the durable `workflow.value` aggregate and the retained projection alike: more than
@@ -7949,7 +7962,15 @@ The `complete`/`run-failed`/`aggregate-unreadable` arms (the engine settled) iss
 accepted cost: the stop and the query are each bounded by the 30 s reply timeout, so a silent
 responder can delay a timeout/cancel settlement by up to 60 s. The model-facing stop action
 (`async-stop-action.js`, which seals a delivered paused run against terminal proof) is a
-different implementation perk never calls.
+different implementation perk never calls. The contract is the CLASS — `acknowledged` or a typed
+refusal code; `observed` / `pending` / `unknown` / `unavailable` — never the engine's reason
+text, which perk carries verbatim as DATA and which varies across releases and with the instant
+of the read: 0.81.0's terminal-run `invalid_state` text differs from 0.76.1's, and the immediate
+post-stop proof reads `Workflow dispatch is still open.` or names the still-running child
+depending on whether perk's read beats the script's abort handling. The test doubles' sample
+strings are samples, not pins. An `unknown` proof (e.g. `writer-close-unverified`) stays
+uncertainty perk never upgrades: a stop acknowledgement, a dead pid, an `endedAt` or a freed slot
+never turns it `observed`.
 
 **Awaited-child events.** pi-subagents ≥ 0.76.1 emits one `subagent:async-complete` event per
 awaited workflow CHILD on the same advertised channel the wave listens to (`awaitedByWorkflow:
@@ -7963,11 +7984,19 @@ Timeout without completion, interrupted sessions and cross-reload recovery are u
 Collection is per activation: a wave launched before a `/reload` or a session switch is never
 collectable afterwards (pending records live in the activation's wave instance); any browser
 door's browser is marked detached at that shutdown (§8.23 "The browser-operation owner") — a
-browser-side notice only, never collection, resume or reuse. A same-session
-`/reload` still delivers the engine's queued completion notice to the new runtime — since 0.80 the
-notice itself is the waking custom message (0.76.1 followed it with a steered `Subagent updates
-above.` prompt) — while a session switch does not; the collect tools answer `no_wave` with a
-detail naming the rule.
+browser-side notice only, never collection, resume or reuse. Perk promises nothing about the
+engine's completion notice across a same-session `/reload`, in either direction: pi-subagents
+≥ 0.79.2 persists an undelivered notice (`subagent-notify-pending`) only on a non-reload
+`session_shutdown` and resends it from the next *process* that opens the session; on `reload` the
+notifier re-adopts its in-memory wake bookkeeping for the same session id and resends nothing;
+Pi refuses a mid-turn `/reload`, so a reload during a busy turn follows an Escape, whose
+automatic-wake hold is binding-local — a held notice is appended without a wake, carrying a
+`Parent action:` line that defers to the user's next prompt, and the hold is reset at the next
+`session_start` binding, the reload's included. Since 0.80 a wake, when one happens, is the
+notice itself as a custom-message start (no steered `Subagent updates above.` prompt). Whether a
+notice or a wake appears after a reload is a measured fact (the W4 cell of the live matrix),
+never a perk guarantee; a session switch delivers nothing to the new session; the collect tools
+answer `no_wave` with a detail naming the per-activation rule.
 
 **Relaunch freshness (the launch token).** pi-subagents reuses a workflow's children when a
 launch matches a run the extension runtime replaced: `/reload`'s runtime `cleanup()` stops every

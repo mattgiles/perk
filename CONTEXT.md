@@ -286,9 +286,18 @@ _Avoid_: collect grace (the separate `PERK_WAVE_COLLECT_GRACE_MS` bound on a pre
 
 **Deadline partial**:
 A native partial settlement with reason `timeout` whose completed lanes' reports are retained and
-whose still-running lane(s) surface as `lane-failed` — a normal collected outcome, never a cue to
-recover reports from `status.json` or child artifacts.
+whose still-running lane(s) — a lane named only by the engine's correlated `workflowChildren`
+roster included — surface as `lane-failed` — a normal collected outcome, never a cue to recover
+reports from `status.json` or child artifacts.
 _Avoid_: timeout (perk's own empty expiry), partial timeout
+
+**Unfinished lane**:
+A lane the correlated `workflowChildren` roster still reports `running` at an explicit native
+partial settlement while no `results[]` row speaks for it — diagnosed `lane-failed` (`lane still
+running at native partial settlement`) from the roster's identity alone, never a source of report
+DATA.
+_Avoid_: missing lane (a carrier-absent key with no roster evidence), roster-only lane (the
+mechanism, not the outcome)
 
 **Termination proof**:
 The engine's workflow terminal proof as perk projects it after its own stop request — `observed` /
