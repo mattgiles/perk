@@ -7987,8 +7987,11 @@ door's browser is marked detached at that shutdown (§8.23 "The browser-operatio
 browser-side notice only, never collection, resume or reuse. Perk promises nothing about the
 engine's completion notice across a same-session `/reload`, in either direction: pi-subagents
 ≥ 0.79.2 persists an undelivered notice (`subagent-notify-pending`) only on a non-reload
-`session_shutdown` and resends it from the next *process* that opens the session; on `reload` the
-notifier re-adopts its in-memory wake bookkeeping for the same session id and resends nothing;
+`session_shutdown` (a quit, a session switch or a new session) and resends it at the next *fresh
+binding* of that session — a new process, or the same process switching or resuming back to it
+(Pi opens a fresh `SessionManager` there, which the notifier's retained bookkeeping, keyed by the
+session manager, does not cover); on `reload` the notifier re-adopts its in-memory wake
+bookkeeping for the same session id and resends nothing;
 Pi refuses a mid-turn `/reload`, so a reload during a busy turn follows an Escape, whose
 automatic-wake hold is binding-local — a held notice is appended without a wake, carrying a
 `Parent action:` line that defers to the user's next prompt, and the hold is reset at the next

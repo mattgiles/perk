@@ -124,10 +124,11 @@ for collection; only the workflow's own completion counts.
 **`/reload` while a wave runs:** the wave is **not collectable** afterwards — collection is per
 activation, so `collect_review_wave` / `collect_draft_review_wave` answer `no_wave` naming that
 rule — and perk promises no completion notice or wake after the reload (the engine resends an
-undelivered notice only when a *new process* reopens the session). Launching
+undelivered notice only when the session is opened afresh: in a new process, or by switching or
+resuming back to it in the same one). Launching
 again starts a fresh wave over new children: perk never re-attaches to or reuses the earlier
 wave's children (they finish on their own, and their findings are never read). A session switch
-delivers no notice at all. On every browser door (`/plan-review-browser`,
+delivers no notice to the session you switch to. On every browser door (`/plan-review-browser`,
 `/objective-review-browser`, `/pr-review-browser`, `/stack-review-browser`) the open browser tab is
 marked detached at the reload — its `perk:wave` marker is replaced: findings will not arrive there
 and a decision made there is not routed. On the draft doors the reload also waits up to 60 s for an
