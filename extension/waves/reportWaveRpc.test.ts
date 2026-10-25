@@ -1044,6 +1044,154 @@ test("rpc integration: duplicate native results rows for one key collapse at the
   assert.equal(fake.stops.length, 0);
 });
 
+const W6_QUICK_REPORT = { angle: "lane-quick", verdict: "clean" };
+
+/**
+ * The certification's W6 shape: an explicit native partial whose compact `results` carry only the
+ * finished lane (the engine builds them from the settled children), while the `workflowChildren`
+ * roster still reports `lane-long` running under its own child run id and `lane-orphan` running
+ * with no run id at all. `aggregate` overrides the durable side (default: failed, no value);
+ * `workflowRunId` overrides the inventory's binding (default: the spawned run).
+ */
+function w6PartialFixture(
+  handle: Readonly<WaveRunHandle>,
+  opts: { aggregate?: FakeSettlement["aggregate"]; workflowRunId?: string } = {},
+): FakeSettlement {
+  return {
+    aggregate: opts.aggregate ?? {
+      state: "failed",
+      error: "Workflow script timed out after 20000ms.",
+      value: undefined,
+    },
+    completion: {
+      state: "failed",
+      success: false,
+      terminalOutcome: { state: "partial", reason: "timeout" },
+      results: [
+        {
+          workflowKey: "lane-quick",
+          agent: "perk.scout",
+          runId: "child-quick",
+          success: true,
+          structuredOutput: W6_QUICK_REPORT,
+          output: "SECRET",
+        },
+      ],
+      workflowChildren: {
+        version: 1,
+        parentToolCallId: "tc-w6",
+        workflowRunId: opts.workflowRunId ?? handle.asyncId,
+        inventoryComplete: true,
+        workflowState: "failed",
+        children: [
+          { childId: "lane-quick", runId: "child-quick", state: "completed", agent: "perk.scout" },
+          { childId: "lane-long", runId: "child-long", state: "running", agent: "perk.scout" },
+          { childId: "lane-orphan", state: "running" },
+        ],
+      },
+    },
+  };
+}
+
+function w6Spec(): ReportWaveRequest {
+  return makeSpec({
+    assignments: ["lane-quick", "lane-long", "lane-orphan"].map((key) => ({
+      key,
+      agent: "perk.scout",
+      task: `scout ${key}`,
+    })),
+  });
+}
+
+const W6_ORPHAN_MISSING = "lane 'lane-orphan' is absent from the wave aggregate";
+
+test("W6: a roster-only running lane is lane-failed at native partial settlement; a roster-only lane whose runId does not correlate stays withheld", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([
+    { executeSettlement: async (_script, handle) => w6PartialFixture(handle) },
+  ]);
+  fake.attach(bus);
+  const result = await createReportWave(bus).run(w6Spec());
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [{ key: "lane-quick", report: W6_QUICK_REPORT }]);
+  assert.deepEqual(
+    result.failures.map(({ key, reason, detail }) => [key, reason, detail]),
+    [
+      [null, "run-failed", result.failures[0]?.detail],
+      ["lane-long", "lane-failed", "lane still running at native partial settlement"],
+      ["lane-orphan", "missing-lane", W6_ORPHAN_MISSING],
+    ],
+  );
+  assert.match(result.failures[0]?.detail ?? "", /native partial: timeout/);
+  assert.equal(result.receipt.state, "failed");
+  assert.deepEqual(result.receipt.children, [
+    { key: "lane-quick", runId: "child-quick", success: true, agent: "perk.scout" },
+  ]);
+  const receipt = JSON.stringify(result.receipt);
+  assert.doesNotMatch(receipt, /SECRET|structuredOutput/);
+  assert.doesNotMatch(receipt, /lane-long/, "no receipt child is synthesized from the roster");
+  assert.deepEqual(fake.stops, []);
+  assert.deepEqual(fake.statuses, []);
+});
+
+test("W6: the durable workflow.value array is still the carrier; the roster only names the unfinished lane", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([
+    {
+      executeSettlement: async (_script, handle) =>
+        w6PartialFixture(handle, {
+          aggregate: {
+            state: "partial",
+            value: [{ key: "lane-quick", ok: true, error: null, report: W6_QUICK_REPORT }],
+          },
+        }),
+    },
+  ]);
+  fake.attach(bus);
+  const result = await createReportWave(bus).run(w6Spec());
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [{ key: "lane-quick", report: W6_QUICK_REPORT }]);
+  assert.deepEqual(
+    result.failures.map(({ key, reason, detail }) => [key, reason, detail]),
+    [
+      [null, "run-failed", result.failures[0]?.detail],
+      ["lane-long", "lane-failed", "lane still running at native partial settlement"],
+      ["lane-orphan", "missing-lane", W6_ORPHAN_MISSING],
+    ],
+  );
+  assert.match(
+    result.failures[0]?.detail ?? "",
+    /wave run ended 'partial' \(native partial: timeout\)/,
+  );
+  assert.deepEqual(fake.stops, []);
+  assert.deepEqual(fake.statuses, []);
+});
+
+test("W6: a mismatched inventory withholds the diagnosis \u2014 the running lane stays missing-lane", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([
+    {
+      executeSettlement: async (_script, handle) =>
+        w6PartialFixture(handle, { workflowRunId: "foreign" }),
+    },
+  ]);
+  fake.attach(bus);
+  const result = await createReportWave(bus).run(w6Spec());
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [{ key: "lane-quick", report: W6_QUICK_REPORT }]);
+  assert.deepEqual(
+    result.failures.map(({ key, reason }) => [key, reason]),
+    [
+      [null, "run-failed"],
+      ["lane-long", "missing-lane"],
+      ["lane-orphan", "missing-lane"],
+    ],
+  );
+  // The withheld inventory also withholds receipt correlation (no keyed children).
+  assert.deepEqual(result.receipt.children, []);
+  assert.deepEqual(fake.stops, []);
+});
+
 test("rpc integration: two OVERLAPPING waves through one factory correlate out of launch order", async () => {
   // NEW coverage (not a port): the behavioral half of per-launch freshness (the structural
   // half is the source pin above) — two overlapping launches each ping, and completions

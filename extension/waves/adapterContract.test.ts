@@ -197,6 +197,8 @@ export function assertWaveAdapterContract(
         ],
       },
     ]);
+    // No roster correlates an unfinished lane here: the key set is omitted, never empty.
+    assert.equal("unfinishedLanes" in (received[0] ?? {}), false);
     for (const child of received[0]?.children ?? []) {
       assert.ok(Object.keys(child).every((key) => CHILD_KEYS.includes(key)));
     }

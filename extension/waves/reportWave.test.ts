@@ -26,6 +26,7 @@ import {
   toAttemptReceipt,
 } from "./reportWave.ts";
 import {
+  LANE_STILL_RUNNING_ERROR,
   startWaveScript,
   WAVE_ACCEPTANCE,
   WAVE_INTERCOM_BRIDGE,
@@ -225,6 +226,88 @@ test("partial normalization keeps absent, malformed and failed reports distinct"
       ["run-failed", reason, "missing-lane"],
     );
   }
+});
+
+test("normalization: a carrier row always wins over the roster; unknown roster keys are ignored", async () => {
+  const result = await reportWaveOver(
+    createMemoryWaveAdapter({
+      aggregate: { state: "failed", value: undefined },
+      completionDetail: {
+        state: "failed",
+        success: false,
+        terminalOutcome: { state: "partial", reason: "timeout" },
+        retainedEntries: [
+          okEntry("plan-fidelity", { verdict: "clean" }),
+          { key: "correctness", ok: false, error: "engine failure", report: null },
+        ],
+        unfinishedLanes: ["correctness", "tests", "not-an-assignment"],
+      },
+    }),
+  ).run(
+    makeSpec({
+      assignments: [
+        ...ASSIGNMENTS,
+        { key: "tests", agent: "perk.pr-reviewer", task: "angle: tests", phase: "review" },
+      ],
+    }),
+  );
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [{ key: "plan-fidelity", report: { verdict: "clean" } }]);
+  assert.deepEqual(
+    result.failures.map(({ key, reason, detail }) => [key, reason, detail]),
+    [
+      [null, "run-failed", result.failures[0]?.detail],
+      ["correctness", "lane-failed", "engine failure"],
+      ["tests", "lane-failed", LANE_STILL_RUNNING_ERROR],
+    ],
+  );
+  assert.match(result.failures[0]?.detail ?? "", /native partial: timeout/);
+  assert.deepEqual(result.receipt.children, []);
+});
+
+test("startWaveScript: unfinishedLanes rides only the explicit-partial failure arm, and only when nonempty", async () => {
+  const spec = { flow: "unfinished", script: "return [];", outputSchema: {} };
+  const partial = {
+    state: "failed",
+    terminalOutcome: { state: "partial", reason: "timeout" },
+    retainedEntries: [],
+  } as const;
+  const run = async (
+    aggregate: { state: string; value: unknown },
+    completionDetail: Omit<WaveCompletion, "asyncId" | "asyncDir">,
+  ) => {
+    const start = await startWaveScript(
+      createMemoryWaveAdapter({ aggregate, completionDetail }),
+      spec,
+    );
+    assert.ok(start.ok);
+    return await start.result;
+  };
+  const named = await run(
+    { state: "failed", value: undefined },
+    { ...partial, unfinishedLanes: ["lane-long"] },
+  );
+  assert.equal(named.ok, false);
+  if (!named.ok) assert.deepEqual(named.unfinishedLanes, ["lane-long"]);
+  const empty = await run(
+    { state: "failed", value: undefined },
+    { ...partial, unfinishedLanes: [] },
+  );
+  assert.equal(empty.ok, false);
+  assert.equal("unfinishedLanes" in empty, false);
+  // A generic failure (no explicit partial carrier) never forwards the key set.
+  const generic = await run(
+    { state: "failed", value: undefined },
+    { state: "failed", unfinishedLanes: ["lane-long"] },
+  );
+  assert.equal(generic.ok, false);
+  assert.equal("unfinishedLanes" in generic, false);
+  const complete = await run(
+    { state: "complete", value: [] },
+    { ...partial, unfinishedLanes: ["lane-long"] },
+  );
+  assert.equal(complete.ok, true);
+  assert.equal("unfinishedLanes" in complete, false);
 });
 
 const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
