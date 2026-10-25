@@ -538,7 +538,7 @@ them.
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `default` | string (`provider/id`) | _(pi default)_ | Must be an **exact** `provider/id` pair (pi's settings default is an exact lookup). Split on the **first** `/`, so openrouter ids keep their inner slashes. A `:thinking` suffix is accepted. |
-| `thinking` | string (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`) | _(pi default)_ | |
+| `thinking` | string (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`) | _(pi default)_ | |
 
 Either key may be set alone. A `:thinking` suffix on `default`
 (`"anthropic/claude-opus-4-1:high"`) is split at convergence — the last-colon segment counts as a
@@ -643,7 +643,7 @@ when `perk <stage>` cold-launches that stage's pi session. Each stage is its own
 | Key | Type | Default |
 | --- | --- | --- |
 | `model` | string (model id, free-form; perk does not validate it; a `model:thinking` suffix also works — pi `--model` accepts it) | _(pi default)_ |
-| `thinking` | string (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`) | _(pi default)_ |
+| `thinking` | string (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`) | _(pi default)_ |
 
 Either key may be set alone; when a stage sets **neither**, nothing is injected (pi's own
 resolution is left untouched, falling through to the `[models]`-converged settings default when

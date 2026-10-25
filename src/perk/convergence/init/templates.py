@@ -41,7 +41,7 @@ PERK_TOML_TEMPLATE = """\
 # flag is injected first; pi parses last-wins). Overlay-aware (a local.toml
 # [models.stages.<id>] leaf-merges over these). Valid stage ids: the registry
 # stages (plan, implement, address, learn, objective-author, objective-plan, …
-# — see `perk registry`). Thinking ∈ off/minimal/low/medium/high/xhigh. A
+# — see `perk registry`). Thinking ∈ off/minimal/low/medium/high/xhigh/max. A
 # `model:thinking` suffix also works (pi `--model` accepts it). `perk doctor`
 # validates the configured stage ids + thinking levels (loud-but-non-fatal).
 #

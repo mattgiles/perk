@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`max` is a valid thinking level.** `[models] thinking`, `[models.stages.<id>] thinking` and a `:max` suffix on `[models] default`, `[models.stages.<id>] model` or a `[models.subagents]` value now accept Pi's `max` level (Pi 1.4.0 and pi-subagents 0.81.0 already do); `perk doctor` no longer flags `:max` as a typo. (413b353b)
 - **The perk footer shows a foreground writer's provider retry state.** While `resolve_submit_conflicts`, the retained stack-sync resolver or `run_librarian` runs a child that pi-subagents reports in provider backoff or a retry in flight, the composed `perk` status reads e.g. `conflict resolver: provider backoff 2/5 (rate limited), retrying in 8s`, clearing when the retry ends — so a stalled-looking turn can be told apart from a backoff. Display only: nothing is recorded, retried or counted toward spend. (41e153c7)
 
 ### Changed

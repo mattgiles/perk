@@ -27,10 +27,21 @@ from perk.substrate.skill_exposure import SkillsPolicy
 
 DEFAULT_WORKTREE_DIRNAME = ".worktrees"
 
-# pi's `--thinking` level vocabulary (the contract surface the doctor check validates configured
-# `[models.stages.<id>] thinking` values against). Model strings are NOT validated by perk — pi
-# resolves those at session start.
-PI_THINKING_LEVELS: frozenset[str] = frozenset({"off", "minimal", "low", "medium", "high", "xhigh"})
+# Pi's thinking-level vocabulary, least → most — the `--thinking` flag, `settings.json`
+# `defaultThinkingLevel`, and pi-subagents' `:thinking` suffix rule all share it. Pinned EQUAL to
+# the adopted Pi's `settings.schema.json` `ModelThinkingLevel` enum by
+# `tests/test_pi_config_schemas.py`. The doctor checks validate configured thinking values against
+# it; model strings are NOT validated by perk — pi resolves those at session start.
+PI_THINKING_LEVEL_ORDER: tuple[str, ...] = (
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+)
+PI_THINKING_LEVELS: frozenset[str] = frozenset(PI_THINKING_LEVEL_ORDER)
 
 
 class ConfigError(Exception):
@@ -317,7 +328,7 @@ class ModelsTable(LenientParseModel):
         if self.thinking is not None and self.thinking not in PI_THINKING_LEVELS:
             raise ValueError(
                 f"thinking `{self.thinking}` is not a valid pi level "
-                "(off/minimal/low/medium/high/xhigh)"
+                f"({'/'.join(PI_THINKING_LEVEL_ORDER)})"
             )
         if self.default is not None and "/" not in self._base_model():
             raise ValueError(

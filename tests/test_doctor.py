@@ -621,6 +621,16 @@ def test_stage_models_check_warns_on_invalid_thinking(scaffolded_perk_repo):
     assert "ultra" in check.detail
 
 
+def test_stage_models_check_accepts_max_thinking(scaffolded_perk_repo):
+    # `max` is Pi's top thinking level — a valid stage thinking value, never a warn.
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
+        '[models.stages.implement]\nthinking = "max"\n', encoding="utf-8"
+    )
+    check = _stage_models_check(scaffolded_perk_repo)
+    assert check is not None
+    assert check.status == "ok"
+
+
 def test_stage_models_check_warns_on_malformed_committed_toml(scaffolded_perk_repo):
     # Malformed TOML defers to the config check (mirrors providers/issues).
     (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
@@ -675,6 +685,16 @@ def test_models_check_quiet_on_ollama_tag_and_inherit(scaffolded_perk_repo):
     (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
         '[models.subagents]\npr-reviewer = "ollama/llama3:70b"\nconflict-resolver = "inherit"\n',
         encoding="utf-8",
+    )
+    check = _models_check(scaffolded_perk_repo)
+    assert check is not None
+    assert check.status == "ok"
+
+
+def test_models_check_quiet_on_max_suffix(scaffolded_perk_repo):
+    # A `:max` suffix is a real thinking level, not a typo'd one.
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
+        '[models.subagents]\npr-reviewer = "a/b:max"\n', encoding="utf-8"
     )
     check = _models_check(scaffolded_perk_repo)
     assert check is not None

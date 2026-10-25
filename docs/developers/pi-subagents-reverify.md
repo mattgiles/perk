@@ -5,11 +5,15 @@ halves of the pair. perk consumes Pi through the SDK boundary and the PATH `pi` 
 borrowed `pi-subagents` engine only through public surfaces (the v1 RPC envelope, the delegation
 events, agent-def frontmatter). Compatibility therefore rests on *recorded baselines*, exact pins
 (see "The five version facts") and this ritual — never on reading the installed source from tests
-or doctor. One carve-out: the host-SDK bridge's **census drift guard**
+or doctor. Two carve-outs. The host-SDK bridge's **census drift guard**
 (`extension/substrate/nativeSdkBridge.test.ts`) lexes the installed consumers' *import specifiers*
 — a structural fact of the shipped artifact (which SDK modules it imports), not engine mechanics —
 so a new release that imports an SDK subpath perk does not bridge fails loudly instead of silently
-loading a second SDK copy.
+loading a second SDK copy. The **Pi config-schema producer check** reads the
+`schemas/settings.schema.json` / `schemas/models.schema.json` data files the exact-pinned dev
+`@earendil-works/pi-coding-agent` publishes (listed in its `package.json` `files`) — Pi's published
+configuration contract, not engine mechanics — so a perk-written value outside the adopted Pi's
+declared contract fails CI.
 
 **Vocabulary.** An **exact pin** is what gets installed; a **floor** is the admitted minimum
 (**Host floor** in `CONTEXT.md` § Host admission); the **guidance stamp** is the last supplier
@@ -275,6 +279,22 @@ the stamp the same way; the stamp moves only on certification evidence.
      is a real finding: a new SDK specifier means a second SDK copy would load unbridged — extend
      `NATIVE_SDK_CENSUS` and bump `BRIDGE_SCHEMA` in `extension/substrate/nativeSdkBridge.ts`
      (contracts §8.73); a vanished one is a stale entry;
+   - **the Pi config-schema producer check** — `tests/test_pi_config_schemas.py` converges
+     representative repos with `perk init` (consumer and self-repo wiring, the borrowed, provider
+     and Linear entries, the filtered Ponytail object, `subagents.disableBuiltins` beside an
+     operator's `agentOverrides`, `[compaction]`, `[models]` at every thinking level) plus the
+     committed `.pi/settings.json`, validates each against the pinned dev package's
+     `schemas/settings.schema.json` through `extension/testing/piConfigSchemasLive.ts`, and pins
+     `PI_THINKING_LEVEL_ORDER` equal to the schema's `ModelThinkingLevel` enum;
+     `extension/testing/piConfigSchemas.test.ts` proves the loader (the resolved manifest version
+     equals the dev pin), the validators' controls and the harness's planted `models.json` against
+     `schemas/models.schema.json`. Both run inside the run-all `run_ci`. The schemas are read from
+     the resolved dev package — never vendored or fetched — so `just bump-pi` is the refresh. A
+     failure is a finding: a perk-written value outside the new Pi's contract, a Pi thinking level
+     added or removed (widen or narrow `PI_THINKING_LEVEL_ORDER` and its docs), or, when the
+     loader names a version mismatch, a stale root `node_modules` (`npm install` in the
+     checkout). If a release stops shipping `schemas/`, the loader fails naming it; vendoring is
+     then a recorded fallback decision;
    - **the live bridge smoke**, `tests/test_native_sdk_bridge_live.py`, on both the PATH `pi` and
      the pinned CLI, each with a captured `/perk-selfcheck`: its two positive tests
      (`test_the_installed_pi_subagents_is_the_managed_pin`,

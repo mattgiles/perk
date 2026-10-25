@@ -874,6 +874,22 @@ def test_models_thinking_suffix_split(tmp_path):
     }
 
 
+def test_models_max_thinking_alone(tmp_path):
+    # `max` is Pi's top thinking level (the settings schema's `ModelThinkingLevel` enum).
+    _write(tmp_path, "perk.toml", '[models]\nthinking = "max"\n')
+    assert load_committed_models(tmp_path) == {"defaultThinkingLevel": "max"}
+
+
+def test_models_max_thinking_suffix_split(tmp_path):
+    # A `:max` suffix is a thinking level, not part of the model id.
+    _write(tmp_path, "perk.toml", '[models]\ndefault = "anthropic/claude-opus-4-1:max"\n')
+    assert load_committed_models(tmp_path) == {
+        "defaultProvider": "anthropic",
+        "defaultModel": "claude-opus-4-1",
+        "defaultThinkingLevel": "max",
+    }
+
+
 def test_models_non_vocab_suffix_stays_in_id(tmp_path):
     # The pi-subagents-shared suffix rule: a last-colon segment outside the thinking vocabulary
     # stays part of the model id (ollama-style tags are safe).
@@ -911,8 +927,9 @@ def test_models_default_without_slash_raises(tmp_path):
 def test_models_invalid_thinking_raises(tmp_path):
     # Hard ConfigError: a typo never converges into the committed settings.json.
     _write(tmp_path, "perk.toml", '[models]\nthinking = "hgih"\n')
-    with pytest.raises(ConfigError, match="hgih"):
+    with pytest.raises(ConfigError, match="hgih") as excinfo:
         load_committed_models(tmp_path)
+    assert "off/minimal/low/medium/high/xhigh/max" in str(excinfo.value)
 
 
 def test_models_non_string_value_raises(tmp_path):
