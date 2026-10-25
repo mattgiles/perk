@@ -267,11 +267,11 @@ test("normalization: a carrier row always wins over the roster; unknown roster k
 
 test("startWaveScript: unfinishedLanes rides only the explicit-partial failure arm, and only when nonempty", async () => {
   const spec = { flow: "unfinished", script: "return [];", outputSchema: {} };
-  const partial = {
+  const partial: Omit<WaveCompletion, "asyncId" | "asyncDir"> = {
     state: "failed",
     terminalOutcome: { state: "partial", reason: "timeout" },
     retainedEntries: [],
-  } as const;
+  };
   const run = async (
     aggregate: { state: string; value: unknown },
     completionDetail: Omit<WaveCompletion, "asyncId" | "asyncDir">,
