@@ -1082,8 +1082,8 @@ value** — the objective segment plus the activity of the live Perk-owned waits
 wait (`<label>: provider backoff …` / `… in flight`, the delegation transport below)
 (`<objective> · <activity>`, either half optional; a set of live waits, so overlapping waits keep
 it until the last ends — the newest live wait's text shows — and a settled or reset wait's late
-end is inert; a wait whose first publish throws is never admitted) — and keeps its RPC
-`setStatus` dual-publish.
+end is inert; a wait whose first publish throws is never admitted, the slot repainted
+best-effort to the remaining composition) — and keeps its RPC `setStatus` dual-publish.
 
 **The objective transition surface (TS tool ↔ Python CLI).** The genuinely cross-plane shapes:
 

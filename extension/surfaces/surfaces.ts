@@ -198,8 +198,15 @@ export function createPerkStatus(): PerkStatusHandle {
         publish(target);
       } catch (error) {
         // A wait whose first publish threw is not live, so no ghost text survives a rendering
-        // failure; the throw still reaches the caller.
+        // failure; the throw still reaches the caller. The slot may already show the wait (a
+        // subscriber can throw after `setStatus` succeeded) and the caller holds no `end` for it,
+        // so repaint the restored composition best-effort before rethrowing the original error.
         live.delete(token);
+        try {
+          publish(target);
+        } catch {
+          /* The original failure is the one reported; the rollback repaint is best-effort. */
+        }
         throw error;
       }
       return () => {

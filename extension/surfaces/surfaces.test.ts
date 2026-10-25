@@ -277,6 +277,25 @@ test("createPerkStatus: the ref-counted activity composes with the objective int
   assert.equal(fired, firedBeforeHeadless);
 });
 
+test("createPerkStatus: a subscriber that throws after the slot published rolls the slot back to the restored composition and rethrows the original error", () => {
+  const { target, calls } = fakeTarget(true);
+  const status = createPerkStatus();
+  status.set(target, "🎯 251");
+  let failures = 0;
+  status.subscribe(() => {
+    failures += 1;
+    throw new Error(`subscriber failure ${failures}`);
+  });
+  assert.throws(() => status.beginActivity(target, "waiting on X"), /subscriber failure 1$/);
+  assert.equal(status.get(), "🎯 251", "the failed wait is not live");
+  assert.deepEqual(
+    calls.map((call) => call.value),
+    ["🎯 251", "🎯 251 · waiting on X", "🎯 251"],
+    "the published slot no longer shows the rolled-back wait",
+  );
+  assert.equal(failures, 2, "the rollback repaint's own subscriber failure is contained");
+});
+
 test("createPerkStatus: a throwing publish during beginActivity propagates and admits no live token", () => {
   const calls: (string | undefined)[] = [];
   let throwNext = true;
@@ -296,7 +315,8 @@ test("createPerkStatus: a throwing publish during beginActivity propagates and a
   assert.throws(() => status.beginActivity(target, "waiting on X"), /render failure/);
   assert.equal(status.get(), undefined, "the failed wait is not live");
   status.set(target, "🎯 251");
-  assert.deepEqual(calls, ["🎯 251"], "no ghost activity text composes afterwards");
+  // The rollback repaints the restored (empty) composition, then the objective composes alone.
+  assert.deepEqual(calls, [undefined, "🎯 251"], "no ghost activity text composes afterwards");
 });
 
 // --- the foreground writers' provider-retry wait -------------------------------------------
@@ -457,7 +477,11 @@ test("createDelegationActivity is exception-safe: a throwing begin admits no tok
   assert.doesNotThrow(() => a.observe(PROGRESS_BACKOFF));
   assert.equal(one.get(), undefined);
   one.set(first, "🎯 251");
-  assert.deepEqual(published, ["🎯 251"], "the objective composes without the retry text");
+  assert.deepEqual(
+    published,
+    [undefined, "🎯 251"],
+    "the rollback repaint, then the objective without the retry text",
+  );
   assert.doesNotThrow(() => a.end());
 
   // (2) setStatus throws only once the wait is live: transitions and end are swallowed.
@@ -479,17 +503,22 @@ test("createDelegationActivity is exception-safe: a throwing begin admits no tok
   assert.equal(two.get(), undefined, "the ended wait is gone even though its repaint threw");
 
   // (3) A throwing footer subscriber.
-  const { target } = fakeTarget(true);
+  // The slot itself published before the subscriber threw, so the rollback must repaint it: the
+  // owner holds no `end` for a rejected wait, and nothing else would ever clear the retry text.
+  const { target, calls } = fakeTarget(true);
   const three = createPerkStatus();
   three.subscribe(() => {
     throw new Error("subscriber failure");
   });
   const c = createDelegationActivity(three, target, ACTIVITY_LABEL_LIBRARIAN);
   assert.doesNotThrow(() => c.observe(PROGRESS_BACKOFF));
+  assert.equal(calls.at(-1)?.value, undefined, "no stuck backoff text in the published slot");
   assert.doesNotThrow(() => c.observe(PROGRESS_IN_FLIGHT));
+  assert.equal(calls.at(-1)?.value, undefined, "no stuck in-flight text in the published slot");
   assert.doesNotThrow(() => c.observe(PROGRESS_HISTORY));
   assert.doesNotThrow(() => c.end());
   assert.equal(three.get(), undefined);
+  assert.equal(calls.at(-1)?.value, undefined);
 });
 
 test("the structural observe slice accepts the substrate's decoded progress (compile-time pin)", () => {
