@@ -817,7 +817,7 @@ test("executeCollectDraftReviewWave: no_wave without a launch; wave_running reta
   // The per-activation rule is named, distinguishing a same-session reload from a session switch.
   assert.match(
     none.content[0]?.text ?? "",
-    /running in this activation .*\(collection is per activation: a wave launched before a \/reload or a session switch is never collectable here; a same-session \/reload still delivers its completion notice, a session switch does not\)$/,
+    /running in this activation .*\(collection is per activation: a wave launched before a \/reload or a session switch is never collectable here, and no completion notice or wake is promised afterwards\)$/,
   );
 
   // Launch a wave that never completes on its own; an early collect (a tiny env-driven grace —
