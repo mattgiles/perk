@@ -11,6 +11,11 @@ engine actually answers. The precedents are [`pi-1.1.0-characterization.md`](pi-
 [`pi-subagents-descendant-ceilings.md`](pi-subagents-descendant-ceilings.md) (node 2.1; its
 instrument shape is what the deferred legs below reuse).
 
+**Amended 2026-10-25:** the W4, W6 and W7a rows below are the 1.1.0-era expectations, preserved
+verbatim; the 1.1.0 certification measured all three FAIL
+([`pi-1.1.0-certification.md`](pi-1.1.0-certification.md) § W); their re-specified cells and
+fixed dispositions are in § "Re-specified cells" at the end.
+
 **Verdict: every node clause has offline evidence in the framework suites; no live measurement was
 taken.** Per the operator decision recorded at planning (2026-10-19: live legs are "expensive in
 time and effort"), every live leg the node implies is specified below as a protocol with pass
@@ -274,3 +279,33 @@ settings or trust file outside `$AUTHED`/`$SCRATCH` changed (hash before/after);
 - `docs/learned/pi/subagents.md` § "Supervisor channel" / § "The v1 extension RPC seam": the wake
   prompt; the awaited-child event; the RPC stop vs the tool-action stop; `status`'s terminal proof;
   the 0.76.1 facts above.
+
+## Re-specified cells (amended 2026-10-25)
+
+The 1.1.0 certification measured W4, W6 and W7a FAIL against the "Deferred live legs" rows above,
+which stay verbatim as the 1.1.0-era expectations. For the adopted pair (Pi 1.4.0 + pi-subagents
+0.81.0) the three cells are re-specified with fixed dispositions and measured by objective
+#2767's certification node (3.1):
+
+- **W6 — repaired in perk.** 0.81.0 still builds the partial `results` from the settled children,
+  so a lane running at the deadline appears only in the `workflowChildren` roster. perk now
+  derives that lane's key from the run-id-correlated roster and reports it `lane-failed` (`lane
+  still running at native partial settlement`) instead of `missing-lane`; reports still come only
+  from the validated carrier (contracts §8.35).
+- **W4 — activation-local collection retained.** The post-reload auto-wake expectation is
+  retired: 0.81.0's notifier resends nothing on `reload`, and an Escape's wake hold is
+  binding-local. The cell stages an uncollected wave the production draft-review tool pair owns,
+  and scores that the parent stays stopped, the supplier result stays available, and the collector
+  answers `no_wave`.
+- **W7a — classes, not reason text.** The stop outcome and the terminal proof are scored by class
+  (`acknowledged` / a typed `invalid_state` refusal; `observed` / `pending` / `unknown` /
+  `unavailable`) under a fixed bound; engine reason text is recorded, never asserted.
+
+| Cell | Procedure (3.1 instantiates the 1.1.0 appendix's probe with the deltas below) | PASS iff | FAIL iff / not staged |
+|---|---|---|---|
+| **W6** live deadline partial | `PERK_WAVE_TIMEOUT_MS=20000`, `/probe-wave deadline <model>` (lanes `lane-quick` + `lane-long` "Read AGENTS.md and summarize it in 600 words."); record the RPC sends, the collected result, `<asyncDir>/status.json`. Staging: `status.json.workflowChildren` shows `lane-long` `state: "running"` at settlement; if `lane-long` finished before the deadline the leg is **not staged** — re-run with a longer task, never scored. | (1) the completion carried the explicit `terminalOutcome {partial, timeout}` and was consumed inside the grace (`failures[0]` = `{key: null, reason: "run-failed"}`, detail matching `native partial: timeout`); (2) `reports` = exactly `[lane-quick]`; (3) `failures[1]` = `{key: "lane-long", reason: "lane-failed", detail: "lane still running at native partial settlement"}`; (4) `complete: false`; (5) receipt `state: "failed"`, children = `lane-quick` only, no report bytes; (6) perk's RPC sends are exactly `ping`, `spawn`. | `lane-long` reported `missing-lane` or any other reason/detail; a report dropped or promoted; a `stop`/`status` sent. |
+| **W4** completion-while-busy → Escape → `/reload` → prompt (activation-local collection retained; the production draft-review tool pair owns the wave) | A `perk plan` read-only session in tmux on the appendix's sacrificial plan body (the X5a instrument). (1) prompt: write the sacrificial draft via `plan_draft`, then stop; (2) `/plan-review-browser`, accept the reviewer wave → the model calls `start_draft_review_wave` and yields — record the JSONL tool-result (`ok: true`, `asyncId`, `launch.runnable`); (3) immediately: `` Run exactly `sleep 170` with bash and then reply OK; nothing else. ``; (4) record the completion timestamp (`<asyncDir>/status.json` `endedAt`); (5) Escape — record the timestamp; (6) 30 s idle; (7) `/reload`; (8) 60 s idle; (9) one prompt: `Call collect_draft_review_wave now and report its error_type verbatim; do nothing else.`; (10) re-read `status.json`; teardown: close the browser tab, never `/plan-save`. Staging: (4) precedes (5), AND the JSONL holds the (2) start result and NO `collect_draft_review_wave` result before (7) — else **not staged** (re-run, never scored). | (a) no agent turn starts automatically between (5) and (9): the session JSONL holds no assistant message and no custom-message-started turn in that interval and the pane shows the idle editor through (6) and (8) — the presence/absence of a `subagent-notify` message is RECORDED, not scored; (b) `<asyncDir>/status.json` parses at (7)+ and at (10) with `state: "complete"` and an array `workflow.value` carrying every lane's `ok: true` entry (the result/index file's state is recorded, not scored); (c) the JSONL tool-result entry for `collect_draft_review_wave` at (9) carries `details.error_type: "no_wave"` and text containing `collection is per activation` — evidence of the collection boundary only because (2) proved the predecessor activation owned the uncollected wave. | an automatic wake/agent turn in (6) or (8); `status.json` missing or non-terminal; any collector answer but `no_wave`. The 1.1.0 auto-wake expectation is retired; a notice resend is neither required nor forbidden. |
+| **W7a(i)** cancel-while-running | `PROBE_CANCEL_DELAY_MS=10000 /probe-wave cancel <model>` (lane `lane-long`, the 600-word task): the probe waits for the runner pid, waits 10 s, aborts; record the stop reply (with its timestamp), the immediate projected proof, and ONE scored `status {id}` at **stop acknowledgement + 60 s**. Staging: at abort time the child's `status.json` reads `state: "running"` with a numeric `pid`, else **not staged**; an immediate proof of class `observed` means the child had already terminated at the read — **not staged**, re-run with a longer task (1500 words), never scored. | (1) `termination.stop.acknowledged === true` (detail contains `; stop requested;`); (2) the immediate projected proof is class `pending` — `Workflow dispatch is still open.` or the reason naming `lane-long`, whichever the instant of the read yields (text recorded, not asserted); (3) the 60 s re-query answers `details.workflowTerminalProof.state === "observed"`. | (1) fails; the immediate proof is `unknown`/`unavailable`; or the 60 s re-query answers `unknown` (record `reason` — e.g. `writer-close-unverified` — the runner close exit code and the child's `process-terminal.json` state/reason) or `pending` (record the reason) or no proof. Never inferred termination (a dead pid, `endedAt`, a freed slot); never an upstream waiver. A later re-query is a recorded diagnostic, never a score. |
+| **W7a(ii)** reload-then-stop | `/probe-wave start-long <model>` (the 600-word task; the mode waits for the runner pid and logs it before returning, handle → `PROBE_HANDLE_FILE`) → within 5 s before the `/reload` keystroke record `<asyncDir>/status.json` `state: "running"` and the child's `status.json` `state: "running"` + pid (timestamped) → `/reload` → record the workflow's post-reload `status.json` state/`stopCause` → `/probe-stop` on the SAME handle (raw RPC `stop` + perk's adapter `stop`/`terminalProof`). Staging: the pre-reload reads show both running, else **not staged** (re-run with a longer task, never scored). | the raw reply is `success: false` with `error.code === "invalid_state"` (message recorded, not asserted); the adapter projects `acknowledged: false` with `reason` starting `invalid_state: `, the detail renders `stop refused (invalid_state: …)`, and `terminalProof` projects one of `observed` / `pending` / `unknown` / `unavailable` (recorded). | the stop is acknowledged; the refusal code is not `invalid_state`; the adapter throws or projects no proof. |
+
+**Probe deltas 3.1 applies when instantiating `probe-wave.ts` from the 1.1.0 appendix:** (1) `start-long` calls `waitRunnerPid` and logs the child before returning; (2) `cancel` logs the `stop` reply timestamp (the `rpc-send`/reply pair) and schedules its scored manual `status` at that timestamp + 60 s instead of sleeping 30 s after `drain()`; (3) W4 uses no probe wave — `/probe-wakes` is optional recording only.
