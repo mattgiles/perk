@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Certification target (throwaway; never merged): the staged divergence for the resolver leg. (0000000)
 - **A report wave's lane still running at the engine's deadline is now reported `lane-failed` (`lane still running at native partial settlement`) instead of `missing-lane`** — perk correlates the engine's `workflowChildren` roster by child run id to name the unfinished lane; reports still come only from the validated carrier. The collect tools' `no_wave` detail and the docs no longer claim a `/reload` delivers a queued completion notice; the W4/W6/W7a certification cells are re-specified for Pi 1.4.0 + pi-subagents 0.81.0. (6312a5af)
 
 ## [4.1.0] - 2026-10-24
