@@ -776,7 +776,7 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 # may lead this stamp while a newer supplier is adopted on characterization evidence ahead of its
 # live certification, and the resulting WARN is the truthful signal of that gap, never grounds to
 # advance the stamp without evidence.
-_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.75.0"
+_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.81.0"
 
 
 def _installed_subagents_version(pkg_dir: Path) -> str | None:
