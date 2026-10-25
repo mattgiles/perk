@@ -62,7 +62,7 @@ The plan seam must always produce perk's reviewed, canonical plan artifact.
   **Remote review:** every browser door (`/plan-review-browser`, `/objective-review-browser`,
   `/pr-review-browser` PR modes, `/stack-review-browser`, and `plan_review`'s browser + wave arm)
   picks its server port by mirroring Plannotator's own selection (pinned at
-  `@plannotator/pi-extension@0.27.22`): a single `PLANNOTATOR_PORT`; the first free port
+  `@plannotator/pi-extension@0.28.30`): a single `PLANNOTATOR_PORT`; the first free port
   of a `PLANNOTATOR_PORT` range (`19432-19435`); `19432` when Plannotator detects a remote session
   (`PLANNOTATOR_REMOTE` = `1`/`true` or `0`/`false`, else `SSH_TTY`/`SSH_CONNECTION`); otherwise a
   free local port. The plain `plan_review` arm leaves the port to Plannotator, which applies the

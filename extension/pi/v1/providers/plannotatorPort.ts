@@ -3,11 +3,11 @@
 // second-guesses the operator's `PLANNOTATOR_PORT` / remote setup, and a fixed SSH tunnel or a
 // tailnet reaches every browser review exactly like it reaches the plain `plan_review` arm.
 //
-// MIRROR PIN: every rule here is a byte-faithful mirror of `@plannotator/pi-extension@0.27.22` —
-// `server/network.ts` (`getRemoteOverride`/`isRemoteSession`, `getServerPortConfiguration`,
-// `DEFAULT_REMOTE_PORT`) and `generated/port-range.ts` (`parsePortSelection`). A later plannotator
-// that changes the rule makes perk and plannotator disagree on the port — loud (the door's
-// readiness probe times out and it degrades), never silent.
+// MIRROR PIN: every rule here is a byte-faithful mirror of plannotator at `PLANNOTATOR_MIRROR_PIN`
+// (plannotatorPin.ts) — `server/network.ts` (`getRemoteOverride`/`isRemoteSession`,
+// `getServerPortConfiguration`, `DEFAULT_REMOTE_PORT`) and `generated/port-range.ts`
+// (`parsePortSelection`). A later plannotator that changes the rule makes perk and plannotator
+// disagree on the port — loud (the door's readiness probe times out and it degrades), never silent.
 //
 // The deliberate divergences are about BUSY ports, never about which port is chosen:
 //  - who walks a range: plannotator walks it at bind time, but the doors need ONE concrete port up

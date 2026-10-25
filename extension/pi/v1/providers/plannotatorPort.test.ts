@@ -1,7 +1,7 @@
 // The plannotator port-selection mirror (offline): plannotator's remote detection, its
 // `parsePortSelection` table, the precedence resolver, the picker over injected seams, the two
-// real-socket helpers, and the doors' readiness notice. Pinned at
-// `@plannotator/pi-extension@0.27.22` — see plannotatorPort.ts.
+// real-socket helpers, and the doors' readiness notice. Pinned at `PLANNOTATOR_MIRROR_PIN`
+// (plannotatorPin.ts) — see plannotatorPort.ts.
 
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:net";

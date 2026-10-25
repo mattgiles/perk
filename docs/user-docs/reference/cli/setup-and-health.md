@@ -200,7 +200,7 @@ review dependency. A lazy install that is not present yet is `info`. When instal
 package identity, the `./skills` export, both exact `SKILL.md` files, and their `ponytail` /
 `ponytail-review` frontmatter names. Divergence is a warning, never a failure, and has no `--fix`
 arm because Perk preserves operator source pins. Set the managed entry's source to known-good
-`npm:@dietrichgebert/ponytail@4.9.0`, run `perk init`, and restart the Perk/Pi session. Runtime
+`npm:@dietrichgebert/ponytail@5.3.2`, run `perk init`, and restart the Perk/Pi session. Runtime
 review-wave preflight is the enforcement boundary: an incompatible Ponytail lane remains explicitly
 uncovered rather than resolving a same-named skill elsewhere.
 Beyond these doctor checks, a local `perk <stage>` launch also surfaces a **soft, non-fatal warning

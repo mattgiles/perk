@@ -34,18 +34,19 @@
 // gate exit all live behind the plan installer's seams; the injection's gate-active check reads
 // the persisted `perk:workflow-state.mode`, the gate's own state twin.
 //
-// EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.20.0`, `plannotator-events.ts`):
+// EVENT ENVELOPE (`plannotator-events.ts`, pinned at `PLANNOTATOR_MIRROR_PIN` — plannotatorPin.ts):
 //   request  — pi.events.emit("plannotator:request", { requestId, action: "plan-review",
 //              payload: { planContent, origin? }, respond })   // respond = in-payload callback
 //   handshake — respond({ status: "handled", result: { status: "pending", reviewId } })
 //             | respond({ status: "unavailable", error? }) | respond({ status: "error", error })
 //   decision — pi.events.on("plannotator:review-result", { reviewId, approved, feedback?, ... })
 //
-// DIRECT EDITS FEEDBACK FORMAT (pinned against plannotator `packages/editor/directEdits.ts`,
-// `buildDirectEditsSection` / `composeFeedbackWithDirectEdits`, at v0.26.1). The browser's
-// direct-edit mode arrives as PROSE inside the existing `feedback` string, never a new envelope
-// field: `# Direct Edits\n` + blank line + a one-sentence preamble (two wording variants — never
-// couple to it) + blank line + a ```diff fence containing
+// DIRECT EDITS FEEDBACK FORMAT (plannotator `packages/editor/directEdits.ts`,
+// `buildDirectEditsSection` / `composeFeedbackWithDirectEdits`; pinned at
+// `PLANNOTATOR_MIRROR_PIN` — plannotatorPin.ts). The browser's direct-edit mode arrives as
+// PROSE inside the existing `feedback` string, never a new envelope field: `# Direct Edits\n` +
+// blank line + a one-sentence preamble (two wording variants — never couple to it) + blank line
+// + a ```diff fence containing
 // `createTwoFilesPatch('plan.md (original)', 'plan.md (edited)', base, edited, undefined,
 // undefined, { context: 3 }).trimEnd()` against the exact bytes perk submitted. The section is
 // composed FIRST; non-sentinel annotation feedback follows after `\n\n---\n\n`; edits-only

@@ -183,7 +183,8 @@ object donor's source pin, metadata, and list position, forces all four filters 
 same-identity duplicates; cold skill exposure also excludes packages whose `skills` key is exactly
 `[]`. Do not use `pi config -l` to enable Ponytail resources: exact-path review-agent binding plus
 runtime preflight is the only supported exposure. `perk doctor` reports a missing lazy install as
-info and incompatible package/skill identity as warn, with a known-good `4.9.0` remediation.
+info and incompatible package/skill identity as warn, with a known-good
+`npm:@dietrichgebert/ponytail@5.3.2` remediation.
 
 ## Change pi-fff's search mode (`PI_FFF_MODE`)
 
