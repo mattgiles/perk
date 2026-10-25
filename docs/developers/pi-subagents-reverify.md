@@ -151,13 +151,12 @@ the stamp the same way; the stamp moves only on certification evidence.
      `status {id}` carries the proof at `details.workflowTerminalProof` with states
      `observed`/`pending`/`unknown`. `rpcAdapter.ts::narrowTerminalProof` and the fake's
      `stopReply`/`terminalProof`/`statusReply` knobs mirror them;
-   - the **lifecycle facts 0.76.1's certification measured as FAILs** (W6, W7a in
-     `docs/design/archive/pi-1.1.0-certification.md` § W): the partial `results` projection omits
-     a still-running `runs.all` lane (it appears only in `workflowChildren`), and `/reload` stops
-     in-process workflows, so a later RPC `stop` answers `invalid_state` while a
-     `writer-close-unverified` terminal proof stays `unknown`. Re-read both at the next release;
-     with W4 they are the three held cells, re-specified or repaired by objective #2767's
-     lifecycle node (2.1) and measured by its certification node (3.1) — not by this procedure;
+   - the **lifecycle cells 0.76.1's certification measured as FAILs** (W4, W6, W7a in
+     `docs/design/archive/pi-1.1.0-certification.md` § W): W6 is repaired in perk (the
+     roster-correlated unfinished-lane diagnosis, contracts §8.35) and W4/W7a are re-specified
+     with fixed dispositions — the rows live in step 5's lifecycle-cell table and are measured by
+     objective #2767's certification node (3.1), not by this procedure; re-read the partial
+     `results` projection, the `/reload` stop and the terminal-proof reasons at the next release;
    - the **awaited-child event** (`subagent-executor.ts::emitWorkflowAwaitedChildComplete`): a
      per-child `subagent:async-complete` payload carrying the CHILD's `id`/`asyncDir` on the
      wave's channel. perk correlates by identity only and must never match it to the workflow
@@ -287,10 +286,10 @@ the stamp the same way; the stamp moves only on certification evidence.
 5. **Elect live-leg owners.** The legs: `perk doctor` (the `pi` row and `subagent-compat`), both
    browser doors (`/plan-review-browser`, `/pr-review-browser`) to N/N coverage, repeated
    collection, PR-wave launch, codemode composition in a read-only stage, worker MCP, the
-   subagent-under-worker cell, and the remote drive. A browser leg passes on the five push-receipt
-   criteria (launch, collect, delivery, decision order, owner observation) in
-   `docs/learned/pi/subagents.md` § Sources — the push receipts, not the collect result, are the
-   instrument. A failed leg is diagnosed, fixed and re-run once; if it still fails, record the
+   subagent-under-worker cell, the remote drive, and the lifecycle cells (below). A browser leg
+   passes on the five push-receipt criteria (launch, collect, delivery, decision order, owner
+   observation) in `docs/learned/pi/subagents.md` § Sources — the push receipts, not the collect
+   result, are the instrument. A failed leg is diagnosed, fixed and re-run once; if it still fails, record the
    FAIL (step 8), leave the stamp where it was (an honest `warn`), and stop for owner diagnosis.
 
    **The owner-election arm.** The browser doors are human-in-the-loop, so an implementing agent
@@ -322,6 +321,24 @@ the stamp the same way; the stamp moves only on certification evidence.
      `plan-ref.json` cache — back it up first;
    - the cells, the probes (with their SHA-256s) and the sacrificial plan bodies are in
      `docs/design/archive/pi-1.1.0-certification.md` § Methodology appendix.
+
+   **The lifecycle cells W4, W6, W7a (the live-matrix rows, re-specified 2026-10-25).** The 1.1.0
+   certification (`docs/design/archive/pi-1.1.0-certification.md` § W) measured all three FAIL
+   against their 0.76.1-era rows (`pi-subagents-0.76.1-lifecycle.md` § "Deferred live legs"). W6
+   is repaired in perk (contracts §8.35); W4 keeps activation-local collection and is staged
+   through the production draft-review tool pair; W7a scores proof and refusal classes, never
+   engine reason text. Each cell has a fixed disposition: a leg that is not staged is re-run, never
+   scored. The same table, dated, closes that archive record (§ "Re-specified cells").
+
+   | Cell | Procedure (3.1 instantiates the 1.1.0 appendix's probe with the deltas below) | PASS iff | FAIL iff / not staged |
+   |---|---|---|---|
+   | **W6** live deadline partial | `PERK_WAVE_TIMEOUT_MS=20000`, `/probe-wave deadline <model>` (lanes `lane-quick` + `lane-long` "Read AGENTS.md and summarize it in 600 words."); record the RPC sends, the collected result, `<asyncDir>/status.json`. Staging: `status.json.workflowChildren` shows `lane-long` `state: "running"` at settlement; if `lane-long` finished before the deadline the leg is **not staged** — re-run with a longer task, never scored. | (1) the completion carried the explicit `terminalOutcome {partial, timeout}` and was consumed inside the grace (`failures[0]` = `{key: null, reason: "run-failed"}`, detail matching `native partial: timeout`); (2) `reports` = exactly `[lane-quick]`; (3) `failures[1]` = `{key: "lane-long", reason: "lane-failed", detail: "lane still running at native partial settlement"}`; (4) `complete: false`; (5) receipt `state: "failed"`, children = `lane-quick` only, no report bytes; (6) perk's RPC sends are exactly `ping`, `spawn`. | `lane-long` reported `missing-lane` or any other reason/detail; a report dropped or promoted; a `stop`/`status` sent. |
+   | **W4** completion-while-busy → Escape → `/reload` → prompt (activation-local collection retained; the production draft-review tool pair owns the wave) | A `perk plan` read-only session in tmux on the appendix's sacrificial plan body (the X5a instrument). (1) prompt: write the sacrificial draft via `plan_draft`, then stop; (2) `/plan-review-browser`, accept the reviewer wave → the model calls `start_draft_review_wave` and yields — record the JSONL tool-result (`ok: true`, `asyncId`, `launch.runnable`); (3) immediately: `` Run exactly `sleep 170` with bash and then reply OK; nothing else. `` — record the JSONL timestamp of the `bash` tool call that starts the sleep; (4) record the completion timestamp (`<asyncDir>/status.json` `endedAt`); (5) Escape — record the timestamp and the JSONL entry that ends that `bash` call (an aborted result or turn, not a completed `sleep`); (6) 30 s idle; (7) `/reload`; (8) 60 s idle; (9) one prompt: `Call collect_draft_review_wave now and report its error_type verbatim; do nothing else.`; (10) re-read `status.json`; teardown: close the browser tab, never `/plan-save`. Staging: the (3) `bash` call started before (4) and was still running at (4) (no `bash` tool result before (5)); (4) precedes (5); (5) interrupts that call (its result or turn is aborted, never a completed `sleep`); AND the JSONL holds the (2) start result and NO `collect_draft_review_wave` result before (7) — else **not staged** (re-run — with a longer sleep when the wave outlasted it — never scored). | (a) no agent turn starts automatically between (5) and (9): the session JSONL holds no assistant message and no custom-message-started turn in that interval and the pane shows the idle editor through (6) and (8) — the presence/absence of a `subagent-notify` message is RECORDED, not scored; (b) `<asyncDir>/status.json` parses at (7)+ and at (10) with `state: "complete"` and an array `workflow.value` carrying every lane's `ok: true` entry (the result/index file's state is recorded, not scored); (c) the JSONL tool-result entry for `collect_draft_review_wave` at (9) carries `details.error_type: "no_wave"` and text containing `collection is per activation` — evidence of the collection boundary only because (2) proved the predecessor activation owned the uncollected wave. | an automatic wake/agent turn in (6) or (8); `status.json` missing or non-terminal; any collector answer but `no_wave`. The 1.1.0 auto-wake expectation is retired; a notice resend is neither required nor forbidden. |
+   | **W7a(i)** cancel-while-running | `PROBE_CANCEL_DELAY_MS=10000 /probe-wave cancel <model>` (lane `lane-long`, the 600-word task): the probe waits for the runner pid, waits 10 s, aborts; record the stop reply (with its timestamp), the immediate projected proof, and ONE scored `status {id}` at **stop acknowledgement + 60 s**. Staging: at abort time the child's `status.json` reads `state: "running"` with a numeric `pid`, else **not staged**; an immediate proof of class `observed` means the child had already terminated at the read — **not staged**, re-run with a longer task (1500 words), never scored. | (1) `termination.stop.acknowledged === true` (detail contains `; stop requested;`); (2) the immediate projected proof is class `pending` — `Workflow dispatch is still open.` or the reason naming `lane-long`, whichever the instant of the read yields (text recorded, not asserted); (3) the 60 s re-query answers `details.workflowTerminalProof.state === "observed"`. | (1) fails; the immediate proof is `unknown`/`unavailable`; or the 60 s re-query answers `unknown` (record `reason` — e.g. `writer-close-unverified` — the runner close exit code and the child's `process-terminal.json` state/reason) or `pending` (record the reason) or no proof. Never inferred termination (a dead pid, `endedAt`, a freed slot); never an upstream waiver. A later re-query is a recorded diagnostic, never a score. |
+   | **W7a(ii)** reload-then-stop | `/probe-wave start-long <model>` (the 600-word task; the mode waits for the runner pid and logs it before returning, handle → `PROBE_HANDLE_FILE`) → within 5 s before the `/reload` keystroke record `<asyncDir>/status.json` `state: "running"` and the child's `status.json` `state: "running"` + pid (timestamped) → `/reload` → record the workflow's post-reload `status.json` state/`stopCause` → `/probe-stop` on the SAME handle (raw RPC `stop` + perk's adapter `stop`/`terminalProof`). Staging: the pre-reload reads show both running, else **not staged** (re-run with a longer task, never scored). | the raw reply is `success: false` with `error.code === "invalid_state"` (message recorded, not asserted); the adapter projects `acknowledged: false` with `reason` starting `invalid_state: `, the detail renders `stop refused (invalid_state: …)`, and `terminalProof` projects one of `observed` / `pending` / `unknown` / `unavailable` (recorded). | the stop is acknowledged; the refusal code is not `invalid_state`; the adapter throws or projects no proof. |
+
+   **Probe deltas 3.1 applies when instantiating `probe-wave.ts` from the 1.1.0 appendix:** (1) `start-long` calls `waitRunnerPid` and logs the child before returning; (2) `cancel` logs the `stop` reply timestamp (the `rpc-send`/reply pair) and schedules its scored manual `status` at that timestamp + 60 s instead of sleeping 30 s after `drain()`; (3) W4 uses no probe wave — `/probe-wakes` is optional recording only.
+
 6. **Recheck the retained adaptations' retirement conditions** — the table in
    `docs/planning/pre-pi-durable-true-up.md` § Retained adaptations (its re-check column) and the
    certification's K rows. The host SDK bridge retires only on an in-process child + lazy-import
@@ -385,9 +402,9 @@ the RPC spawn key `script`, which pi-subagents accepts since 0.74.0
 stamp (0.75.0). The previous pair's live certification
 (`docs/design/archive/pi-1.1.0-certification.md`) HELD Pi 1.1.0 + 0.76.1 and kept the stamp at
 0.75.0, because W4, W6 and W7a failed and S3, S4a-live, U-bg, X5a and X5b were not run. So
-`subagent-compat` warns by design. The three held cells are re-specified or repaired by objective
-#2767's lifecycle node (2.1) and measured by its certification node (3.1), which owns the live
-certification of the adopted pair.
+`subagent-compat` warns by design. W6 is repaired and W4/W7a re-specified (step 5's
+lifecycle-cell table, 2026-10-25); objective #2767's certification node (3.1) measures them and owns
+the live certification of the adopted pair.
 `perk init` writes the pinned spec and reconciles an existing unpinned or differently pinned
 entry forward; `perk doctor --fix` repairs the same drift through `settings-wiring`. Pi installs
 whatever the checkout's own committed `.pi/settings.json` names, so the pin reaches a branch only

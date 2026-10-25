@@ -162,6 +162,8 @@ test("partial carrier requires exact terminal vocabulary and a failed/partial ev
           (terminalOutcome.reason === "timeout" || terminalOutcome.reason === "budget_exhausted");
         assert.equal("retainedEntries" in completion, admitted);
         assert.equal("terminalOutcome" in completion, admitted);
+        // No roster in this fixture: the unfinished-lane key set is omitted, never empty.
+        assert.equal("unfinishedLanes" in completion, false);
         if (admitted)
           assert.deepEqual(completion.retainedEntries, [
             { key: "a", ok: true, error: null, report: { answer: 1 } },
@@ -251,6 +253,156 @@ test("partial projection withholds ambiguous keys/identities and never guesses k
     { key: "hostile", ok: true, error: null, report: { answer: 4 } },
   ]);
   assert.doesNotMatch(JSON.stringify(received[0]?.retainedEntries), /SECRET/);
+});
+
+test("roster-correlated unfinished lanes: only a uniquely correlated running roster-only lane is named; everything else is withheld", async () => {
+  const bus = createFakeBus();
+  respond(bus, () => ({ success: true, data: pingData() }));
+  const adapter = createRpcWaveAdapter(bus);
+  await adapter.ping();
+  const received: WaveCompletion[] = [];
+  const unsubscribe = adapter.onComplete((completion) => received.push(completion));
+  const quickRow = {
+    workflowKey: "lane-quick",
+    runId: "child-quick",
+    success: true,
+    structuredOutput: { angle: "lane-quick" },
+    output: "SECRET",
+  };
+  const quickChild = { childId: "lane-quick", runId: "child-quick", state: "completed" };
+  const longChild = { childId: "lane-long", runId: "child-long", state: "running" };
+  const quickReceipt = { key: "lane-quick", runId: "child-quick", success: true };
+  const inventory = (children: unknown, overrides: Record<string, unknown> = {}) => ({
+    version: 1,
+    parentToolCallId: "tc-w6",
+    workflowRunId: "run-w6",
+    inventoryComplete: true,
+    workflowState: "failed",
+    children,
+    ...overrides,
+  });
+  const cases: Array<{
+    name: string;
+    workflowChildren: unknown;
+    results?: unknown[];
+    complete?: true;
+    unfinished: string[] | undefined;
+    children: unknown[];
+  }> = [
+    {
+      name: "(i) a uniquely correlated running roster-only lane",
+      workflowChildren: inventory([quickChild, longChild]),
+      unfinished: ["lane-long"],
+      children: [quickReceipt],
+    },
+    {
+      name: "(ii) plus a running child without a runId",
+      workflowChildren: inventory([
+        quickChild,
+        longChild,
+        { childId: "lane-orphan", state: "running" },
+      ]),
+      unfinished: ["lane-long"],
+      children: [quickReceipt],
+    },
+    {
+      name: "(iii) two running children sharing one runId",
+      workflowChildren: inventory([
+        quickChild,
+        longChild,
+        { childId: "lane-other", runId: "child-long", state: "running" },
+      ]),
+      unfinished: undefined,
+      children: [quickReceipt],
+    },
+    {
+      name: "(iv) two children sharing one childId",
+      workflowChildren: inventory([
+        quickChild,
+        longChild,
+        { childId: "lane-long", runId: "child-long-2", state: "running" },
+      ]),
+      unfinished: undefined,
+      children: [quickReceipt],
+    },
+    {
+      name: "(v) workflowRunId differs from the payload id",
+      workflowChildren: inventory([quickChild, longChild], { workflowRunId: "foreign" }),
+      unfinished: undefined,
+      children: [],
+    },
+    {
+      name: "(vi) version 2",
+      workflowChildren: inventory([quickChild, longChild], { version: 2 }),
+      unfinished: undefined,
+      children: [],
+    },
+    {
+      name: "(vii) children not an array",
+      workflowChildren: inventory({ "lane-long": longChild }),
+      unfinished: undefined,
+      children: [],
+    },
+    {
+      name: "(viii) the running child's runId is carried by a results row under another key",
+      workflowChildren: inventory([quickChild, longChild]),
+      results: [
+        quickRow,
+        { workflowKey: "lane-other", runId: "child-long", success: false, error: "boom" },
+      ],
+      unfinished: undefined,
+      children: [quickReceipt, { key: "lane-long", runId: "child-long", success: false }],
+    },
+    {
+      name: "(ix) the running child's childId is carried as a results workflowKey",
+      workflowChildren: inventory([quickChild, longChild]),
+      results: [quickRow, { workflowKey: "lane-long", success: false, error: "boom" }],
+      unfinished: undefined,
+      children: [quickReceipt],
+    },
+    ...["completed", "pending", "failed"].map((state) => ({
+      name: `(x) roster state '${state}'`,
+      workflowChildren: inventory([quickChild, { ...longChild, state }]),
+      unfinished: undefined,
+      children: [quickReceipt],
+    })),
+    {
+      name: "(xi) the same roster on a complete payload without terminalOutcome",
+      workflowChildren: inventory([quickChild, longChild]),
+      complete: true,
+      unfinished: undefined,
+      children: [quickReceipt],
+    },
+  ];
+  try {
+    for (const row of cases) {
+      bus.emit("subagent:async-complete", {
+        id: "run-w6",
+        ...(row.complete === true
+          ? { state: "complete", success: true }
+          : {
+              state: "failed",
+              success: false,
+              terminalOutcome: { state: "partial", reason: "timeout" },
+            }),
+        results: row.results ?? [quickRow],
+        workflowChildren: row.workflowChildren,
+      });
+      const completion = received.pop();
+      assert.ok(completion, row.name);
+      if (row.unfinished === undefined) {
+        assert.equal("unfinishedLanes" in completion, false, row.name);
+      } else {
+        assert.deepEqual(completion.unfinishedLanes, row.unfinished, row.name);
+      }
+      assert.equal("retainedEntries" in completion, row.complete !== true, row.name);
+      // Receipts are never synthesized from the roster: only `results` rows yield children.
+      assert.deepEqual(completion.children, row.children, row.name);
+      assert.doesNotMatch(JSON.stringify(completion), /SECRET/, row.name);
+    }
+  } finally {
+    unsubscribe();
+  }
 });
 
 test("requests carry the v1 envelope: version, requestId, method, params, source.extension", async () => {
@@ -437,6 +589,14 @@ function statusData(proof: unknown): Record<string, unknown> {
   };
 }
 
+/**
+ * Representative engine proof reasons — each ONE fixture value feeding both the responder's
+ * `statusData(...)` and the expectation: the projection carries the reason verbatim, whatever
+ * text a given engine release (or the instant of the read) yields.
+ */
+const PENDING_REASON = "Workflow dispatch is still open.";
+const UNKNOWN_REASON = "async workflow child a process-terminal proof is missing";
+
 const NO_PROOF = {
   state: "unavailable",
   reason: "status reply carried no workflow terminal proof",
@@ -455,23 +615,15 @@ test("narrowTerminalProof: observed, pending/unknown with the engine's reason, a
   assert.deepEqual(narrowTerminalProof(statusData(observed)), { state: "observed" });
   assert.deepEqual(
     narrowTerminalProof(
-      statusData({
-        state: "pending",
-        dispatchClosed: false,
-        reason: "Workflow dispatch is still open.",
-      }),
+      statusData({ state: "pending", dispatchClosed: false, reason: PENDING_REASON }),
     ),
-    { state: "pending", reason: "Workflow dispatch is still open." },
+    { state: "pending", reason: PENDING_REASON },
   );
   assert.deepEqual(
     narrowTerminalProof(
-      statusData({
-        state: "unknown",
-        dispatchClosed: true,
-        reason: "async workflow child a process-terminal proof is missing",
-      }),
+      statusData({ state: "unknown", dispatchClosed: true, reason: UNKNOWN_REASON }),
     ),
-    { state: "unknown", reason: "async workflow child a process-terminal proof is missing" },
+    { state: "unknown", reason: UNKNOWN_REASON },
   );
   assert.deepEqual(narrowTerminalProof(statusData({ state: "pending" })), {
     state: "pending",
@@ -769,7 +921,7 @@ test("hold: a ghost no_active_session on stop and status then live successes —
     }
     return {
       success: true,
-      data: statusData({ state: "pending", reason: "Workflow dispatch is still open." }),
+      data: statusData({ state: "pending", reason: PENDING_REASON }),
     };
   });
   const events: DuplicateResponderEvent[] = [];
@@ -778,7 +930,7 @@ test("hold: a ghost no_active_session on stop and status then live successes —
   assert.deepEqual(await adapter.stop({ asyncId: "a1", asyncDir: "/d1" }), { acknowledged: true });
   assert.deepEqual(await adapter.terminalProof({ asyncId: "a1", asyncDir: "/d1" }), {
     state: "pending",
-    reason: "Workflow dispatch is still open.",
+    reason: PENDING_REASON,
   });
   assert.deepEqual(events, [
     { method: "stop", superseded: CONTEXTLESS_TEXT },

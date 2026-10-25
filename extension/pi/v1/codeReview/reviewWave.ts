@@ -352,7 +352,7 @@ export async function executeCollectReviewWave(
     ref === null ? ({ kind: "none" } as const) : await collectAdversarialReviewWave(wave, ref);
   if (collected.kind === "none") {
     return fail(
-      "no review wave is running in this activation — launch one with start_review_wave (collection is per activation: a wave launched before a /reload or a session switch is never collectable here; a same-session /reload still delivers its completion notice, a session switch does not)",
+      "no review wave is running in this activation — launch one with start_review_wave (collection is per activation: a wave launched before a /reload or a session switch is never collectable here, and no completion notice or wake is promised afterwards)",
       "no_wave",
     );
   }

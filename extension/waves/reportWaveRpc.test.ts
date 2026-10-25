@@ -20,6 +20,7 @@ import { test } from "node:test";
 import {
   attachGhostResponder,
   createFakeSubagents,
+  FAKE_DEFAULT_TERMINAL_PROOF,
   type FakeSettlement,
   noLiveRunController,
   waveScriptItems,
@@ -33,6 +34,7 @@ import {
   type WaveBus,
   type WaveRunHandle,
   type WaveSpawnParams,
+  type WaveTermination,
 } from "./transport.ts";
 
 /** A synchronous in-memory bus (the adapter-contract suite's shape). */
@@ -106,6 +108,20 @@ function awaitedChildEvent(
     awaitedByWorkflow: true,
     parentWorkflowRunId: handle.asyncId,
   };
+}
+
+/**
+ * The post-stop CLASS contract (contracts.md §8.35): the stop acknowledged and the proof
+ * `pending` with a nonempty engine reason. Engine reason text varies across releases and with the
+ * instant of the read, so the class is what is asserted; verbatim carriage composes from the
+ * fake's exported sample (`FAKE_DEFAULT_TERMINAL_PROOF`), never a second literal.
+ */
+function assertAcknowledgedPending(termination: WaveTermination | undefined): void {
+  assert.ok(termination !== undefined);
+  assert.equal(termination.stop.acknowledged, true);
+  const { proof } = termination;
+  assert.ok(proof.state === "pending", `unexpected proof state '${proof.state}'`);
+  assert.notEqual(proof.reason, "");
 }
 
 /** Collect under a tiny collect grace: `running` proves the ref is still pending. */
@@ -402,14 +418,14 @@ test("rpc integration: timeout — stop acknowledged, then exactly ONE status qu
     result.failures.map((f) => [f.key, f.reason]),
     [[null, "timeout"]],
   );
-  assert.match(
-    result.failures[0]?.detail ?? "",
-    /; stop requested; child termination unconfirmed \(pending: Workflow dispatch is still open\.\)$/,
-  );
+  const detail = result.failures[0]?.detail ?? "";
+  assert.match(detail, /; stop requested; child termination unconfirmed \(pending: .+\)$/);
+  assert.ok(detail.endsWith(`(pending: ${FAKE_DEFAULT_TERMINAL_PROOF.reason})`), detail);
   assert.equal(result.receipt.state, "timed-out");
+  assertAcknowledgedPending(result.receipt.termination);
   assert.deepEqual(result.receipt.termination, {
     stop: { acknowledged: true },
-    proof: { state: "pending", reason: "Workflow dispatch is still open." },
+    proof: { state: "pending", reason: FAKE_DEFAULT_TERMINAL_PROOF.reason },
   });
   assert.deepEqual(
     result.reports,
@@ -420,6 +436,9 @@ test("rpc integration: timeout — stop acknowledged, then exactly ONE status qu
   assert.deepEqual(fake.stops, [{ id: runId }], "the stop request names the spawned run");
   assert.deepEqual(fake.statuses, [{ id: runId }], "exactly one status query, after the stop");
 });
+
+/** A representative engine `unknown` reason — one fixture value feeding plan and expectation. */
+const UNKNOWN_PROOF_REASON = "async workflow child correctness process-terminal proof is missing";
 
 for (const [label, plan, expected] of [
   [
@@ -434,14 +453,8 @@ for (const [label, plan, expected] of [
   ],
   [
     "an unknown proof keeps the engine's reason",
-    {
-      terminalProof: {
-        state: "unknown",
-        dispatchClosed: true,
-        reason: "async workflow child correctness process-terminal proof is missing",
-      },
-    },
-    "; stop requested; child termination unconfirmed (unknown: async workflow child correctness process-terminal proof is missing)",
+    { terminalProof: { state: "unknown", dispatchClosed: true, reason: UNKNOWN_PROOF_REASON } },
+    `; stop requested; child termination unconfirmed (unknown: ${UNKNOWN_PROOF_REASON})`,
   ],
 ] as const) {
   test(`rpc integration: timeout — ${label}`, async (t) => {
@@ -475,16 +488,27 @@ test("rpc integration: timeout — a REFUSED stop (invalid_state) with a success
     [[null, "timeout"]],
     "a refused stop never rejects the wave nor changes the reason literal",
   );
+  const detail = result.failures[0]?.detail ?? "";
   assert.match(
-    result.failures[0]?.detail ?? "",
-    /; stop refused \(invalid_state: Workflow .* has no live run controller available to stop\.\); child termination unconfirmed \(pending: Workflow dispatch is still open\.\)$/,
+    detail,
+    /; stop refused \(invalid_state: .+\); child termination unconfirmed \(pending: .+\)$/,
   );
-  assert.deepEqual(result.receipt.termination, {
-    stop: {
-      acknowledged: false,
-      reason: `invalid_state: Workflow ${runId} has no live run controller available to stop.`,
-    },
-    proof: { state: "pending", reason: "Workflow dispatch is still open." },
+  const refusal = noLiveRunController(runId);
+  const refusedReason = `${refusal.code}: ${refusal.message}`;
+  assert.ok(
+    detail.endsWith(
+      `; stop refused (${refusedReason}); child termination unconfirmed (pending: ${FAKE_DEFAULT_TERMINAL_PROOF.reason})`,
+    ),
+    detail,
+  );
+  const termination = result.receipt.termination;
+  assert.ok(termination !== undefined);
+  assert.equal(termination.stop.acknowledged, false);
+  if (!termination.stop.acknowledged) assert.match(termination.stop.reason, /^invalid_state: /);
+  assert.equal(termination.proof.state, "pending");
+  assert.deepEqual(termination, {
+    stop: { acknowledged: false, reason: refusedReason },
+    proof: { state: "pending", reason: FAKE_DEFAULT_TERMINAL_PROOF.reason },
   });
   assert.deepEqual(fake.stops, [{ id: runId }]);
   assert.deepEqual(fake.statuses, [{ id: runId }]);
@@ -503,20 +527,25 @@ test("rpc integration: cancel after launch — the same stop request + one-shot 
   assert.equal(collected.kind, "settled");
   if (collected.kind !== "settled") return;
   const result = collected.result;
+  assert.match(
+    result.failures[0]?.detail ?? "",
+    /^wave 'pr-review' was cancelled; stop requested; child termination unconfirmed \(pending: .+\)$/,
+  );
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason, f.detail]),
     [
       [
         null,
         "cancelled",
-        "wave 'pr-review' was cancelled; stop requested; child termination unconfirmed (pending: Workflow dispatch is still open.)",
+        `wave 'pr-review' was cancelled; stop requested; child termination unconfirmed (pending: ${FAKE_DEFAULT_TERMINAL_PROOF.reason})`,
       ],
     ],
   );
   assert.equal(result.receipt.state, "cancelled");
+  assertAcknowledgedPending(result.receipt.termination);
   assert.deepEqual(result.receipt.termination, {
     stop: { acknowledged: true },
-    proof: { state: "pending", reason: "Workflow dispatch is still open." },
+    proof: { state: "pending", reason: FAKE_DEFAULT_TERMINAL_PROOF.reason },
   });
   assert.deepEqual(fake.stops, [{ id: start.runId }]);
   assert.deepEqual(fake.statuses, [{ id: start.runId }]);
@@ -741,9 +770,10 @@ test("rpc integration: a ghost responder on the timeout arm — spawn, stop and 
   await drain();
   t.mock.timers.tick(30 + WAVE_SETTLEMENT_GRACE_MS);
   const result = await pending;
+  assertAcknowledgedPending(result.receipt.termination);
   assert.deepEqual(result.receipt.termination, {
     stop: { acknowledged: true },
-    proof: { state: "pending", reason: "Workflow dispatch is still open." },
+    proof: { state: "pending", reason: FAKE_DEFAULT_TERMINAL_PROOF.reason },
   });
   const superseded = "no_active_session: No active extension context for subagent RPC.";
   assert.deepEqual(notices, [
@@ -1042,6 +1072,154 @@ test("rpc integration: duplicate native results rows for one key collapse at the
   assert.equal(result.receipt.state, "failed");
   assert.doesNotMatch(JSON.stringify(result.receipt), /verdict|structuredOutput|copy/);
   assert.equal(fake.stops.length, 0);
+});
+
+const W6_QUICK_REPORT = { angle: "lane-quick", verdict: "clean" };
+
+/**
+ * The certification's W6 shape: an explicit native partial whose compact `results` carry only the
+ * finished lane (the engine builds them from the settled children), while the `workflowChildren`
+ * roster still reports `lane-long` running under its own child run id and `lane-orphan` running
+ * with no run id at all. `aggregate` overrides the durable side (default: failed, no value);
+ * `workflowRunId` overrides the inventory's binding (default: the spawned run).
+ */
+function w6PartialFixture(
+  handle: Readonly<WaveRunHandle>,
+  opts: { aggregate?: FakeSettlement["aggregate"]; workflowRunId?: string } = {},
+): FakeSettlement {
+  return {
+    aggregate: opts.aggregate ?? {
+      state: "failed",
+      error: "Workflow script timed out after 20000ms.",
+      value: undefined,
+    },
+    completion: {
+      state: "failed",
+      success: false,
+      terminalOutcome: { state: "partial", reason: "timeout" },
+      results: [
+        {
+          workflowKey: "lane-quick",
+          agent: "perk.scout",
+          runId: "child-quick",
+          success: true,
+          structuredOutput: W6_QUICK_REPORT,
+          output: "SECRET",
+        },
+      ],
+      workflowChildren: {
+        version: 1,
+        parentToolCallId: "tc-w6",
+        workflowRunId: opts.workflowRunId ?? handle.asyncId,
+        inventoryComplete: true,
+        workflowState: "failed",
+        children: [
+          { childId: "lane-quick", runId: "child-quick", state: "completed", agent: "perk.scout" },
+          { childId: "lane-long", runId: "child-long", state: "running", agent: "perk.scout" },
+          { childId: "lane-orphan", state: "running" },
+        ],
+      },
+    },
+  };
+}
+
+function w6Spec(): ReportWaveRequest {
+  return makeSpec({
+    assignments: ["lane-quick", "lane-long", "lane-orphan"].map((key) => ({
+      key,
+      agent: "perk.scout",
+      task: `scout ${key}`,
+    })),
+  });
+}
+
+const W6_ORPHAN_MISSING = "lane 'lane-orphan' is absent from the wave aggregate";
+
+test("W6: a roster-only running lane is lane-failed at native partial settlement; a roster-only lane whose runId does not correlate stays withheld", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([
+    { executeSettlement: async (_script, handle) => w6PartialFixture(handle) },
+  ]);
+  fake.attach(bus);
+  const result = await createReportWave(bus).run(w6Spec());
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [{ key: "lane-quick", report: W6_QUICK_REPORT }]);
+  assert.deepEqual(
+    result.failures.map(({ key, reason, detail }) => [key, reason, detail]),
+    [
+      [null, "run-failed", result.failures[0]?.detail],
+      ["lane-long", "lane-failed", "lane still running at native partial settlement"],
+      ["lane-orphan", "missing-lane", W6_ORPHAN_MISSING],
+    ],
+  );
+  assert.match(result.failures[0]?.detail ?? "", /native partial: timeout/);
+  assert.equal(result.receipt.state, "failed");
+  assert.deepEqual(result.receipt.children, [
+    { key: "lane-quick", runId: "child-quick", success: true, agent: "perk.scout" },
+  ]);
+  const receipt = JSON.stringify(result.receipt);
+  assert.doesNotMatch(receipt, /SECRET|structuredOutput/);
+  assert.doesNotMatch(receipt, /lane-long/, "no receipt child is synthesized from the roster");
+  assert.deepEqual(fake.stops, []);
+  assert.deepEqual(fake.statuses, []);
+});
+
+test("W6: the durable workflow.value array is still the carrier; the roster only names the unfinished lane", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([
+    {
+      executeSettlement: async (_script, handle) =>
+        w6PartialFixture(handle, {
+          aggregate: {
+            state: "partial",
+            value: [{ key: "lane-quick", ok: true, error: null, report: W6_QUICK_REPORT }],
+          },
+        }),
+    },
+  ]);
+  fake.attach(bus);
+  const result = await createReportWave(bus).run(w6Spec());
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [{ key: "lane-quick", report: W6_QUICK_REPORT }]);
+  assert.deepEqual(
+    result.failures.map(({ key, reason, detail }) => [key, reason, detail]),
+    [
+      [null, "run-failed", result.failures[0]?.detail],
+      ["lane-long", "lane-failed", "lane still running at native partial settlement"],
+      ["lane-orphan", "missing-lane", W6_ORPHAN_MISSING],
+    ],
+  );
+  assert.match(
+    result.failures[0]?.detail ?? "",
+    /wave run ended 'partial' \(native partial: timeout\)/,
+  );
+  assert.deepEqual(fake.stops, []);
+  assert.deepEqual(fake.statuses, []);
+});
+
+test("W6: a mismatched inventory withholds the diagnosis — the running lane stays missing-lane", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([
+    {
+      executeSettlement: async (_script, handle) =>
+        w6PartialFixture(handle, { workflowRunId: "foreign" }),
+    },
+  ]);
+  fake.attach(bus);
+  const result = await createReportWave(bus).run(w6Spec());
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [{ key: "lane-quick", report: W6_QUICK_REPORT }]);
+  assert.deepEqual(
+    result.failures.map(({ key, reason }) => [key, reason]),
+    [
+      [null, "run-failed"],
+      ["lane-long", "missing-lane"],
+      ["lane-orphan", "missing-lane"],
+    ],
+  );
+  // The withheld inventory also withholds receipt correlation (no keyed children).
+  assert.deepEqual(result.receipt.children, []);
+  assert.deepEqual(fake.stops, []);
 });
 
 test("rpc integration: two OVERLAPPING waves through one factory correlate out of launch order", async () => {

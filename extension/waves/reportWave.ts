@@ -51,6 +51,7 @@ import {
 } from "./ponytail.ts";
 import { createRpcWaveAdapter } from "./rpcAdapter.ts";
 import {
+  LANE_STILL_RUNNING_ERROR,
   startWaveScript,
   type WaveAdapter,
   type WaveBus,
@@ -130,10 +131,10 @@ export interface AssignmentReport {
 /** The assignment-level failure reasons this tier produces during normalization/preflight —
  * always keyed by the assignment they blame. */
 export type AssignmentFailureReason =
-  | "lane-failed" // assignment resolved ok: false / null report
+  | "lane-failed" // assignment resolved ok: false / null report, or a roster-correlated lane still running at native partial settlement
   | "skill-unavailable" // exact required-skill source failed preflight (non-retryable)
   | "malformed-report" // aggregate entry for this key has unusable shape, or the key appears more than once
-  | "missing-lane"; // expected key absent from the aggregate
+  | "missing-lane"; // expected key absent from the aggregate and not a roster-correlated unfinished lane
 
 /**
  * The caller-facing failure vocabulary: the transport tier's wave-level subset
@@ -301,11 +302,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * are ignored: the module owns the script, so extras cannot occur without upstream drift, and
  * the per-assignment reasons below already make the wave incomplete under `strict`. A key
  * appearing more than once is ambiguous identity: `malformed-report`, every row withheld (§8.35).
- * Module-private: the wave's settle is the only consumer.
+ * `unfinished` (the roster-correlated keys still running at explicit native partial settlement)
+ * is consulted ONLY where an expected key has no carrier row: such a key is `lane-failed` with
+ * `LANE_STILL_RUNNING_ERROR` instead of `missing-lane`. A carrier row for the key always wins,
+ * and keys outside the assignments are ignored. Module-private: the wave's settle is the only
+ * consumer.
  */
 function normalizeAssignments(
   keys: string[],
   entries: unknown[],
+  unfinished: ReadonlySet<string>,
 ): { reports: AssignmentReport[]; failures: ReportWaveFailure[] } {
   const reports: AssignmentReport[] = [];
   const failures: ReportWaveFailure[] = [];
@@ -322,11 +328,15 @@ function normalizeAssignments(
     }
     const entry = rows[0];
     if (entry === undefined) {
-      failures.push({
-        key,
-        reason: "missing-lane",
-        detail: `lane '${key}' is absent from the wave aggregate`,
-      });
+      failures.push(
+        unfinished.has(key)
+          ? { key, reason: "lane-failed", detail: LANE_STILL_RUNNING_ERROR }
+          : {
+              key,
+              reason: "missing-lane",
+              detail: `lane '${key}' is absent from the wave aggregate`,
+            },
+      );
       continue;
     }
     if (entry.ok === true) {
@@ -406,9 +416,11 @@ function settleReportWave(run: WaveScriptResult, request: ReportWaveRequest): Re
     );
   }
 
+  const unfinished = new Set(run.ok ? [] : (run.unfinishedLanes ?? []));
   const normalized = normalizeAssignments(
     request.assignments.map((assignment) => assignment.key),
     run.value,
+    unfinished,
   );
   const { reports } = normalized;
   // Retained evidence does not imply completion under either policy. Keep the transport

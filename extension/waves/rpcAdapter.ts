@@ -60,23 +60,28 @@
 // Explicit native partial settlement additionally carries keyed structured results, independently
 // of receipts; a row the engine projects as `state: "running"` (a child still working when the
 // workflow deadline fired — it carries no `success`) projects to an explicit `ok: false` entry so
-// the normalizer reports the lane as failed, never as a malformed report. The runner retains only
+// the normalizer reports the lane as failed, never as a malformed report. 0.81.0
+// (`src/runs/foreground/subagent-executor.js`) builds the partial `results` from the settled
+// children only, so a lane still running at the deadline can be absent from `results` and present
+// only in the `workflowChildren` roster with `state: "running"`; perk derives only that lane's KEY
+// from the correlated inventory (`unfinishedLanes`), never report DATA. The runner retains only
 // its first matched completion, never a report cache.
 
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type {
-  WaveAdapter,
-  WaveAggregate,
-  WaveBus,
-  WaveChildReceipt,
-  WaveCompletion,
-  WavePing,
-  WaveRunHandle,
-  WaveSpawnParams,
-  WaveStopOutcome,
-  WaveTerminationProof,
+import {
+  LANE_STILL_RUNNING_ERROR,
+  type WaveAdapter,
+  type WaveAggregate,
+  type WaveBus,
+  type WaveChildReceipt,
+  type WaveCompletion,
+  type WavePing,
+  type WaveRunHandle,
+  type WaveSpawnParams,
+  type WaveStopOutcome,
+  type WaveTerminationProof,
 } from "./transport.ts";
 
 /** The pinned v1 request channel (pi-subagents `SUBAGENT_RPC_REQUEST_EVENT`). */
@@ -276,13 +281,11 @@ function narrowReceiptChild(
   };
 }
 
-// A present malformed/mismatched inventory withholds correlation rather than inventing keys
-// from agent names. Duplicate run identities are ambiguous, even when their childIds agree.
-function workflowReceiptKeys(
-  data: Record<string, unknown>,
-): Map<string, string | null> | undefined {
+// The `workflowChildren` envelope check: undefined when absent; an EMPTY list when present but
+// not a version-1 inventory bound to this completion's workflow run id (a withheld inventory);
+// otherwise the raw children.
+function inventoryChildren(data: Record<string, unknown>): unknown[] | undefined {
   if (!("workflowChildren" in data)) return undefined;
-  const keys = new Map<string, string | null>();
   const inventory = data.workflowChildren;
   const runId = data.id ?? data.runId;
   if (
@@ -292,13 +295,66 @@ function workflowReceiptKeys(
     inventory.workflowRunId !== runId ||
     !Array.isArray(inventory.children)
   )
-    return keys;
-  for (const child of inventory.children) {
+    return [];
+  return inventory.children;
+}
+
+// A present malformed/mismatched inventory withholds correlation rather than inventing keys
+// from agent names. Duplicate run identities are ambiguous, even when their childIds agree.
+function workflowReceiptKeys(
+  data: Record<string, unknown>,
+): Map<string, string | null> | undefined {
+  const children = inventoryChildren(data);
+  if (children === undefined) return undefined;
+  const keys = new Map<string, string | null>();
+  for (const child of children) {
     if (!isRecord(child) || typeof child.runId !== "string" || child.runId === "") continue;
     const key = typeof child.childId === "string" && child.childId !== "" ? child.childId : null;
     keys.set(child.runId, keys.has(child.runId) ? null : key);
   }
   return keys;
+}
+
+/**
+ * The roster-only lanes still running at native partial settlement (contracts.md §8.35), in
+ * inventory order — identity only. Reuses the receipt correlation map (`keys`): no inventory or a
+ * withheld one diagnoses nothing. A child qualifies only when its state is `running`, its nonempty
+ * `runId` maps uniquely to its own nonempty `childId` (a duplicated run id maps to null), that
+ * `childId` is unique in the inventory, and no `results` row carries its key or its run id (the
+ * carrier already speaks for that run).
+ */
+function unfinishedRosterLanes(
+  data: Record<string, unknown>,
+  keys: Map<string, string | null> | undefined,
+): string[] {
+  if (keys === undefined || keys.size === 0) return [];
+  const children = inventoryChildren(data) ?? [];
+  const childIdCounts = new Map<string, number>();
+  for (const child of children) {
+    if (isRecord(child) && typeof child.childId === "string" && child.childId !== "") {
+      childIdCounts.set(child.childId, (childIdCounts.get(child.childId) ?? 0) + 1);
+    }
+  }
+  const carriedKeys = new Set<string>();
+  const carriedRuns = new Set<string>();
+  if (Array.isArray(data.results)) {
+    for (const row of data.results) {
+      if (!isRecord(row)) continue;
+      if (typeof row.workflowKey === "string") carriedKeys.add(row.workflowKey);
+      if (typeof row.runId === "string") carriedRuns.add(row.runId);
+    }
+  }
+  const unfinished: string[] = [];
+  for (const child of children) {
+    if (!isRecord(child) || child.state !== "running") continue;
+    const { childId, runId } = child;
+    if (typeof childId !== "string" || childId === "") continue;
+    if (typeof runId !== "string" || runId === "") continue;
+    if (keys.get(runId) !== childId || childIdCounts.get(childId) !== 1) continue;
+    if (carriedKeys.has(childId) || carriedRuns.has(runId)) continue;
+    unfinished.push(childId);
+  }
+  return unfinished;
 }
 
 // This is a narrow native envelope, not an inference from failure/notification prose.
@@ -313,12 +369,6 @@ function narrowPartialOutcome(data: Record<string, unknown>): WaveCompletion["te
     return undefined;
   return { state: "partial", reason: outcome.reason };
 }
-
-/**
- * The retained-entry error for a lane the engine projected as still `running` at native partial
- * settlement (contracts.md §8.35): explicit `ok: false`, so the logical tier yields `lane-failed`.
- */
-const LANE_STILL_RUNNING_ERROR = "lane still running at native partial settlement";
 
 /** Project report DATA only by native workflowKey; ambiguous identities withhold evidence. */
 function narrowRetainedEntries(results: unknown): unknown[] {
@@ -455,6 +505,7 @@ export function createRpcWaveAdapter(bus: WaveBus, options?: RpcWaveAdapterOptio
               return child === null ? [] : [child];
             })
           : undefined;
+        const unfinished = terminalOutcome !== undefined ? unfinishedRosterLanes(data, keys) : [];
         handler({
           ...(typeof data.id === "string" ? { asyncId: data.id } : {}),
           ...(typeof data.asyncDir === "string" ? { asyncDir: data.asyncDir } : {}),
@@ -462,7 +513,11 @@ export function createRpcWaveAdapter(bus: WaveBus, options?: RpcWaveAdapterOptio
           ...(typeof data.success === "boolean" ? { success: data.success } : {}),
           ...(children !== undefined ? { children } : {}),
           ...(terminalOutcome !== undefined
-            ? { terminalOutcome, retainedEntries: narrowRetainedEntries(data.results) }
+            ? {
+                terminalOutcome,
+                retainedEntries: narrowRetainedEntries(data.results),
+                ...(unfinished.length > 0 ? { unfinishedLanes: unfinished } : {}),
+              }
             : {}),
         });
       });
