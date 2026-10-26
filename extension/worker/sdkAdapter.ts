@@ -17,8 +17,9 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-// pi-ai's `ModelThinkingLevel` (`"off" | minimal | … | xhigh`) is the union `resolveCliModel`
-// returns and `createAgentSessionFromServices` accepts; the pi-coding-agent root does not
+// pi-ai's `ModelThinkingLevel` union is what `resolveCliModel` returns and
+// `createAgentSessionFromServices` accepts (perk's ordered mirror of its members is
+// `PI_THINKING_LEVEL_ORDER` in `src/perk/substrate/config.py`); the pi-coding-agent root does not
 // re-export a thinking-level type (only `ThinkingLevelChangeEntry`).
 import type { Api, Model, ModelThinkingLevel as ThinkingLevel } from "@earendil-works/pi-ai";
 import {
