@@ -46,11 +46,19 @@ standard shape for id params once ids are backend-owned opaque strings (see
 
 ## Refusal shapes and the sweep invariant
 
-- The six Result-seam doors refuse mistyped params with a **uniform strict-fail `bad_input`**.
+- The Result-seam doors (every perk tool whose outcome is a Result — the count has grown far past
+  the original six; don't pin it) refuse mistyped params with a **uniform strict-fail
+  `bad_input`**.
 - `run_ci` / `plan_review` refuse in their **native result shapes** (each has
   its own outcome union; a foreign `bad_input` shape would break their consumers).
-- The sweep invariant: `params as` survives only in `testing/harness.ts` (deliberate) plus the one
-  structural narrowing inside `paramsOf` (the `parseObject` precedent). Anything else is a
+- **The sweep invariant.** A `params as` cast is admissible only as a **structural narrowing
+  immediately after an explicit object check**, never as a shape assertion. Three live instances:
+  `testing/harness.ts` (deliberate), `paramsOf`'s own narrowing (the `parseObject` precedent), and
+  `extension/library/librarian.ts::decodeLibrarianParams` — which narrows to
+  `Record<string, unknown>` after its own object check because its decode is a closed-key-set,
+  first-violation-wins refusal (unknown keys, control characters, a length cap, per-action field
+  rules, values verbatim) that the tri-state helpers don't model. **No guard test enforces the
+  sweep** — it is a review convention; a new handler-level `params as {…}` shape assertion is the
   regression.
 - **Trim-then-refuse for optional free-text params.** An optional free-text param that survives
   as whitespace rides every composed downstream string as a dangling, contentless suffix. Decode
@@ -63,10 +71,17 @@ standard shape for id params once ids are backend-owned opaque strings (see
 Proving "the decode refused *before* the side effect" in harness tests:
 
 - **Cold-door tools:** `fakePerk(..., { argvFile })` + asserting the argv file was never written
-  proves no exec happened.
-- **`plan_review`:** select plannotator with a short `PERK_PLANNOTATOR_HANDSHAKE_MS`; if the bridge
-  had been invoked the outcome would be `unavailable` after the timeout, so a `skipped` /
-  `bad_input` outcome proves decode-before-bridge ordering.
+  proves no exec happened. Pins: `extension/pi/v1/plan.test.ts` ("plan_save with a mistyped
+  consumed_learn → bad_input, no exec"), `extension/pi/v1/gist.test.ts` ("gist_save with a
+  mistyped scope"), `extension/pi/v1/objectiveAuthoring.test.ts` ("objective_save with a mistyped
+  roadmap").
+- **`plan_review`:** the pin is `extension/pi/v1/planReview.test.ts` ("mistyped plan -> skipped
+  with reason bad_input"), and it runs without a plannotator handshake. The short
+  `PERK_PLANNOTATOR_HANDSHAKE_MS` technique — select plannotator with a short handshake; an
+  invoked bridge would yield `unavailable` after the timeout, so a `skipped` / `bad_input` outcome
+  proves decode-before-bridge ordering — is what the neighbouring no-listener / missing-plan pins
+  in the same file use, and it is the lever to reach for when a decode refusal must be
+  distinguished from an `unavailable` bridge.
 
 Both are deterministic and need no timing slack.
 
@@ -89,11 +104,14 @@ The harness's `invokeTool(name, params, { ui })` overlays scripted `select`/`inp
 answers over the recording UI (precedents: `plan_review`'s launch chooser in
 `extension/pi/v1/planReview.test.ts`; `run_ci`'s confirm arms in `extension/pi/v1/delivery/ci.test.ts`),
 so a registered tool's dialog flow IS testable offline. Only `invokeCommand` (a real `session.prompt`)
-has no dialogs. The pattern: export the handler's decode as a pure function (the `decodeAskUserParams`
-pattern) and compose it with the file's pure core + fake-UI tests; the handler stays a thin wiring
-layer. That export is the **preferred** shape for decode/branch coverage — cheap, exhaustive and
-independent of the dialog script — not a workaround forced by a harness gap; reserve `opts.ui`
-overlays for the end-to-end dialog wiring (see `pi/extension-api.md`).
+has no dialogs. The pattern: export the handler's decode as a pure function (the
+`decodePlanSaveParams` precedent in `extension/pi/v1/plan.ts`; the ask-user tool that first carried
+the pattern was retired with its provider smoke —
+`docs/design/archive/provider-smoke-juicesharp-ask-user.md`) and compose it with the file's pure
+core + fake-UI tests; the handler stays a thin wiring layer. That export is the **preferred** shape
+for decode/branch coverage — cheap, exhaustive and independent of the dialog script — not a
+workaround forced by a harness gap; reserve `opts.ui` overlays for the end-to-end dialog wiring
+(see `pi/extension-api.md`).
 
 ## Live-path note
 
@@ -104,7 +122,9 @@ programmatic callers, not live-session drift.
 ## Cross-references
 
 - `extension/substrate/toolParams.ts` — the tri-state seam, `paramsOf`
-- `extension/substrate/toolParams.test.ts` — the decode + ordering-proof pins
+- `extension/substrate/toolParams.test.ts` — the primitive tri-state decoder pins (no door tests)
+- `extension/pi/v1/plan.test.ts`, `gist.test.ts`, `objectiveAuthoring.test.ts`,
+  `planReview.test.ts` — the decode-before-side-effect ordering-proof pins
 - `docs/learned/workflow/cold-door-client.md` — the contrasting advisory decode policy (never reuse
   its helpers here)
 - `docs/learned/pi/extension-api.md` — `invokeTool`'s `opts.ui` overlay + the pure-decode recipe

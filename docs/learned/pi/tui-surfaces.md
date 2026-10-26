@@ -19,12 +19,14 @@ pi API facts, and test recipes those turns established.
   imports) — "The surfaces module = `surfaces.ts` + `report.ts`".
 - perk publishes ONE composed `perk` status slot (`<objective> · <activity>`, either half
   optional); activity waits are a Set of per-holder tokens, never a scalar ref-count; three live
-  wait kinds (browser review, `/simplify`, writer provider backoff); replace a wait by beginning
-  the new token before ending the old — "The composed single `perk` status slot".
+  wait kinds (browser review, `/simplify`, foreground writers' provider backoff — conflict resolver
+  and librarian); replace a wait by beginning the new token before ending the old — "The
+  composed single `perk` status slot".
 - The RPC dual-publish LAW: RPC mode drops factory widgets and `setFooter`; every themed surface
   keeps a `setStatus`/string twin — "The RPC dual-publish law".
-- The footer facts (lifecycle, slot filtering, `model_select` exists but no usage event —
-  reactivity stays render-driven) — "`setFooter` adoption facts".
+- The footer facts (lifecycle, slot filtering, install-site vacating under a foreign `[providers]
+  footer`, `model_select` exists but no usage event — reactivity stays render-driven) —
+  "`setFooter` adoption facts".
 - Test recipes: `invokeCommand` (never `runCommandHandler`) for status/widget effects; on the tool
   path pass a `setStatus` recorder (`invokeTool` keeps its own private statuses); severity-filtered
   notify asserts — "Harness recipes".
@@ -64,8 +66,12 @@ are absent (`createPerkStatus` in `surfaces.ts`). The objective publisher owns t
   bridge in `plan.ts`, ended when each wait settles.
 - **The `/simplify` run** (`extension/pi/v1/simplify.ts`).
 - **The foreground writers' provider-retry wait** via `createDelegationActivity`
-  (`surfaces.ts`), e.g. `conflict resolver: provider backoff 2/5 …` — shown only while the
-  supplier reports a live `retry` (`pi/subagents.md` § Supervisor channel, provider diagnostics).
+  (`surfaces.ts`), held by the two conflict-resolver drives
+  (`extension/pi/v1/delivery/submitConflict.ts`, `extension/pi/v1/delivery/stackConflictResolver.ts`,
+  label `ACTIVITY_LABEL_CONFLICT_RESOLVER`) and the librarian writer
+  (`extension/pi/v1/librarian.ts`, label `ACTIVITY_LABEL_LIBRARIAN`), e.g.
+  `conflict resolver: provider backoff 2/5 …` — shown only while the supplier reports a live
+  `retry` (`pi/subagents.md` § Supervisor channel, provider diagnostics).
   The text is static (no countdown) by design.
 
 `session_shutdown` in `extension/pi/activation.ts::activatePerk` (the
@@ -128,6 +134,12 @@ charter records why (`docs/design/tui-charter.md` §6: `setFooter` is an RPC no-
   the assignability.
 - **`sanitizeStatusText` is not exported** from pi — reimplement locally (newline/tab → space,
   collapse spaces, trim).
+- **The CH mirror has drifted (recorded, not fixed):** `surfaces.ts::latestCacheHitRate` was built
+  as an exact mirror of pi 0.84.1's default-footer `CH` computation; pi 1.4.0's `footer.js`
+  additionally folds `entry.type === "usage"` entries into the cache-activity totals (the display
+  gate), which perk's mirror does not — so a session whose cache activity rides only `usage`
+  entries shows no `CH` in perk's footer where pi's would. The CH *value* (latest usage-bearing
+  assistant message) is unchanged. Code parity is a report-only harvest lead, not this doc's job.
 - **`ctx.getContextUsage()`** returns `ContextUsage | undefined` — `{ tokens, contextWindow,
   percent }`, `tokens`/`percent` null right after compaction. A **`model_select` extension
   event** exists (`ModelSelectEvent { model, previousModel, source: "set" | "cycle" | "restore" }`)
@@ -136,10 +148,17 @@ charter records why (`docs/design/tui-charter.md` §6: `setFooter` is an RPC no-
 - **Replaced-footer dispose is explicit as of pi 0.84.1**: `setExtensionFooter` disposes a
   replaced footer factory, and `resetExtensionUI` restores the built-in footer on `/reload` and
   before session replacement. Installing per headful `session_start` is therefore safe — perk's
-  once-only `footerInstalled` guard is retired (`extension/pi/activation.ts::activatePerk` installs on every headful
-  `session_start`, so each install's closures capture the *current* event's `ctx`; pinned by a
-  same-activation re-emit test via the harness seams `footerInstallCount()` /
-  `emitSessionStart()`).
+  once-only `footerInstalled` guard is retired (`extension/pi/activation.ts::activatePerk` installs
+  on every headful `session_start` *only while perk's own footer reference is the selected
+  `[providers] footer`*, so each install's closures capture the *current* event's `ctx`; pinned by
+  a same-activation re-emit test via the harness seams `footerInstallCount()` /
+  `emitSessionStart()`). The selection read is
+  `extension/surfaces/footerProvider.ts::isPerkFooterReferenceSelected`, fail-safe to install on
+  any config-read error. Under a foreign selection (`pi-powerline-footer` / `pi-bar`) perk installs
+  nothing, and its objective progress still reaches the foreign footer through the single-value
+  `perk` `setStatus` slot — the install-site vacating pattern (`workflow/provider-seam.md` owns
+  the seam classification; pinned by `extension/index.test.ts` "footer seam: a foreign [providers]
+  footer … vacates installPerkFooter").
 - **The footer is a single last-wins slot** — extensions receive `session_start` in settings load
   order, so a later-loaded package calling `ctx.ui.setFooter` silently replaces perk's footer (no
   error, no log). Borrowed packages must never call it; see `workflow/borrowed-packages.md` for
@@ -210,8 +229,10 @@ normative statement is `docs/design/tui-charter.md` §6, its "display-sanitizer 
 is the operational summary:
 
 - **One stripper.** `surfaces.ts` exports ONE control stripper, `stripTerminalControls` (LF and tab
-  survive; pi-tui renders a tab as three spaces), and `sanitizeOneLine` (the stripper, then a
-  reimplementation of Pi's `sanitizeStatusText` whitespace fold). Never add a second stripper.
+  survive — pi-tui's Text/Markdown render a surviving tab as three spaces, and `visibleWidth`
+  counts it as three, while Input/Editor expand a pasted tab to four spaces on insertion; a typed
+  Tab never inserts), and `sanitizeOneLine` (the stripper, then a reimplementation of Pi's
+  `sanitizeStatusText` whitespace fold). Never add a second stripper.
 - **The sink rule is by row shape.** A one-row renderer folds — an embedded LF breaks row accounting
   and `truncateToWidth` keeps LF. A row-splitting renderer strips only, so indentation survives.
 - **Sanitize whole persisted strings *before* splitting them into rows**, so a control string
@@ -264,9 +285,10 @@ returning an overlay where a structural `Component` is expected type-checks stru
 ### Sanitize an editable Input's paste BEFORE insertion, not after
 
 pi-tui `Input.handlePaste` inserts the pasted text raw (only CR/LF removal + tab expansion) and
-advances the cursor by the raw length; `setValue` only clamps the cursor, and `cursor`/`handlePaste`
-are TS-private. So a post-hoc scrub of the value displaces the cursor: in `ab|cd`, pasting a
-control-bearing `X` then typing `Y` gave `abXcdY` instead of `abXYcd`.
+advances the cursor by the inserted (CR/LF-stripped, tab-expanded) length — control bytes
+included; `setValue` only clamps the cursor, and `cursor`/`handlePaste` are TS-private. So a
+post-hoc scrub of the value displaces the cursor: in `ab|cd`, pasting a control-bearing `X` then
+typing `Y` gave `abXcdY` instead of `abXYcd`.
 
 **Fix shape:** clean the bracketed paste chunk before the Input sees it
 (`extension/vendor/btw/btw.ts::scrubBracketedPaste`). Pi's terminal re-wraps a paste as ONE
@@ -319,7 +341,10 @@ the first production console-swap; prior swaps were all test-local):
   a burst then quiets, so restore after `quietMs` with no new line; start the timer immediately so a
   zero-line case still restores; a `finally` backstop also restores. The shipped value was corrected
   `1500ms → 6000ms` in review because the producer can pause ~4s between lines — **tune a debounce to
-  the producer's worst-case silence, not the typical gap.**
+  the producer's worst-case silence, not the typical gap.** `quietMs` is a **required** option on
+  `interceptConsoleError` (no default); the callers pass `CONSOLE_QUIET_MS`
+  (`extension/pi/v1/browserOperation.ts`) and a literal 6000 in
+  `extension/pi/v1/codeReview/browser.ts`.
 - **Idempotent + never-clobber-a-newer-patcher restore** (reassign only if the slot is still our
   replacement), **post-restore deactivation** (a stale reference delegates to the original), and a
   **re-entrancy guard** (a `console.error` fired from inside the sink delegates to the original) —
@@ -343,9 +368,11 @@ the first production console-swap; prior swaps were all test-local):
 - **Re-verify at each pin bump.** A bump silently re-asserts every dist-scoped fact here: its
   plan re-reads each against the newly *installed* dist (resolved per
   `toolchain/worktree-node-modules.md`) and corrects or dates changes. Last full re-verification:
-  the `0.87.0` dist — provenance, not a currency promise; the pin is. 2026-10-01: the pins moved
-  to `0.99.2` with the suites green and no full re-audit of this doc (owed) — facts here are
-  verified at 0.87.0 unless corrected in place.
+  the `1.4.0` dist (the dream-audit currency pass that produced this revision — every dist-scoped
+  fact above re-read against the installed 1.4.0 dist and corrected in place where it moved) —
+  provenance, not a currency promise; the pin is. Earlier provenance: first full verification at
+  `0.87.0`; 2026-10-01 the pins moved to `0.99.2` with the suites green and no re-audit (that owed
+  audit is the 1.4.0 pass).
 
 ## Cross-references
 
@@ -359,3 +386,6 @@ the first production console-swap; prior swaps were all test-local):
 - `extension/vendor/btw/btw.ts::scrubBracketedPaste` — the pre-insertion paste clean
 - `docs/learned/pi/extension-seams.md` — `report()` and the consolidation-seam recipe
 - `docs/learned/workflow/borrowed-packages.md` — the setFooter-clobber vetting/retirement recipe
+- `extension/surfaces/footerProvider.ts` — `isPerkFooterReferenceSelected`, the install-site
+  vacating guard
+- `docs/learned/workflow/provider-seam.md` — the footer seam's classification
