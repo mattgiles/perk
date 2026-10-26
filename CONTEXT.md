@@ -175,8 +175,8 @@ never stranded, in the cohort).
 _Avoid_: `only`-strand, hidden writer
 
 **Discovery cohort**:
-The sessions in which perk re-registers the pilot family (`declared: deferred`) deferred and
-switches it off once: those where Pi's builtin `tool_search` is registered and active at
+The sessions in which perk keeps the pilot family's `deferred` registration (`declared:
+deferred`; every other session re-declares it `direct` at `session_start`): those where Pi's builtin `tool_search` is registered and active at
 `session_start` (the init-converged `defaultTools: ["+tool_search"]`; opt-out `-tool_search`,
 effective at the next launch) — the headless worker included, through its own builtin
 `tool_search`. `/btw` and any session whose *resolved* selection leaves `tool_search` out (a project `-tool_search`, or an empty resolved selection — a

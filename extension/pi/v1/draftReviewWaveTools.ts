@@ -11,7 +11,7 @@
 // `pi/v1/codeReview/reviewWave.ts`'s shape (own pending slot; a generic extraction waits for
 // the rule of three). A successful launch also primes its collector (`DRAFT_LAUNCH_PRIMES`) in a
 // discovery-cohort session: the door primed it already, so this is the backstop for a resume
-// between the door and the launch (resume starts from the host's defaults).
+// between the door and the launch (Pi restores a primed collector only once a request recorded it).
 //
 // THE DOOR-PRIMED CONTEXT (the trust posture difference from the PR pair): the wave's inputs
 // ride the registration-owned `DraftReviewWaveState` — the context/state module lives in

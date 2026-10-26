@@ -123,23 +123,28 @@ test("derivePiMetadata: terminal/interactive/orchestration/host are model-only; 
     annotations: { readOnlyHint: true },
   });
   for (const kind of ["terminal", "interactive", "orchestration", "host"] as const) {
-    assert.deepEqual(derivePiMetadata({ ...base, kind, gated: "blocked" }, { cohort: true }), {
-      exposure: "model-only",
-    });
+    assert.deepEqual(
+      derivePiMetadata({ ...base, kind, gated: "blocked" }, { declareDirect: true }),
+      { exposure: "model-only" },
+    );
   }
   for (const kind of ["query", "action"] as const) {
     assert.deepEqual(derivePiMetadata({ ...base, kind, gated: "blocked" }), { exposure: "direct" });
-    assert.deepEqual(derivePiMetadata({ ...base, kind, gated: "blocked" }, { cohort: true }), {
-      exposure: "direct",
-    });
-    // A family member registers direct; only the cohort re-registration derives `deferred`.
+    assert.deepEqual(
+      derivePiMetadata({ ...base, kind, gated: "blocked" }, { declareDirect: true }),
+      { exposure: "direct" },
+    );
+    // A family member registers deferred; only the nonparticipant re-declaration derives `direct`.
     const member = { ...base, kind, gated: "blocked", declared: "deferred" } as const;
-    assert.deepEqual(derivePiMetadata(member), { exposure: "direct" });
-    assert.deepEqual(derivePiMetadata(member, { cohort: false }), { exposure: "direct" });
-    assert.deepEqual(derivePiMetadata(member, { cohort: true }), { exposure: "deferred" });
-    assert.deepEqual(derivePiMetadata({ ...member, declared: "always" }, { cohort: true }), {
-      exposure: "direct",
-    });
+    assert.deepEqual(derivePiMetadata(member), { exposure: "deferred" });
+    assert.deepEqual(derivePiMetadata(member, { declareDirect: false }), { exposure: "deferred" });
+    assert.deepEqual(derivePiMetadata(member, { declareDirect: true }), { exposure: "direct" });
+    // `declared: "always"` is unaffected by the option.
+    for (const options of [{}, { declareDirect: true }, { declareDirect: false }]) {
+      assert.deepEqual(derivePiMetadata({ ...member, declared: "always" }, options), {
+        exposure: "direct",
+      });
+    }
   }
   assert.deepEqual(derivePiMetadata({ ...base, kind: "action", gated: "allowed" }), {
     exposure: "direct",
@@ -149,9 +154,9 @@ test("derivePiMetadata: terminal/interactive/orchestration/host are model-only; 
     derivePiMetadata({ ...base, kind: "orchestration", gated: { carveOut: "one file" } }),
     { exposure: "model-only", annotations: { readOnlyHint: true } },
   );
-  // A bounded writer (an action carve-out) is model-only: declared, never script-callable — in
-  // and out of the cohort alike.
-  for (const options of [{}, { cohort: true }, { cohort: false }]) {
+  // A bounded writer (an action carve-out) is model-only: declared, never script-callable — with
+  // or without the nonparticipant re-declaration.
+  for (const options of [{}, { declareDirect: true }, { declareDirect: false }]) {
     assert.deepEqual(
       derivePiMetadata({ ...base, kind: "action", gated: { carveOut: "one file" } }, options),
       { exposure: "model-only", annotations: { readOnlyHint: true } },
@@ -190,8 +195,8 @@ test("derivePiMetadata: a query with declared success details gets the ok-discri
     outputSchema: envelope,
   });
   assert.deepEqual(deriveOutputSchema(result), envelope);
-  // A gate-allowed deferred query: readOnlyHint derived beside the schema; the cohort
-  // re-registration alone flips the exposure.
+  // A gate-allowed deferred query: readOnlyHint derived beside the schema; it registers deferred
+  // and the nonparticipant re-declaration alone flips the exposure.
   const allowedQuery = {
     stages: PLANNING_READ_STAGES,
     gated: "allowed",
@@ -200,12 +205,12 @@ test("derivePiMetadata: a query with declared success details gets the ok-discri
     result,
   } as const;
   assert.deepEqual(derivePiMetadata(allowedQuery), {
-    exposure: "direct",
+    exposure: "deferred",
     annotations: { readOnlyHint: true },
     outputSchema: envelope,
   });
-  assert.deepEqual(derivePiMetadata(allowedQuery, { cohort: true }), {
-    exposure: "deferred",
+  assert.deepEqual(derivePiMetadata(allowedQuery, { declareDirect: true }), {
+    exposure: "direct",
     annotations: { readOnlyHint: true },
     outputSchema: envelope,
   });
@@ -1014,15 +1019,15 @@ test("toolMatrix: perk + builtin rows, the postures section, sorted eligibility,
   ]);
   assert.ok(m.eligible.plan?.["read-only"].includes("tt_carve"));
   assert.ok(m.eligible.plan?.["read-only"].includes("tt_model_only"));
-  // Outside the cohort a family member is eligible like any tool; its row reads the registered
-  // default (`direct`).
+  // A family member is eligible like any tool; its row reads the registration-time exposure
+  // (`deferred` — a nonparticipant re-declares it `direct` at session_start).
   assert.deepEqual(m.eligible.unscoped?.["read-write"], Object.keys(m.tools).sort());
   assert.equal(m.tools.tt_deferred?.owner, "perk");
   assert.deepEqual(
     m.tools.tt_deferred?.owner === "perk"
       ? [m.tools.tt_deferred.declared, m.tools.tt_deferred.exposure]
       : [],
-    ["deferred", "direct"],
+    ["deferred", "deferred"],
   );
 });
 
@@ -1094,6 +1099,14 @@ test("strandedWriters: a registered, gate-eligible, direct, nested-blocked perk 
   // Recorded inside the test (top-level records run before every test): a gate-allowed direct
   // action that is NOT mode-over-stage, stranded exactly where it is staged.
   recordPerkTool("tt_allowed_action", { stages: ["plan"], gated: "allowed", kind: "action" });
+  // A gate-allowed family action: registered deferred by default, re-declared direct in a
+  // nonparticipant — where it strands like any direct writer.
+  recordPerkTool("tt_deferred_action", {
+    stages: ["plan"],
+    gated: "allowed",
+    kind: "action",
+    declared: "deferred",
+  });
   const only = (names: readonly string[]) => ({ registered: names });
   // A registered gate-allowed direct action strands where it is gate-eligible…
   assert.deepEqual(strandedWriters("plan", only(["tt_allowed_action"])), ["tt_allowed_action"]);
@@ -1105,6 +1118,13 @@ test("strandedWriters: a registered, gate-eligible, direct, nested-blocked perk 
   );
   assert.deepEqual(strandedWriters("plan", only([])), []);
   assert.deepEqual(strandedWriters("plan", only(["read", "codemode"])), []);
+  // A family member: a nonparticipant landing (nothing deferred — it was re-declared direct)
+  // counts it stranded; a cohort landing (the registry reports it deferred) does not.
+  assert.deepEqual(strandedWriters("plan", only(["tt_deferred_action"])), ["tt_deferred_action"]);
+  assert.deepEqual(
+    strandedWriters("plan", { ...only(["tt_deferred_action"]), deferred: ["tt_deferred_action"] }),
+    [],
+  );
   // A carve-out (model-only), a gate-eligible query, a model-only kind and a gate-blocked action
   // never strand.
   for (const [name, stage] of [
@@ -1124,7 +1144,9 @@ test("strandedWriters: a registered, gate-eligible, direct, nested-blocked perk 
   // No `registered` fact → the whole catalog is a candidate, in catalog order.
   assert.deepEqual(
     strandedWriters("plan"),
-    perkToolNames().filter((n) => ["tt_over", "tt_over_blocked", "tt_allowed_action"].includes(n)),
+    perkToolNames().filter((n) =>
+      ["tt_over", "tt_over_blocked", "tt_allowed_action", "tt_deferred_action"].includes(n),
+    ),
   );
   assert.deepEqual(strandedWriters("implement"), ["tt_over", "tt_over_blocked"]);
 });

@@ -542,6 +542,28 @@ test("renderCensus: custom base prompt, empty surfaces → none/omitted/unavaila
   );
 });
 
+test("renderCensus: a nonparticipant with a member still deferred names it (a failed re-declaration)", () => {
+  const discoveryLine = (discovery: { cohort: boolean; family: readonly string[] }) =>
+    renderCensus({
+      prompt: promptCensus(undefined),
+      tools: toolsCensus([], []),
+      branch: branchContextCensus([], []),
+      model: modelIdentityCensus(undefined, []),
+      usage: branchUsageCensus([]),
+      context: contextCensus(null, null),
+      bridge: NO_BRIDGE,
+      discovery,
+      hostSdk: ADMITTED_SDK,
+    })
+      .split("\n")
+      .find((line) => line.startsWith("  discovery:"));
+  assert.equal(
+    discoveryLine({ cohort: false, family: ["objective_stack_status", "push_annotations"] }),
+    "  discovery: nonparticipant (still deferred: objective_stack_status, push_annotations)",
+  );
+  assert.equal(discoveryLine({ cohort: false, family: [] }), "  discovery: nonparticipant");
+});
+
 // ---------------------------------------------------------------------------
 // Pure: modelIdentityCensus / contextCensus (the model, usage and context rows)
 // ---------------------------------------------------------------------------

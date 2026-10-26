@@ -534,8 +534,9 @@ function identityLines(
  * - `host sdk:` is the loaded SDK version the entry admitted against the floor (`?` when
  *   unobserved — an activation is only ever reached admitted). The bridge block carries
  *   `describeBridge`, the host entry (or `-`) and the root paths — identifiers only.
- *   `discovery:` reports the session's discovery-cohort membership and, in the cohort, the whole
- *   pilot family in catalog order.
+ *   `discovery:` reports the session's discovery-cohort membership and, in the cohort, the family
+ *   members currently registered deferred in catalog order; a nonparticipant names any member
+ *   still deferred (a failed re-declaration).
  */
 export function renderCensus(census: {
   prompt: PromptCensus;
@@ -578,7 +579,9 @@ export function renderCensus(census: {
   lines.push(
     discovery.cohort
       ? `  discovery: cohort (family: ${discovery.family.join(", ")})`
-      : "  discovery: nonparticipant",
+      : discovery.family.length === 0
+        ? "  discovery: nonparticipant"
+        : `  discovery: nonparticipant (still deferred: ${discovery.family.join(", ")})`,
   );
   lines.push(
     `  branch: ${branch.entries} entries; binding-header-copies=${branch.bindingHeaderCopies}`,

@@ -44,11 +44,10 @@ export type ToolKind = "terminal" | "interactive" | "orchestration" | "query" | 
 /** A tool's posture under the read-only gate; `carveOut` names its one bounded write, in prose. */
 export type GatePosture = "allowed" | "blocked" | { carveOut: string };
 /**
- * How the tool is declared to the model: always, or deferred — a discovery-pilot family member.
- * A deferred tool registers `direct` like every other tool; in a discovery-cohort session it is
- * re-registered `exposure: "deferred"` at `session_start`, deactivated once, and thereafter
- * declared only while a door or launcher primes it or the host (`tool_search`, a `/tree`
- * restore) activates it.
+ * How the tool is declared to the model: always, or deferred — a discovery-pilot family member:
+ * registered `exposure: "deferred"`, inactive until a door or launcher primes it or the host
+ * (`tool_search`, a resume/fork/`/tree` restore) activates it; re-registered `direct` at
+ * `session_start` in every session that is not a discovery host.
  */
 export type Declared = "always" | "deferred";
 /** The session's gate mode (the workflow-state `mode` field). */
@@ -265,19 +264,21 @@ export function deriveOutputSchema(result: QueryResultSchema): object {
  * hand-set on a definition. A model-only kind and every carve-out writer are `model-only`: a
  * bounded writer is declared to the model but never a member of a codemode script's `tools` and
  * never reachable through `ctx.executeTool` (Pi refuses both before any hook), so Pi's codemode
- * `only` mode cannot hide it from the model. `exposure` is `deferred` only for a family member
- * re-registered inside the discovery cohort (`cohort: true`); registration and the golden matrix
- * derive without it, so every family member registers `direct`. A carve-out is never deferred
- * (validation refuses it), so the two never compete for the one enum.
+ * `only` mode cannot hide it from the model. A family member (`declared: "deferred"`) registers
+ * `exposure: "deferred"` — Pi never activates a deferred tool on registration; `tool_search`, a
+ * prime or a restore does. A nonparticipant's `session_start` re-registers it `direct`
+ * (`declareDirect`), which Pi activates like a new tool. The golden matrix records the
+ * registration-time exposure. A carve-out is never deferred (validation refuses it), so the two
+ * never compete for the one enum.
  */
 export function derivePiMetadata(
   policy: ToolPolicy,
-  options: { cohort?: boolean } = {},
+  options: { declareDirect?: boolean } = {},
 ): PiToolMetadata {
   const exposure =
     MODEL_ONLY_KINDS.has(policy.kind) || typeof policy.gated === "object"
       ? "model-only"
-      : policy.declared === "deferred" && options.cohort === true
+      : policy.declared === "deferred" && options.declareDirect !== true
         ? "deferred"
         : "direct";
   return {
@@ -483,8 +484,8 @@ export type BuiltinRow = {
 
 /**
  * The session facts a codemode lift reads beyond (stage, mode): the session's codemode mode (Pi's
- * merged `codemode.mode` setting), the names this activation actually deferred, and the names
- * registered in this session. Absent facts fail closed: no `codemode` → no lift; no `deferred`
+ * merged `codemode.mode` setting), the family names registered `deferred` in this session (read
+ * from the registry), and the names registered in this session. Absent facts fail closed: no `codemode` → no lift; no `deferred`
  * → nothing deferred; no `registered` → the whole catalog is a candidate (more stranded
  * writers, never fewer).
  */
@@ -651,7 +652,7 @@ export function isEligible(
 /**
  * The perk tools Pi's codemode `only` mode would strand in a gated landing: registered in this
  * session (`landing.registered`, else every catalogued name), eligible under the gate in the
- * stage, exposed `direct` here (not deferred in this activation, not model-only) and blocked
+ * stage, exposed `direct` here (not deferred in this session, not model-only) and blocked
  * nested — so `only` would hide them from the model while the nested policy refuses them to a
  * script, leaving no path at all. Catalog order. A catalogued name the host never registered can
  * never strand (only registered names exist in a session).
@@ -665,7 +666,11 @@ export function strandedWriters(
   return [...CATALOG].flatMap(([name, policy]) => {
     if (registered !== null && !registered.has(name)) return [];
     if (!isEligible(name, undefined, stage, "read-only")) return [];
-    if (deferred.has(name) || derivePiMetadata(policy).exposure !== "direct") return [];
+    // The deferral is the session's (`landing.deferred`, read from the registry); the metadata
+    // test only excludes a model-only kind or carve-out — a family member registers deferred by
+    // default, but a nonparticipant re-declared it `direct`, where it can strand.
+    if (deferred.has(name)) return [];
+    if (derivePiMetadata(policy, { declareDirect: true }).exposure !== "direct") return [];
     return nestedPostureFor({ owner: "perk", policy }) === "blocked" ? [name] : [];
   });
 }
@@ -769,10 +774,10 @@ export function carveOutWritersFor(
  * The active set perk installs for a (stage, mode) landing, or null when the live set already
  * equals it (order-insensitive) — so a session whose live set needs no change gets no install:
  *   (live active − perk-owned) ∪ eligible-always-perk ∪ (live active ∩ eligible-deferred-perk)
- * "Deferred" means deferred IN THIS SESSION — the names `deferred` lists (the discovery cohort's
- * successfully re-registered family; empty outside the cohort). Such a name is kept exactly while
- * it is active (primed or host-activated) and eligible; every other eligible perk tool — a family
- * member whose re-registration failed included, since it is still `direct` and unsearchable — is
+ * "Deferred" means deferred IN THIS SESSION — the names `deferred` lists (the family members the
+ * registry reports `exposure: "deferred"`; none in a nonparticipant whose `direct` re-declaration
+ * succeeded). Such a name is kept exactly while it is active (primed, searched or restored) and
+ * eligible; every other eligible perk tool — a re-declared `direct` family member included — is
  * always-declared. Foreign names keep their live order and membership (perk
  * never activates or deactivates one); perk names follow in catalog order. Only REGISTERED perk
  * names count: a catalogued name the host did not register (a vacated provider tool, a host

@@ -462,18 +462,17 @@ stays active but is not declared to the model, and a late-registering tool (the 
 supervisor) is shown or hidden by its posture the moment it appears. In a discovery-cohort session (below), a deferred perk tool that
 `tool_search` activates stays while it is eligible; where it is not, it is hidden from the very
 next request and switched off when the next prompt starts (until then it stays callable — the
-read-write diet has no call-time check). Pi restores such activations only when you navigate
-the session tree, not on resume or fork; perk keeps what Pi restored and adds nothing.
+read-write diet has no call-time check). Pi restores such activations when you resume or fork a
+session (once a prompt has recorded them) and when you navigate the session tree; perk keeps what
+Pi restored and adds nothing.
 
-On Pi 1.0, tools Pi restores after `/reload` or tree navigation survive perk's reconciliation —
-for example an MCP server's tools that reconnect before your next prompt. Until that prompt starts,
-perk only adds tools; anything it would switch off (a tool the new stage or mode does not allow,
-the deferred discovery tools, a suspended `codemode`) waits for the next prompt, while a `codemode`
-a read-only stage keeps on comes back at once. Meanwhile that
-tool is not declared to the model, though its usage notes can still appear in the system prompt
-of that one prompt. Waiting changes no permission: a tool read-only mode does not allow is
-blocked at once, while a deferred discovery tool the stage and mode allow stays callable as
-before.
+Tools Pi restores after `/reload`, tree navigation or (Pi 1.4.0) a resume or fork survive perk's
+reconciliation — for example an MCP server's tools that reconnect before your next prompt. Until
+that prompt starts, perk only adds tools; anything it would switch off (a tool the new stage or
+mode does not allow, a suspended `codemode`) waits for the next prompt, while a `codemode` a
+read-only stage keeps on comes back at once. Meanwhile that tool is not declared to the model and
+nothing of it reaches that prompt. Waiting changes no permission: a tool read-only mode does not
+allow is blocked at once.
 
 One composition limit: `codemode` writes its own description from every callable tool, so in a
 read-write stage session that description may name a tool the diet hides, and in a read-only
@@ -512,8 +511,8 @@ resolves to Pi's four default tools plus `tool_search`; commit a project `[]` to
 empty selection.
 
 A session whose Pi has its builtin `tool_search` registered **and** active at startup joins
-the **discovery cohort**: perk re-registers four optional, schema-heavy tools as deferred and
-switches them off once — `objective_stack_status`, `collect_review_wave`,
+the **discovery cohort**: perk registers four optional, schema-heavy tools as deferred, and Pi
+leaves them off until something activates them — `objective_stack_status`, `collect_review_wave`,
 `collect_draft_review_wave` and `push_annotations`. Their schemas, snippets and guidelines leave
 every request until something activates them; `tool_search` itself is declared instead.
 
@@ -530,14 +529,20 @@ They come back in two ways:
 - **Search.** The model can find any of them with `tool_search`; the match is declared from the
   next model call.
 
-An activated tool stays only while the stage and mode allow it, exactly like any perk tool.
-Resume and fork start without it (re-run the door or search again); `/reload` deactivates the
-four again when your next prompt starts; navigating the session tree restores whatever the transcript had and perk keeps it.
-`/perk-selfcheck` reports `discovery: cohort (family: …)` or `discovery: nonparticipant`.
+An activated tool stays with the session: Pi restores it on resume and fork once a prompt recorded
+it, keeps it across `/reload`, and restores whatever the transcript had when you navigate the
+session tree; perk keeps it while the stage and mode allow it, exactly like any perk tool.
+`/perk-selfcheck` reports `discovery: cohort (family: …)` or `discovery: nonparticipant` (with
+`(still deferred: …)` if perk could not declare one of the four there).
+
+A `tools` allowlist (`--tools`) that names one of the four activates it in any session. A pattern
+entry that only matches it (`--tools 'objective_*'`) does not activate it in a discovery-cohort
+session — search for it or run the door.
 
 Who never participates: a session of a repo that opted out with `-tool_search` (or whose resolved
 selection is empty), a session whose `tool_search` comes from some other extension, `/btw`'s side
-session and spawned subagent children — they keep every perk tool declared as before. The pilot's measurements and its adopt/retire decision are
+session and spawned subagent children — they keep every perk tool declared as before (perk
+declares the four at startup, so they are listed after the other tools). The pilot's measurements and its adopt/retire decision are
 recorded in `docs/design/native-discovery-pilot.md`.
 
 **In the headless worker.** The worker loads Pi's builtin `tool_search` and `codemode` itself, so

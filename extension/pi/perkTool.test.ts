@@ -17,7 +17,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import ts from "typescript";
 import { perkToolNames, perkToolPolicy } from "../substrate/toolPolicy.ts";
-import { fauxModelRuntime, scaffoldRepo } from "../testing/harness.ts";
+import { COHORT_SETTINGS, fauxModelRuntime, scaffoldRepo, toolSearch } from "../testing/harness.ts";
 import { ensureToolCatalog, loadPerkSessionAt } from "../testing/toolCatalog.ts";
 
 const PI_V1 = join(import.meta.dirname, "v1");
@@ -188,6 +188,8 @@ function terminateMismatches(scanned: ScannedRegistration[]): string[] {
 // --- the census -------------------------------------------------------------------------------
 
 test("exposure census: model-only iff terminal/interactive/orchestration/host or a carve-out writer; readOnlyHint iff not blocked", async () => {
+  // A nonparticipant session (no active `tool_search`): the family was re-declared `direct` at
+  // session_start, so every non-model-only tool reads `direct`.
   const h = await loadPerkSessionAt(scaffoldRepo());
   try {
     for (const name of perkToolNames()) {
@@ -205,6 +207,35 @@ test("exposure census: model-only iff terminal/interactive/orchestration/host or
         info.annotations,
         policy.gated === "blocked" ? undefined : { readOnlyHint: true },
         `${name} annotations`,
+      );
+    }
+  } finally {
+    h.dispose();
+  }
+});
+
+test("exposure census (cohort): a discovery host keeps the family's deferred registration; every other tool reads the derived value", async () => {
+  const h = await loadPerkSessionAt(scaffoldRepo(), {
+    extraExtensions: [toolSearch()],
+    settings: COHORT_SETTINGS,
+  });
+  try {
+    const deferred = perkToolNames().filter(
+      (name) => perkToolPolicy(name)?.declared === "deferred",
+    );
+    assert.ok(deferred.length > 0, "the family is catalogued");
+    for (const name of perkToolNames()) {
+      const policy = perkToolPolicy(name);
+      const info = h.toolInfo(name);
+      assert.ok(policy !== undefined && info !== null, name);
+      assert.equal(
+        info.exposure,
+        MODEL_ONLY_KINDS.has(policy.kind) || typeof policy.gated === "object"
+          ? "model-only"
+          : policy.declared === "deferred"
+            ? "deferred"
+            : "direct",
+        `${name} (${policy.kind}, declared ${policy.declared ?? "always"})`,
       );
     }
   } finally {

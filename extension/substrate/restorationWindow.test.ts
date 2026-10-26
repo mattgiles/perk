@@ -3,7 +3,8 @@
 // tool is active and recorded in the transcript, and after `/reload` it registers only when the
 // test releases it. Inside the window every perk install only adds, and the first request after
 // it declares none of the names the window's close removed; the host's pending set re-activates
-// the late tool when it registers, and perk never deactivates it.
+// the late tool when it registers, and perk never deactivates it. The discovery family registers
+// deferred, so in these cohort sessions it is never live unless something activated it.
 
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
@@ -82,13 +83,30 @@ async function registration(h: PerkSession, name: string): Promise<void> {
   assert.ok(isRegistered(h, name), `${name} registered once released`);
 }
 
-/** The registered perk names ineligible in the landing — the reload re-activates every one. */
+/**
+ * The registered perk names ineligible in the landing — the reload re-activates every one. A
+ * deferred family member is never live (Pi never activates it on registration), so it is not a
+ * window removal and is excluded.
+ */
 function ineligibleOwn(h: PerkSession, stage: string, mode: "read-only" | "read-write"): string[] {
   const eligible = new Set(perkToolsFor(stage, mode));
+  const family = new Set(discoveryFamily());
   return h.session
     .getAllTools()
     .map((t) => t.name)
-    .filter((name) => isPerkTool(name) && name !== LOADOUT_HOST_NAME && !eligible.has(name));
+    .filter(
+      (name) =>
+        isPerkTool(name) && name !== LOADOUT_HOST_NAME && !eligible.has(name) && !family.has(name),
+    );
+}
+
+/** The family is inactive and (when a request is given) undeclared in it. */
+function assertFamilyOff(h: PerkSession, label: string, request?: { tools: string[] }): void {
+  for (const name of discoveryFamily()) {
+    assert.ok(!isActive(h, name), `${label}: ${name} inactive`);
+    if (request !== undefined)
+      assert.ok(!request.tools.includes(name), `${label}: ${name} undeclared`);
+  }
 }
 
 /** Every in-window install kept the live set it replaced (no deactivation clears Pi's pending set). */
@@ -122,13 +140,15 @@ test("the window after /reload (A): every perk install only adds until the run s
       rt.census();
       await h.session.prompt("census");
       assert.ok(isActive(h, LATE), `${label}: the late tool is active and recorded`);
+      assertFamilyOff(h, `${label} before /reload`, rt.last());
 
       const from = installs.length;
       await h.reload();
       assert.ok(!isRegistered(h, LATE), `${label}: not registered yet (the window is open)`);
-      const removable = [...family, ...ineligibleOwn(h, stage, mode)];
+      const removable = ineligibleOwn(h, stage, mode);
       for (const name of removable)
         assert.ok(isActive(h, name), `${label}: ${name} stays active until the run starts`);
+      assertFamilyOff(h, `${label} after /reload`);
       assertOnlyAdds(installs.slice(from), label);
 
       late.release();
@@ -145,6 +165,10 @@ test("the window after /reload (A): every perk install only adds until the run s
         assert.ok(!first.tools.includes(name), `${label}: ${name} undeclared in the first request`);
         assert.ok(!isActive(h, name), `${label}: ${name} deactivated when the run started`);
       }
+      assertFamilyOff(h, `${label} first request`, first);
+      for (const install of installs.slice(from))
+        for (const name of family)
+          assert.ok(!install.names.includes(name), `${label}: no perk install names ${name}`);
       assert.ok(isActive(h, LATE), `${label}: perk never deactivates the restored foreign tool`);
     } finally {
       h.dispose();
@@ -152,7 +176,7 @@ test("the window after /reload (A): every perk install only adds until the run s
   }
 });
 
-test("a /tree restore inside the window (A): after /reload, navigating back to a leaf whose transcript declared an activated family member keeps it through the next run; the rest of the family is switched off", async () => {
+test("a /tree restore inside the window (A): after /reload the family is inactive; navigating back to a leaf whose transcript declared an activated family member restores it, and it survives the next run; the rest of the family stays inactive", async () => {
   const family = discoveryFamily();
   const restored = "objective_stack_status";
   const rt = await recordingRuntime();
@@ -172,11 +196,15 @@ test("a /tree restore inside the window (A): after /reload, navigating back to a
     assert.ok(rt.last().tools.includes(restored), `${restored} declared in the transcript`);
     const leaf = h.session.sessionManager.getLeafId();
     assert.ok(leaf !== null);
+    // A foreign owner switched it off since (unrecorded — no prompt followed): the reload keeps
+    // the live set, so the whole family is inactive inside the window.
+    h.session.setActiveToolsByName(h.session.getActiveToolNames().filter((n) => n !== restored));
 
     await h.reload();
-    for (const name of family) assert.ok(isActive(h, name), `${name} active inside the window`);
+    assertFamilyOff(h, "after /reload");
     await h.navigateTo(first);
     await h.navigateTo(leaf);
+    assert.ok(isActive(h, restored), `${restored} restored by /tree`);
     const before = rt.requests.length;
     rt.census();
     await h.session.prompt("census");
@@ -186,7 +214,7 @@ test("a /tree restore inside the window (A): after /reload, navigating back to a
     assert.ok(isActive(h, restored), `${restored} survives the window's close`);
     for (const name of family.filter((n) => n !== restored)) {
       assert.ok(!request.tools.includes(name), `${name} undeclared`);
-      assert.ok(!isActive(h, name), `${name} switched off`);
+      assert.ok(!isActive(h, name), `${name} stays inactive`);
     }
   } finally {
     h.dispose();
@@ -207,8 +235,9 @@ test("a sendMessage-triggered turn inside the window (A): no before_agent_start,
   try {
     const from = installs.length;
     await h.reload();
-    const removable = [...family, ...ineligibleOwn(h, "objective-plan", "read-only")];
+    const removable = ineligibleOwn(h, "objective-plan", "read-only");
     for (const name of removable) assert.ok(isActive(h, name), `${name} active inside the window`);
+    assertFamilyOff(h, "after /reload");
     assertOnlyAdds(installs.slice(from), "reload");
 
     const before = rt.requests.length;
@@ -224,6 +253,10 @@ test("a sendMessage-triggered turn inside the window (A): no before_agent_start,
       assert.ok(!first.tools.includes(name), `${name} undeclared in the triggered turn's request`);
       assert.ok(!isActive(h, name), `${name} deactivated when the triggered run started`);
     }
+    assertFamilyOff(h, "the triggered turn", first);
+    for (const install of installs.slice(from))
+      for (const name of family)
+        assert.ok(!install.names.includes(name), `no perk install names ${name}`);
   } finally {
     h.dispose();
   }

@@ -310,7 +310,8 @@ the stamp the same way; the stamp moves only on certification evidence.
    - **the policy suites** — `tests/test_subagent_agents.py` and `tests/test_repo_local_agents.py`
      (the descendant ceiling; a removed-field throw fails every def at load),
      `extension/substrate/mcpReadOnlyFloor.test.ts`,
-     `extension/substrate/restorationWindow.test.ts`, `extension/substrate/codemodeLift.test.ts`,
+     `extension/substrate/restorationWindow.test.ts`,
+     `extension/substrate/restoredDiscovery.test.ts`, `extension/substrate/codemodeLift.test.ts`,
      and the lifecycle matrix in `extension/waves/reportWaveRpc.test.ts`,
      `extension/waves/reportWave.test.ts` and `extension/pi/v1/waveIsolation.test.ts`. The fake
      `extension/testing/fakeSubagents.ts` mirrors the RPC where perk touches it — a wire change

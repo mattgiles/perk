@@ -59,6 +59,8 @@ type FakeTool = {
   source: string;
   path: string;
   annotations?: { readOnlyHint?: boolean };
+  /** The registered exposure `getAllTools` reports; default `direct`. */
+  exposure?: "direct" | "deferred";
 };
 
 const builtin = (name: string): FakeTool => ({ name, source: "builtin", path: `builtin:${name}` });
@@ -92,11 +94,21 @@ function defaultRegistry(): FakeTool[] {
 }
 
 /**
- * The default live active set: a bare session's — Pi's defaults plus every registrant's tools (a
- * discovery-family member registers direct, so it is active on registration like any perk tool).
+ * The default live active set: a bare session's — Pi's defaults plus every registrant's tools,
+ * except a tool registered `deferred` (Pi never activates one on registration: a cohort session's
+ * discovery family, a nonparticipant member whose `direct` re-declaration failed).
  */
 function defaultActive(registry: readonly FakeTool[]): string[] {
-  return registry.map((t) => t.name).filter((name) => !["grep", "find", "ls"].includes(name));
+  return registry
+    .filter((t) => t.exposure !== "deferred")
+    .map((t) => t.name)
+    .filter((name) => !["grep", "find", "ls"].includes(name));
+}
+
+/** A registry whose discovery-family members are registered deferred (a cohort session's). */
+function cohortRegistry(registry: readonly FakeTool[]): FakeTool[] {
+  const family = new Set(discoveryFamily());
+  return registry.map((t) => (family.has(t.name) ? { ...t, exposure: "deferred" } : t));
 }
 
 /** One recorded install: the names, the live foreign set it replaced, and the host's hidden set. */
@@ -115,15 +127,30 @@ function gateFixture(
     active?: readonly string[];
     /** Pi's merged settings (`getSettings`); default `{}` — codemode mode `on`; null = no API. */
     settings?: { codemode?: { mode?: string } } | null;
+    /**
+     * A discovery-cohort session: the family is registered deferred (so inactive by default — Pi
+     * never activated it). Default false: a nonparticipant, whose family is `direct` and active
+     * like any perk tool.
+     */
+    cohort?: boolean;
   } = {},
 ) {
   const hooks = new Map<string, Hook>();
-  let registry: FakeTool[] = [...(opts.registry ?? defaultRegistry())];
+  const base = opts.registry ?? defaultRegistry();
+  let registry: FakeTool[] = opts.cohort === true ? cohortRegistry(base) : [...base];
   let active: string[] = [...(opts.active ?? defaultActive(registry))];
   const settings = opts.settings === undefined ? {} : opts.settings;
   // `append` throws before recording; `append-after` records THEN throws (Pi's non-transactional
   // append: the entry reaches the branch before the persistence that fails).
-  let fail: "snapshot" | "census" | "toolset" | "append" | "append-after" | "settings" | undefined;
+  let fail:
+    | "snapshot"
+    | "census"
+    | "toolset"
+    | "append"
+    | "append-after"
+    | "settings"
+    | "projection"
+    | undefined;
   const appends: unknown[] = [];
   const installs: Install[] = [];
   const pi = {
@@ -138,6 +165,7 @@ function gateFixture(
       if (fail === "census") throw new Error("census");
       return registry.map((t) => ({
         name: t.name,
+        exposure: t.exposure ?? "direct",
         sourceInfo: { source: t.source, path: t.path },
         ...(t.annotations !== undefined ? { annotations: t.annotations } : {}),
       }));
@@ -173,10 +201,15 @@ function gateFixture(
   sessionManager.getBranch = () => {
     throw new Error("branch unavailable");
   };
-  // The branch projection Pi's `/tree` restore reads: empty (no declared loadout) until `restore`.
+  // The branch projection Pi's restore reads (resume/fork/`/tree`): empty (no recorded loadout)
+  // until `restore`; `fail("projection")` makes it unreadable.
   let projected: unknown[] = [];
-  sessionManager.buildSessionProjection = () =>
-    ({ messages: projected }) as unknown as ReturnType<SessionManager["buildSessionProjection"]>;
+  sessionManager.buildSessionProjection = () => {
+    if (fail === "projection") throw new Error("projection");
+    return { messages: projected } as unknown as ReturnType<
+      SessionManager["buildSessionProjection"]
+    >;
+  };
   const context: Pick<ExtensionContext, "sessionManager"> = { sessionManager };
   const ctx = context as ExtensionContext;
   return {
@@ -198,8 +231,9 @@ function gateFixture(
       if (activate) active = [...active, tool.name];
     },
     /**
-     * Pi's `/tree` restore of a branch that declares a loadout: the live set becomes `names` and
-     * the branch projection now carries a system message. Fire `session_tree` after it.
+     * Pi's restore of a branch that records a loadout: the live set becomes `names` and the branch
+     * projection now carries a system message. Fire `session_tree` after it (a `/tree` restore),
+     * or a `session_start` (a resumed or forked session's constructor restore).
      */
     restore: (names: readonly string[]) => {
       active = [...names];
@@ -1102,13 +1136,18 @@ const CODEMODE_TOOL: FakeTool = builtin("codemode");
 
 /** A session with Pi's builtin codemode registered and active, under the given settings. */
 function withCodemode(
-  opts: { floor?: () => boolean; mode?: "on" | "only"; registry?: readonly FakeTool[] } = {},
+  opts: {
+    floor?: () => boolean;
+    mode?: "on" | "only";
+    registry?: readonly FakeTool[];
+    cohort?: boolean;
+  } = {},
 ): Fixture {
   const registry = [...(opts.registry ?? defaultRegistry()), CODEMODE_TOOL];
   return gateFixture(opts.floor ?? (() => false), {
     registry,
-    active: [...defaultActive(registry)],
     settings: opts.mode === undefined ? {} : { codemode: { mode: opts.mode } },
+    ...(opts.cohort === true ? { cohort: true } : {}),
   });
 }
 
@@ -1161,8 +1200,9 @@ test("the codemode lift: mode on keeps a user-enabled codemode active, declared 
 });
 
 test("the codemode lift under mode only: lifted in a cohort session; a nonparticipant keeps it suspended (its mode-over-stage actions stay direct) unless its registry lacks them", async () => {
-  const cohort = withCodemode({ mode: "only" });
-  cohort.gate.joinDiscoveryCohort(discoveryFamily());
+  // The family is registered deferred there, so neither action is a direct path to strand.
+  const cohort = withCodemode({ mode: "only", cohort: true });
+  cohort.gate.joinDiscoveryCohort();
   cohort.gate.syncFromState("read-only", "plan");
   await assertLifted(cohort, "cohort plan");
 
@@ -1235,8 +1275,12 @@ test("the codemode lift follows the stage: plan → implement → plan suspends 
 });
 
 // --- the discovery cohort ---------------------------------------------------------------------------
+//
+// The family registers deferred; a cohort session keeps that registration (the fixture's `cohort`),
+// a nonparticipant re-declared it `direct` at session_start (the default fixture). "Deferred" is
+// read from the registry's reported exposure at every point.
 
-test("the cohort join: applied by the next reconciliation as ONE install (the family deactivated once); idempotent; nonparticipants keep the family", async () => {
+test("a cohort session: the family is registered deferred and inactive; the first sync's one install is the diet and never names a family member; discovery() reads the family from the registry; a nonparticipant (direct) keeps it", async () => {
   const family = discoveryFamily();
   assert.ok(family.length > 0, "the pilot family is catalogued");
   const outside = gateFixture(() => false);
@@ -1245,32 +1289,35 @@ test("the cohort join: applied by the next reconciliation as ONE install (the fa
   for (const name of family.filter((n) => isEligible(n, undefined, "implement", "read-write")))
     assert.ok(outside.active().includes(name), `a nonparticipant keeps ${name}`);
 
-  const h = gateFixture(() => false);
-  h.gate.joinDiscoveryCohort(family);
-  assert.deepEqual(h.installs, [], "the join installs nothing itself");
+  const h = gateFixture(() => false, { cohort: true });
+  for (const name of family) assert.ok(!h.active().includes(name), `${name} inactive at startup`);
+  h.gate.joinDiscoveryCohort();
+  assert.equal(h.installs.length, 0, "the join installs nothing itself");
   assert.deepEqual(h.gate.discovery(), { cohort: true, family });
   h.gate.syncFromState("read-write", "implement");
-  assert.equal(h.installs.length, 1, "one install at the first sync");
-  for (const name of family) assert.ok(!h.active().includes(name), `${name} deactivated`);
+  assert.equal(h.installs.length, 1, "one install at the first sync (the diet)");
+  for (const name of family)
+    assert.ok(!h.installs[0]?.names.includes(name), `the install never names ${name}`);
   assert.deepEqual(activePerk(h), perkView(perkToolsFor("implement", "read-write", true)));
   assertForeignInvariance(h);
   // A second join and every later point change nothing.
-  h.gate.joinDiscoveryCohort(family);
+  h.gate.joinDiscoveryCohort();
   await h.call("resources_discover");
   await h.call("before_agent_start");
   h.gate.syncFromState("read-write", "implement");
   assert.equal(h.installs.length, 1, "no further install");
+  assert.deepEqual(h.gate.discovery(), { cohort: true, family });
 });
 
-test("primeDeferred: a no-op outside the cohort; inside it activates the registered eligible inactive family members named, in catalog order, and they survive the points while eligible", async () => {
+test("primeDeferred: finds nothing where the family is direct; in a cohort it activates the registered-deferred eligible inactive members named, in catalog order, and they survive the points while eligible", async () => {
   const outside = gateFixture(() => false);
   outside.gate.syncFromState("read-write", "implement");
   const before = outside.installs.length;
   assert.deepEqual(outside.gate.primeDeferred(["collect_review_wave", "push_annotations"]), []);
-  assert.equal(outside.installs.length, before, "no install outside the cohort");
+  assert.equal(outside.installs.length, before, "no install where nothing is deferred");
 
-  const h = gateFixture(() => false);
-  h.gate.joinDiscoveryCohort(discoveryFamily());
+  const h = gateFixture(() => false, { cohort: true });
+  h.gate.joinDiscoveryCohort();
   h.gate.syncFromState("read-write", "implement");
   const live = h.active();
   // Catalog order, whatever the caller's order; a non-family name is never primed.
@@ -1306,8 +1353,8 @@ test("primeDeferred: a no-op outside the cohort; inside it activates the registe
 
 test("primeDeferred skips an unregistered or ineligible name and never throws", async () => {
   const registry = defaultRegistry().filter((t) => t.name !== "push_annotations");
-  const h = gateFixture(() => false, { registry });
-  h.gate.joinDiscoveryCohort(discoveryFamily());
+  const h = gateFixture(() => false, { registry, cohort: true });
+  h.gate.joinDiscoveryCohort();
   h.gate.syncFromState("read-write", "plan");
   const installs = h.installs.length;
   assert.deepEqual(h.gate.primeDeferred(["push_annotations"]), [], "unregistered");
@@ -1323,78 +1370,84 @@ test("primeDeferred skips an unregistered or ineligible name and never throws", 
   ]);
 });
 
-test("a throwing install keeps the cohort deferral pending for the next point", async () => {
-  const family = discoveryFamily();
-  const h = gateFixture(() => false);
-  h.gate.joinDiscoveryCohort(family);
-  h.fail("toolset");
-  const failed = h.gate.syncFromState("read-write", "implement");
-  assert.equal(failed.status === "failed" ? failed.error : failed.status, "toolset");
-  for (const name of family.filter((n) => isEligible(n, undefined, "implement", "read-write")))
-    assert.ok(h.active().includes(name), `${name} still active after the failed install`);
-  h.fail(undefined);
-  await h.call("resources_discover");
-  for (const name of family) assert.ok(!h.active().includes(name), `${name} deactivated now`);
-  assert.equal(h.installs.length, 1);
-});
-
-test("a member whose deferred re-registration failed stays always-declared: kept under the gate when gate-allowed, else dropped and restored at its exit", () => {
-  // deferDiscoveryFamily omits a member it could not re-register; it is still `direct`, so
-  // tool_search cannot find it and only reconciliation can bring it back.
-  const joined = discoveryFamily().filter((name) => name !== "objective_stack_status");
-  const h = gateFixture(() => false);
-  h.gate.joinDiscoveryCohort(joined);
+test("a nonparticipant member still registered deferred (a failed re-declaration): inactive, primable, kept while active and eligible, reported by discovery() with cohort false", async () => {
+  const stuck = "objective_stack_status";
+  const registry = defaultRegistry().map(
+    (t): FakeTool => (t.name === stuck ? { ...t, exposure: "deferred" } : t),
+  );
+  const h = gateFixture(() => false, { registry });
+  assert.ok(!h.active().includes(stuck), "Pi never activated it");
   h.gate.syncFromState("read-write", "implement");
-  assert.ok(h.active().includes("objective_stack_status"), "never deferred, so kept at the join");
+  assert.ok(!h.active().includes(stuck), "reconciliation never activates it");
+  assert.ok(h.hidden().includes(stuck), "hidden while undeclared");
+  assert.deepEqual(h.gate.discovery(), { cohort: false, family: [stuck] });
+  // The rest of the family is direct: always-declared like any perk tool, never primed.
+  const direct = discoveryFamily().filter(
+    (n) => n !== stuck && isEligible(n, undefined, "implement", "read-write"),
+  );
+  for (const name of direct) assert.ok(h.active().includes(name), `${name} always-declared`);
+  assert.deepEqual(h.gate.primeDeferred([stuck, ...direct]), [stuck], "only the deferred member");
+  assert.equal(h.hidden().includes(stuck), false, "declared once primed");
   h.gate.enter();
-  assert.ok(h.active().includes("objective_stack_status"), "gate-allowed, so kept under the gate");
+  assert.ok(h.active().includes(stuck), "gate-allowed, so kept under the gate");
   h.gate.exit();
-  assert.ok(h.active().includes("objective_stack_status"), "kept at the gate exit");
-  assert.deepEqual(h.gate.discovery(), { cohort: true, family: joined }, "reports what deferred");
-  assert.deepEqual(h.gate.primeDeferred(["objective_stack_status"]), [], "not a deferred member");
-
-  // A gate-BLOCKED member that failed its re-registration: dropped under the gate, restored at
-  // its exit.
-  const blockedJoined = discoveryFamily().filter((name) => name !== "collect_review_wave");
-  const b = gateFixture(() => false);
-  b.gate.joinDiscoveryCohort(blockedJoined);
-  b.gate.syncFromState("read-write", "implement");
-  assert.ok(b.active().includes("collect_review_wave"), "never deferred, so kept at the join");
-  b.gate.enter();
-  assert.ok(!b.active().includes("collect_review_wave"), "gate-blocked under the gate");
-  b.gate.exit();
-  assert.ok(b.active().includes("collect_review_wave"), "restored at the gate exit");
-  assert.deepEqual(b.gate.discovery(), { cohort: true, family: blockedJoined });
-  assert.deepEqual(b.gate.primeDeferred(["collect_review_wave"]), [], "not a deferred member");
+  assert.ok(h.active().includes(stuck), "kept at the gate exit");
+  assert.equal(isEligible(stuck, undefined, "gist-author", "read-write"), false);
+  h.gate.syncFromState("read-write", "gist-author");
+  assert.ok(!h.active().includes(stuck), "dropped where ineligible");
+  h.gate.syncFromState("read-write", "implement");
+  assert.ok(!h.active().includes(stuck), "never re-activated by reconciliation");
+  assertForeignInvariance(h);
 });
 
 // --- the restoration window (contracts.md §8.40) ---------------------------------------------------
 //
-// Pi ≥ 1.0 drops its pending restored tools on any deactivating `setActiveTools`, so between a
-// `reload` session_start (or a session_tree) and the next agent_start every perk install only adds;
-// the removals land at agent_start. The fake host models a fresh post-reload activation: every
-// registrant's tools are active again (Pi's reload re-activates them) and a new gating closure runs.
+// Pi drops its pending restored tools on any deactivating `setActiveTools`, so between a window
+// opener — a `reload` session_start, a session_start whose branch projection records a loadout (a
+// resumed or forked session Pi restored in its constructor), or a session_tree — and the next
+// agent_start every perk install only adds; the removals land at agent_start. The fake host models
+// a fresh post-restore activation: every registration-activated tool is active (Pi's restore and
+// reload re-activate them) and a new gating closure runs; a cohort's deferred family stays inactive
+// unless the transcript recorded it.
 
 const CODEMODE: FakeTool = { name: "codemode", source: "builtin", path: "builtin:codemode" };
 
 /** A fresh activation whose live set carries every registrant's tools (codemode too when given). */
-function reloaded(opts: { codemode?: boolean } = {}): Fixture {
+function reloaded(opts: { codemode?: boolean; cohort?: boolean; active?: string[] } = {}): Fixture {
   const registry = [...defaultRegistry(), ...(opts.codemode === true ? [CODEMODE] : [])];
+  const cohort = opts.cohort === true;
   return gateFixture(() => false, {
     registry,
-    active: [...defaultActive(defaultRegistry()), ...(opts.codemode === true ? ["codemode"] : [])],
+    active: [
+      ...defaultActive(cohort ? cohortRegistry(registry) : registry),
+      ...(opts.active ?? []),
+    ],
+    ...(cohort ? { cohort: true } : {}),
   });
 }
 
 const OPENERS = [
   ["a reload session_start", (h: Fixture) => h.call("session_start", { reason: "reload" })],
+  [
+    "a resumed session_start that records a loadout",
+    (h: Fixture) => {
+      h.restore(h.active());
+      return h.call("session_start", { reason: "resume" });
+    },
+  ],
   ["a session_tree", (h: Fixture) => h.call("session_tree")],
 ] as const;
 
-/** The registered perk names ineligible in a landing (what the window keeps live but hidden). */
-function ineligiblePerk(stage: string | null, mode: Mode): string[] {
+/**
+ * The registered perk names ineligible in a landing that the window keeps live but hidden. A
+ * deferred family member is never live in a cohort session, so it is not a window removal.
+ */
+function ineligibleOwn(stage: string | null, mode: Mode): string[] {
   const eligible = new Set(perkToolsFor(stage, mode));
-  return perkToolNames().filter((name) => name !== LOADOUT_HOST_NAME && !eligible.has(name));
+  const family = new Set(discoveryFamily());
+  return perkToolNames().filter(
+    (name) => name !== LOADOUT_HOST_NAME && !eligible.has(name) && !family.has(name),
+  );
 }
 
 /** Every install since `from` kept the live set it found (only additions). */
@@ -1405,22 +1458,20 @@ function assertOnlyAdds(h: Fixture, from: number, before: readonly string[], lab
   for (const name of before) assert.ok(names.has(name), `${label}: ${name} kept (no removal)`);
 }
 
-test("the restoration window: a reload session_start or a session_tree opens it \u2014 a cohort join's family deferral, a stage sync that drops own tools and a gate entry that suspends codemode each make one install that only adds", async () => {
+test("the restoration window: each opener opens it — a stage sync that drops own tools and a gate entry that suspends codemode each make one install that only adds; a cohort's deferred family contributes no removal", async () => {
   const family = discoveryFamily();
   for (const [label, open] of OPENERS) {
-    // The cohort join: nothing to add, so the install is the identical live set.
-    const joined = reloaded();
+    // A cohort startup: the family was never live, so the diet's removals are the window's only
+    // ones; nothing to add, so the install is the identical live set and never names the family.
+    const joined = reloaded({ cohort: true });
     await open(joined);
-    joined.gate.joinDiscoveryCohort(family);
+    joined.gate.joinDiscoveryCohort();
     let before = joined.active();
     joined.gate.syncFromState("read-write", "implement");
-    assertOnlyAdds(joined, 0, before, `${label}: join`);
-    assert.deepEqual(
-      joined.installs[0]?.names,
-      before,
-      `${label}: identical when nothing is added`,
-    );
-    for (const name of family) assert.ok(joined.active().includes(name), `${label}: ${name} kept`);
+    assertOnlyAdds(joined, 0, before, `${label}: cohort startup`);
+    assert.deepEqual(joined.installs[0]?.names, before, `${label}: identical when nothing added`);
+    for (const name of family)
+      assert.ok(!joined.active().includes(name), `${label}: ${name} stays inactive`);
 
     // A stage sync that drops implement's own tools: plan's additions land, the drops wait.
     const staged = reloaded();
@@ -1446,28 +1497,27 @@ test("the restoration window: a reload session_start or a session_tree opens it 
     assert.equal(gated.gate.isActive(), true, `${label}: the gate is on at once`);
     for (const name of ["codemode", "edit", "submit"])
       assert.equal((await blockOf(gated, name))?.block, true, `${label}: ${name} blocked at once`);
+    assertForeignInvariance(joined);
+    assertForeignInvariance(staged);
     assertForeignInvariance(gated, ["codemode"]);
   }
 });
 
-test("the restoration window's presentation: inside it the host hides the still-active ineligible names by eligibility but not the still-declared family; the closing install hides every name it removed; an activation unmasks a member", async () => {
+test("the restoration window's presentation: inside it the host hides the still-active ineligible names by eligibility and every inactive deferred member; the closing install hides every name it removed; an activation unmasks a member", async () => {
   const family = discoveryFamily();
-  const implementMembers = family.filter((n) =>
-    isEligible(n, undefined, "implement", "read-write"),
-  );
-  const h = reloaded({ codemode: true });
+  const h = reloaded({ codemode: true, cohort: true });
   await h.call("session_start", { reason: "reload" });
-  h.gate.joinDiscoveryCohort(family);
+  h.gate.joinDiscoveryCohort();
   h.gate.syncFromState("read-write", "implement");
   const inWindow = h.installs.at(-1);
   assert.ok(inWindow !== undefined, "the window install re-ran the host's hook");
-  for (const name of ineligiblePerk("implement", "read-write")) {
+  for (const name of ineligibleOwn("implement", "read-write")) {
     assert.ok(h.active().includes(name), `${name} still active`);
     assert.ok(inWindow.hidden.includes(name), `${name} hidden by eligibility`);
   }
-  for (const name of implementMembers) {
-    assert.ok(h.active().includes(name), `${name} still active and declared`);
-    assert.ok(!inWindow.hidden.includes(name), `${name} (declared, eligible) not hidden in-window`);
+  for (const name of family) {
+    assert.ok(!h.active().includes(name), `${name} never live`);
+    assert.ok(inWindow.hidden.includes(name), `${name} (deferred, undeclared) hidden`);
   }
   h.gate.enter();
   const gated = h.installs.at(-1);
@@ -1480,9 +1530,11 @@ test("the restoration window's presentation: inside it the host hides the still-
   const closing = h.installs.at(-1);
   assert.ok(closing !== undefined && closing !== gated, "agent_start installed");
   const removed = before.filter((name) => !closing.names.includes(name));
-  for (const name of [...family.filter((n) => before.includes(n)), "codemode", "submit"])
+  for (const name of ["codemode", "submit"])
     assert.ok(removed.includes(name), `${name} removed at the close`);
   for (const name of removed) assert.ok(closing.hidden.includes(name), `${name} hidden by name`);
+  for (const name of family)
+    assert.ok(!closing.names.includes(name), `${name} never installed by the close`);
 
   // An activation unmasks a member: a prime (push_annotations is gate-allowed) and an additive
   // owner toggle (a tool_search hit) both stop hiding the member they activate.
@@ -1496,17 +1548,16 @@ test("the restoration window's presentation: inside it the host hides the still-
 });
 
 test("the restoration window's close: agent_start installs the pre-change target and clears the memos; before_agent_start inside the window removes nothing; a prime inside it survives the close", async () => {
-  const family = discoveryFamily();
-  const h = reloaded({ codemode: true });
+  const h = reloaded({ codemode: true, cohort: true });
   await h.call("session_tree");
-  h.gate.joinDiscoveryCohort(family);
+  h.gate.joinDiscoveryCohort();
   h.gate.syncFromState("read-only", "implement");
   const before = h.active();
   const from = h.installs.length;
   await h.call("before_agent_start");
   assertOnlyAdds(h, from, before, "before_agent_start");
-  assert.deepEqual(h.gate.primeDeferred(["push_annotations"]), ["push_annotations"], "lifted");
-  assert.deepEqual(h.installs.at(-1)?.names, before, "the lift re-presents the identical set");
+  assert.deepEqual(h.gate.primeDeferred(["push_annotations"]), ["push_annotations"]);
+  assert.deepEqual(h.installs.at(-1)?.names, [...before, "push_annotations"], "additive prime");
 
   await h.call("agent_start");
   const gatedView = perkView(perkToolsFor("implement", "read-only", true));
@@ -1528,27 +1579,36 @@ test("the restoration window's close: agent_start installs the pre-change target
   assertForeignInvariance(h, ["codemode"]);
 });
 
-test("the restoration window: a /tree restore that replaces the loadout supersedes the reload's pending family deferral \u2014 a restored member survives the close; a navigation without a restore leaves the deferral pending", async () => {
+test("the restoration window after /reload: a member the reload kept live survives the close; a /tree restore of a recorded member survives it too; the rest of the family stays inactive", async () => {
   const family = discoveryFamily();
-  const opened = async (): Promise<Fixture> => {
-    const h = reloaded();
+  const opened = async (active: string[] = []): Promise<Fixture> => {
+    const h = reloaded({ cohort: true, active });
     await h.call("session_start", { reason: "reload" });
-    h.gate.joinDiscoveryCohort(family);
+    h.gate.joinDiscoveryCohort();
     h.gate.syncFromState("read-write", "implement");
     return h;
   };
-  // A branch that declares no loadout: Pi restores nothing, the reload's live set stands.
+  // A navigation without a restore: Pi restores nothing, the reload's live set stands.
   const unrestored = await opened();
+  for (const name of family)
+    assert.ok(!unrestored.active().includes(name), `${name} inactive after /reload`);
   await unrestored.call("session_tree");
   unrestored.gate.syncFromState("read-write", "implement");
   await unrestored.call("agent_start");
   for (const name of family)
-    assert.ok(!unrestored.active().includes(name), `${name} deactivated at the close`);
+    assert.ok(!unrestored.active().includes(name), `${name} stays inactive through the close`);
+
+  // A member primed before the reload: Pi's reload kept the live set, perk keeps it.
+  const kept = await opened(["push_annotations"]);
+  await kept.call("agent_start");
+  assert.ok(kept.active().includes("push_annotations"), "the reload-kept member survives");
+  assert.equal(kept.installs.at(-1)?.hidden.includes("push_annotations"), false, "declared");
 
   // A branch whose transcript carried an activated objective_stack_status (a past search or prime).
   const h = await opened();
-  h.restore([...h.active().filter((n) => !family.includes(n)), "objective_stack_status"]);
+  h.restore([...h.active(), "objective_stack_status"]);
   await h.call("session_tree");
+  const from = h.installs.length;
   h.gate.syncFromState("read-write", "implement");
   await h.call("agent_start");
   assert.ok(
@@ -1560,19 +1620,19 @@ test("the restoration window: a /tree restore that replaces the loadout supersed
     false,
     "and stays declared",
   );
+  for (const install of h.installs.slice(from))
+    assert.ok(install.names.includes("objective_stack_status"), "no install dropped it");
   for (const name of family.filter((n) => n !== "objective_stack_status"))
     assert.ok(!h.active().includes(name), `${name} stays off`);
-  assertForeignInvariance(h);
+  for (const f of [unrestored, kept, h]) assertForeignInvariance(f);
 });
 
-test("a prime inside the restoration window of an inactive pending member lifts its deferral: it survives the close and stays declared", async () => {
+test("a prime inside the restoration window survives the close and stays declared; the rest of the family stays inactive", async () => {
   const family = discoveryFamily();
-  // A foreign owner switched push_annotations off while its deferral was still pending.
-  const h = reloaded();
+  const h = reloaded({ cohort: true });
   await h.call("session_start", { reason: "reload" });
-  h.gate.joinDiscoveryCohort(family);
+  h.gate.joinDiscoveryCohort();
   h.gate.syncFromState("read-write", "implement");
-  h.setActive(h.active().filter((n) => n !== "push_annotations"));
   const live = h.active();
   assert.deepEqual(h.gate.primeDeferred(["push_annotations"]), ["push_annotations"]);
   assert.deepEqual(h.installs.at(-1)?.names, [...live, "push_annotations"], "one additive install");
@@ -1580,14 +1640,14 @@ test("a prime inside the restoration window of an inactive pending member lifts 
   assert.ok(h.active().includes("push_annotations"), "the primed member survives the close");
   assert.equal(h.installs.at(-1)?.hidden.includes("push_annotations"), false, "and stays declared");
   for (const name of family.filter((n) => n !== "push_annotations"))
-    assert.ok(!h.active().includes(name), `${name} deactivated at the close`);
+    assert.ok(!h.active().includes(name), `${name} stays inactive`);
 
-  // After a /tree restore left one member active and another inactive: priming the inactive one.
-  const t = reloaded();
+  // After a /tree restore left one member active: priming another.
+  const t = reloaded({ cohort: true });
   await t.call("session_start", { reason: "reload" });
-  t.gate.joinDiscoveryCohort(family);
+  t.gate.joinDiscoveryCohort();
   t.gate.syncFromState("read-write", "implement");
-  t.restore([...t.active().filter((n) => !family.includes(n)), "objective_stack_status"]);
+  t.restore([...t.active(), "objective_stack_status"]);
   await t.call("session_tree");
   t.gate.syncFromState("read-write", "implement");
   assert.deepEqual(t.gate.primeDeferred(["push_annotations"]), ["push_annotations"]);
@@ -1600,16 +1660,25 @@ test("a prime inside the restoration window of an inactive pending member lifts 
   assertForeignInvariance(t);
 });
 
-test("the restoration window stays shut at startup, and a bare session's agent_start installs nothing", async () => {
+test("the restoration window stays shut at a session_start that records no loadout (startup, resume, fork, new): the diet lands at once; a bare session's agent_start installs nothing", async () => {
   const family = discoveryFamily();
-  const h = reloaded();
-  await h.call("session_start", { reason: "startup" });
-  h.gate.joinDiscoveryCohort(family);
-  h.gate.syncFromState("read-write", "implement");
-  for (const name of family) assert.ok(!h.active().includes(name), `${name} deactivated at once`);
-  assert.equal(h.installs.length, 1, "still ONE install at startup");
-  await h.call("agent_start");
-  assert.equal(h.installs.length, 1, "the close finds nothing to land");
+  for (const reason of ["startup", "resume", "fork", "new"]) {
+    const h = reloaded({ cohort: true });
+    await h.call("session_start", { reason });
+    h.gate.joinDiscoveryCohort();
+    h.gate.syncFromState("read-write", "implement");
+    assert.equal(h.installs.length, 1, `${reason}: ONE install at startup`);
+    assert.deepEqual(
+      activePerk(h),
+      perkView(perkToolsFor("implement", "read-write", true)),
+      `${reason}: the diet landed at once`,
+    );
+    for (const name of family)
+      assert.ok(!h.installs[0]?.names.includes(name), `${reason}: ${name} never installed`);
+    await h.call("agent_start");
+    assert.equal(h.installs.length, 1, `${reason}: the close finds nothing to land`);
+    assertForeignInvariance(h);
+  }
 
   const bare = gateFixture(() => false);
   bare.gate.syncFromState(undefined, undefined);
@@ -1620,21 +1689,77 @@ test("the restoration window stays shut at startup, and a bare session's agent_s
   assert.deepEqual(bare.installs, [], "zero installs, window or not");
 });
 
-test("a throwing closing install keeps the cohort deferral pending for the next point", async () => {
-  const family = discoveryFamily();
-  const h = reloaded();
+test("a session_start whose branch projection records a loadout opens the window (every reason): a gated startup's codemode suspension and a stage change's diet only add until agent_start, where they land; an unreadable projection on a non-reload reason leaves it shut, and reload opens it regardless", async () => {
+  for (const reason of ["startup", "resume", "fork", "new", "reload"]) {
+    // A restored gated startup: Pi's constructor restore recorded the loadout before any handler.
+    const h = reloaded({ codemode: true, cohort: true });
+    h.restore(h.active());
+    await h.call("session_start", { reason });
+    h.gate.joinDiscoveryCohort();
+    const before = h.active();
+    h.gate.syncFromState("read-only", "implement");
+    assertOnlyAdds(h, 0, before, `${reason}: the restored gated startup`);
+    assert.ok(h.active().includes("codemode"), `${reason}: the suspension waits`);
+    assert.ok(h.active().includes("submit"), `${reason}: the diet waits`);
+    assert.equal((await blockOf(h, "codemode"))?.block, true, `${reason}: enforcement at once`);
+    await h.call("agent_start");
+    assert.ok(!h.active().includes("codemode"), `${reason}: suspended at the close`);
+    assert.deepEqual(
+      activePerk(h),
+      perkView(perkToolsFor("implement", "read-only", true)),
+      `${reason}: the diet landed at the close`,
+    );
+    assertForeignInvariance(h, ["codemode"]);
+
+    // A stage change inside the window: the diet only adds until the close.
+    const s = reloaded({ cohort: true });
+    s.restore(s.active());
+    await s.call("session_start", { reason });
+    s.gate.syncFromState("read-write", "implement");
+    const live = s.active();
+    const from = s.installs.length;
+    s.gate.syncFromState("read-write", "plan");
+    assertOnlyAdds(s, from, live, `${reason}: the stage change`);
+    assert.ok(s.active().includes("submit"), `${reason}: implement's submit not yet removed`);
+    await s.call("agent_start");
+    assert.ok(!s.active().includes("submit"), `${reason}: removed at the close`);
+    assertForeignInvariance(s);
+  }
+  // An unreadable projection reads as no restore: a non-reload reason leaves the window shut.
+  for (const reason of ["startup", "resume", "fork", "new"]) {
+    const u = reloaded({ cohort: true });
+    u.fail("projection");
+    await u.call("session_start", { reason });
+    u.gate.syncFromState("read-write", "implement");
+    assert.deepEqual(
+      activePerk(u),
+      perkView(perkToolsFor("implement", "read-write", true)),
+      `${reason}: unreadable projection — the diet landed at once`,
+    );
+  }
+  const r = reloaded({ cohort: true });
+  r.fail("projection");
+  await r.call("session_start", { reason: "reload" });
+  const before = r.active();
+  r.gate.syncFromState("read-write", "implement");
+  assertOnlyAdds(r, 0, before, "reload with an unreadable projection");
+  assert.ok(r.active().includes("submit"), "the reload window holds the diet's removal");
+});
+
+test("a throwing closing install leaves the window's removals for the next point", async () => {
+  const h = reloaded({ cohort: true });
   await h.call("session_start", { reason: "reload" });
-  h.gate.joinDiscoveryCohort(family);
-  h.gate.syncFromState("read-write", "implement");
+  h.gate.joinDiscoveryCohort();
+  h.gate.syncFromState("read-write", "plan");
+  assert.ok(h.active().includes("submit"), "the diet's removal waits in the window");
   h.fail("toolset");
   await quietly(async () => {
     await h.call("agent_start");
   });
-  for (const name of family.filter((n) => isEligible(n, undefined, "implement", "read-write")))
-    assert.ok(h.active().includes(name), `${name} still active after the failed close`);
+  assert.ok(h.active().includes("submit"), "still active after the failed close");
   h.fail(undefined);
   await h.call("before_agent_start");
-  for (const name of family) assert.ok(!h.active().includes(name), `${name} deactivated now`);
+  assert.ok(!h.active().includes("submit"), "removed at the next point");
 });
 
 test("the codemode lift in the restoration window: a reload in a gated plan landing removes nothing; a /tree restore landing in implement waits for the close to suspend", async () => {
