@@ -1,5 +1,9 @@
 # Native-discovery pilot: cohort, criteria, measurements, decision
 
+> **Historical:** this record describes the retired register-direct / re-register-deferred
+> mechanism as measured; the current mechanism (the family registers deferred, a nonparticipant
+> re-declares it direct) is `shared/contracts.md` §8.40.
+
 **Status:** binding record (Objective #2634, Node 3.2). **Decision: ADOPT** (§7) — every pinned
 criterion passed, the four live legs included, run from this PR's own delivery flow. The raw evidence (verbatim census tables, the
 live-leg ledger) is [`archive/native-discovery-pilot-dogfood.md`](./archive/native-discovery-pilot-dogfood.md);
