@@ -32,6 +32,9 @@ predecessor `branchOf`/`BranchSource`, and the `appendWorkflowState`/`EntrySink`
   1 base + 1 superset" / "Aspirational-comment fiction".
 - Seams that own a prefix de-prefix migrated messages; not every site fits a single-message seam
   (the P1/P2/P3 triage) — "The de-prefixing trap" / "Not every site fits".
+- `report()` contains a throwing detail sink with one stderr write (a charter exception); a notice
+  from a caller holding a landed save uses the `reportGateTransition` pattern — "report()-rollout
+  gotchas".
 
 ## The minimal-structural-interface recipe
 
@@ -216,6 +219,15 @@ that assumption per-suite before accepting cosmetic drift.
 - **The startup banner makes count-based notify assertions fragile**: every headful harness
   session now receives the startup notify, so filter notify asserts by severity (e.g. "exactly one
   *error* notify"), never by count. See the harness recipes in `pi/tui-surfaces.md`.
+- **`report()` can recurse into the failing persistence path.** The warm-command detail sink
+  appends through Pi's persistence, so a multi-line notice *about* a persistence failure could
+  throw past a landed save. `report()` (`extension/surfaces/report.ts`) now wraps the sink in
+  try/catch and falls back to one `console.error` of the full value — a bounded exception recorded
+  in `docs/design/tui-charter.md` (describe it as "one write", not "one line"; any new
+  `console.error` path in `report()` needs a charter amendment).
+- **The `reportGateTransition` pattern** (`extension/pi/v1/gateTransitions.ts`: fold newline runs,
+  wrap `report()`, fall back to stderr) is the shape for any notice sent by a caller holding a
+  landed save or receipt — the notice must never undo what already landed.
 
 ## Not every site fits a single-message seam (the P1/P2/P3 triage)
 
