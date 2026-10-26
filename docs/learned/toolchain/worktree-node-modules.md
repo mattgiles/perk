@@ -1,6 +1,6 @@
 ---
 title: Worktree node_modules resolution trap — stale SDK shadowing
-read_when: CI or the SDK census guard fails in files you never touched, a fresh worktree fails tsc before install, a pinned bump seems inert, a .pi/npm package is stale, or a Pi pin-bump lockfile trim
+read_when: CI or the SDK census guard fails in files you never touched, a fresh worktree fails tsc before install, a Pi pin bump or host-floor raise, a stale or shared .pi/npm install, version-fact constants
 cluster: toolchain-gotchas
 ---
 
@@ -11,8 +11,8 @@ own dev-tool tree — what `tsc` / `node --test` resolve — and a linked worktr
 has none of its own until `npm ci`/`npm install` runs there, so those tools walk **up to the
 parent repo's `node_modules`** (the shared root checkout). The **`.pi/npm/` install root** is Pi's
 separately staged extension-install world: `materialize_extensions`
-(`src/perk/run/launch/materialize.py`) clone-copies the converged repo-root `.pi/npm/` into fresh
-worktrees (see `workflow/cold-door-launch.md` §"Launch banner + worktree `.pi/npm` pre-staging";
+(`src/perk/run/launch/materialize.py`) stages the converged repo-root `.pi/npm/` into fresh
+worktrees through `fsclone.clone_tree` (see `workflow/cold-door-launch.md` §"Launch banner + worktree `.pi/npm` pre-staging";
 drift/repair mechanics in `workflow/distribution.md`). The resolution trap below is entirely a
 **root-world** phenomenon, with two distinct symptoms.
 
@@ -29,15 +29,18 @@ is an environment preflight blocker (the gitignored root drifts) — repair with
   "Symptom 2"; peer-only `pi-tui`/`typebox` resolutions go stale independently — "Symptom 3".
 - Prove provenance before assuming you broke it; exit 143 with no `FAILED` line is a transient
   kill — "Diagnosing pre-existing breakage".
-- A `.pi/npm` package can be stale on disk while `npm ls` says it is correct — read its on-disk
-  `package.json` — "The `.pi/npm` world in perk's own checkout".
+- `.pi/npm` staging is `fsclone.clone_tree` (macOS `clonefile(2)`, else hardlinks + detached
+  metadata); `stat -f %l .pi/npm/package.json` > 1 ⇒ the legacy shared layout; a `.pi/npm` package
+  can be stale on disk while `npm ls` says it is correct — "The `.pi/npm` world in perk's own
+  checkout".
 - `git checkout package-lock.json` drops incidental `"peer": true` churn — "Commit hygiene after
   installing in a worktree".
-- A Pi pin bump: `just bump-pi`, trim the lockfile to the changed ranges (never hand-trim
-  pi-coding-agent's shrinkwrapped tree), `npm prune` dropped dependencies, never run the suites from
-  a lagging root checkout — "Pi pin-bump mechanics".
-- Host floor, remote install pin, dev pins, the pi-subagents pin and the guidance stamp are five
-  distinct facts; tests stay version-honest — "Five version facts, kept distinct".
+- A Pi pin bump: `just bump-pi`, keep npm's whole canonical lockfile output and prove it,
+  `npm run typecheck` is mandatory, the companions are exact-declared since 1.3.0 — "Pi pin-bump
+  mechanics".
+- Host floor, adopted Pi pin + install set, dev pins, the pi-subagents pin and the guidance stamp
+  are five distinct facts (adopted ≠ certified); tests stay version-honest — "Five version facts,
+  kept distinct".
 - Smoke the worktree's `.venv/bin/perk` and run `perk init` smokes in a scratch dir — "Stale
   globally-installed `perk`".
 
@@ -110,12 +113,34 @@ Nothing but a Pi launch populates `.pi/npm` here (#2501): `perk doctor --fix` re
 `extension-install: self-repo — local package, no npm install` and `subagent-compat: pi-subagents
 not installed — compatibility not evaluated` (its detail: pi lazy-installs the package at launch).
 The two populators are Pi's lazy install at an
-INTERACTIVE first launch (the Trust step) and `materialize_extensions`' hard-link clone
-(plan-worktree launches only). A hand-made detached worktree under `.worktrees/` inherits
-nearest-ancestor trust (so it never sees the first) and is not a plan launch (so it never sees the
-second) — stage it explicitly with
-`materialize_extensions(<main>, <worktree>)` (`perk/run/launch/materialize.py`; shared inodes at
-distinct paths — path-keyed tooling copes).
+INTERACTIVE first launch (the Trust step) and `materialize_extensions`' staging (plan-worktree
+launches only). A hand-made detached worktree under `.worktrees/` inherits nearest-ancestor trust
+(so it never sees the first) and is not a plan launch (so it never sees the second) — stage it
+explicitly with `materialize_extensions(<main>, <worktree>)` (`perk/run/launch/materialize.py`).
+
+**How staging isolates (`src/perk/substrate/fsclone.py::clone_tree`).** On macOS a `clonefile(2)`
+via ctypes — a whole-hierarchy copy-on-write clone with independent inodes; otherwise
+`copytree(copy_function=os.link)` then `detach_shared_files`, which gives every root- and
+`node_modules`-level regular file with `st_nlink > 1` its own inode. There is deliberately no
+byte-copy tier (CPython's macOS `copy2`/`copyfile` is a byte copy, not a clone). An unpopulated
+`dst` is removed first; a partial tree is removed on failure. The structural rule: package
+directories are safe to hardlink because package managers replace them wholesale; metadata files
+(`package.json`, lockfiles, `node_modules/.package-lock.json`) are rewritten in place and must not
+share inodes — the legacy all-hardlink layout shared `package.json` across ~50 trees, so one
+install changed every tree.
+
+- **Diagnostic:** `stat -f %l .pi/npm/package.json` > 1 ⇒ legacy shared layout.
+- **Every perk launch detaches still-shared metadata** (`pi_exec._detach_extension_install`,
+  lazily per worktree); running `pi` directly in a legacy worktree still writes through shared
+  inodes.
+- A one-time stale-spec warning (`materialize.py::_stale_extension_specs`) fires at stage launch
+  only (`perk resume` skips it).
+- Merging never touches gitignored `.pi/npm`, so the main checkout and sibling worktrees keep their
+  old installs until re-staged, and new worktrees copy whatever main has.
+- On the hardlink tier package files stay shared — a tool patching installed files in place leaks
+  across trees; the clonefile tier is darwin-only and tested locally only.
+- The launch seam itself: `workflow/cold-door-launch.md` § "Launch banner + worktree `.pi/npm`
+  pre-staging".
 
 **A `.pi/npm` package can be stale on disk while npm reports it correct.** The census drift guard
 in `extension/substrate/nativeSdkBridge.test.ts` saw pi-subagents 0.71.0 (no `typebox/value`)
@@ -146,45 +171,77 @@ A second churn shape — `pi-ai` bin-path npm-normalization rewrites with no dep
 has its rule and detail in `workflow/distribution.md` (§the git→npm install mirror):
 `git checkout package-lock.json` before staging when that is the only diff.
 
-## Pi pin-bump mechanics (used at 0.99.2 and 1.0.0)
+## Pi pin-bump mechanics (used at 0.99.2, 1.0.0, 1.1.0, 1.4.0)
 
-`just bump-pi <version>` moves the four `@earendil-works/*` exact pins (pi-coding-agent, pi-ai,
+`just bump-pi <version>` moves the four `@earendil-works/*` exact dev pins (pi-coding-agent, pi-ai,
 pi-tui, pi-agent-core) and runs an `npm ls` gate, the typecheck, `piAiCompatGuard.test.ts` and
-`tests/test_packaging.py::test_pi_toolchain_pin_lockstep` (which pins a closed key set). The
-lockfile it leaves needs a deliberate trim:
+`tests/test_packaging.py::test_pi_toolchain_pin_lockstep` (which pins a closed key set). It stops
+at its first failing line — after a fixture fix run the remaining gate lines one by one; never
+re-run the recipe.
 
-- **Keep** the bumped top-level pins, pi-coding-agent's whole nested tree — it ships
-  `hasShrinkwrap: true`, so never hand-trim it — and any entry whose declared range changed.
-- **Revert** incidental patch re-resolutions whose ranges did not change (`@aws-sdk/*`,
-  `@smithy/*`, `ws`, `@babel/runtime`) to the base text.
-- **The third churn shape**: pi-ai pins `openai` exactly, and its optional peer edges move ≈21
-  unrelated AWS/Smithy/`ws` entries — real version moves; restore them where the ranges allow.
-- **Validate**: `npm install --package-lock-only` leaves the file byte-identical, `npm ci`
-  succeeds, and the `npm ls` gate exits 0.
-- **Prune orphans.** Dropping a devDependency leaves extraneous packages (`chord`, `ignore`) — run
-  `npm prune` after any bump that drops a dependency. `npm ls <names>` exits 0 when every problem is
-  `extraneous` (npm 11.16), so the gate misses orphans.
-- `typebox` shows as not deduped — the shrinkwrapped tree carries its own copy; expected.
-- **A stale installed SDK now fails loudly**: the installed-SDK precondition test in
+- **Lockfile posture: keep npm's whole canonical output and prove it.** The earlier trim rules
+  (hand-preserving a shrinkwrapped tree, reverting incidental re-resolutions) were set aside by
+  operator decision at 1.1.0. Acceptance is the validation, not a byte shape:
+  `npm install --package-lock-only` leaves the file byte-identical, `npm ci` passes, the `npm ls`
+  gate exits 0, and nothing is extraneous.
+- **Prune orphans.** Dropping a devDependency leaves extraneous packages — run `npm prune`;
+  `npm ls <names>` exits 0 when every problem is `extraneous` (npm 11.16), so the gate misses them.
+- **`npm run typecheck` is mandatory** — node:test type-stripping hides SDK type breakage, and
+  `as unknown as` fakes never flag interface growth.
+- **Grep comments repo-wide** for the old floor literal and old install-shape wording.
+- **The pinned package's `schemas/` is a test oracle** — `extension/testing/piConfigSchemas.ts`
+  reads them from the root dev install, so the bump's install refreshes it
+  (`pi/extension-api.md` § Pi config files and their schemas).
+- **The companion graph.** Since Pi 1.3.0 the package declares its companions at exact versions
+  (no shrinkwrap since 1.0.1); `PI_COMPANION_PACKAGES` is the presence/version check, and
+  `tests/test_pi_host.py` pins exactness and closure against the lockfile. If Pi returns to caret
+  ranges those tests fail by name, and a registry `maxSatisfying` preflight plus a closed
+  multi-spec install become relevant again (derive the companion set from the target release's
+  package manifests, never hardcode).
+- **The global single-spec install nests the companions** under the package with only `bin/pi`
+  linked — nesting is the healthy layout (the broken-host fixture in `tests/_pi_layout.py` is
+  broken by version mismatch or a dangling link, not by nesting).
+- **Lockfile-instrument gotchas.** `lockdiff` "ranges unchanged" ≠ revertable; `lockrevert`
+  matches dependents by name regardless of nesting.
+- **A stale installed SDK fails loudly**: the installed-SDK precondition test in
   `extension/substrate/hostAdmission.test.ts` refuses a below-floor `node_modules` — repair with
   `npm ci`, never weaken the test.
-- **The root checkout's `node_modules` can lag the manifest** (it did: 0.87.0 installed vs 1.0.0
-  pinned) — never run the suites from it.
+- **The root checkout's `node_modules` can lag the manifest** — never run the suites from it.
 
-Record: `docs/design/archive/pi-1.0.0-dev-pins.md`.
+Records: `docs/design/archive/pi-1.0.0-dev-pins.md`, `docs/design/archive/pi-1.1.0-dev-pins.md`,
+`docs/design/archive/pi-1.4.0-adoption.md`.
 
 ## Five version facts, kept distinct
 
 1. **The host floor** — `shared/host-floor.yaml`, read by both planes' admission.
-2. **The remote install pin** — `src/perk/run/workflow_artifacts.py::REMOTE_PI_VERSION`; it pins
-   both the consumer remote CLI and the worker SDK.
+2. **The adopted Pi pin + pinned install set** — `src/perk/substrate/pi_host.py`
+   (`PI_ADOPTED_VERSION`, `PI_COMPANION_PACKAGES`, `PI_INSTALL_SPECS`, `PI_INSTALL_COMMAND`); it
+   pins the global CLI repair, the consumer remote CLI and the worker SDK.
+   `workflow_artifacts.REMOTE_PI_VERSION` is an import-bound alias, never a second literal.
 3. **The dev pins** — `package.json` devDependencies; also the self-repo remote worker's SDK via
    `npm ci`.
 4. **The pi-subagents supplier pin** — `src/perk/convergence/init/settings.py::SUBAGENTS_PACKAGE`,
    reconciled by `settings-wiring`.
 5. **The guidance stamp** — `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` (`pi/subagents.md` § Sources).
 
-A comment or doc merging any two is drift. **Version-honest tests** (dated): an expectation that
+A comment or doc merging any two is drift. The pin-surface table (homes, guards, how each moves)
+is owned by `docs/developers/pi-subagents-reverify.md` § The five version facts — the upkeep source
+of truth; don't restate it.
+
+- **Adopted vs certified.** A pin moves as *adopted* on characterization + offline evidence;
+  *certified* is a later live record; nothing says "certified" before it exists. Pin-leads-stamp
+  is legitimate, and the version-honest test shape is
+  `tests/test_doctor.py::test_subagent_compat_on_the_pinned_install_follows_the_stamp` (it plants
+  the installed version and asserts warn-iff-differs, so no test edit is owed whichever fact
+  moves).
+- **Sort a floor-raise test list one test at a time** by where the floor comes from: grep
+  real-probe and floor-default callers; assert the derived remediation constant in `env.py` rather
+  than a literal; keep literals only in the deliberate drift-alarm tests.
+- **The committed self-repo managed artifacts have a lockstep test**
+  (`tests/test_workflow_artifacts.py::test_committed_self_repo_remote_artifacts_are_the_owners_render`),
+  so a forgotten regeneration fails CI — regenerate through the owner, never hand-revert its render.
+
+**Version-honest tests** (dated): an expectation that
 holds on both hosts stays unconditional; host-differing expectations were a branched pair until
 SDK-boundary admission retired the old arms — do not reintroduce a `hostSdkAtLeast`-style helper.
 Assertions on Pi-rendered tool description text are fragile (1.0.0 dropped codemode's inline
@@ -207,10 +264,11 @@ in a **scratch dir, never the worktree.**
 
 ## The stale-SDK trap generalizes: per-instance module-global registries
 
-**Nested vs top-level package instances each carry their own module-global registries**
-(`pi-coding-agent` bundles its own nested `@earendil-works/pi-ai`) — see
+**Nested vs top-level package instances each carry their own module-global registries** (pi-ai
+was nested under `pi-coding-agent` until 1.0.1 and is hoisted top-level since; the principle holds
+whenever two copies exist) — see
 `docs/learned/pi/headless-session-drive.md` § "Driving the real runtime offline with a faux model
-(the e2e worker tier)" (the nested-`pi-ai` bullet) for the resolution pattern.
+(the e2e worker tier)" (the per-instance pi-ai bullet) for the resolution pattern.
 
 ## Cross-references
 
@@ -227,4 +285,4 @@ in a **scratch dir, never the worktree.**
   rebase-recovery recipes (delete/edit + interrupted rebase)
 - `docs/learned/workflow/distribution.md` — the `pi-ai` bin-path lockfile churn at the release seam
 - `docs/learned/pi/headless-session-drive.md` § "Driving the real runtime offline with a faux model
-  (the e2e worker tier)" — the nested-`pi-ai` per-instance-registry resolution
+  (the e2e worker tier)" — the per-instance pi-ai registry resolution
