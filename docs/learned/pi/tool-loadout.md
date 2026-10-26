@@ -311,7 +311,7 @@ whole suite, not the plan's file list. Record: `docs/design/archive/pi-1.0.0-mcp
 - **Design lesson — use the host primitive instead of scaffolding around a fight with it.** The
   register-direct / re-register-deferred / deactivate-once design was the root of every measured
   defect; registering deferred from the start deleted machinery (the family deferral and its
-  `pendingDeferral` memo are gone). Corollary: when a deferred effect needs memos, ask whether the
+  deferral memo are gone). Corollary: when a deferred effect needs memos, ask whether the
   effect is necessary before enumerating window interleavings.
 - **Prime before the carrier lands.** A carrier naming a `declared: deferred` tool primes it via
   an exported `*_PRIMES` constant (`DRAFT_REVIEW_DOOR_PRIMES`, `DRAFT_LAUNCH_PRIMES`,
