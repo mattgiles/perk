@@ -1,6 +1,6 @@
 ---
 title: Pi context system — no transclusion, ambient index split, the scan-timeout guard, gate engagement
-read_when: You are surfacing info to a session (the ambient index), debugging a timed-out bash scan, touching the scan-timeout guard or the gate engagement latch, or hit the worktree AGENTS.md double-load.
+read_when: You are surfacing info to a session (the ambient index), debugging a timed-out bash scan, touching the scan-timeout guard or the gate engagement latch, or a worktree session's AGENTS.md load.
 cluster: pi-extension
 ---
 
@@ -11,8 +11,10 @@ cluster: pi-extension
 - Pi context files load verbatim — no `@`-transclusion; the ambient index is a two-layer split
   (compressed routing in `.pi/APPEND_SYSTEM.md`, the full catalog on demand) — "No in-file
   `@`-transclusion", "Ambient index must be a real two-layer split".
-- A linked worktree double-loads `AGENTS.md` (main + worktree) — "Linked-worktree AGENTS.md
-  double-load".
+- Pi suppresses the main checkout's `AGENTS.md` for a nested linked worktree (one load, not two);
+  the rule keys on a same-basename context file under the main root and does not cover sibling
+  worktrees, bare layouts, submodules, or the `.pi/` prompt kinds — "Which AGENTS.md a
+  linked-worktree session loads".
 - The read-only bash gate (walker, veto view, row craft, bypass checklist) lives in
   `pi/read-only-bash-gate.md` — "The read-only bash gate lives in its own doc".
 - The second always-on `tool_call` hook injects `timeout = 30` onto gitignore-blind scans and
@@ -46,15 +48,37 @@ Because transclusion doesn't work, an "ambient index" of durable learnings requi
 Don't try to compress the full catalog into the ambient context. The two-layer split is the right
 architecture.
 
-## Linked-worktree AGENTS.md double-load
+## Which AGENTS.md a linked-worktree session loads
 
-pi's context-file discovery walks up from a linked worktree under `.worktrees/` and loads
-**both** the main-checkout and worktree `AGENTS.md` — identical content, double-counted (~6.6KB
-of redundant payload in every worktree session at measurement time). Discovered by the
-`/perk-selfcheck` payload census; the measured record is
-`docs/design/archive/context-payload-baseline.md`. The ambient payload itself was dieted (Objective
-#1610 Node 3.4 compressed the AGENTS.md "Developing perk" section in place); the structural
-double-load is pi discovery behavior and remains.
+**Current rule** (verified at the 1.4.0 pin, `dist/core/resource-loader.js::findShadowedContextFile`
+/ `loadProjectContextFiles`). Pi's ancestor walk skips the main checkout's context file when all
+three hold:
+
+1. the cwd's worktree root sits **under** the main repo root — exactly perk's `.worktrees/<name>`
+   layout from `[worktree] root`;
+2. the main root's `.git` is the common git dir — so not a bare `proj/.bare` layout and not a
+   submodule;
+3. the worktree carries its own context file of the **same basename** — the loader compares the
+   canonicalized directory + basename, so a worktree `AGENTS.md` symlinked to main's still counts
+   as the worktree's own.
+
+Ancestor inheritance is otherwise unchanged. Residuals worth knowing: a worktree whose only context
+file has a different basename (e.g. `CLAUDE.md` vs main's `AGENTS.md`) is not shadowed and both
+load; a sibling worktree never double-loaded in the first place (main is not an ancestor). The
+`SYSTEM.md` / `APPEND_SYSTEM.md` prompt kinds are discovered separately in the cwd's `.pi/` dir
+(project-trust gated, global fallback) and are not part of the ancestor/shadow walk,
+so a worktree session's ambient carrier is the worktree's own `.pi/APPEND_SYSTEM.md`.
+
+**Dated history.** At pi 0.80.3 the walk loaded **both** the main-checkout and worktree
+`AGENTS.md` — two identical 6,628-char files in every worktree session, measured by the
+`/perk-selfcheck` payload census (`docs/design/archive/context-payload-baseline.md`). By pi 0.84.1
+the double-load was gone (`docs/design/archive/context-payload-baseline-2.md` records `files=1`).
+The payload diet that ran alongside it (the ambient-tier diet plus the `AGENTS.md` "Developing
+perk" sweep, compressed in place) stays as recorded there.
+
+**Re-check at a pin bump** with the selfcheck census line `agents=… (files=N)`
+(`extension/pi/v1/selfcheck.ts`) — `files=1` inside a `.worktrees/` session is the expected
+reading.
 
 ## The read-only bash gate lives in its own doc
 
@@ -142,6 +166,8 @@ Contracts §8.3 was narrowed accordingly.
 ## Cross-references
 
 - `extension/substrate/toolGating.ts` — `apply()`'s engagement latch
+- `docs/design/archive/context-payload-baseline-2.md` — the `files=1` record (worktree double-load gone)
+- `extension/pi/v1/selfcheck.ts` — the context-file census line (`agents=… (files=N)`)
 - `extension/substrate/commandPositions.ts` — `splitTopLevelSegments`, the lexer both hooks share
 - `docs/learned/pi/read-only-bash-gate.md` — the read-only bash gate (walker, veto view, row craft)
 - `extension/substrate/bashScanTimeout.ts` + `extension/pi/v1/bashScanTimeout.ts` — the scan-timeout guard (policy + Pi glue)

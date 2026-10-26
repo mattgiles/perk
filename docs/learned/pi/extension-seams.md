@@ -25,8 +25,10 @@ predecessor `branchOf`/`BranchSource`, and the `appendWorkflowState`/`EntrySink`
 - Strict decode = tolerant decode + count check; identities the engine validates are port
   parameters, never re-derived in a backing; provider flag-bags become discriminated variants at
   the adapter — "Door→typed-op extraction craft".
-- The strict-append seam never throws, returns a boolean, and verifies only the contracted
-  linkage tier — "The strict-append seam".
+- The strict-append seam never throws; the boolean entry is a thin wrapper over a classified
+  sibling (`applied | rejected | unverified`) and is the common append path for durable
+  workflow-state fields — each field's §8.3 contract row, not the mechanism, decides what a
+  caller does on a non-applied result — "The strict-append seam".
 - Grep call sites before trusting a one-line idiom framing ("1 base + 1 superset" — prefer an
   opt-in flag); comments claiming an unadopted idiom mark migration sites — "'One idiom' is often
   1 base + 1 superset" / "Aspirational-comment fiction".
@@ -49,8 +51,11 @@ Corollary for plan handoffs: **when a plan names SDK types for an exported core,
 signature to the minimal structural slices the sibling seams already export** (`EntrySink`,
 `BranchSource`, `ReportTarget`, `SessionDataCtx`). Callers pass `pi`/`ctx` unchanged — plan
 fidelity is preserved — and the core's offline tests reuse the existing fakes with no harness
-(the `writePlanDraft` precedent: spec'd against `ExtensionAPI`/`ExtensionContext`, landed against
-the slices).
+(the plan-draft-write precedent: spec'd against `ExtensionAPI`/`ExtensionContext`, landed against
+the slices). The lesson stands; the instance is dated — `writePlanDraft` is gone: the core has
+since been re-homed as `revisePlanDraft` over the `WorkflowSession` seam
+(`extension/authoring/plan/draft.ts`), and the structural-slice discipline now lives one layer down
+in `SessionStateStore` (`extension/session/lifecycle.ts`: `rebuild`/`append`/`appendVerified`).
 
 `branchCarries` is a further census entry: a repeated context-dependent idiom (2 hand-rolled
 duplicates + 6 new call sites) collapsed into one tested pure function in
@@ -136,9 +141,16 @@ Testability:
 
 When a vocabulary type moves to a new owning module that the old module still references, import
 it back **type-only**: the new owner imports the old module's values normally; the old module's
-`import type { … }` of the moved type is erased at runtime, so no cycle exists. Realized when
-`plan_review` moved out of the plannotator adapter — `planReview.ts` imports the bridge (a value)
-from `planAdapterPlannotator.ts`, and the adapter imports `ReviewOutcome` type-only back.
+`import type { … }` of the moved type is erased at runtime, so no cycle exists.
+
+The realized instance is dated history: when `plan_review` moved out of the plannotator adapter,
+`planReview.ts` imported the bridge (a value) from the adapter and the adapter imported
+`ReviewOutcome` type-only back — the type-only import was the interim tool. The terminal shape
+dissolves the cycle outright: `ReviewOutcome` now lives in a dedicated vocabulary module
+(`extension/pi/v1/reviewOutcome.ts`, no imports of its own) that the adapter
+(`extension/pi/v1/providers/plannotator.ts`) imports type-only, and the adapter imports nothing
+back from `planReview.ts` (which still takes value helpers from the adapter, but no longer the
+bridge).
 
 ## The "pure module + effectful seam" reconciliation
 
@@ -158,12 +170,34 @@ The helper shape that worked for the verified workflow-state append:
 - **Idempotence pre-checks stay caller-side** ("append iff rebuilt differs") — pushing
   skip-if-equal into the helper was considered and rejected to keep the seam single-purpose.
 
-Two non-obvious facts around it:
+Non-obvious facts around it:
 
-- **Verified-linkage tiering:** strict read-back applies only to the four contracted linkage
-  fields. Mode writes, activation appends, the fork append (LWW), and budget appends deliberately
-  stay un-verified — do **not** "helpfully" migrate them onto the seam; the contract distinguishes
-  the tiers.
+- **Mechanism vs contract row.** The append → rebuild → compare mechanism is now the default path
+  for durable workflow-state fields. `appendWorkflowStateClassified` classifies the outcome:
+  `applied` (read-back equals expected, *including* when `appendEntry` threw — the read-back is
+  the proof authority), `rejected` (the append threw AND the rebuilt field still differs — proven
+  refusal-before-effect), `unverified` (the append returned but the read-back missed, or the
+  post-throw rebuild itself failed — an effect may have landed unproven). `appendWorkflowState`
+  is its boolean wrapper (`applied` → true), and `branchSessionStateStore`
+  (`extension/session/lifecycle.ts`) exposes the classified form to the session seam as
+  `SessionStateStore.appendVerified`. What differs per field is its **§8.3 contract row**, not the
+  mechanism: the verified-linkage tier (`run_id ↔ pi_session_id`, `active_plan_ref`)
+  withholds/propagates on a non-applied result; most best-effort fields continue past the loud
+  report; and a best-effort field can still withhold — the conflict counter is best-effort tier,
+  yet an unverified increment withholds the resolver dispatch. For the live census, grep
+  `appendVerified(` / `appendWorkflowState(` rather than trusting a field list. The two
+  boolean-wrapper riders: `setConflictAttempts` (refuses a non-integer/negative counter loudly
+  *before* any append — the reader narrows such values to 0, so persisting one would silently
+  reopen the budget; equal-value short-circuit) and the dream wave's `markBundleDigest` closure
+  (`extension/pi/v1/learning/dream.ts`; fail-closed on an unverified CLEAR).
+- **The plain-append remainder (deliberately unverified):** the fork/adopt identity append in
+  `extension/session/lifecycle.ts` (LWW, inherits the parent's state); the gate's own `mode`
+  enter/exit writes in `extension/substrate/toolGating.ts` (they return a typed `GateTransition`
+  instead — `pi/context-system.md` § Gate engagement); `session_name`/`session_naming`
+  (`extension/session/sessionName.ts`; the contract calls it a plain append); and the `/objective`
+  command's `active_objective` write in `extension/pi/v1/objective.ts`. Don't migrate the fork
+  append: a fail-open rebuild feeding an LWW write is the trap "Door→typed-op extraction craft"
+  already names.
 - **Object-valued read-back is reference-identity:** `rebuildWorkflowState` copies `entry.data` by
   reference, so a default compare on an object field passes iff both sides share the same object
   reference — build the payload object once and pass it to both the append and the expectation. A
@@ -248,7 +282,11 @@ planSave change deliberately inherited the seam's fail-safe.
 ## Cross-references
 
 - `extension/surfaces/report.ts` — `report()`, `ReportTarget`
-- `extension/substrate/workflowState.ts` — `appendWorkflowState`, `EntrySink`, `rebuildWorkflowState`
+- `extension/substrate/workflowState.ts` — `appendWorkflowState` / `appendWorkflowStateClassified`,
+  `setConflictAttempts`, `EntrySink`, `rebuildWorkflowState`
+- `extension/session/lifecycle.ts` — `SessionStateStore` (`rebuild`/`append`/`appendVerified`),
+  `branchSessionStateStore`, the fork/adopt plain append
+- `extension/pi/v1/reviewOutcome.ts` — the vocabulary module that dissolved the adapter cycle
 - `docs/learned/pi/extension-api.md` — the SDK context the structural interface slices
 - `docs/learned/workflow/plan-review-flow.md` — the extracted-core + scripted-fake testing recipe
 - `docs/learned/workflow/warm-door-commands.md` — the warm doors whose error paths these seams serve

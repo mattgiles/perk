@@ -13,7 +13,7 @@ table.
 | Category | Doc | Cluster | When to read |
 |----------|-----|---------|-------------|
 | pi | [context-injection.md](pi/context-injection.md) | pi-extension | You are injecting or stripping session context, deduplicating delivery across compaction via Pi's projection, handling compaction callbacks or a token-cap failure, or validating branch-entry data. |
-| pi | [context-system.md](pi/context-system.md) | pi-extension | You are surfacing info to a session (the ambient index), debugging a timed-out bash scan, touching the scan-timeout guard or the gate engagement latch, or hit the worktree AGENTS.md double-load. |
+| pi | [context-system.md](pi/context-system.md) | pi-extension | You are surfacing info to a session (the ambient index), debugging a timed-out bash scan, touching the scan-timeout guard or the gate engagement latch, or a worktree session's AGENTS.md load. |
 | pi | [extension-api.md](pi/extension-api.md) | pi-extension | You need live system-prompt inputs, before_agent_start user vs custom starts, Pi config schemas, model selection vs dispatch, host-floor lockouts, pi.exec, dogfooding extension code, harness testing |
 | pi | [extension-seams.md](pi/extension-seams.md) | pi-extension | You are collapsing a repeated extension idiom into one tested seam (report()/branchOf/branchCarries), extracting a tool's execute core, or evacuating survivor code from a retiring module. |
 | pi | [headless-session-drive.md](pi/headless-session-drive.md) | pi-extension | You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, worker MCP isolation, abort latching, usage accounting, print-mode probes, offline determinism |

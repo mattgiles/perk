@@ -101,8 +101,9 @@ SDK-constructed session loads them only through `extensionFactories` (the packag
   `perk-worker-policy` inline extension. **`builtin: true` is load-bearing**: it yields the
   `builtin:<name>` path and `sourceInfo.source === "builtin"` provenance that the posture table and
   `isDiscoveryHost` key on, so the worker joins the discovery cohort (`pi/tool-loadout.md`).
-- Both register inactive; configuration alone activates them (`defaultTools` `+tool_search` /
-  `+codemode`); a project `extensions: ["-builtin:<name>"]` disables one.
+- `codemode` and `tool_search` register inactive — configuration alone activates them
+  (`defaultTools` `+tool_search` / `+codemode`); `mcp` registers server tools as servers connect; a
+  project `extensions: ["-builtin:<name>"]` disables any one of the three.
 - `/btw` still supplies none; `llama.cpp` is deliberately absent.
 - **MCP — factory-scoped isolation.** `workerMcpOptions` replaces every global MCP resource Pi's
   `createMcpExtension` would take from `getAgentDir()`: project `.pi/mcp.json` only (registered
@@ -495,7 +496,8 @@ the corrections are the durable knowledge.
   load path (offline — no npm), `PI_OFFLINE=1` belt-and-suspenders. The
   tier no longer injects perk through `resourceLoaderOptions.extensionFactories` (that was the
   in-memory-settings workaround); production passes the hidden `perk-worker-policy` inline
-  extension plus the two builtins through it. (The production-side story lives in
+  extension plus the three builtins (`workerBuiltinExtensions`: `codemode`, `tool-search`, `mcp`)
+  through it. (The production-side story lives in
   `docs/learned/workflow/remote-runner.md`.)
   - **Generalize before scoping extension delivery for ANY headless/worker session: audit the
     stage prompts it will drive for capabilities sourced from borrowed packages.** Loading only
