@@ -9,10 +9,12 @@ cluster: doors-and-launch
 A perk *local* stage launch ends in `os.execvpe(<absolute pi path>, …)`: the perk CLI process
 **becomes** pi. The seam is the `perk/run/launch/` package (`launch_stage` + its phase functions
 in `perk/run/launch/__init__.py`; `materialize.py`, `prompts.py`, `worktree.py`, `remote.py`) plus
-the exec phase in `perk/run/pi_exec.py::exec_pi` — the ONE Pi exec pipeline (env build, absolute
-`pi` resolution, the Linear-key seed, the stale-lock sweep, `chdir` + exec), shared by stage
-launches, the plain bare-`perk` session and `perk resume`; `perk/run/launch/__init__.py::_exec_pi`
-is only the `_LaunchContext` adapter onto it. This doc owns the launch phase — execution +
+the exec phase in `perk/run/pi_exec.py::exec_pi` — the ONE Pi exec pipeline, in fixed order:
+absolute `pi` resolution → host admission → the Linear-key seed → env build → the stale-lock
+sweep → the extension-install detach → the `PERK_PROFILE_HANDOFF` stop-before-exec arm
+(`startup-profiling.md` owns that instrument) → `chdir` + exec — shared by stage launches, the
+plain bare-`perk` session and `perk resume`; `perk/run/launch/__init__.py::_exec_pi` is only the
+`_LaunchContext` adapter onto it. This doc owns the launch phase — execution +
 positioning; what a door *gathers* before calling `launch_stage` is `plan-factories.md`'s
 (§ "Policy stays in the door's `gather` closure"). This doc carries no history: retire a rule by
 deleting it and pointing at the owner.
@@ -25,9 +27,17 @@ deleting it and pointing at the owner.
   live in `exec_pi`".
 - A local launch never returns; `--remote` returns through `_drive_remote_target` before any
   positioning or prompt assembly — "Local execs, remote returns".
-- Env layering is merge order (injected defaults < operator env < perk stamps); a blank
-  `PI_CODING_AGENT_DIR` is scrubbed from the child env, never forwarded; ONE agent-dir resolver,
-  `launch_pi_agent_dir` — "Env setdefault via merge order", "The launch-precedence agent dir".
+- The child env is the three-tier merge (injected npm defaults < operator env < perk stamps)
+  followed by four normalizations keyed on `None`/blankness, never on key presence:
+  `PERK_CLI_VERSION` always stamped; `PERK_RUN_ID` stamped, or removed on `run_id=None`;
+  `LINEAR_API_KEY` filled only when blank; `PI_CODING_AGENT_DIR` injected by the `config` arm or
+  scrubbed when blank. ONE agent-dir resolver, `launch_pi_agent_dir` — "Env setdefault via merge
+  order", "The launch-precedence agent dir".
+- `exec_pi` is a fixed sequence: resolve the absolute `pi` path, **admit the host**
+  (`_admit_pi_host`: one bounded `pi --version` against `shared/host-floor.yaml`; typed
+  `pi_version_unsupported` / `pi_version_unverifiable` / `pi_companions_incoherent` refusals, no
+  operator override, no later phase runs), Linear-key read, env build, lock sweep, detach,
+  handoff arm, `chdir` + exec — "Every-launch rules live in `exec_pi`".
 - A `worktree: none` stage runs in the MAIN checkout even from a linked worktree; positioning
   gates key off the *launched stage instance* — "`worktree: none` resolves to the main checkout".
 - The `[worktree] setup` marker clears only after the hook succeeds — "The `[worktree] setup`
@@ -88,6 +98,21 @@ plan: stage launch → `materialize_*` → `_exec_pi` → `exec_pi`; bare `perk`
 `materialize_extensions` and never ran on resume; it now lives in
 `pi_exec._detach_extension_install`.)
 
+The pipeline's order is the lead's: resolve → admit → Linear-key read → env build → lock sweep
+→ detach → handoff arm → `chdir` + exec. The host admission (`_admit_pi_host`) runs **second**,
+right after the pre-chdir resolution and before the Linear-key read, so a refused host leaves no
+exec-phase trace — no key read, no lock sweep, no handoff record, no `chdir`; `--dry-run`
+previews return before the pipeline and never probe. The admission's verdict vocabulary and the
+floor itself belong to contracts §8.76 and `init-doctor.md` § "Host-floor rows and the three
+settings-convergence shapes" (doctor's `_check_pi` runs the same `probe_pi_host`; the
+`pi --version` side-effects note lives there) — this doc owns only the placement. Two pins in
+`tests/test_launch.py` hold it: `test_exec_pi_admission_precedes_every_other_exec_phase_step`,
+whose events list is the executable statement of the order (the handoff arm, inert when unset,
+is pinned by its own `test_exec_pi_profile_handoff_*` tests), and
+`test_exec_pi_refused_host_runs_no_later_phase`. **Craft rule:** a new every-launch phase goes
+into `exec_pi`'s sequence **and** into that events-list pin in the same edit — the pin is the
+order's only enforcement.
+
 `perk resume` differs from a stage launch: no skill-exposure scoping, no `--approve`, it strips
 `PERK_RUN_ID`, builds a fresh bridge, runs no staging check, and its PLAN arm goes through
 `pi --resume`'s picker (`perk/run/launch/session_resume.py`).
@@ -103,11 +128,26 @@ three render sites.
 
 ## Env setdefault via merge order
 
-`perk/run/pi_exec.py::_build_exec_env` is `{**_NPM_QUIET_ENV, **environ, PERK_RUN_ID,
-PERK_CLI_VERSION}`: injected defaults < operator env < perk-owned stamps, **no conditionals**.
-Slot new launch-seam vars into this layering, never `env.setdefault()` loops. A `run_id=None`
-call (a session reopen mints nothing) REMOVES an inherited `PERK_RUN_ID` — the extension's `keep`
-arm depends on no foreign id arriving.
+`perk/run/pi_exec.py::_build_exec_env` starts from a copy-merge — perk's injected npm defaults
+under the operator env — and then applies four normalizations, each with its reason:
+
+1. **`PERK_CLI_VERSION` is always stamped** and **`PERK_RUN_ID` is stamped from `run_id`** —
+   the run identity and CLI version are authoritative launch metadata, so they override
+   inherited values (the third, perk-stamp tier).
+2. **`run_id=None` REMOVES an inherited `PERK_RUN_ID`** — a session reopen mints nothing, and
+   the extension's `keep` arm depends on no foreign id arriving.
+3. **`LINEAR_API_KEY` is filled from the caller's fallback only when the inherited value is
+   blank** — env wins. `exec_pi` reads the gitignored fallback only in that same blank case, so
+   the check is doubled on purpose: the builder stays correct when called with a fallback it
+   should not use.
+4. **`PI_CODING_AGENT_DIR` is assigned verbatim when the caller injects one** (precedence is
+   settled before the call — `resolve_launch_agent_dir`'s `config` arm), **else a blank
+   inherited value is scrubbed**.
+
+Slot new launch-seam vars into this shape — either a merge-tier default or a post-merge
+normalization keyed on blankness/`None` — never `env.setdefault()` loops and never a presence
+check. The `tests/test_launch.py::test_build_exec_env_*` pins are the builder's behavioural
+contract.
 
 - **Cosmetic defaults are local-only; correctness defaults ride both spawn sites.** The advisory
   npm quiet vars stay off `perk/run/run_worker.py::_spawn_worker` (CI keeps full npm output),
@@ -119,7 +159,8 @@ arm depends on no foreign id arriving.
   **first** — perk's injected tier, not the shell profile.
 - **The Linear key seed.** `exec_pi` fills `LINEAR_API_KEY` from `load_local_linear_api_key`
   (the gitignored `.perk/local.toml`, read from the **main checkout before `os.chdir`**) only
-  when the environment lacks a non-blank value (`linear-backend.md`). An env seed designed for a
+  when the environment lacks a non-blank value (`linear-backend.md`); the seed is read in
+  `exec_pi` and applied inside `_build_exec_env` (normalization 3). An env seed designed for a
   perk-controlled cwd becomes CROSS-PROJECT the moment the cwd is human-chosen — re-examine every
   seeded secret when adding such a door; the seed stays on the reopen path as a documented
   residual with the operator opt-out (contracts §8.71(b)).
@@ -129,10 +170,10 @@ arm depends on no foreign id arriving.
 
 **Precedence normalization must reach the child environment.** Merge order suffices only when
 key *presence* is the override rule. `launch_pi_agent_dir` treats a whitespace-only
-`PI_CODING_AGENT_DIR` as unset, so `_build_exec_env` **scrubs** a blank inherited value from the
-copied child env (never mutating the parent) instead of forwarding it — forwarding made pi read
-an empty dir. Decide the configured redirect once, before the preview branch, and carry it
-through preview and exec: the exec step cannot safely recompute precedence after `chdir`.
+`PI_CODING_AGENT_DIR` as unset while pi treats it as a path, so forwarding it made pi read an
+empty dir — hence normalization 4 above (on the copied child env, never the parent). Decide the
+configured redirect once, before the preview branch, and carry it through preview and exec: the
+exec step cannot safely recompute precedence after `chdir`.
 
 ## The launch-precedence agent dir
 
@@ -247,10 +288,11 @@ miss, the chdir/exec race an ordinary `OSError` arm. Both probing seams — the 
 pre-chdir, absolutized via `Path.absolute()` because `which` returns a **relative** candidate
 when the matching `PATH` entry is relative; `None` on a miss. `exec_pi` resolves `pi` FIRST
 (`_resolve_pi_executable`; a miss is a typed `pi_cli_missing` refusal, **no bare-name
-fallback**), then `os.execvpe(pi_path, …)` inside the `launch_failed` `OSError` arm. The miss
-aborts the **exec phase only** — earlier phases may have run; a re-run reuses the materialized
-worktree but **mints a fresh `run_id` + handoff** (handoffs are per-run artifacts, never
-resumed).
+fallback**), admits the host SECOND (`_admit_pi_host`; a refusal is typed, never a bare-name or
+lower-version fallback), then runs the remaining phases and `os.execvpe(pi_path, …)` inside the
+`launch_failed` `OSError` arm. A `pi_cli_missing` or host-admission refusal aborts the **exec
+phase only** — earlier phases may have run; a re-run reuses the materialized worktree
+but **mints a fresh `run_id` + handoff** (handoffs are per-run artifacts, never resumed).
 
 **Pin announce-before-exec ordering through the FAILURE arms.** A door that announces its launch
 line must prove the announcement precedes the exec phase's refusals: stub the resolver to raise
@@ -312,11 +354,14 @@ launch environment.
 ## Cross-references
 
 - `perk/run/launch/__init__.py` (`launch_stage`, `_build_argv`, the `_exec_pi` adapter,
-  `run_pending_setup`), `perk/run/pi_exec.py` (`exec_pi`, `_build_exec_env`,
+  `run_pending_setup`), `perk/run/pi_exec.py` (`exec_pi`, `_admit_pi_host`, `_build_exec_env`,
   `resolve_launch_agent_dir`), `perk/run/launch/session_resume.py`, `perk/substrate/config.py`
-  (`launch_pi_agent_dir`), `perk/substrate/proc.py` (`which_absolute`)
+  (`launch_pi_agent_dir`), `perk/substrate/proc.py` (`which_absolute`),
+  `perk/substrate/pi_host.py` (`probe_pi_host`, `PI_ADOPTED_VERSION`) + `shared/host-floor.yaml`
 - `docs/learned/workflow/plan-factories.md` — the seeded-cold-door pipeline whose tail composes
   `launch_stage` (gather policy lives there); `docs/learned/workflow/worktree-lifecycle.md` —
   the setup hook's dry-run preview asymmetry
+- `docs/learned/workflow/init-doctor.md` — the host-floor rows (the admission's owner);
+  `docs/learned/workflow/startup-profiling.md` — the `PERK_PROFILE_HANDOFF` arm
 - `docs/learned/workflow/remote-runner.md`, `docs/learned/workflow/objective-lifecycle.md`,
   `docs/learned/workflow/skill-bindings.md`, `docs/learned/workflow/linear-backend.md`
