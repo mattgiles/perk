@@ -11,9 +11,10 @@
 // The loadout host (`perk_stage`) is the one other registrant here: the only tool allowed a
 // `prepareLoadout` hook, which presents the session's stage/mode loadout by hiding declarations.
 //
-// The discovery cohort's re-registration lives here too (`deferDiscoveryFamily`): a definition can
-// only be replaced by the extension that registered it, so the seam retains what each activation
-// registered (keyed by that activation's own `pi`) and re-registers exactly that, deferred.
+// The discovery family registers deferred here (the policy derives it); a nonparticipant's
+// re-declaration lives here too (`declareDiscoveryFamily`): a definition can only be replaced by
+// the extension that registered it, so the seam retains what each activation registered (keyed by
+// that activation's own `pi`) and re-registers exactly that, `direct`.
 
 import type { ExtensionAPI, ToolDefinition, ToolLoadout } from "@earendil-works/pi-coding-agent";
 import { structureResult } from "../substrate/result.ts";
