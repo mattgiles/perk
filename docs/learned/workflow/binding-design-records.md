@@ -1,6 +1,6 @@
 ---
 title: Binding design records & disposable-scaffold spikes
-read_when: You are authoring or reconciling a binding design record, spike, or dogfood/characterization record — session-event evidence vs self-report, teardown, FAIL verdicts, waivers, stale claims.
+read_when: You are authoring or reconciling a binding design record, spike, characterization or certification record — instrument proofs, staging, owner legs, NO-GO verdicts, waivers, stale claims
 cluster: knowledge-stewardship
 ---
 
@@ -13,6 +13,21 @@ authoring craft, distilled from the docs-site records
 (`docs/design/archive/learned-curation-map.md`). Only the cross-cutting record-authoring patterns live
 here — the docs-site–specific discoveries stay bound in those committed records; reuse rather
 than re-derive.
+
+## Distillation
+
+- Criteria in the plan → disposable scaffold → text-only evidence → teardown proof → named
+  consumers — "The proven record shape"; teardown is two-part — "Disposable spike teardown".
+- Pin outcome criteria and resolution rules, not config fragments; carry cross-section arithmetic
+  in-doc; readiness tables record effective state — the three middle sections.
+- Re-measure at commit; pilots pin criteria first and keep a byte-identical nonparticipant arm —
+  "Point-in-time records re-measure at commit", "Pilot shape and contamination".
+- Reconcile the whole current-state narrative, not only the named sentences — "Reconcile the
+  whole current-state narrative".
+- Separate MEASURED from SOURCE-DERIVED; a FAIL or NO-GO can land honestly; instrument claims come
+  from session events; prove every instrument before its row; stage from engine events; script
+  non-browser owner legs; close audits before teardown — "Characterization and dogfood nodes".
+- The evidence records the craft was distilled from are listed in "Cross-references".
 
 ## The proven record shape (three confirmations)
 
@@ -156,6 +171,45 @@ bounded re-verification) added the record disciplines below. The binding record 
   tree; run long series detached from the session and budget for laptop-contention outliers; and
   let a "speed" objective close honestly with a **no-speedup verdict** when that is what the series
   shows — the record's value is the measured truth, not the hoped-for headline.
+
+The Pi 1.1.0/1.4.0 certification arc and the 0.81.0 launcher characterization added five groups
+(records: `docs/design/archive/pi-subagents-0.81.0-launcher.md`,
+`pi-1.4.0-certification.md`, `pi-1.1.0-certification.md`, `pi-1.1.0-characterization.md`,
+`pi-1.1.0-headless-print-mode.md`):
+
+- **Instruments.** Prove every instrument and capture path with a pre-row probe — `NOT MEASURED
+  (instrument)` is an outcome (a dead `log show` was caught by a B0 probe, which made the
+  amendment legitimate). Rebind reused probe instruments that hard-code the previous worktree, and
+  prove the rebinding. Plan a second attribution source up front. An honest NO-GO caused by an
+  instrument limit is a valid result. macOS seatbelt (`sandbox-exec`) gotchas when it is the
+  instrument: `log stream` (not `log show`) returns Sandbox deny lines; the kernel suppresses
+  duplicate deny reports and logs nothing for keychain reads; match resolved paths
+  (`/private/var`); use `-D` parameters, not text substitution; `(allow process-exec* (with
+  report))` attributes pids; `file-read*` includes metadata reads.
+- **Staging.** Stage from engine events (`subagent.run.started`), never from a lane obeying a
+  directed tool call; a `sleep N` first step stages a deadline partial where output length does
+  not; timing-dependent staging proves the overlap, not the order; every live cell has a "not
+  staged → re-run, never scored" branch; pre-split decision rules ("stop before the child started"
+  vs "during a running child") so nothing is decided after a FAIL.
+- **Planning.** Run every literal in a task brief once unfenced at planning (issue/PR numbers
+  decay); size iteration caps from how the narrowing actually proceeds; set endpoints per question
+  (one question's validity must not gate another's disposition); exact-count oracles fail on
+  model-driven turns — write predicates over all entries; schedule issue comments/closes before
+  `/submit` or in a later session.
+- **Owner-heavy matrices.** Script every non-browser leg through tmux and reserve owner time for
+  browser decisions and marker observation; order owner legs by gate weight (stamp-gating supplier
+  rows first, INFO rows last); reconfirm every runner secret with a live dispatch before remote
+  legs; ask about the `perk:wave` marker while the wave runs; keep verdict and stamp as two
+  independent slots; a docs-only source-equivalence allowlist keeps a parallel owner session cheap;
+  a parallel session in `$MAIN` contends on the singleton `plan-ref.json`.
+- **Audits.** A release-note coverage map assigns every changelog bullet (sibling packages
+  included) to a disposing row; close the audit before teardown, or recover witnesses via
+  `npm pack` + `dist.shasum`; a failing assertion's successors never ran — credit only the
+  assertions before the failure line; version-history claims need a registry/archive check (a
+  pointer sweep proves resolution, not truth); reap detached supplier runners by command line
+  (`pgrep -f <scratch path>`, TERM→KILL rounds) excluding the reaper's own ancestor chain,
+  validated on a planted fake first; request-prefix hashes need a deterministic measurement root
+  (`pi/tool-loadout.md` § Test craft).
 
 ## Cross-references
 
