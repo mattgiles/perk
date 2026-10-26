@@ -217,6 +217,23 @@ the stamp the same way; the stamp moves only on certification evidence.
      activity; never termination, lock or spend evidence). Re-read the unions and the `message`
      policy at the next bump; a vocabulary change is a decoder update + test pin
      (`providerDiagnostics.test.ts`), never a wire break.
+   - the **runner launcher** (`src/runs/shared/runner-launcher.js`, with the supplier's
+     `docs/agents.md` § "Sandboxing background children with a launcher" and
+     `docs/configuration.md` § `runnerLaunchers`): characterized NO-GO at 0.81.0
+     (`docs/design/archive/pi-subagents-0.81.0-launcher.md`); re-read where a launcher may live,
+     the refusal shape and the status files it writes (`docs/learned/pi/subagents.md` § Runner
+     launchers);
+   - the **delegation-request census and bridge rules** mirrored in
+     `extension/testing/fakeConflictResolver.ts` (the request field census and the
+     `intercomBridge` validator) and the foreground transport's bridge override
+     (`foregroundDelegation.ts::FOREGROUND_INTERCOM_BRIDGE`, byte-equal to the wave constant) —
+     a census change is a fake update with its vacuity controls, re-read at every bump;
+   - the **frontmatter parser's `allowedAgents` handling** (`src/agents/frontmatter.js` /
+     `agents.js`): a blank `allowedAgents:` line must still mean "deny all descendants" while a
+     literal `[]` parses to `["[]"]` and drops the def (`tests/_agent_defs.py::assert_descendant_ceiling`);
+   - the **`autoResume` default**: 0.82.0 defaults it `true`, resuming reload/exit-interrupted
+     workflows on reopen — a bump to ≥ 0.82.0 must pin it `false` in the managed settings or
+     per-activation wave collection breaks (beside the `argsDigest` reuse key above).
 
    Keep MEASURED observations and SOURCE-DERIVED design apart in the record, and hand a gap the
    source establishes to a repair design — never record it as a measured result.

@@ -75,6 +75,14 @@ staging claim, and names the mirror's absolute path.
   config-pinned — no global or system config, no credential helper, hooks disabled — so HTTPS
   credentials never apply.
 
+### Source-mirror gotchas
+
+- Source mirrors are blobless partial clones: a whole-tree `git grep <rev>` lazily fetches blobs and
+  can fail against the promisor remote. Use targeted reads — `git show <sha>:<path>`,
+  `git diff <a> <b> -- <path>`.
+- Fetched tags can lag a release commit the mirror already contains. Cite by release SHA and confirm
+  the version with `git show <sha>:package.json`.
+
 ## The documentation workflow
 
 `perk librarian add docs <url>` (a new entry) and `perk librarian refresh <slug>` (an existing
