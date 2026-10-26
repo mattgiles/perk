@@ -20,7 +20,9 @@ deleting it and pointing at the owner.
 ## Distillation
 
 - Build the launch `argv` ONCE, before the `dry_run` branch; inject perk defaults BEFORE
-  pass-through args (pi parses last-wins) — "Build `argv` once, inject before pass-through".
+  pass-through args (pi parses last-wins); a rule for every launch belongs in `exec_pi`, not the
+  materialization phase — "Build `argv` once, inject before pass-through", "Every-launch rules
+  live in `exec_pi`".
 - A local launch never returns; `--remote` returns through `_drive_remote_target` before any
   positioning or prompt assembly — "Local execs, remote returns".
 - Env layering is merge order (injected defaults < operator env < perk stamps); a blank
@@ -30,9 +32,9 @@ deleting it and pointing at the owner.
   gates key off the *launched stage instance* — "`worktree: none` resolves to the main checkout".
 - The `[worktree] setup` marker clears only after the hook succeeds — "The `[worktree] setup`
   hook is marker-gated".
-- Skills are mirrored and `.pi/npm` pre-staged into the worktree before exec — nothing is
-  filterable after the exec-wall — "Worktree positioning must mirror `.agents/skills/`", "Launch
-  banner + worktree `.pi/npm` pre-staging".
+- Skills are mirrored and `.pi/npm` pre-staged (`fsclone.clone_tree`) into the worktree before
+  exec — nothing is filterable after the exec-wall — "Worktree positioning must mirror
+  `.agents/skills/`", "Launch banner + worktree `.pi/npm` pre-staging".
 - Resolve the absolute executable path BEFORE `os.chdir` (`which_absolute`): closes worktree
   binary substitution, NOT the shebang-interpreter `PATH` walk — "Exec-launcher safety".
 
@@ -76,6 +78,19 @@ so `perk resume`'s picker arms compose **no** `--approve` and Pi's native trust 
 door owns the terminal-only rule: `not_a_tty`, decided after `not_a_repo` and before any
 config/backend read. Launch prose says "no *stage* prompt", never "no prompt" — every launch
 without `--approve` may still show Pi's trust prompt.
+
+## Every-launch rules live in `exec_pi`
+
+Rules that must hold for every launch belong in `exec_pi`, not in `launch_stage`'s
+materialization phase. Trace the three entry points before writing "every launch / resume" into a
+plan: stage launch → `materialize_*` → `_exec_pi` → `exec_pi`; bare `perk` → `exec_pi`;
+`perk resume` → `exec_session_resume` → `exec_pi`. (The legacy-hardlink detach was first placed in
+`materialize_extensions` and never ran on resume; it now lives in
+`pi_exec._detach_extension_install`.)
+
+`perk resume` differs from a stage launch: no skill-exposure scoping, no `--approve`, it strips
+`PERK_RUN_ID`, builds a fresh bridge, runs no staging check, and its PLAN arm goes through
+`pi --resume`'s picker (`perk/run/launch/session_resume.py`).
 
 ## Prompt assembly: the augment-only `prompt_suffix` seam
 
@@ -205,20 +220,22 @@ narrates load-bearing pre-launch I/O emits it *itself* through
 and remote is None` gate; `launch_stage`'s call is then the no-op fallback. Grep for
 `print_launch_banner_gated(` to derive the narrating doors.
 
-**Pre-stage `.pi/npm`.** `materialize_extensions` clone-copies the converged repo-root `.pi/npm/`
-into the worktree so pi's `needsInstall` short-circuits. Copy, not symlink — per-worktree
-isolation. The two npm worlds never overlap: repo-root `node_modules` = perk's dev deps;
+**Pre-stage `.pi/npm`.** `materialize_extensions` stages the converged repo-root `.pi/npm/` into
+the worktree so pi's `needsInstall` short-circuits. Staging is `fsclone.clone_tree` — the isolation
+tiers (clonefile vs hardlinks + detached metadata) and their limits are
+`toolchain/worktree-node-modules.md` § "The `.pi/npm` world in perk's own checkout". The two npm
+worlds never overlap: repo-root `node_modules` = perk's dev deps;
 `.pi/npm/` = pi's extension-install root (`toolchain/worktree-node-modules.md`). The repo-root
 install is warmed **before** the clone — `_warm_extension_install`
 (`ensure_extension_install_present`; idempotent, needs neither `env` nor `chdir`) precedes the
 worktree block.
 
-**The partial-tree cache hazard.** `_clone_npm_tree` is two-tier and `OSError`-only (hardlink
-`copytree(copy_function=os.link)`, on `OSError` rmtree + deep copy); `materialize_extensions`
-wraps it in `except OSError` and rmtrees the partial tree (`shutil.Error` subclasses `OSError`).
-**General rule: a presence-only resume guard requires its writer to clean up partial state on
-failure, or it caches corruption** (a half-copied package satisfies a presence check yet fails
-to load).
+**The partial-tree cache hazard.** Staging requires a non-existent `dst` (an unpopulated one is
+removed first), and the presence-only resume guard holds because `clone_tree` removes a partial
+tree on failure. **General rule: a presence-only resume guard requires its writer to clean up
+partial state on failure, or it caches corruption** (a half-copied package satisfies a presence
+check yet fails to load). The one-time stale-spec verification (`_stale_extension_specs`) is
+stage-launch-only — `perk resume` skips it.
 
 ## Exec-launcher safety: resolve the absolute executable path BEFORE the chdir
 
