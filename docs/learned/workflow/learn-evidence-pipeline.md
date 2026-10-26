@@ -23,7 +23,8 @@ doc carries the why + the traps. Siblings: `learn-docs-scan.md` (docs scanner + 
   parse's `except ValueError`, so every projection must be total — "Match a reader's exception
   posture to its consumer's contract".
 - Pi persists `role: "system"` messages since 0.99 and records nested `ctx.executeTool` calls in
-  `message.nestedCalls`; tolerate a field by not declaring it — "The Pi session JSONL grammar".
+  `message.nestedCalls`; tolerate-and-drop (undeclared) vs tolerate-and-project (`object | None`
+  + a total projection); system state renders as `<system_state>` — "The Pi session JSONL grammar".
 - One rejected line can cut off the whole active branch (`malformed_lines > 0` ⇒ suspect a grammar
   gap); dedup must exclude entries a later prune deletes; `↑ duplicate of entry <id>` is a
   projection — read the raw entry — "The `--render` normalization pass".
@@ -139,7 +140,7 @@ streaming timeline lives in top-level `custom_message` shapes
 payloads under `message.details`) that `message.role` filters miss.
 
 **System messages (Pi ≥ 0.99, session format v3).** The pi-ai `SystemMessage` grammar is
-byte-identical at `0.99.2` and `1.0.0`: `content: string | TextContent[]` plus `sections`,
+byte-identical from `0.99.2` through `1.4.0`: `content: string | TextContent[]` plus `sections`,
 `toolsAdded`, `toolsRemoved`. A leading snapshot is an ordinary `type:"message"` entry with
 `content: ""`, the prompt in `sections` and the tool set in `toolsAdded`; later deltas use the same
 entry type; compaction entries carry a `systemMessage` snapshot.
@@ -148,14 +149,25 @@ entry type; compaction entries carry a `systemMessage` snapshot.
   `null`/absent projecting as empty, any other shape a malformed line. Pydantic's lax smart union
   still rejects int/bool/dict (no `str←int` coercion; a dict is not a tuple input), so widening
   keeps other shapes malformed.
-- The delta fields stay undeclared so `extra="ignore"` tolerates any shape — **not declaring a
-  field is how to tolerate it; never declare loose types.**
-- System entries render only through the generic `<message role="system">` arm, bounded by payload
-  truncation, never as `<user>` — context evidence, never user authorization or a workflow event
-  (contracts §8.35). On Pi 1.0.0 a live `/learn` renders none, because every system entry has empty
-  content.
-- Interpreting `sections` and the tool deltas is unbuilt (a residual: `/learn` evidence cannot show
-  which prompt sections or tools changed).
+- **Two tolerance cases.** *Tolerate and drop*: leave the field undeclared under
+  `extra="ignore"` (`timestamp`; sections/tool lists on a non-system role). *Tolerate and project*:
+  declare `object | None`, project with code that cannot raise, and count bad parts in
+  `malformed`/`dropped` — never a specific loose type like `dict[str, str]`.
+- **System state is built.** `SystemState` (`perk/learn/session_jsonl.py`) rides
+  `SessionEntry.system_state`, renders as `<system_state>`, is counted in
+  `system_states`/`system_malformed`, is part of the dedup signature and is substantive for the
+  prune. It is context evidence, never user authorization or a workflow event (contracts §8.35).
+  `system_malformed` gates nothing — it is a grammar-drift hint. Repeated compaction snapshots
+  spend chunk budget.
+- **What Pi writes.** Deltas carry only changed sections (`null` = removed); a redefined tool
+  appears in both `toolsRemoved` and `toolsAdded`; the compaction `systemMessage` is a full
+  snapshot with no `toolsRemoved`; a perk session has eight sections, each wrapped twice; the file
+  records no writer version.
+- **The size-bound rule.** List every emitted part — markers, pointers, escaping expansion,
+  splitter granularity — and pin the over-budget case.
+- **Fixtures from the real writer.** Write a real session from the pinned SDK (`SessionManager` +
+  Pi's own prompt/diff helpers; append an assistant message first) rather than hand-written JSON.
+  No committed Pi-written compaction fixture exists yet (an owed item).
 
 **Nested calls (Pi ≥ 0.99).** Pi records nested `ctx.executeTool` calls in `message.nestedCalls` on
 the calling tool's toolResult: `{ calls: [{ id "<parent>/<n>", name, status ok|error|unfinished,
