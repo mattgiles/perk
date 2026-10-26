@@ -125,10 +125,17 @@ unregistered construction over a real stage + worker, then the registered routin
 - **Retiring a generated flat launcher takes two edits:** the stage id into `DEDICATED_STAGES`
   (stops generation) AND out of the curated `STAGE_LAUNCHERS` (`perk/cli/alias.py`; the drift
   guard's "no stale entries" arm). A flat alias keeps the row rendering, so step 2 is honesty.
-- **Build defensively at import time:** wrap the registry read in `try/except (RegistryError,
-  FileNotFoundError, KeyError)`; the fallback keeps the group's `--help` and the warm
-  `perk <group> <verb> --json` doors working and loses only the bare-launch half (`pr` registers
-  the bare workers; `plan` / `learn` skip the launcher).
+- **Build defensively at import time — the tuple matches what the lookup raises**, not a house
+  list. `perk/substrate/registry.py::stage_by_id` raises `RegistryError` on an unknown id, so its
+  sites (`plan`'s merged `save` + hidden launcher, `learn`'s hidden launcher) catch exactly
+  `(RegistryError, FileNotFoundError)` — the same pair `perk/cli/stages.py::register_stage_commands`
+  catches around its non-indexing `load_registry()` walk; only a site that indexes a dict built
+  from `load_registry().stages` adds `KeyError` (`pr`, the one such site). Don't widen a tuple past
+  its lookup — a swallowed unrelated `KeyError` would silently drop a launcher. New borrow-a-stage
+  sites use `stage_by_id` (its docstring names it the one shared lookup), so the two-exception arm
+  is the default and `KeyError` stays `pr`-specific. The fallback keeps the group's `--help` and
+  the warm `perk <group> <verb> --json` doors working and loses only the bare-launch half (`pr`
+  registers the bare workers, marked `worker`; `plan` / `learn` skip the launcher).
 - **L vs L+W vs W is a registry fact, not an author-time annotation.** A command has a launcher
   half only if its id is a `shared/registry.yaml` stage — verify there, never in an objective's
   target tree. Launcher-only (`pr address`): a dedicated command with the launcher option set

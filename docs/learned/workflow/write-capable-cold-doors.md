@@ -25,9 +25,11 @@ below are what an agent can't derive from any single file.
   "Main-checkout resolution for repo-owned content invoked from a worktree".
 - The FS mutation is the deliverable; the network reconverge after it is surfaced but non-fatal —
   "Non-fatal network reconverge".
-- Doors sharing a gitignored staging area preflight before launch, claim a unique directory
-  atomically, never clean, keep the dry-run write-free, and build the seed's commands once as argv —
-  "Doors that share a gitignored staging area claim, never clean".
+- Doors sharing a gitignored staging area run the cache-only preflight and then a networked
+  one-page seed probe before launch, claim a unique directory atomically, never clean, keep the
+  dry-run free of tracked writes and staging claims (a gitignored scratch write is admissible),
+  and build the seed's commands once as argv — "Doors that share a gitignored staging area claim,
+  never clean".
 - Dogfood gates: encode the stitched offline precondition when the network hop cannot be
   localized; drive the real CLI end to end offline when it can — "The dogfood-gate test pattern".
 
@@ -114,7 +116,8 @@ fail the local FS verb. Where they surface depends on the verb:
 - **`create`** never returns: after `perform_scaffold` it prints warnings/errors to stderr via
   `user_output` on both the human and `--json` paths, then execs its authoring session, so there
   is no outcome payload. Its only `machine_output` is the `--dry-run --json` preview, which
-  scaffolds nothing.
+  scaffolds nothing (with `--from FILE` it still writes the gitignored seed scratch — see the
+  staging-area section).
 
 Test it with a **stubbed convergence** returning a canned `RepoSkillsConvergence` /
 `RepoSkillsManifest` — never hitting the network. Two scope disciplines that held:
@@ -130,12 +133,38 @@ Test it with a **stubbed convergence** returning a canned `RepoSkillsConvergence
 into a staging directory under the gitignored library (`src/perk/library/docs_session.py`,
 contracts §8.75(k)). The rules that held:
 
-- **Run the cache-only preflight before launch**, so a refusal costs no session.
+- **Cache-only preflight first** (`src/perk/library/guard.py`, contracts §8.75(d)): real-directory
+  roots, the tracked sweep, publish eligibility (`add`) or the docs-entry lookup (refresh), the
+  skill script + converters, the ignore probes over the *first free* staging name and the entry
+  dir — every refusal costs no session and writes nothing.
+- **Then the networked seed probe, still before the claim** (`docs_session.py::probe_seed`): one
+  fetch of the seed through the crawl script's own dry run capped at one page. Three outcomes by
+  exit code: the seed-redirect exit (`SEED_REDIRECT_EXIT`) → the typed `seed_redirect` refusal
+  naming the page's redirect target and the copyable reissue, **nothing claimed**; exit 0 → pass;
+  anything else (a non-zero exit, a spawn failure, the timeout) → one advisory warning the door
+  prints at launch (`door.py::launch_docs_session`), and the crawl reports the seed's state. Why:
+  a redirect-stub seed (a `/latest/`-style version alias) would otherwise burn a session and leave
+  a staging directory behind, while a flaky network must not refuse a launch. Probe → claim, so a
+  refusal leaves nothing behind. The probe runs on the launch and on `perk librarian prepare` —
+  never on `--dry-run`. Pins in `tests/test_librarian_docs_door.py`:
+  `test_add_docs_refuses_a_redirect_stub_seed_before_the_claim`,
+  `test_add_docs_an_inconclusive_probe_warns_and_launches`,
+  `test_refresh_refuses_a_source_that_now_redirects`.
 - **Claim atomically, never clean.** Claim a unique per-session directory with `mkdir` without
   `exist_ok` over `<slug>`, `<slug>-2`, …; never delete an existing one — it may be an in-progress
   or abandoned run (a leftover is `list`'s to report and the human's to dispose of).
-- **Keep the dry-run write-free.** It previews the first free name; the real launch claims its own,
-  which may differ.
+- **Keep the dry-run free of tracked writes and claims.** `perk librarian add docs --dry-run` (the
+  refresh door has none) runs the crawl script's full dry run in place of probe + claim —
+  networked (the URL → file map), but the script never creates the output directory, and
+  `door.py::relay_dry_run` maps its exit codes, the seed-redirect exit to the same
+  `seed_redirect`; it previews the first free name, and the real launch claims its own, which may
+  differ. The cross-door promise is "no tracked write, no staging claim", **not** "no write":
+  `skills create --from FILE --dry-run` materializes the gitignored seed scratch
+  (`seed_file.py::render_seed_file_scratch`, surfaced as `scratch_path` under `--dry-run --json`;
+  `tests/test_skills_cmd.py::test_create_from_file_dry_run_json`), exactly as `plan from` file
+  mode and the seeded-door pipeline do (`plan-factories.md` § "The shared seeded-cold-door
+  pipeline"). A dry-run that must be byte-free of writes says so explicitly; the default is the
+  tracked-write/claim promise.
 - **Build the seed's commands once, as argv** (`DocsCrawlPlan`) and render them with `shlex.join`,
   so the dry-run and the seed cannot diverge and paths with spaces or URLs with `&` / `?`
   round-trip.
@@ -179,7 +208,8 @@ and from a linked worktree. Craft:
 
 ## Cross-references
 
-- `plan-factories.md` — the read-only `plan`-stage borrow sibling (the same lever, read-only flavor).
+- `plan-factories.md` — the read-only `plan`-stage borrow sibling (the same lever, read-only flavor)
+  + the seeded-door pipeline's scratch-before-dry-run order.
 - `cold-door-launch.md` — `launch_stage`; § "`worktree: none` resolves to the main checkout" (the
   positioning rule the `save` borrow relies on); the worktree `.agents/skills/` mirror.
 - `skill-bindings.md` — § "The `binding_trigger` "borrows-a-stage" hazard" (the trigger-diversion
@@ -188,8 +218,11 @@ and from a linked worktree. Craft:
 - `init-external-cli.md` — the repo-authored-skills convergence + the `skills` CLI delivery path.
 - `cli-command-groups.md` — the `perk skills` pass-through group + the parity-smoke fingerprint.
 - `doc-reconciliation.md` — the docs-only-node accuracy gate.
-- `src/perk/library/docs_session.py` — the docs doors' deterministic half (preflight, staging
-  claim, `DocsCrawlPlan`); `src/perk/cli/commands/librarian/door.py` — the launch glue.
+- `src/perk/library/docs_session.py` — the docs doors' deterministic half (the cache-only
+  preflight, the seed probe, the staging claim, `DocsCrawlPlan`);
+  `src/perk/cli/commands/librarian/door.py` — the launch glue.
+- `src/perk/cli/seed_file.py` (`render_seed_file_scratch`) — the gitignored scratch a
+  seed-from-file dry-run writes.
 - `tests/test_library_dogfood.py` + `tests/_library_upstream.py` — the stitched real-CLI dogfood
   and its offline bare upstream.
 - `pi/read-only-bash-gate.md` — why `perk librarian prepare …` stays gate-blocked and `add docs` is
