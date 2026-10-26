@@ -1,6 +1,6 @@
 ---
 title: The report-wave module — flow migrations onto code-owned waves, lane semantics, and the wave test machinery
-read_when: You are changing extension/waves, review-wave identity/launch manifests, the single-use post record, the minimum-verdict floor, partial settlement, Ponytail coverage, lane semantics, or wave tests.
+read_when: You are changing extension/waves, review-wave identity/launch token, native partial settlement and unfinished lanes, stop/terminal-proof classes, parent-prepared snapshots, lane semantics, wave tests
 cluster: subagent-orchestration
 ---
 
@@ -20,13 +20,11 @@ duplicate them here.
 
 ## Distillation
 
-- Wave mechanics are CODE, module-owned: `reportWave.ts` is the logical core over the confined
-  transport tier (`transport.ts`); every flow is a mechanism (`waves/<flow>Wave.ts`) + installer
-  (`pi/v1/…`) pair catalogued in "Orientation", the simplify doors' wave included (upstream
-  pi-subagents mechanics live in `pi/subagents.md`, not here).
-- Every wave spawn carries the fixed contract incl. the explicit acceptance disable
-  (`acceptance: {level: "none"}`) AND the intercom-bridge disable (`intercomBridge: {mode:
-  "off"}`) — waves are completion-only — "The fixed spawn contract carries an explicit acceptance
+- Wave mechanics are CODE: `reportWave.ts` (logical core) over `transport.ts`; every flow is a
+  mechanism + installer pair catalogued in "Orientation" (engine mechanics: `pi/subagents.md`).
+- Every wave spawn carries three fixed fields — `acceptance: {level: "none"}`,
+  `intercomBridge: {mode: "off"}` and the per-launch `args: { launch: randomUUID() }` token that
+  defeats supplier workflow reuse — "The fixed spawn contract carries an explicit acceptance
   disable".
 - Blocking runs are start + await — "The start/settle split"; migrating a flow's prompt mechanics
   onto a code-owned wave tool follows "The flow-migration checklist".
@@ -37,16 +35,17 @@ duplicate them here.
   honest incompleteness — "Session-scoped guard state".
 - The recorded post state carries a code-owned minimum verdict (a clean post over an actionable
   floor is refused before the publisher); native `partial` settlement retains sibling reports but
-  never completeness (duplicate keys withheld at BOTH tiers); every child carries the CONSTANT
+  never completeness (duplicate keys withheld at BOTH tiers; still-running roster lanes report
+  `lane-failed` via `unfinishedLanes`); every child carries the CONSTANT
   `{readOnly: true}` packet + `worktree: false` — "One discriminated, single-use post record",
   "Native partial settlement", "The constant child-restriction packet".
 - Producer-lane waves key lanes `lane.<ordinal>` (`laneIdentity.ts`); routing tokens are fenced
   by refusal, never escaped; outcome loops walk the plan, not the aggregate — "Validate
   downstream identifier contracts"; `blocked` reports reclassify to `lane-failed` before coverage
   (`blockedReports.ts`) — "Lane semantics".
-- A `no_active_session` RPC reply is held for a later success, never first-reply — "The
-  context-less RPC hold"; a lane's compaction survival lives in `pi/subagents.md`.
-- "Watch items / residuals" is the flagged-edges register — check it before extending.
+- The parent owns the facts, the lane returns judgment — "Parent-prepared snapshots"; a
+  `no_active_session` RPC reply is held for a later success — "The context-less RPC hold"; the
+  flagged-edges register (stop/proof classes, wave cost `unavailable`) — "Watch items / residuals".
 
 ## Orientation
 
@@ -183,7 +182,17 @@ a bridge template telling children to send them — perk children never ask deci
 bridge is pure cost, and turning it off at spawn is what makes every wave **completion-only**
 (no `contact_supervisor` tool, no template; the def prose needs no tool-named prohibition).
 Delivery of both rides pi-subagents' workflow-defaults spread onto each lane child;
-`renderWaveScript` is untouched (scripts stay byte-identical). The hazard details live in
+`renderWaveScript` is untouched (scripts stay byte-identical).
+
+**The launch token is the third fixed field.** `args: { launch: randomUUID() }` is minted at
+`startWaveScript`'s one spawn site (`transport.ts`): not a spec field, not caller-selectable, never
+read back, never identity (identity stays `asyncDir`/`asyncId`); the script bytes are unchanged, so
+render parity holds. Its only job is to defeat the supplier's workflow reuse key (`scriptDigest` +
+`argsDigest` over a `runtime-replaced` run — `pi/subagents.md` § The v1 extension RPC seam), which
+once returned a `/reload`-replaced wave's reports as fresh. A source pin in
+`reportWaveRpc.test.ts` forbids the reuse vocabulary in the three wave modules and asserts the
+mint site. Glossary: `CONTEXT.md` **Launch token** / **Relaunch freshness**. Accepted residual:
+children of a wave abandoned at `/reload` run to completion unobserved. The hazard details live in
 `docs/learned/pi/subagents.md`; the doctor `subagent-compat` version `warn` is the drift tripwire
 (doctor never reads the engine's source).
 
@@ -399,6 +408,29 @@ perk-side application.)
   > is looking at, pass parent-verified DATA (pins) into the task rather than a flag that lets
   > the child re-derive a moving answer.
 
+## Parent-prepared snapshots — the parent owns the facts, the lane returns judgment
+
+The `/address` classifier recipe (`extension/waves/reviewClassifierWave.ts`), reusable for any
+lane that judges parent-known subjects:
+
+- **Strict decode at the parent.** The parent fetches the input and decodes it with a compiled
+  typebox schema — open objects, every kept field strict, id uniqueness checked (the consumer twin
+  of the producer's duplicate-id refusal).
+- **Code derives the subjects** and renders only those, inside a fixed-tag fence
+  (`<untrusted_feedback_snapshot>`; attribute values via `JSON.stringify`).
+- **Complete-coverage bounded rendering.** Every subject is listed; the per-body cap adapts from
+  `SNAPSHOT_BODY_CAP_CHARS` (4,000) down to `SNAPSHOT_BODY_FLOOR_CHARS` (200) under a
+  `SNAPSHOT_DIGEST_BUDGET_CHARS` (240K-char) budget, refusing `snapshot_too_large` only when the
+  floor itself overflows — a sibling of "Budgeted block-packing renderers".
+- **The lane schema carries judgment only** — `additionalProperties: false` turns a parent-known
+  field echoed by the lane into a schema fault.
+- **The binder** checks shape first, then correlates every fault in one pass walking the subjects.
+- **The parent holds the bound result per activation**, cleared at every classify entry; the
+  mutating tool (`finalize_address`) refuses when nothing is held or an id is outside the held set.
+- Typebox 1.x wire fact: `Type.Enum` serialises to a plain `{enum}` with no `type`/`anyOf`.
+- Plan craft: check example fixtures against the plan's own formula; `failFor`'s `fail()` already
+  reports.
+
 ## Lane semantics — status ≠ validity ≠ coverage
 
 The normalization distinction lives at the `lane-failed` / `malformed-report` reason comments in
@@ -480,14 +512,29 @@ preserved while the wave still surfaces failure and `complete: false`. The invar
   reports. Vocabulary: `CONTEXT.md` (engine deadline / settlement grace / deadline partial);
   normative home §8.35; the engine side is `pi/subagents.md` § "Execution surfaces and structured
   output".
+- **Roster-correlated unfinished lanes.** The supplier builds partial `results[]` from settled
+  children only, so a still-running `runs.all` lane appears only in the `workflowChildren`
+  roster. An identity-only side channel (`unfinishedLanes` on `WaveCompletion` → the `ok: false`
+  arm → `normalizeAssignments`) is consulted only in the no-carrier-row branch and reports
+  `lane-failed` with `LANE_STILL_RUNNING_ERROR`. Qualification: state `running`, a nonempty
+  `runId` mapping uniquely to its own `childId` via the receipt correlation map (computed once per
+  completion), a unique `childId`, and no `results` row with its key or run id. Invariants: a
+  carrier row always wins; the roster never contributes a report, `ok` or error text; the field is
+  omitted when empty; a withheld or mismatched inventory leaves `missing-lane`; no receipt child is
+  synthesized. Reusable pattern: when a supplier splits one fact across two payload surfaces, add
+  a separate identity-only channel consulted only at the exact fallback point. `ok` is the sole
+  per-lane status fact (a failed row with partial markers and a schema-valid report stays
+  `lane-failed`). Proven offline against 1.1.0-shaped fixtures (W6); the live confirmation is
+  owed.
 - **Completeness is always false on this path** under both completeness policies, even if every
   report survived; the retained `key: null` `run-failed` entry (ordered first, naming the native
   reason) guarantees it; receipts stay output-free and `failed`.
 - **Storage lifetime.** Completions are buffered **only while the spawn handle is unknown**; after
   the spawn reply the first matching completion goes into a single `matched` slot and the buffer is
   cleared (foreign entries and duplicates included); an `accepting` flag closes on settlement,
-  timeout, or cancel so a completion arriving during best-effort stop can never become late
-  salvage. A run-long buffer would leak report DATA across concurrent waves — and output-only tests
+  timeout, or cancel so a completion arriving during the stop can never become late salvage
+  (the stop itself is a typed outcome plus one terminal-proof read — `pi/subagents.md` § The v1
+  extension RPC seam). A run-long buffer would leak report DATA across concurrent waves — and output-only tests
   cannot prove the release, so a source-shape pin was required.
 
 ## Session-scoped guard state
@@ -618,9 +665,14 @@ deleted from `annotations.ts`). A held final push before browser readiness is fl
 readiness continuation; after readiness the tool retries in-call over `HELD_RETRY_DELAYS_MS`
 and, exhausted, presents the findings in-session — no later wake is promised. The early-decision
 window this opens (the human decides before the wave lands) is closed by policy, not a gate:
-the tool pairs write a code-owned `perk:wave` status marker (running at launch → cleared or
-"incomplete" at collect; the `wave` slug is refused to the model) and the door-open notice says
-to decide after the findings arrive; an early decision is authoritative and forgoes them.
+the tool pairs write a code-owned `perk:wave` status marker (running at launch → cleared,
+"failed" or "incomplete" at collect; the `wave` slug is refused to the model) and the door-open
+notice says to decide after the findings arrive; an early decision is authoritative and forgoes
+them. The marker vocabulary has a fourth, *detached* arm (`reviewDetachedStatus` in
+`extension/pi/v1/providers/waveStatus.ts`: replaced / interrupted / session-ended), pushed only
+by the browser-operation owner (`plan-review-flow.md` § The browser-operation owner), never by the
+tool pairs. The marker persists after the workflow notice until collection — hold collection one
+turn to observe it in a live leg.
 Plan-mode source ownership also needs an `author` carrier for visible lane attribution (the
 installed plan UI displays author rather than source). Evidence and the failed original draft
 leg of the streaming era: `docs/design/archive/pi-subagents-native-streaming-dogfood.md`; the
@@ -714,6 +766,29 @@ Instances:
   microtasks with one `setImmediate`, then tick `timeoutMs + WAVE_SETTLEMENT_GRACE_MS`. Keep the
   engine deadline, settlement grace and collect grace (`PERK_WAVE_COLLECT_GRACE_MS`) distinct;
   the inside-grace regression delivers at `deadline + grace − 1`.
+- **Stop/proof and reload knobs.** The shared fake takes `stopReply`, `terminalProof`,
+  `statusReply: "error"`, records `statuses`, and rebinds via `extension(pi)` on reload; constants
+  `FAKE_DEFAULT_TERMINAL_PROOF` and `noLiveRunController`. The memory adapter takes `stopOutcome`,
+  `terminalProof`, `proofs` (`MEMORY_DEFAULT_TERMINAL_PROOF`) and answers a never-spawned handle
+  like the engine. `awaitedChildEvent` (in `reportWaveRpc.test.ts`) is sent from inside
+  `executeSettlement`; `plantFakeSubagentsResponder` (harness) plants `<cwd>/.pi/extensions/*.ts`
+  importing the shared fake by absolute path, so headless worker e2e drives run RPC waves offline;
+  `classifyThenFinalize` drives the `/address` pair.
+- **The reload-harness idiom.** Enable `t.mock.timers` for `setTimeout` only after
+  `loadPerkSession`; drive via a bounded tick + `setImmediate` loop; drain the orphan transport
+  with `timeoutMs + WAVE_SETTLEMENT_GRACE_MS`. The old activation's `pi.events` throws the
+  stale-ctx error, which the never-throwing adapter turns into `acknowledged: false` /
+  `unavailable`.
+- **Supplier reason text is DATA.** Assert the class; compose any verbatim expectation from the
+  fake's exported constant or ONE test-local constant feeding both input and expectation; fake doc
+  comments call their strings samples.
+- **Raw-text source pin gotcha.** `reportWaveRpc.test.ts` matches the raw text of
+  `rpcAdapter.ts`/`transport.ts`/`reportWave.ts`, comments included, and forbids (among others)
+  `stopCause`, `usage`, `totalTokens`, `totalCost`, `costUsd`, `inputTokens`, `outputTokens`,
+  `cacheRead`, `cacheWrite`, `.cost`, `timedOut`, `triggerTurn`, `capacity`, `reused` — prose in
+  those modules must avoid them; the pin proves it catches known snippets first.
+- **Staging a deadline partial.** By output length it does not work (the scout report shape is
+  bounded); a `sleep N` first step does.
 - **The surviving coverage is public-surfaces-only.** The installed-engine suites
   (`partialSettlementCompat`, the child-execution/plan-bound compat tests, the shared
   `installedEngine` fixture) were deleted with the public-surfaces posture (`pi/subagents.md`
@@ -756,6 +831,12 @@ Instances:
   run has been observed; the live duplicate-load dogfood (user-scope `npm:pi-subagents` beside the
   project entry) was not executed — its protocol is in
   `docs/design/archive/pi-pre-trust-extension-leak.md`.
+- **Wave accounting.** The supplier's `results[].usage` and root totals are not owned-run
+  attribution (no reuse flag; the `cost` RPC includes the parent), so perk reads none of them and
+  wave cost stays `unavailable` (§8.35; the raw-text pin enforces it).
+- **Next-bump hazard.** pi-subagents 0.82.0 defaults `autoResume: true`, resuming
+  reload/exit-interrupted workflows on reopen — this breaks per-activation collection unless perk
+  pins it `false` (`pi/subagents.md` § History; routed code follow-up).
 - `pr`/`worktree`/`bundle_dir` stay model-relayed (an accepted trust posture;
   `decodeStartReviewWaveParams` is the single seam to adjust if door-recorded context is
   adopted).
