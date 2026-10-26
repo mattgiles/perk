@@ -28,6 +28,9 @@ every rule was established by a live failure or a live control, not by reading t
   infer identity or movement from convenient names or exit codes".
 - Private temp-ref namespaces still share `FETCH_HEAD`; fetch with `--no-write-fetch-head` — "A
   private temp-ref namespace does not make concurrent fetches private".
+- A fetch reachable from a read-only or gated path names its destination refspec with `--refmap=`
+  and `--no-tags` (`fetch_remote_tracking`); trace real call order before documenting an error
+  discriminator — "A gated fetch names its destination refspec".
 - Network work outside the lock commits under it only while the catalog owner is unchanged — "A
   lock-free network phase needs a fence at the locked commit".
 - Mechanics in the substrate, forge policy in `perk.github.reviews` — "Layering".
@@ -121,6 +124,29 @@ fetching into otherwise-private namespaces failed nondeterministically on `FETCH
 and nobody reads `FETCH_HEAD` (perk treats it as clobber-racy by design). The flag needs git ≥ 2.29
 — perk does not run a git version matrix, so that floor is asserted, not exercised. Other shared
 state under the common dir (auto-gc, `packed-refs` rewrites) remains untested under concurrency.
+
+## A gated fetch names its destination refspec
+
+A plain `git fetch <remote>` honors the configured `remote.<name>.fetch` mappings (a
+`+refs/heads/main:refs/heads/vendor-main` mapping creates or force-updates a local branch) and
+auto-follows tags, so "mutates no local branch" holds only under default config — and precedent
+proves nothing. `git.py::fetch_remote_tracking` passes an explicit
+`+refs/heads/*:refs/remotes/<remote>/*` with `--refmap=` and `--no-tags`: it writes only
+remote-tracking refs, objects and the shared `FETCH_HEAD`, never creates `refs/remotes/<remote>/HEAD`,
+and does not prune. `RepoDeliveryGit.fetch` uses it.
+
+- **Pins:** `tests/test_git.py::test_fetch_remote_tracking_advances_only_the_remote_tracking_refs`
+  (a hostile mapping + a remote tag, with a non-vacuity leg showing plain `git.fetch` creates both)
+  and the delivery-seam regression.
+- **Rule:** any fetch reachable from a read-only or gated path names its refspec and passes both
+  flags; prove a never-mutate claim with a hostile-config control (the same theme as "Config-pinned
+  is not a sandbox"). The remaining plain-fetch sites (`run/launch/worktree.py`,
+  `cli/commands/plan/watch_cmd.py`) are exterior and honor configured mappings. The shared `FETCH_HEAD.lock`
+  race across worktrees surfaces as a transient `git_error`.
+- **Error-order rule.** A documented discriminator ("offline yields X") must come from tracing the
+  real call order — `reconstruct_train()` reads the objective via `gh` before the fetch, so offline
+  usually fails `github_error` first (§8.44), and `PERK_BIN` fakes prove admission and plumbing
+  only.
 
 ## A lock-free network phase needs a fence at the locked commit
 

@@ -24,6 +24,9 @@ is the durable knowledge.
   byte-identical by design — "The plan-source resolution chain".
 - The canonical save is FAIL-LOUD (it's what implement/resume rebuild from); on-land consume and
   reconcile are fail-open — "Fail-loud at the canonical save; fail-open downstream".
+- A held post-save reconciliation (linkage, claim clear) is repair guidance on a standing save,
+  never a save failure; trace a retry's inputs before promising one; producer goldens double as
+  consumer fixtures — "A held post-save reconciliation is repair guidance".
 
 ## The fidelity gap: assume the model picks the lower-fidelity surface
 
@@ -235,6 +238,45 @@ on-land step is fail-open and only prints on success, a stale header broke the w
 > without updating it**, so re-running `objective_save` after editing prose/roadmap won't push the
 > edits. A genuine gap if in-session objective re-editing becomes a need. See
 > `objective-lifecycle.md`.
+
+## A held post-save reconciliation is repair guidance, never a save failure
+
+`savePlan`'s `linkage` (link-plan-ref) and `claimClear` (clear-node-claim) results ride the single
+`renderSavePlanOutcome` projection (`extension/pi/v1/plan.ts`): verbatim in `details`, a
+`⚠ … — <retry>` suffix per held arm, and `/plan-save` reports at `warning` via
+`planSaveNeedsRepair`. The save stands (`ok: true`, terminating, the gate exits); CONTEXT.md's
+**Save reconciliation** term carries the avoid-terms.
+
+- **Ordering.** The claim clear runs only once `linkage` is applied/unchanged — the claim is the
+  only place a bare `/plan-save` retry can recover `objective_id`/`node_id`.
+- **`retryByCommand`** (`extension/authoring/plan/save.ts`) is true only when no `consumed_learn`
+  was passed and the link params equal what the standing claim resolves to — otherwise the suffix
+  says to re-run the same `plan_save` call. Rule: before writing "re-run X to retry", trace how X
+  resolves its inputs against every way the original call could have been made, and confirm the
+  carrier outlives the failure.
+- **Known residuals.** A save with no run identity has no idempotency key; the two notices are
+  deliberate; the objective save still drops `linkage` (known gap).
+- **The display rule.** Fold every diagnostic entering the save message to one line, the
+  node-link error included — `report()` headlines only the first line.
+
+**Test craft.**
+
+- *Producer goldens as consumer fixtures:* `tests/golden/json/plan_save*.json` are decoded by the
+  TS consumer test via `decodePlanSave`; a vacuity guard requires the known file names; the TS
+  `PlanRef` projection pins that `consumed_learn`/`delivery_lineage` never reach workflow-state;
+  `tests/_golden.py` is the only regen owner (`workflow/execution-path-parity.md` § The test-shape
+  catalog).
+- *The append-failure knobs* (`extension/testing/harness.ts`): `failEntryAppend` is the core,
+  `failStateAppend` matches by `Object.hasOwn`, `failModeAppend` is rebuilt on it; `when: "after"`
+  yields `applied` because the read-back is the authority; `unverified` is producible only with
+  pure fakes.
+- *Two-attempt recovery tests* prove a retry promise.
+
+**Conflict-staging levers** (for a sacrificial plan aimed at a conflict): `[workflow] base` in the
+gitignored `.perk/local.toml` pins `base` into the header; pre-push `plan-<N>` at a fixed SHA so
+`position_branch` takes its existing-remote arm; `plan save` without `--run-id` inherits
+`$PERK_RUN_ID` and upserts — mint a fresh id per sacrificial plan; `plan save`,
+`implement --remote` and `/plan-save` each rewrite the main checkout's `plan-ref.json` cache.
 
 ## Cross-references
 
