@@ -1039,7 +1039,7 @@
     },
     "collect_draft_review_wave": {
       "declared": "deferred",
-      "exposure": "direct",
+      "exposure": "deferred",
       "gated": "allowed",
       "kind": "action",
       "mode_over_stage": true,
@@ -1055,7 +1055,7 @@
     },
     "collect_review_wave": {
       "declared": "deferred",
-      "exposure": "direct",
+      "exposure": "deferred",
       "gated": "blocked",
       "kind": "action",
       "mode_over_stage": false,
@@ -1287,7 +1287,7 @@
     },
     "objective_stack_status": {
       "declared": "deferred",
-      "exposure": "direct",
+      "exposure": "deferred",
       "gated": "allowed",
       "kind": "query",
       "mode_over_stage": false,
@@ -1421,7 +1421,7 @@
     },
     "push_annotations": {
       "declared": "deferred",
-      "exposure": "direct",
+      "exposure": "deferred",
       "gated": "allowed",
       "kind": "action",
       "mode_over_stage": true,

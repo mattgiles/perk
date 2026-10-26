@@ -70,34 +70,29 @@ export function registerPerkTool<TParams extends ToolDefinition["parameters"], T
 }
 
 /**
- * Re-register the discovery-pilot family `exposure: "deferred"` in THIS activation's registry:
- * each catalogued `declared: "deferred"` name this `pi` registered and the host still has. Pi's
- * `registerTool` replaces by name within the owning extension and keeps the tool in the active set
- * (the gating controller's one-time deactivation removes it). A member the registry already
- * reports deferred is skipped, so a re-emitted `session_start` re-registers nothing; a per-name
- * failure is reported and skipped. Returns the family names now deferred, in catalog order.
+ * Re-declare the discovery-pilot family `direct` in THIS activation's registry — the
+ * nonparticipant arm of the `session_start` join: each catalogued `declared: "deferred"` name this
+ * `pi` registered and the host still has. Pi's `registerTool` replaces by name within the owning
+ * extension, and `_refreshToolRegistry` activates a tool whose exposure becomes declarable like a
+ * new tool — no perk install. Idempotent: a member the registry already reports `direct` is
+ * skipped, so a re-emitted `session_start` re-registers nothing. A per-name failure is reported
+ * and leaves that member deferred (still primable, and searchable where `tool_search` exists).
  */
-export function deferDiscoveryFamily(pi: ExtensionAPI): string[] {
+export function declareDiscoveryFamily(pi: ExtensionAPI): void {
   const owned = RETAINED.get(pi);
-  if (owned === undefined) return [];
+  if (owned === undefined) return;
   const exposures = new Map(pi.getAllTools().map((t) => [t.name, t.exposure] as const));
-  const deferred: string[] = [];
   for (const name of discoveryFamily()) {
     const retained = owned.get(name);
     const policy = perkToolPolicy(name);
     if (retained === undefined || policy === undefined || !exposures.has(name)) continue;
-    if (exposures.get(name) === "deferred") {
-      deferred.push(name);
-      continue;
-    }
+    if (exposures.get(name) === "direct") continue;
     try {
-      pi.registerTool({ ...retained, ...derivePiMetadata(policy, { cohort: true }) });
-      deferred.push(name);
+      pi.registerTool({ ...retained, ...derivePiMetadata(policy, { declareDirect: true }) });
     } catch (error) {
-      console.error(`perk: could not defer ${name} — ${error}`);
+      console.error(`perk: could not declare ${name} — ${error}`);
     }
   }
-  return deferred;
 }
 
 /**

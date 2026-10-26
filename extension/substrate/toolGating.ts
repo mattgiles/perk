@@ -20,7 +20,7 @@
 //  - PRESENTATION is the loadout host's (`perk_stage`, registered by pi/activation.ts through
 //    `registerLoadoutHost`): its `prepareLoadout` hides, by name, every registered tool
 //    ineligible in the landing (by provenance — `hiddenDeclarationsFor`) and every
-//    cohort-deferred member outside the loadout being applied, so the gate and the diet reach
+//    deferred family member outside the loadout being applied, so the gate and the diet reach
 //    foreign tools without touching their activation, and a name removed at the restoration
 //    window's close stays hidden in the first request Pi builds from the pre-removal snapshot.
 //    Hidden tools stay active and callable; their prompt snippets and (since Pi 1.0.4) their
@@ -34,19 +34,19 @@
 //    writer, every other perk kind and an extension builtin are blocked. Depth-blind (Pi passes
 //    the immediate caller's id), identical under a child floor and inside the restoration window;
 //    hiding, deferral, discovery and `readOnlyHint` never grant a nested call. Fail-closed.
-//  - THE DISCOVERY COHORT: a session whose host has Pi's builtin `tool_search` registered and
-//    active at `session_start` joins it (pi/activation.ts: `deferDiscoveryFamily` re-registers the pilot
-//    family deferred, then `joinDiscoveryCohort`). The next install deactivates the family once
-//    (still ONE perk install at startup); thereafter a member deferred in this session is kept
-//    exactly while it is active and eligible (`reconcileTarget`'s third term). A member whose
-//    re-registration failed is still `direct` — `tool_search` cannot find it — so it stays
-//    always-declared like any perk tool. Priming
-//    (`primeDeferred`) is the one perk-initiated activation of a deferred tool: a warm door or a
-//    wave launcher activates the members its carrier names. Every other session is a
-//    nonparticipant and keeps today's always-declared loadout. Resets: resume/fork start from the
-//    host's defaults (a primed or searched member is gone); `/reload` re-runs the factory, which
-//    re-joins and re-deactivates when the next run starts; `/tree` restores the transcript's
-//    loadout and perk keeps it.
+//  - THE DISCOVERY COHORT: the pilot family registers `exposure: "deferred"`, so Pi leaves it
+//    inactive (a deferred tool is never activated by its registration). A session whose host has
+//    Pi's builtin `tool_search` registered and active at `session_start` keeps that registration
+//    — it joins the cohort (pi/activation.ts: `joinDiscoveryCohort`) and no perk install touches
+//    the family; every other session is a nonparticipant and re-declares the family `direct` there
+//    (`declareDiscoveryFamily`), which Pi activates like a new tool — the always-declared loadout.
+//    "Deferred" is read from the registry at every point, never memoed: a member registered
+//    deferred is kept exactly while it is active and eligible (`reconcileTarget`'s third term), so
+//    a nonparticipant member whose re-declaration failed behaves like a cohort member. Priming
+//    (`primeDeferred`) is perk's one activation of a deferred tool: a warm door or a wave launcher
+//    activates the members its carrier names. Resets: Pi restores a recorded member on resume,
+//    fork and `/tree`, and `/reload` keeps the live set — perk keeps what Pi restored or kept; a
+//    member leaves only where the landing makes it ineligible.
 //
 // The reconciliation points: `syncFromState` (session_start, session_tree, the doors' stage
 // syncs), `enter`, `exit`, the `resources_discover` re-apply (after every extension's
@@ -72,17 +72,20 @@
 // postures: `resources_discover` rethrows to Pi, `before_agent_start`/`agent_start` log and
 // continue.
 //
-// THE RESTORATION WINDOW (contracts.md §8.40): Pi ≥ 1.0 keeps restored-but-unregistered tools
-// pending from `/reload` (it adds the whole active set) or a `/tree` restore until the next agent
-// run starts — an MCP server still reconnecting gets its saved tools back when it registers them.
-// Any `setActiveTools` that deactivates a name drops that pending set; an identical or additive
-// one keeps it. So between a `session_start` with reason `reload` (or a `session_tree`) and the
-// next `agent_start`, perk only adds: a removal-bearing reconciliation installs the live set plus
-// its additions (an identical list included, so Pi re-runs the loadout hooks for the new
-// landing), and the removals — the cohort's family deferral, the stage diet, the codemode
-// suspension — land at `agent_start`, the first event after Pi's own clear, emitted for prompted
-// and `sendMessage`-triggered runs alike. Enforcement and presentation follow the new landing at
-// once; only the deactivation waits.
+// THE RESTORATION WINDOW (contracts.md §8.40): Pi keeps restored-but-unregistered tools pending
+// from `/reload` (it adds the whole active set), a `/tree` restore and (Pi ≥ 1.4.0) a resumed or
+// forked session's constructor restore until the next agent run starts — an MCP server still
+// reconnecting gets its saved tools back when it registers them. Any `setActiveTools` that
+// deactivates a name drops that pending set; an identical or additive one keeps it. So between a
+// window-opening point — a `session_start` with reason `reload`, any `session_start` whose branch
+// projection records a loadout, or a `session_tree` — and the next `agent_start`, perk only adds:
+// a removal-bearing reconciliation installs the live set plus its additions (an identical list
+// included, so Pi re-runs the loadout hooks for the new landing), and the removals land at
+// `agent_start`, the first event after Pi's own clear, emitted for prompted and
+// `sendMessage`-triggered runs alike. The removals that wait are the stage diet (Pi re-activates
+// the ineligible perk tools on every restore and reload) and the codemode suspension — both
+// policy-owned and hidden by name meanwhile, so the first request carries nothing of them.
+// Enforcement and presentation follow the new landing at once; only the deactivation waits.
 //
 // The exclusion contract: Pi's `--tools`/`--exclude-tools` (the SDK's `tools`/`excludeTools`)
 // are registry filters — a filtered-out perk tool is never registered and never installed; a
@@ -213,32 +216,36 @@ export interface ToolGating {
   isActive(): boolean;
   /**
    * The loadout host's hook: hide, by name, every registered tool ineligible in the presented
-   * landing and every cohort-deferred member the loadout does not declare, plus the host itself —
+   * landing and every deferred family member the loadout does not declare, plus the host itself —
    * declared or not (Pi masks by name across the whole transcript). Never throws — a failure
    * hides only the host (presentation is fail-open; the backstop still enforces). It only ever
    * hides — never a `descriptions` rewrite.
    */
   prepareLoadout(loadout: ToolLoadout): LoadoutPresentation;
   /**
-   * Join the discovery cohort with the family members `deferDiscoveryFamily` actually re-registered
-   * deferred: the next reconciliation removes those names from the live set once, as part of its
-   * one install, and only they are treated as deferred from then on. Idempotent per activation
-   * (a second call is a no-op); installs nothing itself.
+   * Record that this session is a discovery host (the selfcheck's cohort read). Installs and
+   * re-registers nothing: the family's deferral is its registration, read from the registry.
    */
-  joinDiscoveryCohort(family: readonly string[]): void;
+  joinDiscoveryCohort(): void;
   /**
-   * Primed activation: activate the members deferred in this session among `names` that are registered,
-   * eligible in the presented landing and not yet active, in catalog order; returns them. A primed
-   * member's deferral still pending in the restoration window is lifted, so it survives the
-   * window's close — a member still active only because of that deferral is primed this way
-   * and returned too. A no-op
-   * (`[]`, no install) outside the cohort. Never throws — a failure is reported and returns `[]`
-   * (presentation is fail-open: the model can still `tool_search`; enforcement is untouched).
+   * Primed activation: activate the family members among `names` that are registered `deferred`,
+   * eligible in the presented landing and not yet active, in catalog order, in one additive
+   * install; returns them. Where the family is `direct` (a nonparticipant) it finds nothing and
+   * returns `[]` with no install. An activated member survives the restoration window's close
+   * (an active, eligible deferred member is kept). Never throws — a failure is reported and
+   * returns `[]` (presentation is fail-open: the model can still `tool_search`; enforcement is
+   * untouched).
    */
   primeDeferred(names: readonly string[]): string[];
-  /** The selfcheck read: whether this session joined the cohort, and the members it deferred. */
+  /**
+   * The selfcheck read: whether this session is a discovery host, and the family members
+   * currently registered deferred (catalog order).
+   */
   discovery(): { cohort: boolean; family: readonly string[] };
 }
+
+/** One registry read (`readRegistry`): provenance by name, and the family registered deferred. */
+type Registry = { infos: Map<string, Provenance>; deferred: string[] };
 
 function isReadOnlyMode(mode: string | undefined): boolean {
   return mode === "read-only";
@@ -277,18 +284,16 @@ export function registerToolGating(
   // The builtins the gate switched off (codemode), restored when the presentation turns
   // read-write or a lifted landing consumes the memo. Updated only after a successful install.
   let suspended: string[] = [];
-  // Whether this activation joined the discovery cohort; the family members it deferred (catalog
-  // order); and those the next install must still deactivate once (cleared only after a
-  // successful install).
+  // Whether this session is a discovery host (the selfcheck's read only — deferral is the
+  // registry's).
   let cohort = false;
-  let deferred: string[] = [];
-  let pendingDeferral: string[] = [];
-  // Whether Pi's restoration window is open: from a `reload` session_start or a session_tree
-  // until the next agent_start. Pi ≥ 1.0 keeps restored tools whose registrant has not registered
-  // them yet (a reconnecting MCP server's) pending until the next run starts, and any
+  // Whether Pi's restoration window is open: from a `reload` session_start, a session_start whose
+  // branch projection records a loadout (Pi restored it before any handler ran), or a
+  // session_tree, until the next agent_start. Pi keeps restored tools whose registrant has not
+  // registered them yet (a reconnecting MCP server's) pending until the next run starts, and any
   // deactivating `setActiveTools` drops them — so inside the window every install only adds and
-  // the removals (with the `suspended`/`pendingDeferral` memos) complete at agent_start.
-  // startup/resume/new/fork never open it: Pi restores nothing there.
+  // the removals (with the `suspended` memo) complete at agent_start. A session_start whose
+  // projection records no loadout opens none: Pi restored nothing there.
   let restorationWindow = false;
 
   function hasFloor(): boolean {
@@ -321,23 +326,22 @@ export function registerToolGating(
     presentedMode = effective ? "read-only" : "read-write";
     try {
       const live = pi.getActiveTools();
-      const infos = provenanceMap();
+      const registry = readRegistry();
+      const { infos } = registry;
       const step = suspensionStep(
         { active: live, infos },
         presentedMode,
         suspended,
         stageId,
-        landing(infos),
+        landing(registry),
       );
-      const deferring = new Set(pendingDeferral);
-      const joined = step.active.filter((name) => !deferring.has(name));
       const target =
         reconcileTarget(
-          { active: joined, registered: [...infos.keys()] },
+          { active: step.active, registered: [...infos.keys()] },
           stageId,
           presentedMode,
-          deferred,
-        ) ?? joined;
+          registry.deferred,
+        ) ?? step.active;
       const removals = live.filter((name) => !target.includes(name));
       if (restorationWindow && removals.length > 0) {
         // Only add; the removals and their memos wait for the closing apply at agent_start.
@@ -348,7 +352,6 @@ export function registerToolGating(
           pi.setActiveTools(live);
         }
         suspended = step.suspended;
-        pendingDeferral = [];
       }
     } catch (error) {
       presentedMode = isActive() ? "read-only" : "read-write";
@@ -392,19 +395,20 @@ export function registerToolGating(
     apply(active, stageId);
   });
 
-  // The restoration window opens where Pi restores a loadout (`/reload`, a `/tree` restore). These
-  // handlers are registered before pi/activation.ts subscribes its own, so the flag is set before that
-  // event's `syncFromState` reconciles.
-  pi.on("session_start", async (event) => {
-    if (event.reason === "reload") restorationWindow = true;
+  // The restoration window opens where Pi restores a loadout: `/reload`, a `/tree` restore, and a
+  // session_start of any reason whose branch projection records a loadout — Pi ≥ 1.4.0 restores a
+  // resumed or forked session's recorded loadout in its constructor, before any session_start,
+  // exactly when the branch carries a system message. Every such startup reconciles (Pi's restore
+  // re-activates the stage-ineligible perk tools the transcript never mentioned), so the diet's
+  // removal waits for agent_start and Pi's pending set survives. Across a checkpoint-less
+  // compaction the projection reads no restore and the removals land at once. These handlers are
+  // registered before pi/activation.ts subscribes its own, so the flag is set before that event's
+  // `syncFromState` reconciles.
+  pi.on("session_start", async (event, ctx) => {
+    if (event.reason === "reload" || restoredLoadout(ctx)) restorationWindow = true;
   });
-  pi.on("session_tree", async (_event, ctx) => {
+  pi.on("session_tree", async () => {
     restorationWindow = true;
-    // A restore that replaced the loadout supersedes a reload's still-pending family deferral:
-    // the members the transcript declared are active by that history's choice (perk keeps what
-    // Pi restored), the rest are already off. Without a restore the reload's live set stands, so
-    // the deferral stays pending for the close.
-    if (pendingDeferral.length > 0 && restoredLoadout(ctx)) pendingDeferral = [];
   });
 
   // The closing point: Pi has dropped its pending set by the time a run emits agent_start (for a
@@ -422,10 +426,10 @@ export function registerToolGating(
   });
 
   /**
-   * Whether this navigation restored the selected branch's declared loadout. Pi restores exactly
-   * when the branch's projection carries a system message (its replayed declarations replace the
-   * active set before `session_tree` handlers run). An unreadable projection reads as no restore,
-   * which keeps the reload's deferral pending.
+   * Whether the selected branch records a loadout Pi restored. Pi restores exactly when the
+   * branch's projection carries a system message (its replayed declarations replace the active
+   * set before `session_start`/`session_tree` handlers run). An unreadable projection reads as no
+   * restore: the window stays shut and the removals land at once.
    */
   function restoredLoadout(ctx: ExtensionContext): boolean {
     try {
@@ -437,9 +441,17 @@ export function registerToolGating(
     }
   }
 
-  /** Every registered tool's provenance, by name. */
-  function provenanceMap(): Map<string, Provenance> {
-    return new Map(pi.getAllTools().map((t) => [t.name, t.sourceInfo] as const));
+  /**
+   * One registry read: every registered tool's provenance, by name, and the family members
+   * registered `exposure: "deferred"` (catalog order) — what each member became is the deferral,
+   * so a cohort session's family and a nonparticipant's failed re-declaration read alike.
+   */
+  function readRegistry(): Registry {
+    const tools = pi.getAllTools();
+    const infos = new Map(tools.map((t) => [t.name, t.sourceInfo] as const));
+    const exposures = new Map(tools.map((t) => [t.name, t.exposure] as const));
+    const deferred = discoveryFamily().filter((name) => exposures.get(name) === "deferred");
+    return { infos, deferred };
   }
 
   /**
@@ -456,8 +468,12 @@ export function registerToolGating(
   }
 
   /** The session facts a codemode lift reads, over the registry the caller already read. */
-  function landing(infos: ReadonlyMap<string, Provenance>): GateLanding {
-    return { codemode: readCodemodeMode(), deferred, registered: [...infos.keys()] };
+  function landing(registry: Registry): GateLanding {
+    return {
+      codemode: readCodemodeMode(),
+      deferred: registry.deferred,
+      registered: [...registry.infos.keys()],
+    };
   }
 
   // Enforce the whole policy even if presentation failed or a tool was activated between
@@ -473,15 +489,15 @@ export function registerToolGating(
       }
       // A name this session never registered is never callable here — a catalogued perk name
       // included (classification is by catalog, callability by the live registry).
-      const infos = provenanceMap();
-      const provenance = infos.get(event.toolName);
+      const registry = readRegistry();
+      const provenance = registry.infos.get(event.toolName);
       if (provenance === undefined) {
         return {
           block: true,
           reason: `perk read-only mode: ${event.toolName} is blocked (tool not registered).`,
         };
       }
-      if (!isEligible(event.toolName, provenance, stageId, "read-only", landing(infos))) {
+      if (!isEligible(event.toolName, provenance, stageId, "read-only", landing(registry))) {
         return {
           block: true,
           reason: `perk read-only mode: ${event.toolName} is blocked (tool not allowlisted).`,
@@ -599,35 +615,21 @@ export function registerToolGating(
       return settle("read-write", "install", () => apply(false, stageId));
     },
     isActive,
-    joinDiscoveryCohort(family: readonly string[]): void {
-      if (cohort) return;
-      const named = new Set(family);
+    joinDiscoveryCohort(): void {
       cohort = true;
-      deferred = discoveryFamily().filter((name) => named.has(name));
-      pendingDeferral = [...deferred];
     },
     primeDeferred(names: readonly string[]): string[] {
-      if (!cohort) return [];
       try {
         const wanted = new Set(names);
         const live = pi.getActiveTools();
-        const registered = new Set(pi.getAllTools().map((t) => t.name));
-        const pending = new Set(pendingDeferral);
-        const targets = deferred.filter(
+        // Registered is implied: the deferral is read from the registry.
+        const targets = readRegistry().deferred.filter(
           (name) =>
             wanted.has(name) &&
-            registered.has(name) &&
             isEligible(name, undefined, stageId, presentedMode) &&
-            (!live.includes(name) || pending.has(name)),
+            !live.includes(name),
         );
-        const additions = targets.filter((name) => !live.includes(name));
-        // A prime supersedes the one-time deferral the restoration window still holds for the
-        // member — whether it was still live or is activated now — so the closing apply keeps it
-        // (reconcileTarget keeps an active deferred member). When nothing needs adding, the
-        // identical install lets Pi re-run the loadout hooks.
-        pendingDeferral = pendingDeferral.filter((name) => !targets.includes(name));
-        if (additions.length > 0) pi.setActiveTools([...live, ...additions]);
-        else if (targets.length > 0) pi.setActiveTools(live);
+        if (targets.length > 0) pi.setActiveTools([...live, ...targets]);
         return targets;
       } catch (error) {
         console.error(`perk: priming failed — ${error}`);
@@ -635,7 +637,7 @@ export function registerToolGating(
       }
     },
     discovery() {
-      return { cohort, family: [...deferred] };
+      return { cohort, family: readRegistry().deferred };
     },
     prepareLoadout(loadout: ToolLoadout): LoadoutPresentation {
       // By name, independent of the declared list: Pi replaces its mask on every loadout
@@ -647,16 +649,17 @@ export function registerToolGating(
       // name is a no-op, and a deferred member is unmasked by the very application that
       // activates it (a `tool_search` hit, a prime).
       try {
-        const infos = provenanceMap();
+        const registry = readRegistry();
+        const { infos } = registry;
         const hidden = hiddenDeclarationsFor(
           [...infos.keys()],
           infos,
           stageId,
           presentedMode,
-          landing(infos),
+          landing(registry),
         );
         const declared = new Set(loadout.declared.map((t) => t.name));
-        for (const name of deferred) {
+        for (const name of registry.deferred) {
           if (!declared.has(name) && !hidden.includes(name)) hidden.push(name);
         }
         return { hiddenDeclarations: hidden };

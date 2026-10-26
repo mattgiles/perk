@@ -75,7 +75,7 @@ import {
 import { registerBtw } from "../vendor/btw/btw.ts";
 import { registerWhimsical } from "../vendor/whimsical/whimsical.ts";
 import { createReportWave } from "../waves/reportWave.ts";
-import { deferDiscoveryFamily, registerLoadoutHost } from "./perkTool.ts";
+import { declareDiscoveryFamily, registerLoadoutHost } from "./perkTool.ts";
 import { registerBashScanTimeout } from "./v1/bashScanTimeout.ts";
 import { createBrowserOperationOwner } from "./v1/browserOperation.ts";
 import { registerChildTaskRestore } from "./v1/childTaskRestore.ts";
@@ -466,6 +466,9 @@ export function activatePerk(
   // transition worth a toast; installed/disabled/skipped/unsupported are standing state that
   // `/perk-selfcheck` reports (charter D7).
   let bridgeReported = false;
+  // The discovery join runs once per activation; set only after its branch ran, so a throw leaves
+  // it for the next `session_start` to retry.
+  let discoverySettled = false;
 
   pi.on("session_start", async (_event, ctx) => {
     // Read the two native-child booleans and latch the floor before lifecycle work or tool rebuilds.
@@ -562,18 +565,17 @@ export function activatePerk(
     // never opens it).
     const toolScope = sessionStartToolScope(identity);
     // The discovery cohort join (contracts.md §8.40 "Native discovery"), BEFORE the first sync
-    // so the family's one-time deactivation rides that sync's single install. Only a host with
-    // Pi's builtin `tool_search` registered and active qualifies; every other session stays a
-    // nonparticipant. A failure leaves the session a nonparticipant.
+    // so the sync reads the family as it settled. The family registers deferred; a host with Pi's
+    // builtin `tool_search` registered and active (a discovery host) keeps it so — the cohort; no
+    // perk install touches it. Every other session re-declares it `direct` here, which Pi
+    // activates like a new tool. A failure leaves the family as registered (deferred: still
+    // primable, and searchable where `tool_search` exists).
     try {
-      if (!gating.discovery().cohort) {
+      if (!discoverySettled) {
         const infos = new Map(pi.getAllTools().map((t) => [t.name, t.sourceInfo] as const));
-        if (isDiscoveryHost(infos, pi.getActiveTools())) {
-          // Join with what actually deferred: a member whose re-registration failed stays
-          // always-declared, and nothing deferred means nothing to join.
-          const deferred = deferDiscoveryFamily(pi);
-          if (deferred.length > 0) gating.joinDiscoveryCohort(deferred);
-        }
+        if (isDiscoveryHost(infos, pi.getActiveTools())) gating.joinDiscoveryCohort();
+        else declareDiscoveryFamily(pi);
+        discoverySettled = true;
       }
     } catch (error) {
       console.error(`perk: discovery cohort join failed — ${error}`);

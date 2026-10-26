@@ -137,7 +137,7 @@ test("the one query is gate-allowed in the worktree family and the planning/refi
     {
       gated: "allowed",
       declared: "deferred",
-      exposure: "direct",
+      exposure: "deferred",
       stages: REGISTRY_STAGE_IDS.filter((id) =>
         [...WORKTREE_STAGES, ...PLANNING_READ_STAGES].includes(id),
       ),

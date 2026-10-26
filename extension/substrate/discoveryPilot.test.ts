@@ -1,7 +1,8 @@
 // Native discovery (contracts.md §8.40 "Native discovery"), driven through REAL
 // bound AgentSessions (Mode A, fully offline) with Pi's real builtin `tool_search` loaded. A
 // cohort session carries the converged `defaultTools: ["+tool_search"]`; a nonparticipant loads
-// the SAME extension set without it, so the registries are identical and only activation differs.
+// the SAME extension set without it, so the registries hold the same tools — the family registers
+// deferred in both, and only the nonparticipant re-declares it direct at session_start.
 // The nested-execution probe lives in its own file (`discoveryNested.test.ts`) so its fixture
 // registration never enters this process's census.
 //
@@ -104,7 +105,7 @@ const IMPLEMENT_MEMBERS = ["collect_review_wave", "objective_stack_status", "pus
 
 // --- 1. the cohort join ---------------------------------------------------------------------------
 
-test("cohort join (A): the family re-registers deferred and leaves the request; tool_search is declared; one perk install; a re-emitted session_start changes nothing", async (t) => {
+test("cohort join (A): the family is registered deferred and inactive at startup and undeclared; tool_search is declared; no perk install names a family member; a re-emitted session_start changes nothing", async (t) => {
   const installs = recordPerkInstalls(t);
   const family = discoveryFamily();
   assert.deepEqual(
@@ -113,9 +114,9 @@ test("cohort join (A): the family re-registers deferred and leaves the request; 
   );
   const { h, rt } = await pilotSession("implement", "read-write", true);
   try {
-    assert.equal(installs.length, 1, "a cohort startup is ONE perk install");
+    assert.equal(installs.length, 1, "a cohort startup is ONE perk install (the diet)");
     for (const name of family) {
-      assert.equal(h.toolInfo(name)?.exposure, "deferred", `${name} re-registered deferred`);
+      assert.equal(h.toolInfo(name)?.exposure, "deferred", `${name} registered deferred`);
       assert.ok(!isActive(h, name), `${name} inactive`);
     }
     assert.deepEqual(
@@ -128,15 +129,17 @@ test("cohort join (A): the family re-registers deferred and leaves the request; 
     assert.ok(request.tools.includes("tool_search"), "tool_search is declared");
     for (const name of family) {
       assert.ok(!request.tools.includes(name), `${name} undeclared`);
-      assert.ok(!request.prompt.includes(`- ${name}: `), `${name}'s snippet left the prompt`);
+      assert.ok(!request.prompt.includes(`- ${name}: `), `${name}'s snippet is not in the prompt`);
       for (const line of h.registeredTool(name)?.promptGuidelines ?? [])
-        assert.ok(!request.prompt.includes(line), `${name}'s guideline left the prompt`);
+        assert.ok(!request.prompt.includes(line), `${name}'s guideline is not in the prompt`);
     }
     assert.equal(installs.length, 1, "the prompt turn installed nothing");
+    for (const install of installs)
+      for (const name of family)
+        assert.ok(!install.names.includes(name), `no perk install names ${name}`);
 
     // Prime one member, then re-emit session_start: nothing installs, the family stays deferred
-    // (an already-deferred member is never re-registered — the seam test pins the skip), and the
-    // primed member is kept.
+    // (the join runs once per activation), and the primed member is kept.
     spyInjections(h);
     await h.invokeCommand("objective-sync", "7");
     assert.ok(isActive(h, "objective_stack_status"), "primed by the door");
@@ -150,32 +153,28 @@ test("cohort join (A): the family re-registers deferred and leaves the request; 
   }
 });
 
-test("reload (A): a real /reload re-runs the factory — the family is deferred again and deactivated when the next run starts, never declared, tool_search stays declared, a primed member is gone", async () => {
+test("reload (A): a real /reload re-runs the factory — a primed member survives it (active, declared in the next request); the rest of the family stays inactive and undeclared; tool_search stays declared", async () => {
   const family = discoveryFamily();
+  const primed = "objective_stack_status";
   const { h, rt } = await pilotSession("implement", "read-write", true);
   try {
     spyInjections(h);
     await h.invokeCommand("objective-sync", "7");
-    assert.ok(isActive(h, "objective_stack_status"), "primed before the reload");
+    assert.ok(isActive(h, primed), "primed before the reload");
     await h.reload();
-    for (const name of family) {
-      assert.equal(
-        h.toolInfo(name)?.exposure,
-        "deferred",
-        `${name} re-deferred by the new activation`,
-      );
-      // The restoration-window rule (contracts.md §8.40): inside the window perk only adds.
-      assert.ok(isActive(h, name), `${name} stays active until the next run starts`);
-    }
+    for (const name of family)
+      assert.equal(h.toolInfo(name)?.exposure, "deferred", `${name} registered deferred again`);
+    assert.ok(isActive(h, primed), "Pi's reload kept the live set");
+    for (const name of family.filter((n) => n !== primed))
+      assert.ok(!isActive(h, name), `${name} inactive after the reload`);
     rt.census();
     await h.session.prompt("census");
     assert.ok(rt.last().tools.includes("tool_search"), "tool_search stays declared");
-    for (const name of family) {
-      assert.ok(!rt.last().tools.includes(name), `${name} undeclared (hidden by name)`);
-      assert.ok(
-        !isActive(h, name),
-        `${name} deactivated when the run started (the window's close)`,
-      );
+    assert.ok(rt.last().tools.includes(primed), `${primed} declared in the next request`);
+    assert.ok(isActive(h, primed), `${primed} survives the window's close`);
+    for (const name of family.filter((n) => n !== primed)) {
+      assert.ok(!rt.last().tools.includes(name), `${name} undeclared`);
+      assert.ok(!isActive(h, name), `${name} stays inactive`);
     }
   } finally {
     h.dispose();
@@ -184,7 +183,7 @@ test("reload (A): a real /reload re-runs the factory — the family is deferred 
 
 // --- 2. nonparticipant preservation ---------------------------------------------------------------
 
-test("nonparticipant preservation (A): tool_search inactive, absent, or a foreign namesake — the family stays direct, active and declared; a bare session still installs nothing", async (t) => {
+test("nonparticipant preservation (A): tool_search inactive, absent, or a foreign namesake — the family is re-declared direct at session_start, active and declared, with no perk install on its account; a bare session still installs nothing", async (t) => {
   const installs = recordPerkInstalls(t);
   const family = discoveryFamily();
   const namesake = (pi: ExtensionAPI) => registerFakeTool(pi, "tool_search");
@@ -208,7 +207,14 @@ test("nonparticipant preservation (A): tool_search inactive, absent, or a foreig
     try {
       assert.equal(isActive(h, "tool_search"), namesakeActive, `${arm}: the precondition`);
       for (const name of family)
-        assert.equal(h.toolInfo(name)?.exposure, "direct", `${arm}: ${name} stays direct`);
+        assert.equal(h.toolInfo(name)?.exposure, "direct", `${arm}: ${name} re-declared direct`);
+      // Pi activated the re-declared family like a new tool: no perk install ever added one.
+      for (const install of installs)
+        for (const name of family)
+          assert.ok(
+            !install.names.includes(name) || install.before.includes(name),
+            `${arm}: no perk install activated ${name}`,
+          );
       assert.deepEqual(
         activePerk(h),
         registeredSubset(h, perkToolsFor("implement", "read-write")),
@@ -249,23 +255,45 @@ test("nonparticipant preservation (A): tool_search inactive, absent, or a foreig
   }
 });
 
-test("two-session isolation (A): a cohort session's join never reaches a nonparticipant bound in the same process", async () => {
+test("two-session isolation (A): a nonparticipant's direct re-declaration never reaches a cohort session bound in the same process, and vice versa", async () => {
   const family = discoveryFamily();
-  const a = await pilotSession("implement", "read-write", true);
-  const b = await pilotSession("implement", "read-write", false);
-  try {
-    await a.h.emitSessionStart();
+  const check = (cohort: PerkSession, outside: PerkSession, label: string) => {
     for (const name of family) {
-      assert.equal(a.h.toolInfo(name)?.exposure, "deferred", `A: ${name}`);
-      assert.equal(b.h.toolInfo(name)?.exposure, "direct", `B: ${name}`);
+      assert.equal(cohort.toolInfo(name)?.exposure, "deferred", `${label}: cohort ${name}`);
+      assert.equal(outside.toolInfo(name)?.exposure, "direct", `${label}: nonparticipant ${name}`);
     }
     for (const name of IMPLEMENT_MEMBERS) {
-      assert.ok(!isActive(a.h, name), `A defers ${name}`);
-      assert.ok(isActive(b.h, name), `B keeps ${name}`);
+      assert.ok(!isActive(cohort, name), `${label}: the cohort leaves ${name} inactive`);
+      assert.ok(isActive(outside, name), `${label}: the nonparticipant declares ${name}`);
     }
-  } finally {
-    a.h.dispose();
-    b.h.dispose();
+  };
+  // The cohort session binds first; the nonparticipant's session_start re-declares after it.
+  {
+    const a = await pilotSession("implement", "read-write", true);
+    const b = await pilotSession("implement", "read-write", false);
+    try {
+      check(a.h, b.h, "cohort first");
+      await b.h.emitSessionStart();
+      await a.h.emitSessionStart();
+      check(a.h, b.h, "cohort first, re-emitted");
+    } finally {
+      a.h.dispose();
+      b.h.dispose();
+    }
+  }
+  // The nonparticipant binds first; the cohort session registers its own family afterwards.
+  {
+    const b = await pilotSession("implement", "read-write", false);
+    const a = await pilotSession("implement", "read-write", true);
+    try {
+      check(a.h, b.h, "nonparticipant first");
+      await a.h.emitSessionStart();
+      await b.h.emitSessionStart();
+      check(a.h, b.h, "nonparticipant first, re-emitted");
+    } finally {
+      a.h.dispose();
+      b.h.dispose();
+    }
   }
 });
 
@@ -515,7 +543,7 @@ test("draft-review door from a gated worktree (A): /plan → plan_draft → plan
   }
 });
 
-test("priming resets (A): resume and fork from the primed leaf start without it and perk never installs it; /tree restores it and perk keeps it, or drops it in an ineligible stage", async (t) => {
+test("priming survives resume and fork (A): resume and fork from the primed leaf start with it (Pi restored it), it is declared in the first request and still active after it, the rest of the family stays inactive, no perk install drops it; /tree restores it and perk keeps it, or drops it in an ineligible stage", async (t) => {
   const installs = recordPerkInstalls(t);
   const cwd = scaffoldRepo();
   const file = plantSession(cwd, [{ stage: "implement", mode: "read-write" }]);
@@ -544,20 +572,36 @@ test("priming resets (A): resume and fork from the primed leaf start without it 
   }
   assert.ok(existsSync(file) && readFileSync(file, "utf8").includes("objective_stack_status"));
 
+  const primedMember = "objective_stack_status";
+  const unprimed = discoveryFamily().filter((name) => name !== primedMember);
   for (const manager of [SessionManager.open(file), SessionManager.forkFrom(file, cwd)]) {
     installs.length = 0;
     const resumed = await loadAt(cwd, { ...opts, sessionManager: manager });
     try {
       assert.equal(resumed.workflowState().stage, "implement");
-      assert.ok(!isActive(resumed, "objective_stack_status"), "starts without it");
+      assert.ok(isActive(resumed, primedMember), "starts with it (Pi restored it)");
+      for (const name of unprimed) assert.ok(!isActive(resumed, name), `${name} inactive`);
       rt.census();
       await resumed.session.prompt("census");
-      assert.ok(!isActive(resumed, "objective_stack_status"));
+      assert.ok(rt.last().tools.includes(primedMember), "declared in the first request");
+      assert.ok(isActive(resumed, primedMember), "still active after it");
+      for (const name of unprimed) {
+        assert.ok(!rt.last().tools.includes(name), `${name} undeclared`);
+        assert.ok(!isActive(resumed, name), `${name} still inactive`);
+      }
       assert.ok(installs.length > 0, "the recorder sees perk's startup install (non-vacuous)");
       assert.deepEqual(
-        installs.filter((install) => install.names.includes("objective_stack_status")),
+        installs.filter(
+          (install) =>
+            install.before.includes(primedMember) && !install.names.includes(primedMember),
+        ),
         [],
-        "perk never installs it",
+        "no perk install drops it",
+      );
+      assert.deepEqual(
+        installs.filter((install) => unprimed.some((name) => install.names.includes(name))),
+        [],
+        "no perk install activates the rest of the family",
       );
     } finally {
       resumed.dispose();
