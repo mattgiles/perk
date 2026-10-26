@@ -224,6 +224,15 @@ out-of-order roadmaps, not a scope violation — provided it's handled honestly:
   equivalent node — plans freeze roadmap state and go stale (#2006).
 - **Node-description craft:** when a node's scope input is an artifact that hasn't merged yet,
   pin the file path AND the branch/PR in the node description (#2027).
+- **Large reconciles go through the CLI.** `perk objective reconcile <N> --body FILE --dry-run
+  --json`, then the same without `--dry-run` — the `reconcile_objective` tool's inline prose
+  parameter is impractical above ~100 KB (routed follow-up: a body-file or section-insert mode).
+- **The objective body-size note.** The append-only landing log grew one objective's prose to
+  ~188K chars and its comment to ~257K; GitHub refused ~263K (the "65536" message is misleading —
+  the cap sits near 262,144). Keep landing-log entries terse, budget the narrative, and compress to
+  forward-looking content before nearing the cap: extract every sentence naming a remaining node or
+  owed item and confirm each survives the compression (the old text stays in the comment's edit
+  history). A pre-check with a named error is a routed code follow-up.
 
 ## The objective authoring loop mirrors plan → save
 

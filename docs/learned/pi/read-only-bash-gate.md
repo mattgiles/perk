@@ -373,6 +373,9 @@ fails silently in every lane.
   backstop); `docs/learned/pi/tool-loadout.md` — the rest of the gate (activation, presentation,
   enforcement)
 - `shared/contracts.md` §8.3 — the gate contract and its accepted limits
+- `docs/learned/pi/tool-loadout.md` § "Nested execution under the gate" — the nested arm runs before
+  the bash verdict, and a gate-allowed cold-door tool's git side effects are bounded by its Python
+  path, not the verdict (`workflow/git-substrate.md` § "A gated fetch names its destination refspec")
 - `docs/user-docs/reference/in-session/model-tools.md` § "Structural read-only gate"
 - `CONTEXT.md` § "Read-only bash gate" — the glossary
 - `docs/learned/pi/context-system.md` — the scan-timeout guard (the fail-open consumer) and the gate

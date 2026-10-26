@@ -283,8 +283,16 @@ seam to stay hermetic without weakening production behavior.
 - **Rule I** — only `pi/perkTool.ts` calls `pi.registerTool(`. The source-slice tripwire in
   `extension/pi/perkToolSeam.test.ts` (the `registerLoadoutHost` literal) is textual: a `...`
   inside a string literal or a reformat gives a false failure.
+  Rule I has a second test: the `prompt-template:subagent:` delegation event family is confined to
+  the transport (`pi/v1/foregroundDelegation.ts`), writers never use waves or private execution,
+  and the two writer modules carry per-file substrate-free pins (`delivery/conflictResolution.ts`,
+  `library/librarian.ts`). **Planner rule:** when a plan adds an import edge into a specific file,
+  grep the guard for that file path, not just its home directory — the fastest check is running
+  `extension/importDirectionGuard.test.ts` right after the edit.
 - **writeGuard** (`extension/writeGuard.test.ts`) — production writes go through
   `substrate/cache.ts::atomicWriteFileSync`.
+- **Raw-text source pins forbid tokens in comments too** — the list and the gotcha are in
+  `workflow/report-waves.md` § "Test machinery" (the raw-text source pin gotcha).
 
 **Rule: when editing production `extension/` files, run the repo-wide guards** (`writeGuard`,
 `importDirectionGuard`, `surfacesGuard`) in the narrow iteration set — a writeGuard violation was

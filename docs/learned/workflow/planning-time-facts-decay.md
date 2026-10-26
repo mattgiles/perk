@@ -36,6 +36,11 @@ the *authoring and implementing* companion to `workflow/plan-ref-lifecycle.md` (
   script promised compiled JS (≥ 0.70.0 ships compiled JS).
 - **Installed dependency versions decay too** (#2475) — re-verify the load-bearing facts against the
   installed package at implement time and cite the version actually verified in the commit.
+- **A host fact read from one arm of a function is not the whole activation path.** Before freezing
+  an operator decision on it, find every route by which names enter the initial active set, and
+  keep the mandatory empirical re-measure step in host-behaviour plans.
+- **Run every literal in a task brief once, unfenced, at planning** — a command or path a brief
+  hands the implementer is a planning-time fact like any other.
 
 ## Numeric caps are hard acceptance constraints enforced only by the fidelity lane
 

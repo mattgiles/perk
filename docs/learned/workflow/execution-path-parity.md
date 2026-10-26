@@ -66,7 +66,10 @@ Each shape below is a reusable pattern, with its landed exemplar:
   `docs/learned/workflow/shared-contracts.md` for the general lockstep-literal pattern).
 - **One physical fixture file consumed by BOTH suites.** The strongest cross-plane invariance pin
   shares the fixture bytes themselves — `tests/parity/dream_report_invariance.json`, with the
-  `{repeat, count}` expansion convention for oversize cases (#1996).
+  `{repeat, count}` expansion convention for oversize cases (#1996). The plan-save goldens are the
+  same shape without a move into `shared/fixtures/`: Python's `tests/golden/json/plan_save*.json`
+  are decoded by the TS consumer test via `decodePlanSave` (`workflow/plan-save-surfaces.md`
+  § "A held post-save reconciliation is repair guidance").
 - **Full authoring-loop live harness (pytest ↔ the real other plane over a pipe).**
   `extension/testing/refinementLoopLive.ts` drives the *real* TS interior — strict artifact import
   → the draft seam → a scripted deny→revise→approve through the registered review path → the

@@ -61,6 +61,20 @@ honours it), and temp-dir assertions run only against that root — `just test-j
 concurrently, and the worker e2e file creates `perk-worker-agent-*` directories in the shared
 default.
 
+An in-process `withEnv({ TMPDIR })` around a drive is exact only because that file's tests run
+sequentially — adding file-level concurrency breaks it.
+
+## Mocked-clock drivers over real I/O need a real-time bound
+
+A driver budgeted in event-loop turns (N ticks of `t.mock.timers` + `setImmediate`) while the
+driven work awaits **real** I/O (a child process, a file read) exhausts its budget in milliseconds
+on a contended host. Bound the driver by real time instead: yield at least 1 real ms per mocked
+step through a `setTimeout` reference captured at module load (before the mock replaces it), and
+arm the engine deadline beyond the most mocked time the driver can advance. Reproduce by running
+the file in 24 concurrent node processes. Slow-tier flakes surface only in GitHub CI or
+`just test-js-slow`, never the fast `run_ci` row — fix a red build in the same PR rather than
+deferring it.
+
 ## Async currency fences need a fence-between-awaits case
 
 An observer that re-checks `current()` after each of two awaits (before announcing readiness, and

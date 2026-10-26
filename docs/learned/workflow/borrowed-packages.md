@@ -229,6 +229,10 @@ loader-present shape and `eager`/`auto` resolve to eager, loader-absent — neit
 names. Detail, precedence and the posture rows: `docs/learned/pi/tool-loadout.md`. (The earlier
 name-keyed census with sticky late admission and lazy-owner tracking is retired.)
 
+The remote runner's `.pi/npm` is not the local one: unversioned entries resolve to the newest
+release on the runner, and only pi-subagents and perk are exact — a local-vs-remote tool census
+must expect that difference.
+
 ## The read-only bar is repo non-mutation, not zero side effects
 
 Read-only mode's invariant is that the **repo** isn't mutated — not that the tool has zero side
@@ -296,6 +300,13 @@ recipe:
   settings pin are distinct facts. A live smoke must assert the installed package's own
   `package.json` version — a configured source label proves nothing about what is installed
   (`tests/test_native_sdk_bridge_live.py`).
+- **Know which mechanism refreshes a borrow.** Unversioned `npm:` settings entries are installed
+  once and never refreshed by Pi (`installedNpmMatchesConfiguredVersion` accepts any installed
+  version for an unranged source); `pi update` is Pi's only refresh route. perk's convergence moves
+  exactly three things — the host Pi (`env.repair_pi`), `@mgiles/perk` under `.pi/npm`
+  (`materialize_extension_install`) and the version-carrying pi-subagents spec — while
+  `ponytail-compat` only reports. Before calling a borrowed package "latest-tracking" or writing a
+  manual npm step, check which mechanism actually updates it.
 
 ## Residuals
 
