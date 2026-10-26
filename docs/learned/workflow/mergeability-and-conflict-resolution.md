@@ -239,6 +239,27 @@ pin bump) is **silent** at dispatch: no `started` ack → `cancel` → the grace
 **retained lock** that needs human recovery; the doctor `subagent-compat` version `warn` is the
 only early signal.
 
+**The bridge-off invariant and the engine-faithful fake.** Every foreground writer request carries
+`intercomBridge: FOREGROUND_INTERCOM_BRIDGE` (`{ mode: "off" }`, byte-equal to the wave constant;
+`foregroundDelegation.ts`) — never a per-launch knob. `extension/testing/fakeConflictResolver.ts`
+mirrors the engine's delegation-request field census and its `intercomBridge` validator, with
+vacuity controls; it is a version-stamped surface to re-read at every supplier bump
+(`docs/developers/pi-subagents-reverify.md`).
+
+**Progress.** The `providerDiagnostics` snapshot flows to an optional trailing progress sink for
+every correlated update until *settlement* (a throwing sink is contained) and reaches the status
+slot through `ConflictResolverWithProgress` on the adapter side
+(`pi/v1/delivery/conflictResolverEngine.ts`); the Pi-free `ConflictResolver` in
+`delivery/conflictResolution.ts` stays substrate-free per Rule I
+(`workflow/source-scan-guards.md` § Registration and write seams). Keep tests of Pi-free modules
+Pi-free even for fixtures — importing `fakeConflictResolver.ts` into a substrate test pulled in the
+SDK (≈4 s).
+
+**The clone-drive hazard.** Driving a live resolver leg from a sacrificial clone runs
+`just ci → setup → install-cli`, which rebinds the global editable `perk` (`uv tool install
+--editable . --force`) to the clone. After any drive from a clone, restore the install from the
+real checkout and verify `~/.local/share/uv/tools/perk/uv-receipt.toml` points back at it.
+
 ## The worktree-scoped execution lock
 
 `extension/substrate/worktreeResolverLock.ts` keys on the canonical **per-worktree** git dir

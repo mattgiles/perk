@@ -1,6 +1,6 @@
 ---
 title: The plan review → approval → save pipeline
-read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution, Plannotator Direct Edits / the diff apply, or the `pi.events` bridge.
+read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the browser-operation owner of the four doors, the approvalSave seam, Plannotator Direct Edits, the pi.events bridge
 cluster: plan-lifecycle
 ---
 
@@ -17,9 +17,8 @@ hit.
 - `plan_review` dispatch is backend-neutral: plannotator → the event-bus bridge; ANY other
   selection → the first-party `ctx.ui.editor` review (the default substrate) — "The
   backend-neutral review door".
-- Plannotator arms open an in-TUI launch chooser first (drafts-only + presence-probed; null
-  opener falls OPEN to the plain review; Esc picks plain, never cancels) — "The `plan_review`
-  launch chooser".
+- Plannotator arms open an in-TUI launch chooser first (drafts-only + presence-probed; Esc picks
+  plain, never cancels; a `retired` open never falls back) — "The `plan_review` launch chooser".
 - The docs/learned consult is first-stop-MANDATORY prose with `learned-docs-first-stop` audit
   expectations behind it — "The `PLAN_AUTHORING_CONTEXT` nudge seam".
 - The review-surface LAW: review surfaces resolve artifact → param ONLY (never the transcript
@@ -31,11 +30,11 @@ hit.
 - Plannotator Direct Edits arrive as a version-pinned PROSE contract (a `# Direct Edits` diff
   fence inside `feedback`); apply is mechanical on the plan-APPROVE arm only — "Plannotator
   Direct Edits — the prose-diff apply".
-- Summoned background doors (browser review while the session stays live) add three race
-  classes the blocking path doesn't have (stale-draft APPROVE, …) — "Summoned background
-  review doors — three race classes".
-- Finding→annotation mechanics for both plannotator modes live in the `push_annotations`
-  module, not curl — "The annotation-push module (`push_annotations`)".
+- Summoned background doors add three race classes the blocking path doesn't have — "Summoned
+  background review doors"; ONE browser-operation owner per activation serializes every door's
+  open (register → retire predecessor → start), with two fences and tri-state results — "The
+  browser-operation owner".
+- Finding→annotation mechanics live in the `push_annotations` module — "The annotation-push module".
 - The persisted draft-review protocol is GONE — four in-memory guards (`draftReview.ts`: the
   activation's current-review slot + the decision ladder superseded → latch → reviewed bytes →
   destination fence) and a per-component save-destination digest (`saveDestination.ts`; a mirror
@@ -263,15 +262,19 @@ guidance between the gather list and the executor paragraph.**
   `sendUserMessage` wrappers) and returns a non-terminating `wave_launched` result carrying the
   door guidance verbatim; the browser decision routes through the door's existing background
   tasks.
-- **A null opener (a sync port-pick failure) falls OPEN to the plain blocking review**; Esc picks
-  the plain flavor, never cancels.
+- **Open results are tri-state** (`DoorOpenResult`: `launched` / `unlaunched` / `retired`). An
+  `unlaunched` open (already reported loudly) may fall back to the plain blocking review; a
+  `retired` open (a newer browser open or the shutdown retired it before it started) never falls
+  back (`waveRetiredResult` in `extension/pi/v1/review.ts`). Esc picks the plain flavor, never
+  cancels.
 
 ## Summoned background review doors — three race classes the blocking path doesn't have
 
 Unlike the model-called `plan_review` (a blocking wait), the `/plan-review-browser` door
 (`extension/pi/v1/planReviewBrowser.ts`) leaves the session **live while the human decides in
-the browser**. That structural difference creates three race classes beyond the two edges the
-plan explicitly accepted (double-open stale-clear; early decision mid-wave):
+the browser**. That structural difference creates three race classes beyond the edge the plan
+explicitly accepted (an early decision mid-wave; the double-open stale-clear edge is now closed by
+construction — the owner retires a predecessor before a successor starts):
 
 1. **Stale-draft race (APPROVE).** `approvalSave` resolves the *live* artifact, so a `plan_draft`
    write landing during the open-ended browser wait would save bytes the human never approved.
@@ -282,8 +285,8 @@ plan explicitly accepted (double-open stale-clear; early decision mid-wave):
    background tasks over one bridge; clearing primed surfaces on degrade does NOT stop the
    decision task, so a false-negative readiness probe followed by a real human decision would
    route into the save path anyway. Two background tasks sharing one bridge need a **shared
-   mutable liveness token** (`PlanReviewDoorSession.degraded`), not just surface clears — the
-   degrade arm flips it, and the decision task ignores a post-degrade decision *loudly*.
+   liveness check**, not just surface clears — today the owner's `live(op)` plus its two fences
+   (below), and the post-degrade rule answers a late decision with one warning.
 3. **Provenance laundering (feedback re-injection).** Browser feedback can carry
    reviewer-wave-originated content; injecting it verbatim as a user turn launders
    machine-generated text into implementation guidance. Wrap reviewer-originated feedback in
@@ -297,10 +300,6 @@ prompt to enumerate the adjacent races — the missed ones sat right beside the 
 objective-review sibling first) inherits all three and must replicate the byte-compare guard,
 the liveness token, and the delimiting.
 
-The objective sibling shipped as a **twin door**, and its duplication decisions held with no
-friction: module-private delimiter helpers duplicated, a local door-session twin, and a
-rule-of-three deferral of a generic door core — **the third door (gist) is the extraction
-trigger**.
 
 ### Replaced by four in-memory guards (contracts §8.23 "Draft-review guards")
 
@@ -342,14 +341,63 @@ Semantics worth knowing before touching a surface:
   against the current draft.
 - **A superseded decision is ignored loudly on the TUI only** (`SUPERSEDED_DECISION_WARNING` via
   `report()`), never injected into the model's context.
-- **The doors' readiness observers are fenced by the slot.** `PlanReviewDoorSession.current` is
-  the review's `isCurrent()`; the observer consults it after *every* await — proven by a
-  fence-**between**-awaits case (a deferred promise, a `current` spy true-then-false, a supersede
-  while pending; see `toolchain/node-test-async-determinism.md`).
+- **The doors' readiness observers are fenced by the slot.** The draft doors pass the review's
+  `isCurrent()` to the owner as its applicability fence; the observer consults it after *every*
+  await — proven by a fence-**between**-awaits case (a deferred promise, an `isCurrent` spy
+  true-then-false, a supersede while pending; see `toolchain/node-test-async-determinism.md`).
 - **One validated read is the baseline.** The objective/gist browser arms take `raw` from the
   same validated resume read the rendering uses (`ResumeObjectiveDraftResult` /
   `ResumeGistDraftResult` carry `raw`) — a second read of the artifact for the stale-bytes
   baseline would open an interleaved-write window; see "Testing recipes" for the race pin.
+
+## The browser-operation owner (one per activation, all four doors)
+
+`extension/pi/v1/browserOperation.ts::createBrowserOperationOwner`, created once in
+`extension/pi/activation.ts`, is the one object every browser door opens its Plannotator review
+through; the module header is the normative detail (contracts §8.23) — this is the map.
+
+- **Two flavors.** Draft doors (`/plan-review-browser`, `/objective-review-browser`) pass a
+  companion context and the applicability fence `review.isCurrent`; code-review doors
+  (`/pr-review-browser`'s PR modes, `/stack-review-browser`, `open_stack_review`) pass neither.
+- **Serialization: register → retire predecessor → start.** `open` registers synchronously; the
+  predecessor is retired before the successor starts; `lastStarted` is kept after close because a
+  closed operation's readiness poll can still hold the process-wide `PLANNOTATOR_PORT` preset
+  (resource lifetime ≠ lifecycle); a `detaching` set is awaited by every later start and by
+  `shutdown` (chained retirements with different budgets).
+- **Two fences.** Resource = annotation-surface identity; applicability = the door-supplied
+  `review.isCurrent`. `degrade` requires both.
+- **Three detach causes** (`reviewDetachedStatus` in `providers/waveStatus.ts`: replaced /
+  interrupted / session-ended). The replacement sequence: routing cutoff → drain → marker → abort
+  → quiesce → close, all before the successor starts. A late verdict reaches the decision ladder's
+  `superseded` arm only through a blocking `plan_review`, `/implement-here`, or a run-id/subject
+  change.
+- **Tri-state results.** `BrowserOpenResult` (opened / failed / retired) and `DoorOpenResult`
+  (launched / unlaunched / retired); `retired` never falls back (`waveRetiredResult`). Rule: don't
+  collapse non-success into `null` when any caller falls back.
+- **`onOpened`** is the synchronous delivery hook right after the prime and before the background
+  tasks (guidance-vs-degrade ordering); a door delivering through a tool result leaves it out.
+- **`beforeEmit`** (in `plannotatorHandoff.ts`) is the synchronous time-of-check/time-of-use guard
+  at the emission boundary — after the port pick and the preset, no await before the request.
+  `BrowserStartRefusal` separates a door's refusal (`failed {refused}`, latch kept closed, retry
+  allowed) from infrastructure failure. Side effects that depend on a successful launch move to
+  the caller, on `launched` only.
+- **The four-door post-degrade rule**: a decision after the degrade gets one warning naming the
+  re-run and never reaches `onDecision`.
+- **`session_shutdown` is the drain point** (`browserOwner.shutdown`; skip the push on `quit`);
+  detach pushes reuse a muted target (a no-op-notify `ReportTarget`).
+- **Residual risks.** The draft doors still inject after `await owner.open` (the same overtake
+  shape; contracts §8.23 says guidance goes through `onOpened`); a late Plannotator bind after a
+  replacement can take the successor's port (§8.4, unpinned); the stack pin guard is stack-only;
+  the pre-PR local mode is not reload-safe; budgets bound the waits (3 s quiesce, 60 s drain) but
+  do not guarantee them; a detached Plannotator server is never stopped; the door suites are
+  slow-tier (`just test-js-slow`).
+- **Plan-authoring lessons.** When a plan defines a fence in prose and then per-function
+  pseudocode, check each function against the definition. An interrupted blocking `plan_review`
+  (`plan review aborted (turn interrupted)` / `No result provided` while human-launched waves run)
+  is not a verdict — confirm the draft on disk, tell the human, call `plan_review` once after the
+  waves finish, never loop. Plans must not schedule agent-run slash commands or PR-body edits
+  (slash commands are human-only for the agent; `submit` writes the PR body) — evidence the agent
+  can produce comes from session JSONL, test output or commit messages.
 
 ## The save-destination fence — digest per routing component, never file bytes
 
@@ -489,7 +537,9 @@ lives in `extension/pi/v1/providers/plannotatorHandoff.ts`) and the reusable cro
   registry); because there is no handshake, perk **gates on presence up front**
   (`pi.getCommands().some(c => c.name === "plannotator-review")` — the bare command name; detection is
   independent of the selected plan provider) and awaits the (possibly long) review in the
-  **background** (`void (async () => {...})()`) so the session isn't blocked for the whole review.
+  background so the session isn't blocked — through the browser-operation owner's decision task
+  for the PR modes; a door-owned `void (async () => {...})()` remains only in the pre-PR local
+  mode.
 - **Feedback routing** reuses submit.ts's idle-vs-streaming pattern (`ctx.isIdle()` →
   `sendUserMessage` vs `deliverAs: "followUp"`), and a short perk-authored triage suffix is appended
   **only when `annotations.length > 0`** (a platform PR approve/comment action returns an empty
@@ -520,8 +570,9 @@ lives in `extension/pi/v1/providers/plannotatorHandoff.ts`) and the reusable cro
 ## The annotation-push module (`push_annotations`)
 
 The flow-scoped `push_annotations` tool (`extension/pi/v1/providers/annotations.ts`) — live in review
-mode behind the `/pr-review-browser` door's prime/clear lifecycle, and in plan mode behind the
-`/plan-review-browser` and `/objective-review-browser` doors (which prime `mode: "plan"`) —
+mode and in plan mode behind the browser-operation owner's prime/clear lifecycle (the
+`/pr-review-browser` and stack doors prime `mode: "review"`; `/plan-review-browser` and
+`/objective-review-browser` prime `mode: "plan"`) —
 owns the finding→annotation mechanics for **both** plannotator modes
 (review: line-anchored; plan: phrase-anchored drafts) — the browser-review curl cheat sheet
 retired into code. Its

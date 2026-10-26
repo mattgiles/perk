@@ -1,6 +1,6 @@
 ---
 title: Pi extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
-read_when: You need live system-prompt inputs, command vs lifecycle-event handlers, session_compact, pi.exec, onUpdate partials, pi git:-package loading, dogfooding extension code, or harness offline-testing.
+read_when: You need live system-prompt inputs, before_agent_start user vs custom starts, Pi config schemas, model selection vs dispatch, host-floor lockouts, pi.exec, dogfooding extension code, harness testing
 cluster: pi-extension
 ---
 
@@ -19,30 +19,30 @@ can't derive from the package's root type exports.
 - `getSystemPromptOptions()` exists only on COMMAND contexts — "`getSystemPromptOptions()` is
   command-context-only"; `ctx.mode` and `ctx.hasUI` answer different questions — "`ctx.mode` vs
   `ctx.hasUI`".
-- `before_agent_start` fires BEFORE the submitting prompt is persisted — "… (the first-turn
-  hole)"; the `context` event runs on EVERY provider call — its own section.
-- `pi.sendUserMessage` is void fire-and-forget — the PERSISTED session entry is the only
-  delivery evidence (spy on the session instance to assert it offline) — its own section +
-  "Asserting `pi.sendUserMessage` injection offline".
+- `before_agent_start` fires for EVERY run start (a user/custom union — read `event.prompt` only
+  after `messageType === "user"`) and BEFORE the submitting prompt is persisted — "… (the
+  first-turn hole)"; the `context` event runs on EVERY provider call — its own section.
+- `pi.sendUserMessage` is void fire-and-forget — the PERSISTED entry is the only delivery
+  evidence — its own section + "Asserting `pi.sendUserMessage` injection offline".
 - Abort outranks every resolved result: forward `opts.signal` and re-check `aborted` after EVERY
   await — "`ctx.ui.editor` facts".
-- Pi's own compaction lands BEFORE `agent_settled`; a driven-compaction door observes
-  `session_compact` and arbitrates — "Pi's own compaction runs BEFORE `agent_settled`".
+- Pi's own compaction lands BEFORE `agent_settled` (read `agent_settled.aborted`); a
+  driven-compaction door observes `session_compact` and arbitrates — "Pi's own compaction runs
+  BEFORE `agent_settled`"; `appendEntry` is not transactional — "`setSessionName` …".
 - A detached task from a slash command must latch `session_shutdown` and never touch a dead `ctx`
   (test via `invokeCommand` + `reload`, never `runCommandHandler`) — "Background work launched from
   a slash command outlives its activation".
 - Pi sanitizes session names only for newlines — "`setSessionName` / `getSessionName` facts";
   seam-forwarding + sink tests never prove registration — "A new Pi registration needs …".
-- Read the SDK before admission only through a namespace import (a missing named export is
-  `undefined` under jiti but a link-time `SyntaxError` under native ESM); a throwing factory
-  registers nothing — "Host admission at the SDK boundary".
+- Read the SDK before admission only through a namespace import; a floor raise locks the
+  operator out across three tools — "Host admission at the SDK boundary"; `models.json` is
+  schema-validated, settings are not — "Pi config files and their schemas"; selection ≠ dispatch
+  — "Model selection vs dispatch, and usage surfaces".
 - Every perk tool result passes through `structureResult` (`structuredContent` = `details`, own
   `ok: false` ⇒ `isError`); only `kind: query` gets an `outputSchema` — "`registerTool` execute
   results — the structured contract".
-- How pi resolves/loads a `git:`-package extension (clone root, package-manager internals) —
-  "How pi loads a `git:`-package extension".
-- Body version numbers are event stamps, never currency claims — "Sources" names the pin SSOT,
-  the last full re-verification, and the re-verify-at-each-pin-bump rule.
+- `git:`-package loading — "How pi loads a `git:`-package extension"; "Sources" names the pin
+  SSOT and the re-verify-at-each-pin-bump rule (body version numbers are event stamps).
 
 ## `getSystemPromptOptions()` is command-context-only
 
@@ -113,6 +113,18 @@ double-delivers. Fix pattern: scan `event.prompt` for the marker **beside** the 
 The first-turn blindness exists in every `before_agent_start` injector, but it only becomes a bug
 when a cold twin seeds the same marker into the launch prompt.
 
+**User starts vs custom starts (verified 1.4.0).** `before_agent_start` is the discriminated union
+`BeforeAgentStartUserEvent | BeforeAgentStartCustomEvent`. Every run start goes through
+`_startRun → _prepareRun → emitBeforeAgentStart` — an idle `sendMessage(…, {triggerTurn: true})`
+included — and a custom start (`messageType: "custom"`, how pi-subagents ≥ 0.80 wakes the parent)
+carries `message` and no `prompt`. Rules: any `event.prompt` reader checks
+`event.messageType === "user"` first; never scan `event.message` for a delivery marker (a notice
+can quote one). The two perk readers are `extension/pi/v1/contextInjection.ts` and
+`extension/substrate/bindingDelivery.ts`; the harness has `emitBeforeAgentStartCustom`, and the
+custom fixture deliberately omits `prompt`, so a regression throws. Consequence: subagent wake
+turns now run perk's per-prompt reconciliation and both injectors (`pi/tool-loadout.md` § The
+pending-restoration set).
+
 ## The `context` event runs on EVERY provider call
 
 The `context` event (= SDK `transformContext`) runs on **every** provider call over the **full
@@ -179,6 +191,13 @@ throws `Already compacted`. The recipe (`extension/pi/v1/drivenCompaction.ts`):
 `ctx.compact` from an extension aborts an in-flight foreign compaction. A seam's pending record is
 process-local and lost on `/reload`.
 
+**`agent_settled.aborted`** (required at ≥ 1.1.0) is set only by `AgentSession.abort()` during an
+active run; Escape during auto-compaction or retry backoff settles `aborted: false`. The adoption
+pattern (`drivenCompaction.ts`): detect the value, never compare versions; check it after
+consume-then-clear and before any settle verdict; skip loudly — `/compact` is the escape hatch.
+One owner per abort verdict: the SDK worker ignores Pi's flag because its own `handle.abort()` is
+the only caller (`pi/headless-session-drive.md` § The `runStage` outcome boundary).
+
 ## Background work launched from a slash command outlives its activation
 
 The detached-task consequence of "A captured `ctx` goes stale on session replacement" above. On
@@ -196,6 +215,11 @@ The landed pattern (`extension/pi/v1/simplify.ts`):
 - a terminal catch at the task boundary that reports on **stderr only**;
 - skip the activity `end()` once the activation is dead;
 - capture `ctx.cwd` at launch rather than reading it lazily inside callbacks.
+
+`session_shutdown` is awaited before the runner's `invalidate()`, so it is the one drain point for
+admitted non-abortable work (`browserOwner.shutdown` in `extension/pi/activation.ts` —
+`workflow/plan-review-flow.md` § The browser-operation owner); skip network pushes when the reason
+is `quit`.
 
 A wave pending across a reload loses its completion subscription (the invalidation removes it), so
 it settles only on its engine deadline + the 60 s settlement grace (`WAVE_SETTLEMENT_GRACE_MS`) —
@@ -229,6 +253,11 @@ failure or the engine deadline — the simplify doors chose the latter, contract
   entries newest-first.
 - The runner's `setSessionName`/`appendEntry` resolve at call time, so harness tests override them
   as instance properties.
+- **`appendEntry` is not transactional.** `SessionManager._appendEntry` updates the in-memory
+  branch before `_persist`, and `entry_appended` listeners run after persistence and can throw, so
+  a thrown `pi.appendEntry` never proves the branch lacks the entry — re-read the branch at the
+  next rebuild or read it back (why the strict-append seam reads back; `pi/context-system.md` §
+  Gate engagement).
 
 ## `ctx.ui.editor` facts
 
@@ -320,7 +349,7 @@ flags/commands inside test runs — the host repo's committed config leaks into 
 scaffold and restore in `finally`. Hit twice independently. Diagnosis shortcut: a harness test
 failing only locally/on main → check committed `.perk/config.toml` before suspecting the code.
 
-## Host admission at the SDK boundary — extension-loader facts (verified 0.99.2 and 1.0.0)
+## Host admission at the SDK boundary — extension-loader facts (verified 1.4.0)
 
 - **`ExtensionFactory` may be async.** Pi awaits it and commits registrations only after it
   returns; a factory that throws registers nothing and is discarded.
@@ -344,6 +373,19 @@ failing only locally/on main → check committed `.perk/config.toml` before susp
   `extension/substrate/hostAdmission.test.ts` fails when the SDK resolved from `node_modules` is
   below the floor — repair with `npm ci`, never weaken the test
   (`toolchain/worktree-node-modules.md`).
+- **A floor raise locks the operator out across three tools** — Pi (`shared/host-floor.yaml`
+  `pi.min_version`), npm (`engines`) and uv (`required-version`). The Pi repair is
+  `PI_INSTALL_COMMAND` (`src/perk/substrate/pi_host.py`) or `perk doctor --fix` — never a bare
+  `npm install -g …@<floor>`, which floated the companions while they were caret-declared. The
+  SDK-boundary refusal links the public requirements page (`hostAdmission.ts::REQUIREMENTS_DOC_URL`);
+  a refusal must never point at a PATH-`pi`-dependent surface or a source-tree path. The lockout
+  bites only when the host is below the new floor. Gating a host bump on a shared machine
+  (isolated prefix install first on PATH; reconverge with `uv run perk init --no-interactive`;
+  **never** `perk doctor --fix` before landing — it replaces the global Pi for every session) lives
+  in `docs/developers/pi-subagents-reverify.md` § "Pre-land gating and the post-land cutover".
+- **New host fields.** `ToolDefinition.reachesTools` is new at 1.4.0; an exhaustive
+  `satisfies Record<keyof ToolDefinition, …>` (the prose-map table in
+  `tools/prose-map/selector.ts`) is the cheap way to catch new host fields at a bump.
 - **Residual:** a "lying" SDK (`VERSION` ≥ floor, exports missing) is a typed `runtime_init` in the
   worker but call-time `undefined`s under jiti — untested, low likelihood. The cold-process proof
   that an entry links nothing SDK-bearing before admission is `workflow/vacuity-proof-tests.md`
@@ -384,10 +426,49 @@ extension as the path package `..`. Three consequences:
   checkout or worktree carrying a host-floor raise refuses every `pi` — every perk door launched
   there included — on a below-floor PATH `pi`. The implement session does not notice: it still
   runs the pre-change extension loaded at session start. Rule: upgrade the operator's PATH `pi`
-  (`npm install -g @earendil-works/pi-coding-agent@<floor>`) before merging; the escape hatch is
-  `pi -ne`. `run_ci` verdicts depend on that PATH `pi` too: `test-py-slow` is a `[[ci.checks]]` row
+  (`PI_INSTALL_COMMAND`, gated per "Host admission at the SDK boundary") before merging; the
+  escape hatch is `pi -ne`. `run_ci` verdicts depend on that PATH `pi` too: `test-py-slow` is a `[[ci.checks]]` row
   and its live smokes (`tests/test_native_sdk_bridge_live.py`) probe the host, while GitHub CI
   installs no global `pi` and skips them.
+
+- **The mixed pair — old code, new def.** Extension code loads at session start while agent defs
+  are read from disk at each spawn, so a changed wave can run old task text against a new def ("Missing
+  structured_output call" looked like a model miss). Diagnose by counting old-task vs new-marker
+  strings in the async run dir's `workflow-children.jsonl`; fix with `/reload`; keep fail-closed
+  "refuse when the required input block is missing" rules in defs.
+- **Harness door tests must name `spyInjections(h)`** and assert on its captures — three new tests
+  omitted it and review, not the suite, caught it.
+
+## Pi config files and their schemas (1.4.0)
+
+- `models.json` is schema-validated at load (`ModelConfig.load`; an invalid file loads no custom
+  providers); `settings.json` is not (some getters validate individually).
+- The package ships generated JSON Schemas under `schemas/` (settings, models, keybindings,
+  theme), reachable only by path (`exports` covers `.` and `./rpc-entry`); the settings root is
+  open, so extension-owned keys pass.
+- **Test oracle.** `extension/testing/piConfigSchemas.ts` reads the schemas from the root dev
+  install and pins the resolved manifest to the root dev pin (catching a worktree resolving stale
+  `node_modules`); `tests/test_pi_config_schemas.py` runs the `run_init` producer matrix;
+  `PI_THINKING_LEVELS` (`src/perk/substrate/config.py`) is pinned both ways to the schema's
+  `ModelThinkingLevel` enum, so a Pi thinking-level change fails by name. Python
+  (`PI_THINKING_LEVEL_ORDER`) is the single thinking-vocabulary owner. Vendoring the schemas is the
+  recorded fallback if a release stops shipping `schemas/`; `just bump-pi` refreshes the oracle
+  (`toolchain/worktree-node-modules.md` § Pi pin-bump mechanics).
+
+## Model selection vs dispatch, and usage surfaces
+
+- **Selection** = `ctx.model` / `model_change` entries (a virtual model names the router; render
+  `Model.api` as-is). **Dispatch** = each assistant message's `provider`/`model` (+
+  `responseModel`, `api`, `stopReason`). A failed routing leaves the virtual identity on its error
+  message, so count only successful responses as dispatch.
+- Command `ctx` exposes `model`, `getContextUsage()` and `sessionManager`, but not
+  `routedModel`/`getSessionStats()` (AgentSession only), and `getUsageCostBreakdown` is not public
+  — fold the branch yourself (`extension/substrate/usageLedger.ts`, SDK-free, shared by selfcheck
+  and the worker).
+- Pi's `/session` sums the whole tree while selfcheck covers the selected branch.
+- Count each usage record once: assistant `usage`, toolResult `usage` (nested calls already
+  folded), and the `usage` on `compaction`/`branch_summary`/`usage` entries. `reasoning` and
+  `cacheWrite1h` are subsets, never added. Cost 0 is a real zero, distinct from `unavailable`.
 
 ## pi print mode executes slash commands fully offline
 
@@ -601,10 +682,11 @@ tools or *months-old* code:
   provenance, not a currency promise; the pin is. 2026-10-01: the pins moved to `0.99.2` with the
   suites green and minimal in-place corrections only (the `ToolInfo.exposure` field, CLI built-in
   extensions); the full re-audit of this doc is owed — facts here are verified at 0.87.0 unless
-  corrected in place. 2026-10: the pins are at `1.0.0` and the host floor is `1.0.0`
-  (`shared/host-floor.yaml`); the host-admission, structured-result and harness facts were added
-  at the versions each section states (0.99.2 and/or 1.0.0). The full 1.0.0 re-audit of this doc
-  is still owed.
+  corrected in place. The current dev pins and host floor live in their owners
+  (`src/perk/substrate/pi_host.py::PI_ADOPTED_VERSION`, `shared/host-floor.yaml` `pi.min_version`;
+  both 1.4.0 at 2026-10-26); the host-admission, structured-result, harness, config-schema and
+  selection-vs-dispatch facts were added at the versions each section states (0.99.2, 1.0.0,
+  1.1.0 or 1.4.0). A full re-audit of every older-stamped section is still owed.
 
 ## Cross-references
 

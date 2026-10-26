@@ -11,6 +11,23 @@ entry, facades, states) — this doc does not restate it. It records the WHY beh
 Node and Pi facts it rests on, and the repo-specific traps that recur when touching it. Version
 numbers are event stamps, never currency claims.
 
+## Distillation
+
+- Only compiled-`.js`-entry packages (`pi-subagents`, `pi-web-access`) bypass Pi's alias map and
+  load a second SDK graph — "Why two Pi packages load a second SDK graph".
+- perk's package entry must precede the native consumers in `packages` — "Pi package load order".
+- `registerHooks` `resolve` fires for cached modules, `load` only on first fetch; facades read the
+  host namespace from a `globalThis` slot; the resolver mirrors Node's tri-state — "`registerHooks`
+  facts", "Facade addressing", "Why a bespoke conditional-exports resolver".
+- An atomic commit protocol's rollback needs its own failure mode and test — "The
+  claim-then-register commit".
+- The blocking foreground leg shares the host SDK in-process (measured on Pi 1.1.0 + pi-subagents
+  0.76.1 — the stamp does not carry forward); detached runners are `unsupported:embedded-host`;
+  the bridge-off control is required — "Which SDK identity a child runs under".
+- Guard interplay and census widening are package-wide lockstep edits; a supplier bump's decisive
+  checks are glob-skipped by the run-all gate — run both JS tiers explicitly — "Guard interplay",
+  "Widening the census is package-wide". Dated residuals — "Residual risks".
+
 ## Why two Pi packages load a second SDK graph
 
 Verified against pi-coding-agent 0.87.0 / jiti 2.7.0 / Node ≥ 22.19: jiti's `evalModule` skips
@@ -81,7 +98,9 @@ scenario loads until every status object is dropped) proves the hooks are proces
 
 ## Which SDK identity a child runs under
 
-Verified against pi-subagents 0.70.1:
+Measured on Pi 1.1.0 + pi-subagents 0.76.1 (`docs/design/archive/pi-subagents-0.76.1-pin.md`; the
+mechanism was first source-read at 0.70.1). Rerun at each host/supplier bump that could change SDK
+identity — main is now at 1.4.0 + 0.81.0 and the stamp does not carry forward.
 
 - **Blocking `subagent` (`async: false`)** — `loadHostPiCodingAgent` imports the host package by
   absolute entry in the parent process, so the child shares the host identity (the exact-entry
@@ -91,6 +110,20 @@ Verified against pi-subagents 0.70.1:
 - **Wave lanes** (`runs.all` under `workflowAwaitAsync: true`) are detached-runner children awaited
   via result files. A `run_scout_wave` proves the parent-side launch under the bridge; the blocking
   call is the leg that proves the in-process import.
+
+**The measurement recipe (conceptual).** A throwaway command extension calls perk's own
+`dispatchForeground` (the blocking in-process leg `run_librarian` and the conflict resolver use);
+perk-dev's `packages/perk-dev/src/perk_dev/profile_startup/module_tracer.mjs` loads via
+`NODE_OPTIONS=--import` with `PERK_MODULE_CENSUS_DIR`; evaluate only the session's own
+`census-<pid>.jsonl` (an `npm root -g` child writes its own file). Leak predicate: any resolution
+with a pi-subagents parent reaching `@earendil-works/*`, `typebox/` or the host entry. **The
+bridge-off control is required** — off, 33 leaks appeared and the second graph loaded, yet the child
+still completed because the dev pin equals the host; only the tracer tells the runs apart. Scope:
+the blocking foreground leg on the PATH `pi` only.
+
+**A bare-project gap.** A project whose only package is `npm:pi-subagents` cannot validate
+`structured_output` in an in-process foreground child (`Cannot load typebox/compile`) — set
+`PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT`; under perk the bridge serves `typebox`.
 
 The child-policy side is `pi/subagents.md` § "Native child execution" (Execution profile).
 
@@ -135,6 +168,11 @@ not exercised.
 
 **A local drift-guard red is first a stale-install suspect**, not census drift — see
 `toolchain/worktree-node-modules.md` § "The `.pi/npm` world in perk's own checkout".
+
+**A supplier bump's decisive checks are glob-skipped by the run-all gate.** A bump diff touches
+`.py`/`.json`/docs, so the run-all `run_ci` skips the JS rows that carry the census guard — run
+`just test-js-fast` and `just test-js-slow` explicitly and confirm the census guard *ran* rather
+than skipped (it `t.skip`s without a live `.pi/npm/node_modules` install).
 
 ## Residual risks (dated, at landing)
 

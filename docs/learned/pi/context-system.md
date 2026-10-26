@@ -18,8 +18,9 @@ cluster: pi-extension
 - The second always-on `tool_call` hook injects `timeout = 30` onto gitignore-blind scans and
   fails OPEN (a performance guard, the opposite of the gate); pure policy under `substrate/`, Pi
   glue under `pi/v1/`; match rules loose, exemption rules tight — "The bash scan-timeout guard".
-- Latch the fail-closed gate state BEFORE any new fallible read in `apply()` — a throw after a
-  read placed ahead of the latch left the gate open under read-only — "Gate engagement: latch the
+- Latch the fail-closed gate state BEFORE any new fallible read in `apply()`; transitions return a
+  typed `GateTransition` and never throw; a latch ahead of a fallible persist creates a "latched
+  but not persisted" state every flag reader must handle — "Gate engagement: latch the
   fail-closed state BEFORE any new fallible read".
 
 ## No in-file `@`-transclusion
@@ -120,6 +121,23 @@ desired state first" unconditionally: a failing read-only→read-write sync must
 closed, so only the engaging direction is latched early. The test lesson: the failure-path fixture
 had hard-coded the new read as infallible — every new fallible read inside a fail-closed path needs
 its own failure-mode case.
+
+**The typed transition result.** `enter`/`exit`/`syncFromState` never throw; each returns a
+`GateTransition` (`extension/substrate/toolPolicy.ts`): `applied | restricted | failed{step:
+persist|install}`, carrying the effective access — callers report the effective access, never
+their intent (`reportGateTransition` in `extension/pi/v1/gateTransitions.ts`;
+`pi/extension-seams.md` § report()-rollout gotchas).
+
+**Latched but not persisted.** `enter` sets the in-memory gate active *before* appending
+`mode: read-only`, so a held append leaves the gate on in memory while the branch says read-write.
+A "skip if already active" retry then never writes the mode, and `syncFromState` never does either
+— so `gateEntryNeeded` (`gateTransitions.ts`) requires active in memory AND the rebuilt branch mode
+before a warm door may skip entry. Rule: when adding a fail-closed latch ahead of a fallible
+persist, audit every reader of the in-memory flag that assumes persistence — idempotence guards
+included. Pi's append is not transactional (`pi/extension-api.md` § `setSessionName` …), so a
+`persist` failure never proves the branch lacks the entry. Documented residual: a persist-failed
+`enter` that leaves no entry re-opens the gate at the next rebuild point; `/plan` re-enters.
+Contracts §8.3 was narrowed accordingly.
 
 ## Cross-references
 

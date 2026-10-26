@@ -43,6 +43,9 @@ Four sharpenings of the scan:
   pins** — keep the wording arm-neutral (#2474).
 - **A retirement sweep of `docs/learned/` is a grep over the retired NAMES**, not the docs the plan
   names (#2474).
+- **Supplier reason text is DATA.** Assert the class and compose any verbatim expectation from the
+  fake's exported constant (`workflow/report-waves.md` § "Test machinery"). And changing a
+  descriptor's `gated`/`stages` flips pins well beyond a plan's file list (`pi/tool-loadout.md`).
 
 ## A negative substring pin can shape prose, not just guard it
 

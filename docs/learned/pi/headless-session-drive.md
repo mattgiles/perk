@@ -1,6 +1,6 @@
 ---
 title: Headless Pi session construction & driving — the SDK runtime-factory recipe
-read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, a single-prompt drive, compaction replay, sendUserMessage persistence, or offline determinism.
+read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, worker MCP isolation, abort latching, usage accounting, print-mode probes, offline determinism
 cluster: pi-extension
 ---
 
@@ -20,18 +20,16 @@ from the right path instead of rediscovering it.
 - One live SDK recipe — the read-WRITE worker (`sdkAdapter.ts`) with the real extension; seed a
   side session through its `SessionManager`; unset `PERK_RUN_ID` in probes and in-session cold
   doors — "Two construction paths", "Seeding a side session…", "Probe scripts … unset it".
-- The worker supplies Pi's `codemode` (`models: false`) + `tool-search` builtins with
-  `builtin: true` (it joins the discovery cohort); MCP stays absent; `applyOverrides` before the
-  services is discarded — assert knobs on live getters — "The runtime-factory path builds the
-  loader internally".
-- Model error rides `turn_end` (replaced per turn); the token census is per-`turn_end` (assistant +
-  tool results) + per-`compaction_end` usage = `getSessionStats().tokens`; `cacheWarming` is
-  global-only — "`session.subscribe()` event facts".
+- The worker supplies Pi's `codemode` (`models: false`), `tool-search` AND `mcp` builtins with
+  `builtin: true`; MCP runs factory-scoped (`workerMcpOptions`, contracts §8.11); `applyOverrides`
+  before the services is discarded — "The runtime-factory path builds the loader internally".
+- Model error rides `turn_end`; the token census and the usage ledger (`RunOutcome.usage` =
+  `getSessionStats()` incl. cache/cost) — "`session.subscribe()` event facts".
 - The drive is a SINGLE `session.prompt(...)` spanning retry and compaction continuations (idle ≠
   done) — "Single-prompt drive, NOT a `loop.ts` loop".
-- `runStage` samples the abort twice and subscribes once; init failures classify on the bind
-  boundary; the turn cap stops through the agent's `finishTurn` hook (the loop ignores
-  `signal.aborted` between turns) — "The `runStage` outcome boundary".
+- `runStage` samples the abort twice and subscribes once, then latches it and re-fires on
+  `agent_start`/`compaction_start`; the turn cap stops through `finishTurn` — "The `runStage`
+  outcome boundary".
 - The model-call policy: advisory textual screen + the hard `WORKER_CODEMODE_MODELS = false`;
   `toolErrorMessage` has four steps — "The structured run-event stream".
 - Model selection runs inside the runtime factory after the services load (services →
@@ -42,9 +40,9 @@ from the right path instead of rediscovering it.
 - Offline e2e drives the REAL runtime with a faux model; reuse `runDrive`, `observeSessionEvents`,
   `summarizationRouter`, `observeLive`, `assertWorkerKnobs`; slow tier only — "Driving the real
   runtime offline with a faux model".
-- Probes, compaction replay and `sendUserMessage` joining — "Headless probe and dogfood-session
-  craft", "Replaying a recorded session's compaction headlessly", "`sendUserMessage` persists ONE
-  newline-joined text block". "Sources" holds the pin-bump audit list; history is inline.
+- Print-mode mechanics (commands don't wait for their runs; it LOOPS after a pre-spawn lane
+  failure), probes, compaction replay and `sendUserMessage` joining — "Headless probe and
+  dogfood-session craft", "Replaying…", "`sendUserMessage`…"; "Sources" holds the audit list.
 
 ## Two construction paths — pick by isolation axis
 
@@ -95,26 +93,47 @@ shape, not this one.
 **SDK sessions load none of Pi's CLI built-in extensions unless the caller supplies them.** Since
 Pi 0.99 the CLI loads `codemode`, `tool_search` and MCP as `builtin:<name>` extensions; an
 SDK-constructed session loads them only through `extensionFactories` (the package's SDK guide,
-`sdk.md`). The worker's current shape (verified 0.99.2 dev pins and the 1.0.0 source):
+`sdk.md`). The worker's current shape (verified 1.4.0):
 
-- `sdkAdapter.ts::workerBuiltinExtensions()` supplies `codemode` (built with
-  `models: WORKER_CODEMODE_MODELS` = `false`) then `tool-search`, both with the CLI's exact
+- `sdkAdapter.ts::workerBuiltinExtensions(agentDir)` supplies `codemode` (built with
+  `models: WORKER_CODEMODE_MODELS` = `false`), `tool-search` AND `mcp`, each with the CLI's exact
   `{ name, factory, replaceable: true, builtin: true }` identity, after the hidden
   `perk-worker-policy` inline extension. **`builtin: true` is load-bearing**: it yields the
   `builtin:<name>` path and `sourceInfo.source === "builtin"` provenance that the posture table and
   `isDiscoveryHost` key on, so the worker joins the discovery cohort (`pi/tool-loadout.md`).
 - Both register inactive; configuration alone activates them (`defaultTools` `+tool_search` /
   `+codemode`); a project `extensions: ["-builtin:<name>"]` disables one.
-- `/btw` still supplies none. MCP and `llama.cpp` are deliberately absent: Pi's
-  `createMcpExtension` defaults its config, credential store and log to the GLOBAL `getAgentDir()`;
-  isolating it is deferred, and the "no global MCP access" guarantee holds only because the factory
-  is absent, not because anything enforces it.
+- `/btw` still supplies none; `llama.cpp` is deliberately absent.
+- **MCP — factory-scoped isolation.** `workerMcpOptions` replaces every global MCP resource Pi's
+  `createMcpExtension` would take from `getAgentDir()`: project `.pi/mcp.json` only (registered
+  through the public `pi.registerMcpServer`), a stateless credential shim, a log under the
+  throwaway dir, refusing `openUrl`/`updateConfig`. The behaviour table is contracts §8.11 (*MCP —
+  factory-scoped isolation*); the reasoning worth carrying:
+  - Never isolate by moving `PI_CODING_AGENT_DIR` — child model auth and the §8.35 session
+    pointer resolve from it.
+  - Validate through the public `pi.registerMcpServer` (the loader, validator and credential store
+    are deep-only; entries become `scope: "extension"`).
+  - `loadConfig` must never throw — a throw inside `session_start` leaves the builtin
+    uninitialized. The registry rule: tracked registrations equal exactly the latest load;
+    unregister stale names first; a refused re-register leaves the previous registration.
+  - Typing a shim for a class with private members: `satisfies Pick<C, keyof C>` then
+    `as unknown as C`.
+  - Headless diagnostics: `ctx.ui.notify` is a no-op headless (print to stderr); print URLs as
+    origin only; never echo `JSON.parse` messages — V8 quotes input slices.
+  - OAuth observability: the empty-store 401 refresh is the only observable sign-in decision;
+    `insufficient_scope` is silent. Headless MCP problem reporting is silence by design (only the
+    config-error line and the empty-store 401 line print) — a "no tools" census was rejected; a
+    real diagnostic needs an upstream status hook.
+  - Interactive Pi and the worker resolve same-name servers differently (file entries are
+    `builtin:mcp` registrations in the worker, first registrar wins; interactive gives the file
+    entry precedence and reads the global `mcp.json`/OAuth store) — neither an interactive run
+    nor `pi mcp list` is "the faithful check".
 - **Two diagnostic channels.** A replaced builtin shows only in
   `resourceLoader.getExtensions().warnings` (printed as `perk worker: extension warning —
   builtin:<name>: …`); bind-time `ExtensionError` objects (`{extensionPath, event, error, stack?}`)
   arrive at `bindExtensions({ onError })`, formatted by `formatExtensionError` (the old
   `String(err)` printed `[object Object]`). A project `pi.registerMcpServer()` with no MCP handler
-  is a `register_mcp_server` bind error — the observable for "MCP factory absent".
+  is a `register_mcp_server` bind error — now the observable for a project `-builtin:mcp`.
   `ExtensionRunner.getExtensionPaths()` is the live loaded-extension census.
 - Codemode's `models` option is observable from its registered description: a "Model API" section
   appears only with `models: true` (at 1.0.0 the description names `models` in a single Globals
@@ -200,6 +219,12 @@ Verified against the bundled `agent-session.js` at the pinned dist — see `## S
   + per-`compaction_end` `result.usage` = `getSessionStats().tokens.input + output`. Use Pi's census
   as the **test oracle** only — its persistence runs in an async listener and may lag at
   `finishTurn`. One helper (`freshTokensOf`, `sdkAdapter.ts`) serves the fold and the turn gate.
+- **The worker accounting oracle.** `RunOutcome.usage` (`extension/substrate/usageLedger.ts`)
+  covers cache and cost and must equal `getSessionStats()` cache/cost;
+  `freshTokens(turnUsageOf(turn))` is the one fold for the budget, the turn gate and the ledger.
+  The faux provider always records cost 0, so a cost assertion needs `recordingClassifier`'s
+  `usage` knob (`cacheRead`/`cacheWrite`/`cost`), which also proves no doubling on the nested
+  path; the identity is proven only in the slow e2e tier.
 - **Retry events**: `auto_retry_start { attempt, maxAttempts, delayMs, errorMessage }` and
   `auto_retry_end { success }`.
 - **Compaction events**: `compaction_end { reason, result?, aborted, willRetry }` (`result.usage` is
@@ -308,6 +333,20 @@ over an external `AbortSignal`:
    after it (`createDriveSession`), removes the wrapper on rebind/dispose, and installs only when
    `session.agent` exists. Real-runtime divergence is a defect signal, not a fixture update —
    never loosen a plan-specified pin to match what you observed.
+6. **`session.abort()` stops only a running agent — so the drive handle latches the abort.** Pi
+   runs `before_agent_start` handlers inside `prompt()` before the run exists (the MCP
+   direct-server wait holds there up to 10 s), so an abort there has no run to stop. The handle
+   latches it and re-fires it on `agent_start` (delivered synchronously before the first request)
+   and on `compaction_start`. A "fresh" worker session does not have a one-message branch: perk's
+   own `before_agent_start` injections (`agentScratch`, `bindingDelivery`) append `custom_message`
+   entries after the user message, which are compaction cut points, and on the virtual-model path
+   the routing `prepareRequest` checks the threshold on turn 1 (a physical model checks from turn
+   2); `_runAutoCompaction` creates a fresh controller outside the run signal. Planner lesson: a
+   source-read "unreachable path" proof must account for perk's own injections; when a cheap guard
+   covers a path unreachable only by source reading, prefer the guard plus a forcing test over a
+   qualified contract (recipes in "Driving the real runtime offline").
+7. **`RunOutcome.model`'s null/object boundary is session construction.** TDZ trap: a closure that
+   runs on early-exit paths must not read a `let` declared later.
 
 ## Never default the model to `getAvailable()[0]` — leave it undefined
 
@@ -431,11 +470,12 @@ the corrections are the durable knowledge.
   "seed `AuthStorage.inMemory` with a dummy key + unregister the faux provider in `finally`"
   teardown is gone with `AuthStorage` itself (the runtime's in-memory credential store satisfies
   the credential resolution a real runtime still performs even for a faux provider).
-- **pi-coding-agent bundles its own nested `@earendil-works/pi-ai`** — pi-ai module state is
-  **per instance**, so the faux core must still be built from pi-ai *as pi-coding-agent sees it*:
-  `import.meta.resolve` the package, probe its nested `node_modules` for pi-ai, and
-  dynamic-`import()` that path (CJS `require.resolve` throws `ERR_PACKAGE_PATH_NOT_EXPORTED` —
-  pi-ai exposes only the `import` export condition), falling back to the top-level when deduped.
+- **pi-ai module state is per instance** — the faux core must be built from pi-ai *as
+  pi-coding-agent sees it*. At ≥ 1.0.1 pi-ai is hoisted top-level (no nested copy under
+  pi-coding-agent), and `loadSdkPiAi` (`extension/testing/harness.ts`) probes for a nested copy
+  first and falls back to the top-level one; dynamic-`import()` the resolved path (CJS
+  `require.resolve` throws `ERR_PACKAGE_PATH_NOT_EXPORTED` — pi-ai exposes only the `import`
+  export condition).
   Faux message builders are instance-agnostic plain objects; only the provider + the `getModel()`
   it returns must come from the runtime's instance. **Generalize:** ANY module-global SDK state
   is per-instance — resolve singletons through pi-coding-agent when driving the real
@@ -513,12 +553,32 @@ the corrections are the durable knowledge.
   extension/worker/stageExecutionE2e.test.ts`; `run_ci` does not run them.
 - **SDK-worker harness without `runStage`**: reuse `defaultCreateRuntime`, then
   `createDriveSession(...).bind()` — construction fires no `session_start`; bind does.
-- **Residual risks**: a post-dispose turn after a failed lane (stale-ctx errors on
-  `context`/`agent_settled`; whether it sends a provider request is unmeasured); CLI print-mode
-  non-exit depends on the pre-spawn failure kind (model resolution exits; a worktree-admission
-  refusal loops — a perk-absent control settled it); a per-item unknown model fails a lane with no
-  child directory — prove a runner started from `status.json`/logs, never from a directory
-  existing.
+- **The MCP e2e craft.**
+  - *Barrier turn:* tools are snapshotted before each request and `registerMcpServer` connects
+    un-awaited — `t.waitFor` the live table, spend one turn, use the tool on the next request.
+  - *Settle barrier via `direct` exposure:* `waitForDirectServers` holds the first request ≤ 10 s;
+    bound `elapsed_ms` to prove it resolved rather than timed out.
+  - *The in-process streamable-HTTP fixture* (`extension/testing/mcpHttpFixture.ts`): POST JSON,
+    202/405/204, a numbered `Mcp-Session-Id`, `expireSession()`, `closeAllConnections()`; it must
+    run in-process.
+  - *The stdio fixture's in-flight barrier* (`mcpFixtureServer` options: `initDelayMs`,
+    `echo.delayMs`, an exit log + watch dir, a marker file, a token env var); Pi runs stdio
+    servers in the session cwd. `abortOnBarrier` must handle a rejected barrier.
+  - *The shutdown-ordering oracle:* a listing written at child exit — prove it by moving
+    `removeAgentDir()` ahead of dispose and watching it go red.
+  - *Private `TMPDIR` via `withEnv`* works because `os.tmpdir()` reads at call time — safe only
+    because that file's tests run sequentially (`toolchain/node-test-async-determinism.md`).
+  - *Characterization pins tied to pi-mcp internals* (retry delays, the per-request snapshot,
+    stderr silence) go red at a bump by design — re-measure and re-pin.
+- **Forcing a turn-1 compaction without vacuity.** Register a virtual model, drive with a long
+  prompt and `compaction: { reserveTokens, keepRecentTokens: 0 }`, then assert a `custom_message`
+  follows the user message, `compaction_start` fired once, `compaction_end.aborted` is `[true]`,
+  zero provider calls and `budget.turns === 1`.
+- **The preflight-window barrier.** Delay the stdio `initialize`, wrap the late-bound
+  `runtime.session.prompt` in `onRuntime`, wait on `driveSettled || (promptEntered && marker)`,
+  and pin `budget.turns === 1` (0 = the abort landed before the prompt; 2+ = the latch missed).
+- A per-item unknown model fails a lane with no child directory — prove a runner started from
+  `status.json`/logs, never from a directory existing.
 
 Process notes that held up: `git init -q` the temp worktree so the resource loader's ancestor
 skills-walk stops there; save/restore every mutated `process.env` key in `finally` (the hermetic
@@ -551,10 +611,41 @@ shape mismatch.
   so a launcher that must drop `PERK_RUN_ID`/`PI_SESSION_FILE` names them there.
 - **Print mode sends an unknown slash command to the model as a prompt**, so a "not loaded"
   negative probe must assert an absent output line under a short cap.
+- **Print-mode mechanics.** Commands don't wait for the runs they start (`session.prompt("/cmd")`
+  returns when the handler returns; poll `agent_settled` before returning if the wake turn
+  matters). `session_shutdown` (reason `quit`) fires before `session.dispose()` — use it as the
+  dispose boundary. Events keep arriving after `invalidate()` (`context`, `agent_settled`) and ctx
+  getters throw the stale message. Print mode's `onError` drops the event name — use own handlers
+  reading `ctx.hasUI` in try/catch. `agent_settled.aborted` does not reflect a dispose abort.
+- **A persisted assistant entry with `usage` does not prove a provider call** — require a
+  non-error `stopReason`, positive usage and a non-aborted settle. The session JSONL is written
+  only after a user or assistant message (log a branch census at `session_shutdown`; a missing
+  file is "not flushed").
+- **Exit codes differ by `--mode`** (`text` returns 1 on a final error/aborted message; `json`
+  never). Pick the cheapest catalog model at run time (a bare `pi --no-extensions … -p` preflight
+  costs ≈ $0.0001).
+- **Instrument hygiene.** Count the two stale-ctx line shapes separately; find run dirs through
+  the spawn reply's `asyncId`, never "new since" listings; lane rows live under `status.json`
+  `workflow.value`.
 - **Live-testing an authoring-only wave tool from an implement worktree**: bare
   `pi --approve --mode json -p "…"` in the worktree with a scrubbed env, `PERK_SKIP_VERSION_CHECK=1`,
   a throwaway `PI_CODING_AGENT_DIR`, and `PI_SUBAGENTS_TEMP_ROOT` outside the worktree. `/plan` only
   toggles the mode, and `perk plan` from a linked worktree positions in main.
+
+## Residual risks
+
+- **Print mode LOOPS after a pre-spawn lane failure** — with and without perk loaded (an upstream
+  limitation; `badmodel` loops too since 0.76.1); measured in
+  `docs/design/archive/pi-1.1.0-headless-print-mode.md`. The escape is a command handler that
+  waits for the wake turn's `agent_settled`. NOT ESTABLISHED: what re-dispatches `context` after
+  dispose and whether those turns reach the provider; perk's `context`/`agent_settled` handlers
+  carry no post-shutdown guard (a routed candidate follow-up).
+- **`[models.stages.<id>]` is launch-seam only** — `perk run-worker` passes no `--model`, so the
+  worker uses the converged `[models] default` or Pi's fallback (read the run comment's
+  `Model: selected=` line).
+- **A drive-scoped `TMPDIR` is inherited by worker-spawned children.**
+- **The real agent dir also gains `fff/`, `missions/` and `run-history.jsonl`** (pi-fff reads
+  `PI_CODING_AGENT_DIR` directly) — a throwaway agent dir does not hold every write.
 
 ## Replaying a recorded session's compaction headlessly
 
@@ -618,8 +709,9 @@ check the root export list before importing a Pi type by name; mirror/derive dee
   `dist/core/{agent-session,agent-session-services,sdk}.{js,d.ts}`,
   `dist/core/{model-registry,model-runtime,model-resolver,settings-manager,session-manager,resource-loader}.js`,
   `dist/core/model-resolver.d.ts`, the package's SDK guide (`sdk.md`),
-  `dist/core/compaction/compaction.js`, `dist/modes/rpc/*`, and the nested `@earendil-works/pi-ai`
-  (`package.json` `exports`, `dist/compat.d.ts`) — at the version `package.json` `devDependencies`
+  `dist/core/compaction/compaction.js`, `dist/modes/rpc/*`, the MCP builtin
+  (`dist/extensions/mcp`), and `@earendil-works/pi-ai` (hoisted top-level at ≥ 1.0.1;
+  `package.json` `exports`, `dist/compat.d.ts`) — at the version `package.json` `devDependencies`
   pins. The `@earendil-works/*` devDependency pins move in lockstep (the set
   `tests/test_packaging.py::test_pi_toolchain_pin_lockstep` enforces), so the pin is the single version
   truth for every dist-scoped fact here; body version numbers ("pi 0.84 replaced …") are event

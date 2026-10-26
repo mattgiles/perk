@@ -1,6 +1,6 @@
 ---
 title: init/doctor division, managed-convergence SSOT, and gitignore untrack pattern
-read_when: You are adding a managed piece (a doctor check), growing `managed_artifacts()`, the managed-state file, the gitignore block, a doctor migration, probe, or repair — or retiring an orphaned lifecycle.
+read_when: You are adding a managed piece (a doctor check), a host-floor/env row (advisory tier, Node line floors, pi repair), write admission, the managed-state file, a doctor migration, probe, or repair
 cluster: config-and-convergence
 ---
 
@@ -17,15 +17,14 @@ cluster: config-and-convergence
 - Growing `managed_artifacts()` requires the three-part eligibility test — "The managed-artifact
   set"; an unreadable config makes destructive reconciliation a NO-OP (contract §8.10) — "An
   unreadable config makes destructive reconciliation a NO-OP".
-- Network I/O lives in the `fix AND verify`-gated repair gesture, never a `ManagedConvergence` —
-  "Network repairs live in the verify-gated repair gesture"; retiring a superseded lifecycle
-  follows "The retire-an-orphaned-lifecycle recipe".
-- Environment checks need fixture coverage at their actual primitive, required-only filtering in
-  every derived diagnostic, and remediation for absent and version-invalid arms — "The optional
-  `EnvCheck` tier".
-- The host floor makes `init` fatal but not `doctor --fix` (plan `doctor --fix` as the
-  reconvergence path); settings converge in three shapes — "Host-floor rows and the three
-  settings-convergence shapes".
+- Network I/O lives in the `fix AND verify`-gated repair gesture (incl. `env.repair_pi`), never a
+  `ManagedConvergence` — "Network repairs live in the verify-gated repair gesture"; `init`/`--fix`
+  refuse before any write on a foreign or outdated perk — "Write admission".
+- Environment checks: optional and advisory tiers, fixture coverage at the actual primitive,
+  required-only filtering, absent + version-invalid remediation — "The optional `EnvCheck` tier".
+- The host floor makes `init` fatal but not `doctor --fix`; the Node row is a closed per-line
+  table; a floor raise on a below-floor host is a gate before implement; settings converge in three
+  shapes — "Host-floor rows and the three settings-convergence shapes".
 - A report-only check gated on an unpinned package's version range parses strict semver against a
   half-open range (non-semver ⇒ `info`, never a mismatch), mirrors the foreign tool's own
   precedence, and takes an `environ` seam with autouse test hermeticity — "Report-only checks
@@ -291,6 +290,12 @@ Adding a tool whose **absence should warn, not block** is a reusable three-touch
   optional-not-ok / `✗`). The failure path stays unreachable for optional tools because
   `required_tools_ok` ignores them.
 
+**The `advisory` tier.** `EnvCheck.advisory` is a non-blocking caution on an `ok` row (the `pi`
+row's off-pin caution naming the pinned install command): the row stays `ok=True`; doctor shows
+`warn` "<name> ok, with a caution" without changing `healthy` or the exit code; a *successful*
+init adds the advisory to `warnings` — add it at the success return, not after the env gate, or it
+leaks into the `skills_sync_failed` report. The `--json` row shape is unchanged.
+
 Three adjacent traps matter whenever this environment-check family grows:
 
 - **Stub the primitive a check actually calls.** A doctor check that reads the git-config
@@ -313,11 +318,32 @@ unparsable Node version counting as outdated. They feed `perk init`'s fatal pref
 refuses on an outdated Pi/Node, while `perk doctor` reports the `fail` row and does **not** gate
 `--fix` on it (`doctor/__init__.py::run_doctor`). Hence:
 
-- **A plan that raises a requirement the dev host fails should plan `doctor --fix` as its
-  reconvergence path.** At the 1.0.0 floor raise it regenerated `action.yml` and
-  `managed-state.toml`, created the gitignored `.perk/local.toml` and ran the skills sync; the
-  `.pi/settings.json` refresh it performed was the legitimate `desired == live` refresh "Managed
-  convergence is the SSOT for doctor checks" describes.
+- **The Node row is a closed per-line table** (`node.min_version` + `node.line_floors`):
+  `host_floor._node_problems` backs both `validate()` and `supported_node_lines()`; five arms —
+  absent / unparsable / unsupported line / below its line's floor / ok. The TS reader reads only
+  `min_version`; launch admission never probes Node. Adding a Node line is a deliberate release
+  touching `line_floors`, `engines.node` in both `package.json`s, the lockfile, the
+  `describe_node_lines` literals in `tests/test_env.py`/`tests/test_init_onboarding.py`, the prose
+  sweep, and CI's `setup-node` (guarded by
+  `tests/test_workflow_artifacts.py::test_ci_workflows_exercise_the_node_floor`). npm's engine
+  check admits later-triple prereleases exactly as `satisfies_floor` does.
+- **uv and certifi.** `[tool.uv] required-version` is the single uv declaration; `setup-uv`
+  discovers it; the consumer action carries `REMOTE_UV_VERSION_SPEC`, test-pinned equal; `uv tool
+  install` ignores project config, so the installing uv is operator-required. certifi protects only
+  the default httpx path (`SSL_CERT_FILE`/`SSL_CERT_DIR` take precedence). The enforced vs
+  operator-required split lives in `docs/user-docs/reference/security.md`.
+- **A floor raise on a below-floor host.** `engine-strict` gates only install commands, so a green
+  `run_ci` does not prove the host meets `engines`; `npm install --package-lock-only
+  --engine-strict=false` regenerates the lockfile; after landing, every new worktree's setup hook
+  refuses until the host is upgraded — treat a host-upgrade prerequisite as a gate before the
+  implement launch.
+- **Reconvergence after a floor raise goes through the owner** (`runner-workflow` →
+  `action.yml` + `managed-state.toml`). Regenerate managed artifacts with
+  `uv run perk init --no-interactive` when a host bump is in flight; `doctor --fix` also repairs
+  the `pi` row (below), which installs the adopted set onto the global prefix
+  (`docs/developers/pi-subagents-reverify.md` § Pre-land gating and the post-land cutover). The
+  committed self-repo artifacts have a lockstep test
+  (`test_committed_self_repo_remote_artifacts_are_the_owners_render`).
 - `.perk/local.toml` is not materialized into worktrees, so a doctor `config` fail there is
   environmental.
 - A hand edit that drops `.pi/settings.json`'s trailing newline reads as `settings-wiring` drift.
@@ -359,6 +385,23 @@ treats a non-array as `[]`, merges project onto user); give the cross-plane fixt
 from JSON syntax — both defects in the seed came from reasoning over raw JSON. The `defaultTools`
 resolution facts themselves live in `pi/tool-loadout.md` § "`defaultTools` resolution".
 
+## Write admission (`convergence/write_admission.py`)
+
+`perk init` and `doctor --fix` refuse before any write, with exit 2 (`write_refusal`):
+
+- **`foreign_perk`** (self-repo): the running perk's checkout must *equal* the converged root —
+  equality, not containment, because worktrees nest under `<main>/.worktrees/`.
+- **`perk_outdated`** (consumer repos): the running perk is older than
+  `.perk/required-perk-version`.
+
+Bare `doctor` is never gated. In perk's own repo always run `uv run perk init` /
+`uv run perk doctor --fix` from the checkout being converged. The maintainer invariant: a green
+`--fix` means everything works — an unverifiable row fails, and repairs re-probe. Test pattern for
+a verify-gated gate: stub through the facade in `conftest.stub_env`; the gate's own tests restore
+the real function first. Diagnostic note: in a linked worktree `init`/`doctor --fix` report a
+per-skill `skills update --sync` conflict (the known `dot-directory-migration.md` conflict) and
+leave untracked `.agents/local.yaml`, `.agents/cache/`, `.perk/local.toml`.
+
 ## Fail-level checks, fix_errors, and the machine-surface co-owners
 
 Lessons from making skills delivery a fail-level concern (see also `init-external-cli.md`):
@@ -391,6 +434,14 @@ lookup-only path from init/`--fix`'s converge path. Probe results carry only wha
 *discovered*; an input value a render needs goes on the wrapping report, not the probe result. And
 a verify-gated group that can't run must say *why it stopped* (a single warn check), never
 silently pass.
+
+**`doctor --fix` repairs the `pi` row itself** (`env.repair_pi`): on any gap, the advisory
+included, and only under fix AND verify; a failing `node` row blocks it; anything still wrong after
+the install lands on `fix_errors`. Consequence: a worktree `doctor --fix` installs the adopted set
+onto the operator's global prefix — when a host bump is in flight, regenerate managed artifacts with
+`uv run perk init --no-interactive` instead. `runner-pat-secret` checks presence only (an expired
+PAT is invisible) — run `perk doctor workflow smoke-test --wait` before relying on remote legs (an
+age advisory is a routed code follow-up).
 
 **The extension-clone lifecycle is retired** (npm delivery supersedes it — see `distribution.md`),
 but the durable cross-cutting lesson it produced stands: **commit-freshness ≠ dependency

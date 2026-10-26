@@ -303,6 +303,12 @@ both. Pair every live control with an **argv-pin** test (`test_diff_range_and_fe
 a dropped `--no-textconv` flag fails there even in an environment where the live control happens to
 be insensitive. The contract itself is in `workflow/git-substrate.md`.
 
+- **Instrument ownership.** A negative-result live cell must prove its instrument owns the state:
+  stage through the production tool pair, and require the session JSONL to show the `start_*`
+  result and no `collect_*` before the action.
+- **Overlap staging.** The busy call starts before the wave completes, is still running at
+  completion, and is interrupted — otherwise re-run, never score.
+
 ## Negative-space checks need floors and mutation proofs
 
 "No forbidden thing exists" first proves that its selector discovered a meaningful corpus and known
@@ -319,7 +325,17 @@ for the gitignored `.pi/npm` skills) makes a guard pass trivially for that tier 
 
 Mutation-proof ordering pins by temporarily reversing the implementation and watching the pin
 fail — but never restore with `git checkout <file>` while carrying uncommitted work (a HEAD
-reset wipes it); snapshot/stash first and revert only the temporary mutation (#1922).
+reset wipes it); snapshot/stash first and revert only the temporary mutation (#1922). The
+snapshot-and-copy-back pattern worked; a `git checkout` over uncommitted edits inside a
+mutation-proof chain was redundant and dangerous.
+
+- **The TypeBox `Compile` trap.** An unresolvable `$ref` silently compiles to the `false` schema,
+  so every input fails "correctly". Pair a known-good input that must pass with single-fault inputs
+  failing at a specific JSON pointer; `Compile({})` is the matching vacuity control; render root
+  errors as `/`; guard `Check` false with `Errors` empty.
+- **"Untestable without vacuity" is usually wrong.** A source-read "unreachable path" can be
+  forced: drive the path and assert the event happened and ended aborted
+  (`pi/headless-session-drive.md` § the turn-1 compaction recipe).
 
 - **Name the mutation the pin catches.** A pin whose whole purpose is to block regression to a prior
   shape should say so in a comment ("fails if X is reintroduced"): the hand-proof of temporarily

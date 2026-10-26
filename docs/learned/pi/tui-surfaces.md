@@ -18,15 +18,16 @@ pi API facts, and test recipes those turns established.
   allowlisted exception); `surfaces.ts` stays dependency-free (structural params, no controller
   imports) — "The surfaces module = `surfaces.ts` + `report.ts`".
 - perk publishes ONE composed `perk` status slot (`<objective> · <activity>`, either half
-  optional), not per-feature slots; activity waits are a Set of per-holder tokens, never a scalar
-  ref-count (a reset with live holders makes a stale `end` inert, not destructive) — "The composed
-  single `perk` status slot".
+  optional); activity waits are a Set of per-holder tokens, never a scalar ref-count; three live
+  wait kinds (browser review, `/simplify`, writer provider backoff); replace a wait by beginning
+  the new token before ending the old — "The composed single `perk` status slot".
 - The RPC dual-publish LAW: RPC mode drops factory widgets and `setFooter`; every themed surface
   keeps a `setStatus`/string twin — "The RPC dual-publish law".
 - The footer facts (lifecycle, slot filtering, `model_select` exists but no usage event —
   reactivity stays render-driven) — "`setFooter` adoption facts".
-- Test recipes: `invokeCommand` (never `runCommandHandler`) for status/widget effects,
-  severity-filtered notify asserts, the full suite via `just test-js` — "Harness recipes".
+- Test recipes: `invokeCommand` (never `runCommandHandler`) for status/widget effects; on the tool
+  path pass a `setStatus` recorder (`invokeTool` keeps its own private statuses); severity-filtered
+  notify asserts — "Harness recipes".
 - Vendoring a pi-tui-touching extension hits the dual-copy nominal-class clash + friends —
   "Vendoring a TS extension that touches pi-tui".
 - ONE stripper (`stripTerminalControls`/`sanitizeOneLine`), applied by row shape — one-row sinks
@@ -55,11 +56,19 @@ Two structural invariants to preserve:
 
 The slot is **composed**: `<objective> · <activity>`, either half optional, `undefined` when both
 are absent (`createPerkStatus` in `surfaces.ts`). The objective publisher owns the first half via
-`set`; activity owners hold waits via `beginActivity(target, text)` → `end`. The one activity today
-is `ACTIVITY_BROWSER_REVIEW` ("waiting on browser review"), begun by the plannotator browser waits
-(grep `beginActivity(` for the live holders — at the last audit `planReviewBrowser.ts`,
-`objectiveReviewBrowser.ts`, `codeReview/browser.ts`, and the plan door's bridge in `plan.ts`)
-and ended when each wait settles; `session_shutdown` in `extension/pi/activation.ts::activatePerk` (the
+`set`; activity owners hold waits via `beginActivity(target, text)` → `end`. Three live-wait kinds
+(grep `beginActivity(` for the live holders):
+
+- **Browser-review waits** — `ACTIVITY_BROWSER_REVIEW` ("waiting on browser review"), begun
+  through the browser-operation owner (`extension/pi/v1/browserOperation.ts`) and the plan door's
+  bridge in `plan.ts`, ended when each wait settles.
+- **The `/simplify` run** (`extension/pi/v1/simplify.ts`).
+- **The foreground writers' provider-retry wait** via `createDelegationActivity`
+  (`surfaces.ts`), e.g. `conflict resolver: provider backoff 2/5 …` — shown only while the
+  supplier reports a live `retry` (`pi/subagents.md` § Supervisor channel, provider diagnostics).
+  The text is static (no countdown) by design.
+
+`session_shutdown` in `extension/pi/activation.ts::activatePerk` (the
 composition root; the published `index.ts` entry is now only the thin SDK-admission bootstrap that
 dynamically imports it) calls `clearActivity`
 because a browser wait cannot outlive the session. Headless calls are FULL no-ops (record nothing).
@@ -77,12 +86,21 @@ the slot was multi-segment.)
   `live.delete(token)` returning `false` means "already ended or reset" and the `end` is inert — a
   wait begun after a reset can never be consumed by a stale `end`. The newest live wait's text shows
   while any is unended; ending one restores the remainder.
+- **Replace one wait's text by beginning the new token first, then ending the old.** The newest
+  live wait shows throughout (no intermediate blank), so the raw publications are `B, I, I` —
+  `createPerkStatus` never dedupes. Unit tests assert the raw sequence; integration tests assert the
+  distinct-consecutive sequence plus the final value.
+- **A display-only wait owner never throws.** A failed begin records no token; identical snapshots
+  don't republish; `observe`/`end` are arrow properties usable unbound. Residual: `end` has no
+  repaint, so a throwing `setStatus` there leaves stale text until the next publish.
+- **Admission rollback must repaint the restored composition** when the paint may already have
+  happened — the raw sequence then gains a leading `undefined`.
 - **Thread the narrowest structural slice.** Activity owners receive
   `ActivityHandle = Pick<PerkStatusHandle, "beginActivity">`, never the full handle; and the sink is
   a **required** parameter at the leaf seam, so a door that forgets to thread it is a compile error,
-  not a silently status-less wait. (There is no gist browser door — gist review is a warm
-  `plan_review` arm — so the sink rides only the plannotator browser doors and the plan door's
-  bridge.)
+  not a silently status-less wait: a required trailing `status: ActivityHandle` parameter on door
+  installers turns a missed thread into TS2554 (budget for touching stub-based tests). (There is no
+  gist browser door — gist review is a warm `plan_review` arm.)
 - **Shared handle**: created once in `extension/pi/activation.ts::activatePerk` and threaded into its publisher and the
   activity owners — the extension's zero-module-level-mutable-state invariant.
 - **Headless `set`/`beginActivity` must be FULL no-ops** — never record state. If a headless call
@@ -167,8 +185,13 @@ widget consumer remains; the patterns stand for future bounded surfaces.)*
   today's composed slot): a controller clearing an absent value still publishes
   `setStatus("perk", undefined)` on every `session_start` — the
   assert must become "no *defined* value ever set".
+- **Tool-path status effects never reach `h.statuses`.** `invokeTool` builds `ctx.ui` from
+  `headfulUIContext(notifies)` with a private `statuses` array, so a tool's `setStatus` is
+  invisible to the harness capture — pass `{ ui: { setStatus: recorder } }` and filter
+  `slot === "perk"` (the tool-path twin of the `runCommandHandler` gotcha).
 - **The startup banner lands in `h.notifies` in every headful session** — count-based notify
-  assertions are fragile; filter by severity instead (see also `pi/extension-seams.md`).
+  assertions are fragile; filter by severity instead (see also `pi/extension-seams.md`, whose
+  report()-rollout gotchas record the charter's one-write `console.error` exception).
 - The full suite runs via `just test-js` — the justfile's quoted recursive glob picks up nested
   test files (glob mechanics: `pi/extension-api.md`, `toolchain/ts-module-moves.md`); a flat
   single-directory glob silently skips them.
@@ -256,7 +279,10 @@ merely clamped.
 
 **Test recipe:** build the draft through the real overlay's `handleInput` (typed keys + `ESC[D`),
 paste mid-draft, type, and assert the whole draft — an end-of-draft paste cannot detect
-displacement. Unicode bidi/format controls are not stripped (recorded).
+displacement. Unicode bidi/format controls are not stripped (recorded). pi-tui's `Input.render`
+always wraps the cursor cell in the `pi:fc` APC markers, even unfocused (the literals are not
+exported — pin them against `renderFakeCursor`, as `extension/vendor/btw/btw.test.ts` does), so a
+"no control bytes" assertion on the input row strips exactly those two markers first.
 
 ### Bringing a new `ctx.ui.*` method under governance (the `setWorkingMessage` seam)
 

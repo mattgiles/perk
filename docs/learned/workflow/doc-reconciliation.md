@@ -76,6 +76,11 @@ Dated instances live inline as `(#NNNN)` issue anchors.
   unchecked anchors.
 - **Verify comment anchors against the current *call path*, not export existence (#2475)** — an
   upstream symbol can stay exported while falling off the bind path.
+- **A pointer sweep proves resolution, not truth** — version-history claims need an
+  archive/registry check. `perk learn docs-check` scans only `docs/learned/`, so `docs/developers/`
+  and `docs/design/` pointers are re-swept only when a bump touches them. The planning-ledger
+  reconciliation convention: keep seed prose verbatim; add dated "As landed" columns and
+  blockquotes; record deviations in the existing entry shape.
 - **Absolutes and negations ("never", "only", "deleted") are the highest-yield re-verification
   targets (#2517)** — census each by grep at plan time, rewrite them as census rules, and put a
   verified-defect → fix table in the plan Summary.
@@ -171,6 +176,9 @@ construction (the `fail()`/`EXIT_FOR_TYPE` consolidation missed a third file's r
 - **Falsified universally-quantified absolutes** get a small dimensional matrix or a
   mechanism-scoped claim plus the named exception — never a hedge or a new frozen census; advice
   phrased against a literal count dies with the count (#2012, #2010).
+- **A correction deferred to `/learn` must name the owning symbol, not the value** — the `/learn`
+  hand-off decays like any planning-time fact (several inbox replacement texts were already stale
+  at consolidation).
 - **Census method (#2165)**: call-site counts ≠ runtime registration counts; anchor on
   interfaces/methods and re-derive at execution (summary-plus-anchor is the freeze-resistant
   shape); premise confirmations record near-misses, not just pass/fail.
@@ -355,6 +363,11 @@ backslash-u-plus-four-hex-digits text instead of the glyph, and nothing reports 
 - After any prose edit, `grep -n` the touched files for the four-hex-digit backslash-u escape
   pattern (expect only the corpus's deliberate data-format examples) and read the diff for
   unintended `—`→`-` changes before committing.
+- **The em dash → TAB failure.** A literal TAB (sometimes with a stray `true`) in `oldText` lets
+  the fuzzy fallback rewrite the rest of the line; in `newText` it silently lands in source
+  comments, and Biome does not flag it. After any edit run ``grep -n "$(printf '\t')"`` over the
+  touched files; for glyph-heavy rewrites use the ASCII-placeholder Python edit-script pattern
+  (assert `count == 1`, type glyphs literally, write once).
 - **Prose guidance has not held the escape hazard**: three slips in one session, two of which landed
   in `shared/contracts.md`. A CI guard over tracked `*.md` (flag the escape outside backtick code
   spans) is routed follow-up #2705 F4.
@@ -393,9 +406,12 @@ instance, "ALWAYS" labels included; prose awareness does not enforce itself:
   `objective-store.md` § "Node↔plan unification is one `ObjectiveRef | None` capability". For a
   docs-only node the natural evidence homes are the implementation commit message and the node's
   reconciled description — never "the PR description" (#2504, #2506).
-- **Recurrence tally: prose is not stopping it.** Plans put evidence in the PR body a FOURTH time
-  (#2549, #2541, #2543, after #2504/#2506) even with this section in the planner's scope; the lint
-  lead is routed (#2578).
+- **Recurrence tally: prose is not stopping it.** Plans put evidence in the PR body a SIXTH time
+  (#2748, #2784, after #2549/#2541/#2543 and #2504/#2506) even with this section in the planner's
+  scope — the draft-review wave and plan review both missed it; the lint lead (#2578) stays the
+  real fix. Implementer rule: when a plan names an unreachable carrier, move the evidence to the
+  implementation commit message or a plan-issue comment written before `/submit` — never the chat
+  transcript.
 - **Live dogfood legs the human can run during the implement session are a submit gate.** Commit
   the offline part first, hand the human one phase at a time, fill the record from logs and
   session JSONL commit by commit, and call `/submit` only once every criteria row is observed-live
@@ -496,7 +512,9 @@ FAIL verdicts, waivers, offline-proven closure) → `docs/learned/workflow/bindi
   diff scope.
 - **The landing-log single-entry append**: add one "Node X.Y landed (PR #n)" entry after the
   prior one, never rewriting older ones; the reconcile call overwrites the region, so extract it,
-  insert programmatically, `difflib`-prove only-additions, pass the full region.
+  insert programmatically, `difflib`-prove only-additions, pass the full region. Keep entries terse
+  with a size budget — GitHub refuses an objective comment near 262,144 chars
+  (`objective-lifecycle.md` § the body-size note).
 - **The "Anchors (verified)" region is a drift magnet (#687)** — a node that delivers what an
   anchor said didn't exist stales it; check every reconcile, keep-and-annotate, don't delete.
 - **The roadmap `pr` field ≠ the merge PR.** It holds the **plan issue**, as does the
