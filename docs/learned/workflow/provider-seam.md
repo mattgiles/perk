@@ -100,7 +100,7 @@ produced-contract substrate.
 
 ## Correction — `cache.plan-ref.provider` is the issue backend, NOT the seam id
 
-`docs/design/provider-contract.md` originally framed `cache.plan-ref.provider` as "== the plan
+`docs/design/archive/provider-contract.md` originally framed `cache.plan-ref.provider` as "== the plan
 provider id". That equivalence never shipped — the design doc now carries a reconciling note
 pointing at contracts §8.10 — and the shipped rule is:
 
@@ -510,7 +510,7 @@ rather than copying the sibling's structure.
 ## The produced-contract tier sets the bridge weight
 
 *(Historical: the todo arm below describes the since-retired seam; the consumer-check lesson
-stands.)* The two seams' produced contracts lived in different tiers (`docs/design/provider-contract.md`
+stands.)* The two seams' produced contracts lived in different tiers (`docs/design/archive/provider-contract.md`
 Generalization 1), and that tier decides how heavy the bridge is:
 
 - **plan → `cache.plan-ref`** is a **durable cross-plane** artifact downstream stages

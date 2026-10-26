@@ -601,10 +601,11 @@ tools or *months-old* code:
   provenance, not a currency promise; the pin is. 2026-10-01: the pins moved to `0.99.2` with the
   suites green and minimal in-place corrections only (the `ToolInfo.exposure` field, CLI built-in
   extensions); the full re-audit of this doc is owed — facts here are verified at 0.87.0 unless
-  corrected in place. 2026-10: the pins are at `1.0.0` and the host floor is `1.0.0`
-  (`shared/host-floor.yaml`); the host-admission, structured-result and harness facts were added
-  at the versions each section states (0.99.2 and/or 1.0.0). The full 1.0.0 re-audit of this doc
-  is still owed.
+  corrected in place. The current dev pins and host floor live in their owners
+  (`src/perk/substrate/pi_host.py::PI_ADOPTED_VERSION`, `shared/host-floor.yaml` `pi.min_version`;
+  both 1.4.0 at 2026-10-26); the host-admission, structured-result, harness, config-schema and
+  selection-vs-dispatch facts were added at the versions each section states (0.99.2, 1.0.0,
+  1.1.0 or 1.4.0). A full re-audit of every older-stamped section is still owed.
 
 ## Cross-references
 

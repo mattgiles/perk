@@ -87,11 +87,19 @@ behind a terminating-tool preflight (`no_extension_tools`) —
   `.pi/npm/perk-worker/`, because Node refuses to type-strip `.ts` under any `node_modules`
   (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`); package-root resources ride along, bare imports
   walk up to `.pi/npm/node_modules`. A miss is loud (`worker_entry_missing`).
-- **Consumer deps are a two-spec install** (`workflow_artifacts._WORKER_DEPS_CONSUMER`):
-  `@mgiles/perk@{__version__}` plus the *unpinned* `@earendil-works/pi-coding-agent` under
-  `--prefix .pi/npm --legacy-peer-deps`. The SDK spec is load-bearing: `@mgiles/perk` ships zero
-  runtime deps (pi is a peer) and `--legacy-peer-deps` skips peers, so the perk spec alone leaves
-  the worker's import set open. Self-repo: `npm ci`.
+- **Consumer deps are a pinned install** (`workflow_artifacts._WORKER_DEPS_CONSUMER`):
+  `@mgiles/perk@{__version__}` plus `pi_host.PI_INSTALL_SPECS` (the one exact Pi spec at
+  `PI_ADOPTED_VERSION`) under `--prefix .pi/npm --legacy-peer-deps --save-exact`. The SDK spec is
+  load-bearing: `@mgiles/perk` ships zero runtime deps (pi is a peer) and `--legacy-peer-deps`
+  skips peers, so the perk spec alone leaves the worker's import set open. The consumer worker SDK
+  *is* the remote wave host, so it carries the same install set as the global CLI — the
+  composite's global install line is `PI_INSTALL_COMMAND` byte for byte (`_PI_GLOBAL_INSTALL`),
+  and `REMOTE_PI_VERSION` is an import-bound alias of the adopted pin, never a second literal
+  (`toolchain/worktree-node-modules.md` § Five version facts). Self-repo: `npm ci`.
+- **The worker passes no `--model`.** `[models.stages.<id>]` is a launch-seam setting only;
+  `perk run-worker` runs on the converged `[models] default` or Pi's own fallback — read the run
+  comment's `Model: selected=` line rather than assuming the stage model
+  (`pi/headless-session-drive.md` § Residual risks).
 - **In a consumer repo no fix rides a plan branch** — worker code is the npm tarball, the CLI is
   PyPI, the workflow/composite is the consumer's committed tree; committing worker code to a
   consumer plan branch flips resolution to `self` and voids the proof.
@@ -139,10 +147,16 @@ change — and `perk doctor --fix` converges the *whole* repo, so revert drift o
   must defer to the SDK's own resolution (B7; `headless-session-drive.md`).
 - **Open at this writing:** no recurring CI-gated live E2E; the published-registry consumer path
   is proven only through labeled hand-edits in the scratch fixture (no post-release canonical
-  re-proof recorded); the SDK spec in `_WORKER_DEPS_CONSUMER` is deliberately unpinned; the staged
+  re-proof recorded); the live remote legs of the single-spec install (the consumer composite and
+  the self-repo `npm ci` worker at the current pin) remain unproven — offline pins only; the staged
   entry reparses under a `MODULE_TYPELESS_PACKAGE_JSON` warning (`package.json` declares no
   `"type"`); the stacked `position_branch` arm has never run live (`objective-delivery.md`).
-- **Retired:** the `consumer-git` worker-entry candidate; the `remote_not_driven` error type (now
+- **`runner-pat-secret` checks presence only.** An expired `PERK_GH_PAT` is invisible to doctor
+  (expired PATs killed two certifications' remote legs) — run `perk doctor workflow smoke-test
+  --wait` before relying on a remote leg (`init-doctor.md` § Network repairs; an age advisory is a
+  routed code follow-up).
+- **Retired:** the `consumer-git` worker-entry candidate; the unpinned consumer SDK spec (pinned
+  with the Pi 1.4.0 adoption, 2026-10); the `remote_not_driven` error type (now
   `no_plan_ref` / `dispatch_state_unverified` / `dispatch_failed`); the consumer worker-deps
   `::error::` deferral.
 

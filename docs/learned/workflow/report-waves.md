@@ -759,8 +759,9 @@ Instances:
 - `pr`/`worktree`/`bundle_dir` stay model-relayed (an accepted trust posture;
   `decodeStartReviewWaveParams` is the single seam to adjust if door-recorded context is
   adopted).
-- pi-subagents is PINNED for consumers (`npm:pi-subagents@0.75.0` — the re-verified release; this
-  adapter sends the inline script as the RPC spawn key `script`, which pi-subagents accepts since
+- pi-subagents is PINNED for consumers (`SUBAGENTS_PACKAGE` in
+  `src/perk/convergence/init/settings.py` — read the constant for the current pin; this adapter
+  sends the inline script as the RPC spawn key `script`, which pi-subagents accepts since
   0.74.0); the guidance is source-re-verified at
   the version recorded by `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`
   (`src/perk/convergence/doctor/checks.py`), and the doctor `subagent-compat` version `warn` is the
