@@ -1,5 +1,5 @@
 ---
-title: The report-wave module — flow migrations onto code-owned waves, lane semantics, and the wave test machinery
+title: The report-wave module — code-owned waves, lane semantics, native settlement, and the wave test machinery
 read_when: You are changing extension/waves, review-wave identity/launch token, native partial settlement and unfinished lanes, stop/terminal-proof classes, parent-prepared snapshots, lane semantics, wave tests
 cluster: subagent-orchestration
 ---
@@ -8,44 +8,44 @@ cluster: subagent-orchestration
 
 perk's multi-lane subagent fan-outs (review waves, learn-analyst waves) run as **code** on the
 Perk-owned report-wave module in `extension/waves/`, launched over the pi-subagents v1 extension
-RPC. This doc is the perk-side architecture: the module's shape, the checklist for migrating a
-flow's prompt mechanics onto a code-owned wave tool, the lane-normalization semantics, the
-session-scoped guard-state patterns, and the wave test machinery worth reusing.
+RPC. This doc is the perk-side architecture: the module's shape, the recipe for wiring a new
+flow onto a code-owned wave, the lane-normalization semantics, the session-scoped guard-state
+patterns, and the wave test machinery worth reusing.
 
 **Doc boundary:** the *upstream* pi-subagents mechanics — the v1 RPC envelope, `outputSchema` /
-`structured_output`, the supervisor channel (off at every perk spawn), `mission: false`, the completion-notification wake
-(`"subagent-notify"`) and the `bg_wait` background-wait tool (the renamed `subagent_wait`;
-perk does not adopt it) — live in `docs/learned/pi/subagents.md`. Cross-link them; don't
-duplicate them here.
+`structured_output`, the supervisor channel (off at every perk spawn), `mission: false`, the
+completion-notification wake (`"subagent-notify"`) and the `bg_wait` background-wait tool (the
+renamed `subagent_wait`; perk does not adopt it) — and the engine-version chronology live in
+`docs/learned/pi/subagents.md`. Cross-link them; don't duplicate them here.
 
 ## Distillation
 
 - Wave mechanics are CODE: `reportWave.ts` (logical core) over `transport.ts`; every flow is a
-  mechanism + installer pair catalogued in "Orientation" (engine mechanics: `pi/subagents.md`).
-- Every wave spawn carries three fixed fields — `acceptance: {level: "none"}`,
-  `intercomBridge: {mode: "off"}` and the per-launch `args: { launch: randomUUID() }` token that
-  defeats supplier workflow reuse — "The fixed spawn contract carries an explicit acceptance
-  disable".
-- Blocking runs are start + await — "The start/settle split"; migrating a flow's prompt mechanics
-  onto a code-owned wave tool follows "The flow-migration checklist".
+  mechanism + installer pair — "Orientation"; completeness is `strict` (complete ⟺ zero
+  failures) or `best-effort` (complete ⟺ no wave-level failure) per flow.
+- Every spawn carries three fixed fields — `acceptance: {level: "none"}`,
+  `intercomBridge: {mode: "off"}`, the per-launch `args.launch` token — "The fixed spawn
+  contract carries an explicit acceptance disable".
+- Blocking runs are start + await — "The start/settle split"; a new flow = mechanism +
+  installer + policy lockstep + dormant-first → atomic flip — "Wiring a new wave flow".
 - Lane semantics: status ≠ validity ≠ coverage ≠ assessment completion — "Lane semantics";
   size-budgeted renderers emit splittable per-line blocks — "Budgeted block-packing renderers".
-- Review posting uses one discriminated single-use record (`ReviewPassHolder`) bound to one PR;
-  launch manifests preserve requested/runnable/preflight-failed lanes so instability becomes
-  honest incompleteness — "Session-scoped guard state".
-- The recorded post state carries a code-owned minimum verdict (a clean post over an actionable
-  floor is refused before the publisher); native `partial` settlement retains sibling reports but
-  never completeness (duplicate keys withheld at BOTH tiers; still-running roster lanes report
-  `lane-failed` via `unfinishedLanes`); every child carries the CONSTANT
-  `{readOnly: true}` packet + `worktree: false` — "One discriminated, single-use post record",
-  "Native partial settlement", "The constant child-restriction packet".
-- Producer-lane waves key lanes `lane.<ordinal>` (`laneIdentity.ts`); routing tokens are fenced
-  by refusal, never escaped; outcome loops walk the plan, not the aggregate — "Validate
-  downstream identifier contracts"; `blocked` reports reclassify to `lane-failed` before coverage
-  (`blockedReports.ts`) — "Lane semantics".
+- Review posting uses one discriminated single-use `ReviewPassHolder` bound to one PR; launch
+  manifests preserve requested/runnable/preflight-failed lanes — "Session-scoped guard state".
+- The recorded post carries a code-owned minimum verdict; native `partial` settlement retains
+  sibling reports but never completeness (duplicate keys withheld at BOTH tiers; still-running
+  roster lanes report `lane-failed`); every child carries the CONSTANT `{readOnly: true}`
+  packet + `worktree: false` — "One discriminated, single-use post record", "Native partial
+  settlement", "The constant child-restriction packet".
+- Producer-lane waves key lanes `lane.<ordinal>`; routing tokens are fenced by refusal, never
+  escaped; outcome loops walk the plan — "Validate downstream identifier contracts"; `blocked`
+  reports reclassify to `lane-failed` before coverage — "Lane semantics".
+- Parent-verified inputs — the stack door's digest-bound `PinnedStack` (the pinned `review-context`
+  command), the draft doors' door-primed `custom` lane — "Parent-verified lane inputs"; Ponytail's
+  exact skill source is preflighted, never serialized — "Truthful launch and coverage manifests".
 - The parent owns the facts, the lane returns judgment — "Parent-prepared snapshots"; a
-  `no_active_session` RPC reply is held for a later success — "The context-less RPC hold"; the
-  flagged-edges register (stop/proof classes, wave cost `unavailable`) — "Watch items / residuals".
+  `no_active_session` reply is held for a later success — "The context-less RPC hold"; dated
+  history and live evidence — "Live-proof ledger (dated)"; still open — "Watch items / residuals".
 
 ## Orientation
 
@@ -60,90 +60,73 @@ reason on a script-run failure is unrepresentable). Callers consume the opaque `
 lifecycle — `start`/`collect`/`run` over opaque `ReportWaveRef`s: they supply assignments and
 consume typed outcomes, never adapters, run handles, or result promises (the blocking `run` is
 start + await inside the instance; pending execution is instance-owned with drain-once,
-delete-as-claim collection). Adapter selection is wave-owned: `createReportWave(bus)` constructs
-the ONE per-activation production instance at the composition root
-(`extension/pi/activation.ts::activatePerk`) — it
-takes **no supplier** (the child restriction packet is a constant, below); `reportWaveOver(adapter)`
-is the test injection seam. `renderWaveScript` + assignment validation
-are module-private — script text is invisible outside `waves/`, so renderer assertions observe
-the spawned `script` through the adapter seam. `rpcAdapter.ts` is the live pi-subagents
-v1 RPC adapter (interior — `reportWave.ts` is its one sanctioned production construction site);
-the first-class test double lives in `extension/testing/memoryAdapter.ts`. Guard Rule G
-(`extension/importDirectionGuard.test.ts`) bans production edges into
-`transport.ts`/`rpcAdapter.ts` from outside `waves/` (the old ten-site adapter-construction
-census burned down to zero when `createReportWave` made adapter selection wave-owned) and
-censuses raw `WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
+delete-as-claim collection). `ReportWaveRequest.completeness` is `strict` — complete ⟺ zero
+failures (the three review waves, the classifier, explorer, scout, simplify and both dream tiers)
+— or `best-effort` — complete ⟺ no wave-level `key: null` failure, assignment failures being
+explicitly reported skips (the learn, harvest and audit waves). Adapter selection is wave-owned:
+`createReportWave(bus)` constructs the ONE per-activation production instance at the composition
+root (`extension/pi/activation.ts::activatePerk`) — it takes **no supplier** (the child
+restriction packet is a constant, below); `reportWaveOver(adapter)` is the test injection seam.
+`renderWaveScript` + assignment validation are module-private — script text is invisible outside
+`waves/`, so renderer assertions observe the spawned `script` through the adapter seam.
+`rpcAdapter.ts` is the live pi-subagents v1 RPC adapter (interior — `reportWave.ts` is its one
+sanctioned production construction site); the first-class test double lives in
+`extension/testing/memoryAdapter.ts`. Guard Rule G (`extension/importDirectionGuard.test.ts`)
+bans production edges into `transport.ts`/`rpcAdapter.ts` from outside `waves/` (no production
+adapter construction exists outside `waves/`) and censuses raw `WAVE_RPC_`/channel tokens (tests
+included). The flow entrypoints (mechanism — installer + tool — policy):
 
-- `prReviewWave.ts` — `/pr-review`'s bounded-retry wave behind the `run_pr_review_wave` tool.
-- `extension/learning/analystWave.ts` — `/learn`'s analyst fan-out policy behind the
-  `run_learn_wave` tool (`extension/pi/v1/learning/learn.ts`), best-effort, no retry. (The
-  experimental selector-driven `/pr-review-dynamic` flow was retired wholesale — see the
-  CHANGELOG.)
-- `adversarialReviewWave.ts` — the human review doors' completion-only wave behind the
-  `start_review_wave`/`collect_review_wave` tool pair (`extension/pi/v1/codeReview/reviewWave.ts`),
-  registered and in the `extension/substrate/toolGating.ts` census. It landed **dormant** first
-  (built + tested, unregistered) because registration, the agent-def fenced-JSON →
-  `structured_output` flip, and the census additions had to land **atomically** — registering
-  early would have broken lane schemas against the fenced-JSON agent def.
-- `draftReviewWave.ts` — the draft doors' (`/plan-review-browser`,
-  `/objective-review-browser`) completion-only wave behind the
-  `start_draft_review_wave`/`collect_draft_review_wave` tool pair
-  (`extension/pi/v1/draftReviewWaveTools.ts`, over the door-primed context state in
-  `extension/authoring/review/draftContext.ts`), registered and census'd.
-- `reviewClassifierWave.ts` — `/address`'s single-lane classify wave behind the
-  `classify_review_feedback` tool (`extension/pi/v1/delivery/address.ts`): ONE `perk.review-classifier`
-  lane, strict completeness, no retry (the flow's posture is "surface the error and stop").
-- `objectiveExplorerWave.ts` — the objective-plan factory's OPTIONAL single-lane explore wave
-  behind `explore_objective_node` (`extension/pi/v1/objectivePlanning.ts`): ONE
-  `perk.objective-explorer` lane, strict completeness, no retry (on failure the guidance says
-  "explore directly instead"). Both single-lane entrypoints hold their report schema as a module
-  constant — the migration that killed the hand-transcribed `outputSchema` blocks.
+- `prReviewWave.ts` — `/pr-review`'s wave behind `run_pr_review_wave` (installer
+  `extension/pi/v1/codeReview/automated.ts`): strict, ONE bounded retry of the uncovered lanes —
+  never a `skill-unavailable` lane, and none after a non-retryable wave-level failure.
+- `extension/learning/analystWave.ts` (`runLearnAnalystWave`) — `/learn`'s analyst fan-out behind
+  `run_learn_wave` (`extension/pi/v1/learning/learn.ts`): best-effort, no retry.
+- `adversarialReviewWave.ts` — the human review doors' completion-only wave behind
+  `start_review_wave`/`collect_review_wave` (`extension/pi/v1/codeReview/reviewWave.ts`): strict,
+  zero retries; `collectAdversarialReviewWave` applies `reclassifyBlockedReports`; the optional
+  `stack: PinnedStack` input is § "Parent-verified lane inputs".
+- `draftReviewWave.ts` — the draft doors' completion-only wave behind
+  `start_draft_review_wave`/`collect_draft_review_wave` (`extension/pi/v1/draftReviewWaveTools.ts`
+  over `extension/authoring/review/draftContext.ts`): 2–3 of four settled angles + the optional
+  door-primed `custom` lane + Ponytail; strict, zero retries.
+- `reviewClassifierWave.ts` — `/address`'s ONE-lane `perk.review-classifier` wave behind
+  `classify_review_feedback` (`extension/pi/v1/delivery/address.ts`): strict, no retry (the flow's
+  posture is "surface the error and stop").
+- `objectiveExplorerWave.ts` — the objective-plan factory's OPTIONAL ONE-lane
+  `perk.objective-explorer` wave behind `explore_objective_node`
+  (`extension/pi/v1/objectivePlanning.ts`): strict, no retry (on failure the guidance says "explore
+  directly instead").
 - `extension/learning/audit.ts` (`judgeAuditBundle`) — the perk-dev session-audit wave behind
-  `run_audit_wave` (the `extension/pi/v1/learning/audit.ts` adapter): the analyst-wave-shaped
-  sibling with a **structural write binding**. The tool registers with a `gated: { carveOut }` policy (its `registerPerkTool` call in the
-  adapter; the carve-out prose renders into the read-only context) whose write target comes only from the cold
-  door's workflow-state (`audit_bundle_dir`), with **no parameters** — no model-relayed path ⇒ no
-  aimable writer. This is the precedent for read-only-gated tools that must write. Side effect
-  worth sweeping for: adding an isolated registry stage (empty `successors`) implicitly grows
-  GC's terminal set (`terminal_stage_ids()`), firing the exact-set pin in `tests/test_gc.py` — a
-  stage-adding plan should sweep `src/perk/state/gc.py` alongside the
-  stageTools/toolGating/registry pins.
-- `extension/learning/harvest.ts` (`analyzeHarvest`) — the seeded `perk learn harvest`
-  session's analyst fan-out behind the `run_harvest_wave` tool
-  (the `extension/pi/v1/learning/harvest.ts` adapter). The one `manifest_path` param
-  is a **relay handshake, not an authority**: the execute derives the only acceptable run-scoped
-  path from the claimed run's workflow-state and reads the derived path (contracts §8.48); a
-  single-lane manifest is refused toward the seed's direct-analysis path. Best-effort
-  completeness, ONE attempt, no retry; reports re-decoded + pointer-stamped in code.
-- `extension/learning/dream.ts` — the `perk learn dream` session's FIRST-level analyst wave:
-  strict §8.59 manifest decode that binds the run-scoped manifest path into the decoded value,
-  run-key-safe orchestration keys (the `audit.ts` pattern), the `DREAM_ANALYST_CAPS` SSOT, and
-  **strict** completeness (one failed/undecodable lane forces `complete: false`); one attempt,
-  no retry (contracts §8.60).
-- `extension/learning/dreamReducer.ts` — the SECOND-level wave: three FIXED fresh-context
-  `perk.dream-reducer` lanes (`DREAM_REDUCER_ANGLES`) cross-examining the complete analyst
-  outcome; **pure orchestration** — it composes/finalizes the bundle content while the door owns
-  every fs write; the `DREAM_REDUCER_CAPS` SSOT; strict (contracts §8.61). Both dream levels run
-  behind the ONE **parameterless** `run_dream_wave` tool over the two-level ordering/recovery
-  policy in `extension/learning/dreamAnalysis.ts` (`analyzeDream`; the
-  `extension/pi/v1/learning/dream.ts` adapter) — the
-  `run_audit_wave` workflow-state-bound posture on BOTH the read and write sides; reducers
-  launch only after a complete first wave and an in-budget bundle write.
-- `scoutWave.ts` — the `perk.scout` delegation wave behind the `run_scout_wave` tool
-  (`extension/pi/v1/scoutWave.ts`): 1–4 briefs, one fresh-context lane each, best-effort.
+  `run_audit_wave` (`extension/pi/v1/learning/audit.ts`), with a **structural write binding**: a
+  `gated: { carveOut }` policy whose write target comes only from the cold door's workflow-state
+  (`audit_bundle_dir`) and **no parameters** — no model-relayed path ⇒ no aimable writer (the
+  precedent for read-only-gated tools that must write). A new isolated registry stage grows
+  `src/perk/state/gc.py::terminal_stage_ids` and trips `tests/test_gc.py`'s exact-set pin — sweep
+  it with the stageTools/toolGating/registry pins.
+- `extension/learning/harvest.ts` (`analyzeHarvest`) — `perk learn harvest`'s analyst fan-out
+  behind `run_harvest_wave` (`extension/pi/v1/learning/harvest.ts`): the one `manifest_path` param
+  is a **relay handshake, not an authority** — the execute reads only the run-scoped path derived
+  from workflow-state (contracts §8.48), and a single-lane manifest is refused toward the seed's
+  direct-analysis path; best-effort, ONE attempt, no retry.
+- `extension/learning/dream.ts` (analyst tier) + `dreamReducer.ts` (three fixed fresh-context
+  `perk.dream-reducer` lanes, `DREAM_REDUCER_ANGLES`; pure orchestration — the door owns every fs
+  write) behind the ONE parameterless `run_dream_wave` (`extension/pi/v1/learning/dream.ts`) over
+  `extension/learning/dreamAnalysis.ts::analyzeDream`: both tiers strict, one attempt, no retry,
+  workflow-state-bound on read and write like `run_audit_wave`. Manifest decode, preflight, caps,
+  bundle budget and reducers-only-after-a-complete-first-wave: contracts §8.59–§8.61 and
+  `learn-harvest-dream-core.md`.
+- `scoutWave.ts` — the `perk.scout` delegation wave behind `run_scout_wave`
+  (`extension/pi/v1/scoutWave.ts`): 1–`SCOUT_MAX_BRIEFS` (6) briefs, one fresh-context lane each,
+  **strict**, one attempt, no retry (an incomplete wave is the caller's to handle).
 - `simplifyWave.ts` — the `/simplify-plan`/`/simplify-objective` doors' single-assignment, strict,
-  zero-retry `perk.simplifier` wave (`extension/waves/simplifyWave.ts` is the mechanism;
-  `extension/pi/v1/simplify.ts` the installer: two warm doors and **no tool**) — the fourth
-  mechanism/installer instance, after scout.
+  zero-retry `perk.simplifier` wave (installer `extension/pi/v1/simplify.ts`: two warm doors and
+  **no tool**).
 
-**The settled entrypoint + installer split.** Every flow now has two files: the *mechanism* under
-`extension/waves/<flow>Wave.ts` owns the closed report schema, the code-composed
-`<untrusted_…>` result envelope, and returns the raw `ReportWaveResult`; the *installer* under
-`extension/pi/v1/…Wave.ts` (or the flow's own `pi/v1` module) does tool-boundary decode → model
-resolution (`[models.subagents]`) → the `ToolResult` projection. `scoutWave` is the third instance
-after `objectiveExplorerWave`/`harvest`; when cloning it, mirror the **full** options shape
-(`timeoutMs?` included) for parity with the siblings even when no production caller passes it —
-a partial clone is the drift that later makes "the same options" untrue.
+Every mechanism holds its closed report schema as a module constant (the workflow-level
+`outputSchema`). `ponytail.ts` is not a flow — it is the Ponytail source-identity preflight every
+Ponytail lane passes through (§ "Truthful launch and coverage manifests"); `laneIdentity.ts` and
+`blockedReports.ts` are the shared lane helpers (§ "Validate downstream identifier contracts",
+§ "Lane semantics").
 
 ## The constant child-restriction packet
 
@@ -161,28 +144,22 @@ there is no capture that can fail.
 
 This is the producer half of the two-boolean policy; the consumer (`decodeReadOnlyFloor`, the
 activation latch) and the binding record are in `pi/subagents.md` § "Native child execution — the
-two-boolean policy" and `docs/design/pi-subagents-child-execution-policy.md`. Lesson from shipping
-the halves separately: when only one half of a producer/consumer repair lands, state the residual
-in `contracts.md` and don't let passing tests imply end-to-end behavior.
+two-boolean policy" and `docs/design/pi-subagents-child-execution-policy.md`. Lesson: when only
+one half of a producer/consumer repair lands, state the residual in `contracts.md` — passing tests
+never imply end-to-end behavior.
 
 ## The fixed spawn contract carries an explicit acceptance disable
 
-Every wave spawn carries `acceptance: {level: "none", reason}` (`WAVE_ACCEPTANCE`, a fixed
-`WaveSpawnParams` field — no per-lane/per-flow opt-out). Without it, pi-subagents infers an
-acceptance contract and injects a competing completion instruction — observed steering a child into
-invalid `structured_output` attempts. In the installed engine (0.71.0) inference keys **only on a
-declared `acceptanceRole`** (since 0.70.1; perk's defs declare none, so they infer `attested`); under
-an `outputSchema` the inferred instruction asks for an `acceptanceReport` object inside
-`structured_output`; and since 0.63.0 inferred acceptance reports are kept out of reviewer/read-only
-child prompts (CHANGELOG). The disable stays correct and stays fixed — the engine facts' home is
-`docs/learned/pi/subagents.md` (its **Acceptance hazard** paragraph).
-Beside it rides `intercomBridge: {mode: "off"}` (`WAVE_INTERCOM_BRIDGE`, the same fixed-field
-shape): pi-subagents ≥ 0.68.0 discards parent-side `progress_update` requests yet still appends
-a bridge template telling children to send them — perk children never ask decisions, so the
-bridge is pure cost, and turning it off at spawn is what makes every wave **completion-only**
-(no `contact_supervisor` tool, no template; the def prose needs no tool-named prohibition).
-Delivery of both rides pi-subagents' workflow-defaults spread onto each lane child;
-`renderWaveScript` is untouched (scripts stay byte-identical).
+Every wave spawn carries three fixed `WaveSpawnParams` fields — no per-lane/per-flow opt-out.
+`acceptance: {level: "none", reason}` (`WAVE_ACCEPTANCE`): without it the engine infers an
+acceptance contract and injects a competing completion instruction — observed steering a child
+into invalid `structured_output` attempts (the inference rule and its version history:
+`docs/learned/pi/subagents.md`'s **Acceptance hazard** paragraph). `intercomBridge: {mode: "off"}`
+(`WAVE_INTERCOM_BRIDGE`): the engine discards parent-side progress updates yet still appends a
+bridge template telling children to send them — perk children never ask decisions, so the bridge
+is pure cost, and turning it off at spawn is what makes every wave **completion-only** (no
+`contact_supervisor` tool, no template, no tool-named prohibition in def prose). Both ride the
+engine's workflow-defaults spread onto each lane child; scripts stay byte-identical.
 
 **The launch token is the third fixed field.** `args: { launch: randomUUID() }` is minted at
 `startWaveScript`'s one spawn site (`transport.ts`): not a spec field, not caller-selectable, never
@@ -191,84 +168,58 @@ render parity holds. Its only job is to defeat the supplier's workflow reuse key
 `argsDigest` over a `runtime-replaced` run — `pi/subagents.md` § The v1 extension RPC seam), which
 once returned a `/reload`-replaced wave's reports as fresh. A source pin in
 `reportWaveRpc.test.ts` forbids the reuse vocabulary in the three wave modules and asserts the
-mint site. Glossary: `CONTEXT.md` **Launch token** / **Relaunch freshness**. Accepted residual:
-children of a wave abandoned at `/reload` run to completion unobserved. The hazard details live in
-`docs/learned/pi/subagents.md`; the doctor `subagent-compat` version `warn` is the drift tripwire
-(doctor never reads the engine's source).
+mint site. Glossary: `CONTEXT.md` **Launch token** / **Relaunch freshness**. `/reload` stops an
+in-process workflow, and a wave that completed before the reload is `no_wave` to the next
+activation (collection is per-activation; both observed live 2026-10-25 — § "Live-proof ledger
+(dated)"). The doctor `subagent-compat` version `warn` is the drift tripwire (doctor never reads
+the engine's source).
 
 ## The start/settle split
 
 `start*` returns a handle plus a `result` promise that **never rejects** — every arm normalizes —
-so a detached/uncollected run can never become an unhandled rejection. The blocking form is start
-+ await result: ONE operational core, applied at two levels (script: `transport.ts`'s
+so a detached/uncollected run can never become an unhandled rejection. The blocking form is
+start + await result: ONE operational core, applied at two levels (script: `transport.ts`'s
 `startWaveScript`; assignment: the module-private start behind the opaque `ReportWave.start` —
 the handle and result promise never leave `reportWave.ts`; callers hold a `ReportWaveRef` and
 `collect` drains it). Discipline details: the completion subscription is released exactly on settle;
 pre-spawn failures unsubscribe immediately and return the same failure/receipt values the blocking
 runner reported.
 
-Because the refactor moved the runner body verbatim, the pre-existing blocking-runner matrices pin
-the re-expression equivalence **for free** — refactor-parity proof by untouched test matrices.
 When a refactor moves a runner body verbatim, the untouched pre-existing matrix passing *is* the
-parity evidence; lean on it rather than re-arguing the invariants.
+parity evidence — lean on it rather than re-arguing the invariants.
 
-## The flow-migration checklist (prompt mechanics → module-owned tool)
+## Wiring a new wave flow — mechanism + installer, policy lockstep, dormant-first
 
-The `/pr-review` migration is the template. Moving model-authored `workflowScript` mechanics into
-a flow-scoped tool predictably touches:
+- **Mechanism + installer.** The mechanism (`extension/waves/<flow>Wave.ts`) owns the closed
+  report schema and the code-composed `<untrusted_…>` envelope and returns the raw
+  `ReportWaveResult`; the installer (`extension/pi/v1/…`) does tool-boundary decode → model
+  resolution (`[models.subagents]`) → the `ToolResult` projection. Clone the **full** options
+  shape (`timeoutMs?` included) even when no production caller passes it.
+- **Guidance stays judgment-only prose + the tool name**, negatively pinned against
+  `workflowScript`/`runs.all`/`outputSchema`; a template-var change rides
+  `prompts/_fixtures/live.yaml` + the `stageTools.test.ts` drive entry.
+- **Name the five-leg tool-policy lockstep at plan time:** the `registerPerkTool` policy
+  (`stages`, e.g. `WORKTREE_STAGES`); the regenerated `shared/fixtures/tool-matrix.json`
+  (`pi/tool-loadout.md`); the `stageTools.test.ts` drive-coverage guard, firing once the guidance
+  names the tool (`warm-door-commands.md`); the docs-site table
+  `docs/user-docs/reference/in-session/model-tools.md` (guard
+  `docs/site/src/in-session-reference.test.mjs`); the prose-graph projection
+  `docs/design/prose-prompt-map.md`'s pinned fragment total (count failures are ripple detectors).
+- **Dormant-first → atomic flip** when the wave's `outputSchema` and the def's completion form
+  must agree at every commit: land built/tested/unregistered, then flip registration, the def's
+  completion contract, the door prompts, the skills and the census in ONE change. At the dormant
+  landing write the **dormant-qualifier inventory** into the flip node (def description + its
+  prose-invariants pin, wave header, contracts §8.3, config comments, `[models.subagents]` doc
+  rows, deferred prose-map/CHANGELOG items) and pin one qualifier ("Ships dormant") so the flip
+  must invert a pin; de-dormanting = delete the DORMANT paragraphs, drop the tests'
+  `extraExtensions` workaround, flip census-absence pins to membership pins. A dormant def/module
+  is never described in present-tense "perk does X" prose.
+- Agent-def prose precision is behavioral (#1997); retiring prompt discipline into code surfaces
+  latent underspecification (`plan-review-flow.md`); keep interim prose a module will delete
+  minimal and invest in the conventions it inherits.
 
-- **The guidance template shrinks to judgment-only prose + the tool name.** The template var set
-  shrinks, so `prompts/_fixtures/live.yaml` and the `stageTools.test.ts` drive entry ride along.
-- **The schema constant relocates into the wave module.** Check the import graph first — for
-  `/pr-review` it was a two-file move.
-- **Test pins split three ways:** mechanics pins move to the wave suite (memory-adapter-driven);
-  judgment-prose pins stay on the guidance; and an interface-level harness e2e replaces the
-  deleted rendered-mechanics pins — plus *negative* pins that `workflowScript`/`runs.all`/
-  `outputSchema` no longer appear in the guidance.
-- **Name the tool-policy lockstep explicitly** — the tool's `registerPerkTool` policy (its
-  `stages`, e.g. the worktree-stage family `WORKTREE_STAGES`) plus the regenerated
-  `shared/fixtures/tool-matrix.json` (`docs/learned/pi/tool-loadout.md`). Two consecutive flow plans missed it; the `stageTools.test.ts`
-  drive-coverage guard forces it the moment the guidance names the tool, but catching it at plan
-  time avoids the late scramble commit (see also `warm-door-commands.md`).
-
-Adjacent lessons:
-
-- **Dormant landings cite the def+wave atomicity precedent up front** — the dormant-first →
-  atomic-flip shape below is settled; plans should invoke it rather than re-derive it (#1999).
-- **Agent-def prose precision is behavioral** — near-miss phrasing (an empty array vs explicit
-  challenge rows) is a correctness bug, not a style nit (#1997).
-- **Retiring prompt discipline into code surfaces latent underspecification** rather than merely
-  transcribing it — the annotation-push module had to *strengthen* semantics the browser-review
-  curl cheat sheet never confronted (see `plan-review-flow.md`).
-- **When a mechanics module is scheduled to delete interim guidance prose, keep that prose
-  minimal** and spend the design effort on the conventions the module will inherit. What survived
-  into `learnWave.ts` (today `extension/learning/analystWave.ts`) were the contract-ish
-  decisions — angle-slug keys, the compact per-lane projection, all-settled semantics; the
-  prose skeletons did not.
-
-### The dormant-first → atomic-flip migration is validated
-
-The posture this doc prescribed worked in practice: the tool pair + annotation push landed
-built/tested/**unregistered**, and the later flip changed registration, the agent-def completion
-contract, the door prompts, the skills, and the tool census in one change — exactly because the
-wave's `outputSchema` and the def's completion form must agree at every commit. De-dormanting was
-mechanical: delete the DORMANT paragraphs, drop the tests' `extraExtensions` registration
-workaround (the harness binds perk's extension, so live registration reaches it for free), and
-flip census-absence pins to census-membership pins. Worth repeating for future risky wirings.
-
-The third instance (the `perk.simplifier` lane, dormant in #2557, flipped live in #2561 the same day)
-added the practice that made the flip mechanical: at the dormant landing's objective reconcile,
-write an explicit **dormant-qualifier inventory** into the flip node — the def description and its
-prose-invariants pin, the wave header, contracts §8.3, the config comments, the `[models.subagents]`
-doc rows, plus the items the dormant plan deferred (the prose-map row, the CHANGELOG entry). Pin at
-least one qualifier in a test ("Ships dormant" in the def description) so the flip must invert a pin
-rather than silently leave the qualifier behind. Residual: the 40 000-char `proposal` cap fails a
-whole report (`lane-failed`, no retry) when a draft cannot be cut under it — no live evidence yet;
-cap tuning is an ordinary plan.
-
-The companion prose rule: **a dormant def/module must not be described in present-tense "perk
-does X" prose** — materialized substrate is not live behavior; qualify activation state until the
-wiring lands.
+Dated: the `/pr-review` migration (2026-08-08) was the template; the adversarial pair (#1999) and
+the simplifier (#2557 → #2561, same day) validated dormant-first — § "Live-proof ledger (dated)".
 
 ## Shape parity is not contract parity (schema forward-binding)
 
@@ -321,7 +272,8 @@ test double but rejected by the real engine. The lessons:
   render boundary (where the module composes them), so a bad key fails offline in the suite
   rather than live in the worker.
 - **But keep a live dogfood leg** — an upstream contract change can outrun the mirror; the guard
-  proves conformance to the contract *as mirrored*, not to the live engine.
+  proves conformance to the contract *as mirrored*, not to the live engine (the current live legs:
+  S3 and W6 of the 2026-10-25 certification — § "Live-proof ledger (dated)").
 - **Canonical-form enforcement pairs with normalized containment** — the decoder refuses any doc
   path where `posix.normalize(path) !== path`, so byte-exact membership/dedup/self-target rules
   operate on canonical identities (aliases otherwise coexist as two corpus members) (#1999).
@@ -367,46 +319,45 @@ boundary moves into code and the suite only pins the happy-path fan-out:
 - **the full report envelope consumed downstream** (e.g. `{ opportunities, omitted_count }`) —
   pin every field a consumer reads, not just the headline array.
 
-## Heterogeneous lanes + the custom-lane trust posture
+## Parent-verified lane inputs — the pinned stack and the door-primed custom lane
 
-(The upstream per-item `outputSchema` mechanics live in `pi/subagents.md` — this is the
-perk-side application.)
+When a lane's input must match what the human is looking at, pass parent-verified DATA into the
+task — never a flag that lets the child re-derive a moving answer, never model-relayed coordinates.
 
-- Keep **ONE workflow-level report schema for fixed lanes** and render a conditional per-lane
-  `outputSchema` override only for heterogeneous lanes — the override renders only when present,
-  so the fixed-item pins stay byte-identical.
-- *(Historical — the dynamic flow is retired; the posture survives as precedent for any future
-  custom lane.)* The dynamic flow's **custom selector lane was a deliberate untrusted-text
-  exception with a module-owned trust posture**: reserved-lane-key + kebab-slug validation; a
-  whitespace-collapsed ≤300-char scope; ONE custom lane rendered through a fixed
-  scope-definition-only template; the invariant that a non-null custom selection ⟺ the lane
-  launched; custom-aware static retry via the per-lane schema; and fallback only when neither
-  valid picks nor a valid custom arrived.
-- Such an exception warrants an **explicit adversarial containment test** — a hostile scope must
-  stay in exactly the one lane — with the expectation spelled literally in the test rather than
-  derived from the production helper.
-- The former named residual (the per-item `outputSchema` override proven offline but never
-  against live RPC) was mooted by the dynamic flow's wholesale retirement — no live carrier
-  remains.
-- The adversarial wave's `stack: true` option was a **discriminator, not a member array**
-  (`extension/waves/adversarialReviewWave.ts`): with `stack: true` only the subject/context-fetch
-  sentence of the lane task swapped (the combined diff of the stack topped by the PR; the child
-  fetched context via `perk pr review-context --pr <n> --stack`); single-PR lane tasks stayed
-  byte-identical when the option was absent, and stack-membership authority stayed with the
-  context worker — the wave never enumerated members.
-
-  > **Update (2026-09, the pinned static-patch stack review):** `stack` is now `PinnedStack`
-  > (`{topPr, checkout, baseSha, heads[{pr, headSha}] bottom→top}`) — the checkout snapshot the
-  > stack door digest-verified and bound into the session's `StackPinState`, never model-relayed
-  > coordinates. The lane task embeds `pinnedReviewContextCommand(stack)` =
-  > `perk pr review-context --pr <top> --stack --pin-base <sha> --pin-head <pr>=<sha>…`, so the
-  > wave DOES enumerate every member head, and membership authority moved from the context
-  > worker's live re-resolution to the checkout snapshot (the CLI re-validates the pins'
-  > topology, fetches nothing, and stamps `local-pinned`). The discriminator posture survives in
-  > one form: without `stack`, lane tasks are still byte-identical to the single-PR wave. The
-  > durable lesson is the *shape* of the change — when a lane's input must match what the human
-  > is looking at, pass parent-verified DATA (pins) into the task rather than a flag that lets
-  > the child re-derive a moving answer.
+- **The pinned stack.** `extension/waves/adversarialReviewWave.ts::PinnedStack` (`topPr`,
+  `checkout`, `baseSha`, `heads[{pr, headSha}]` bottom→top) is the checkout snapshot the stack door
+  verified and bound: `extension/pi/v1/codeReview/stack.ts::verifyStackPatch` hashes the derived
+  patch against the cold checkout envelope's `patch_sha256` (`mismatch`: the checkout was refreshed
+  — reopen), `pinnedStackOf` builds the pin, and the door sets it into the per-activation
+  `StackPinState` (`pinned` + `inFlight`, in `extension/pi/v1/codeReview/reviewWave.ts`).
+  `start_review_wave`'s `stack` is a **boolean**: `true` reads `StackPinState.pinned`, refuses when
+  no stack review is open or its `topPr`/`checkout` disagree with the call's `pr`/`worktree`, and
+  locks the pin as `inFlight` until `collect_review_wave` settles — a different-pin stack open is
+  refused meanwhile (`pinSupersedeRefusal`). Only the lane task's subject sentence changes: it
+  names the stack topped by the PR and embeds `pinnedReviewContextCommand(stack)` —
+  `perk pr review-context --pr <top> --stack --pin-base <sha> --pin-head <pr>=<sha> …`, the ONE
+  renderer lane tasks and the stack guidance's routing step share. The CLI's pinned arm
+  (`src/perk/cli/commands/pr/review_context_cmd.py::_pinned_stack_context`, `_validate_pins`)
+  treats the pins AS the membership — grammar, objects present locally, a linear stack over the
+  base (`pinned_object_missing` / `stack_topology_broken`) — and diffs exactly those commits with
+  **no git fetch** (`local-pinned`; member title/body stay live GitHub reads). Without `stack`,
+  lane tasks are byte-identical to the single-PR wave (`adversarialReviewWave.test.ts`). *Dated:*
+  before perk 3.6.0 (2026-09-21) `stack` was a bare discriminator and the child re-resolved
+  membership live — the moving-ref hazard the pins closed.
+- **The door-primed custom lane.** `extension/waves/draftReviewWave.ts` adds ONE extra assignment
+  (key = label = `custom`) iff the door-primed context
+  (`extension/authoring/review/draftContext.ts`) carries a human-supplied angle definition — the
+  tool pair has no custom parameter, so the model cannot invent a lane. The task flags the
+  definition as DATA from the human; the schema's `angle` enum includes `custom`; coverage and
+  `push_annotations` treat it like any lane under its own source
+  (`extension/waves/draftReviewWave.test.ts`: appears iff supplied, verbatim as flagged DATA). A
+  lane fed untrusted text warrants an explicit containment test — hostile text stays in exactly
+  that one lane, the expectation spelled literally in the test.
+- **The per-lane schema override has no live carrier.** `ReportAssignment.outputSchema` still
+  renders per item only when present (fixed-item pins stay byte-identical); its one carrier — the
+  dynamic flow's selector-proposed custom lane (reserved-key + kebab-slug validation, ≤300-char
+  collapsed scope, fixed template) — retired with that flow on 2026-09-10 (perk 3.3.0), never run
+  live. Keep the mechanic; don't add a carrier to justify it.
 
 ## Parent-prepared snapshots — the parent owns the facts, the lane returns judgment
 
@@ -439,9 +390,10 @@ validated), while a non-object/non-null report or a non-boolean `ok` is `malform
 pi-subagents 0.71.0 a **failed** lane can retain a schema-valid report as evidence, so coverage is
 `ok: true` AND an object report — `normalizeAssignments` classifies `ok: false` as `lane-failed`
 regardless of a retained report (pinned in `extension/waves/reportWave.test.ts`); "valid ⇒ covered"
-is false. `shared/contracts.md` §8.35's "covered angle ⟺ ok lane ⟺ schema-valid report" carries the
-same stale framing and needs a contracts amendment (routed, #2583). Flow code messaging skipped
-lanes must not conflate the reasons.
+is false. `shared/contracts.md` §8.35's lead sentence still reads "covered angle ⟺ ok lane ⟺
+schema-valid report"; its own later paragraph — `ok` is the sole per-lane status fact, and a failed
+row that retains a schema-valid report stays `lane-failed`, never covered — supersedes it. The lead
+amendment is still open (#2583). Flow code messaging skipped lanes must not conflate the reasons.
 
 The broader rule (from the session-corpus audit): **a child's harness status is not report
 validity is not wave coverage.** Validate the report artifact separately, retry a failed required
@@ -458,11 +410,13 @@ uncovered; the block's `fyi` diagnostics keep their bytes and order and never be
 findings; missing/null/blank plan text **blocks** plan-fidelity (not FYI). In the adversarial
 schema `blocked` is a **required** boolean (never defaulted — missing/mistyped is engine-invalid) with a
 schema conditional (blocked ⇒ empty findings + nonblank `fyi`), and it is not a verdict: it marks
-"could not finish", distinct from "no findings". Relatedly,
-conversation isolation, filesystem placement, and perk's read-only floor are three separate
-controls: the two plan-ref-dependent callers opt into caller-checkout placement (`worktree: false`)
-plus a strengthened child restriction; every other request keeps native defaults; never repair
-missing plan authority by copying ignored state into allocated worktrees.
+"could not finish", distinct from "no findings". Relatedly, conversation isolation, filesystem
+placement and perk's read-only floor are three separate controls: isolation is the engine's (every
+lane is a fresh child context); placement is the renderer's constant `worktree: false` — every
+report child of every flow runs in the caller checkout, there is no per-request opt-in or
+native-default arm (§ "The constant child-restriction packet"); the floor is the constant
+restriction packet. Never repair missing plan authority by copying ignored state into allocated
+worktrees.
 
 **A retry relaunches exactly the effective lanes WITHOUT a report.** A retained actionable report
 is therefore effective evidence a retry can never supersede — only a `blocked` report (reclassified
@@ -524,8 +478,9 @@ preserved while the wave still surfaces failure and `complete: false`. The invar
   synthesized. Reusable pattern: when a supplier splits one fact across two payload surfaces, add
   a separate identity-only channel consulted only at the exact fallback point. `ok` is the sole
   per-lane status fact (a failed row with partial markers and a schema-valid report stays
-  `lane-failed`). Proven offline against 1.1.0-shaped fixtures (W6); the live confirmation is
-  owed.
+  `lane-failed`). Proven live on 2026-10-25 (W6: at a 20 s engine deadline the roster-only
+  running lane reported `lane-failed` "lane still running at native partial settlement" beside the
+  retained sibling report — § "Live-proof ledger (dated)").
 - **Completeness is always false on this path** under both completeness policies, even if every
   report survived; the retained `key: null` `run-failed` entry (ordered first, naming the native
   reason) guarantees it; receipts stay output-free and `failed`.
@@ -547,9 +502,9 @@ retired the dynamic door) that state is **per-activation, never module-scoped**:
 creates one `ReviewPassHolder` per activation (`extension/codeReview/automated.ts`, created and
 threaded by `extension/pi/v1/codeReview/automated.ts`), the browser door's annotation state is
 likewise per-activation (`extension/pi/v1/codeReview/browser.ts`), and a fresh session gets fresh
-state by construction — no registration-time module reset exists or is needed. (Historical: the
-static and dynamic doors once shared one module-scoped state machine; the dynamic door is retired
-and module-level flow state is banned.)
+state by construction — no registration-time module reset exists or is needed. (Dated: the
+retired dynamic door once shared a module-scoped machine with `/pr-review`; module-level flow state
+is banned since.)
 
 Decode tool parameters first; immediately after successful decode transition to `pending`, before
 resolving the review target or spawning lanes. Bad input preserves the prior usable record, but
@@ -600,6 +555,14 @@ preflight failures. If preflight rejects every lane, launch returns `ok: false` 
 failures rather than manufacturing a synthetic wave failure. Pending state keeps the full requested
 order so collection retains the true coverage denominator even when some lanes never spawn.
 
+The one preflight is the Ponytail source boundary (`extension/waves/ponytail.ts`): a lane's
+`requiredSkill` names the exact project-package skill file (`PONYTAIL_CORE_SKILL` /
+`PONYTAIL_REVIEW_SKILL`); `preflightPonytailSkill` checks the package identity, its advertised
+`pi.skills` entry, the readable file and its frontmatter name. The requirement is never serialized
+into the script; a failure is a keyed, non-retryable `skill-unavailable` (Ponytail is never
+resolved from a same-named project/user skill). The memory/fake adapters never exercise it —
+production defaults to `preflightPonytailSkill`, tests inject `requiredSkillPreflight`.
+
 Ponytail is required and exclusively owns the standalone YAGNI/simplification pass. Do not dilute
 that ownership into another angle or count a missing Ponytail as covered. The honest TOCTOU posture
 is that repository or target instability yields incomplete coverage, never falsely accepted
@@ -613,70 +576,62 @@ because they apply only where Ponytail is one angle among siblings — a lane th
 (`perk.simplifier`) omits them. `tests/test_subagent_agents.py::test_ponytail_defs_source_bind_only_the_exact_skill_paths`
 encodes the split; a new Ponytail-bound def copies the recheck paragraph and decides its role.
 
-### Adjacent tripwires
+### Start/collect pairs — instance-owned pending, the collect grace, the wake rule
 
-A prompt-surface or tool-schema change also updates the prose-graph projection in
-`docs/design/prose-prompt-map.md` and its pinned fragment total. Those count failures are
-intentional ripple detectors, not unrelated test churn.
+`executionMode: "sequential"` is the concurrency guard (asserted by the registration tests).
+Pending execution is INSTANCE-OWNED: the `ReportWave` instance holds every launched, uncollected
+run behind opaque `ReportWaveRef`s with drain-once (delete-as-claim) collection. Flow state holds
+only the ref — which wave is *current* is flow policy, never module-global: the draft pair's
+`DraftReviewWaveState.pending` slot (the door-primed `context` beside it) in
+`extension/authoring/review/draftContext.ts`, created per-activation in `activatePerk` and
+threaded to the tool pair AND both browser doors; the review pair's registration-owned
+`ReviewWaveState.pending` slot beside the shared `StackPinState` in
+`extension/pi/v1/codeReview/reviewWave.ts`. Collect races the pending result against a bounded
+grace (`PERK_WAVE_COLLECT_GRACE_MS` — wave-owned, default 15 s) to absorb ordering skew between
+native workflow-completion delivery and aggregate resolution. An early unsettled collect retains
+pending: end the turn and await matching workflow completion. Grace expiry after matching
+completion was observed is an unresolved lifecycle contradiction: report and stop for owner
+diagnosis, never poll or relaunch. The engine deadline settles; the local timer is post-grace
+insurance; pending stays collectable.
 
-The registered-tool census has a fourth leg: the docs-site table
-`docs/user-docs/reference/in-session/model-tools.md`, guarded by
-`docs/site/src/in-session-reference.test.mjs` (set-equal to the tool catalog via
-`shared/fixtures/tool-matrix.json`, and a live harness registration) — keep that guard in mind when registering tools (#1997).
+Parents retain workflow identity and yield with Pi open: a routine successful child completion
+does not wake them; failed/paused/stopped children and the workflow completion do, and only the
+matching WORKFLOW completion authorizes collection. They reconcile exactly once from typed
+reports; duplicate/late notices never re-collect. The flow-side slot clear is identity-guarded: a
+supersede landing during an in-flight collect's await never erases the NEW pending wave. After a
+`/reload` the old wave is `no_wave` (collection is per-activation). Pins: drain/race in
+`extension/waves/reportWave.test.ts`, the flow slot in
+`extension/pi/v1/draftReviewWaveTools.test.ts`, two-session isolation in
+`extension/pi/v1/waveIsolation.test.ts`.
 
-For start/collect wave pairs, `executionMode: "sequential"` remains the concurrency guard — and
-pending execution is INSTANCE-OWNED: the `ReportWave` instance holds every launched,
-uncollected run behind opaque `ReportWaveRef`s with drain-once (delete-as-claim) collection.
-Flow state holds only the opaque ref — which wave is *current* is flow policy: the draft pair's
-`DraftReviewWaveState.pending` slot (with the door-primed `context` beside it) lives in
-`extension/authoring/review/draftContext.ts`, created per-activation in `activatePerk` (`extension/pi/activation.ts`) and threaded
-to the tool pair AND both browser doors, never module-global. Collect races the pending result
-against a bounded, environment-overridable grace (`PERK_WAVE_COLLECT_GRACE_MS` — wave-owned) to
-absorb ordering skew between native workflow-completion delivery and aggregate resolution.
-The default remains 15 seconds. An early unsettled collect retains pending: end the turn and
-await matching workflow completion. Grace expiry after matching completion was observed is an
-unresolved lifecycle contradiction: report and stop for owner diagnosis, never poll or relaunch.
-The engine deadline settles; the local timer is post-grace insurance; pending remains
-collectable. Parents retain workflow
-identity, yield with Pi open (a routine successful child completion does not wake them since
-pi-subagents 0.68.0; failed/paused/stopped children and the workflow completion do — only the
-matching WORKFLOW completion authorizes collection), and reconcile exactly once from typed
-reports. Duplicate/late notices must not re-collect. The flow-side slot clear is identity-guarded: a supersede landing during an in-flight
-collect's await never erases the NEW pending wave (the drain/race pins live in
-`extension/waves/reportWave.test.ts`, the flow-slot pins in
-`extension/pi/v1/draftReviewWaveTools.test.ts`; two-session isolation in
-`extension/pi/v1/waveIsolation.test.ts`).
+### Delivery after collection — reconciliation, held pushes, the perk:wave marker
 
 Both review report schemas are completion-only: `{angle, summary, findings[], fyi[]}` (the
 adversarial schema adds the required `blocked`), no delivery-status field — the wave spawns with
-the bridge off, so nothing reaches the parent before the wave finishes and no per-lane delivery
-disclosure exists (the former `streamed: boolean` + its "no provisional batches" disclosures were
-retired with the streaming protocol; pi-subagents 0.68.0 discards progress updates). The collect
-result is `headline + fenced aggregate + the DATA sentence`. Coverage/failure/attempt semantics
-and receipt-only details are unchanged; `fyi` is in-session color, never synthetic findings or
-posted comments.
+the bridge off, so nothing reaches the parent before the wave finishes (*dated:* the `streamed`
+flag and its "no provisional batches" disclosures left with the streaming protocol in perk 3.4.0).
+The collect result is `headline + fenced aggregate + the DATA sentence`. Coverage/failure/attempt
+semantics and receipt-only details are unchanged; `fyi` is in-session color, never synthetic
+findings or posted comments.
 
 Browser reconciliation happens once, after collection: parent-reconciled arrays must be
 disjoint — merge supported concerns and contributor tags, preserve maximum severity with its
 corresponding confidence, and assign each anchor to the first contributing covered lane; push
 each covered lane once with `replace: true`, empty arrays included. With nothing pushed before
-collection there is no uncovered-source clear and no cross-source promotion (that machinery was
-deleted from `annotations.ts`). A held final push before browser readiness is flushed by the
-readiness continuation; after readiness the tool retries in-call over `HELD_RETRY_DELAYS_MS`
-and, exhausted, presents the findings in-session — no later wake is promised. The early-decision
-window this opens (the human decides before the wave lands) is closed by policy, not a gate:
-the tool pairs write a code-owned `perk:wave` status marker (running at launch → cleared,
-"failed" or "incomplete" at collect; the `wave` slug is refused to the model) and the door-open
-notice says to decide after the findings arrive; an early decision is authoritative and forgoes
-them. The marker vocabulary has a fourth, *detached* arm (`reviewDetachedStatus` in
-`extension/pi/v1/providers/waveStatus.ts`: replaced / interrupted / session-ended), pushed only
-by the browser-operation owner (`plan-review-flow.md` § The browser-operation owner), never by the
-tool pairs. The marker persists after the workflow notice until collection — hold collection one
-turn to observe it in a live leg.
+collection, `annotations.ts` has no uncovered-source clear and no cross-source promotion. A held
+final push before browser readiness is flushed by the readiness continuation; after readiness the
+tool retries in-call over `HELD_RETRY_DELAYS_MS` and, exhausted, presents the findings in-session
+— no later wake is promised. The early-decision window this opens (the human decides before the
+wave lands) is closed by policy, not a gate: the tool pairs write a code-owned `perk:wave` status
+marker (running at launch → cleared, "failed" or "incomplete" at collect; the `wave` slug is
+refused to the model) and the door-open notice says to decide after the findings arrive; an early
+decision is authoritative and forgoes them. The marker's fourth, *detached* arm
+(`reviewDetachedStatus` in `extension/pi/v1/providers/waveStatus.ts`: replaced / interrupted /
+session-ended) is pushed only by the browser-operation owner (`plan-review-flow.md` § "The
+browser-operation owner"), never by the tool pairs. The marker persists after the workflow notice
+until collection — observed live on both doors on 2026-10-25 (§ "Live-proof ledger (dated)").
 Plan-mode source ownership also needs an `author` carrier for visible lane attribution (the
-installed plan UI displays author rather than source). Evidence and the failed original draft
-leg of the streaming era: `docs/design/archive/pi-subagents-native-streaming-dogfood.md`; the
-retirement record: `docs/design/archive/pi-subagents-0.68.0-reverify.md`.
+installed plan UI displays author rather than source).
 
 ## The context-less RPC hold
 
@@ -689,7 +644,9 @@ timeout surfaces the held error, with a "(held for a later reply…)" suffix; `p
 first-reply. The second responder it absorbs is Pi's pre-trust extension leak
 (`pi/subagents.md` § "The v1 extension RPC seam"). Accepted residuals: a genuine single-responder
 `no_active_session` surfaces only at the ~30 s reply timeout; two loaded versions advertising
-different async-complete channels time out loudly.
+different async-complete channels time out loudly. A duplicate-load INFO leg on 0.81.0 observed
+zero `no_active_session` replies (W3 — § "Live-proof ledger (dated)"); the full duplicate-load
+protocol stays in `docs/design/archive/pi-pre-trust-extension-leak.md`.
 
 ## Deliberate non-behaviors need regression pins
 
@@ -720,24 +677,13 @@ Instances:
   tiny `timeoutMs` drives timeout→stop), sinks spawn params (`spawns`) and stop requests
   (`stops`), and computes script-derived aggregates via the `executeScript` plan hook — the
   offline e2e pattern for any RPC-launched wave (bind via the harness's `extraExtensions` or
-  `attach` on a bare fake bus; ten door/pi suites ride it). `waveScriptItems` is the shared
+  `attach` on a bare fake bus; the door/pi suites ride it). `waveScriptItems` is the shared
   `runs.all(`-slice parser (a failed parse throws, never a silent empty list).
-- **The render-then-execute pattern** for dynamic in-script logic (the worked instance was the
-  since-retired `/pr-review-dynamic` flow's `prReviewDynamicWave.test.ts` /
-  `prReviewDynamic.test.ts` suites): the module renders deterministic JS
-  (all dynamic data `JSON.stringify`-embedded); unit tests execute the rendered script via the
-  `AsyncFunction` constructor over a scripted fake `runs` global; and the e2e responder
-  *evaluates* the received script and writes its actual return into `status.json` — a full
-  offline render→execute→aggregate round-trip. Reach for this over string-pins whenever a
-  rendered script carries branching logic.
-- **Dormant (unregistered) tools get end-to-end coverage via the harness's `extraExtensions`
-  hook** — real-session runs with the dormant tools registered, without wiring them live.
+- **Dormant (unregistered) tools** get real-session e2e coverage via the harness `extraExtensions`.
 - **Pin the glue, not just the seams.** Config parse pinned + spawn param pinned still misses the
   tool-execute threading between them — have the fake responder sink spawn params so an e2e
   asserts the configured model/tasks reach the real spawn. "Both sides tested" ≠ "the boundary
   tested."
-- **Reviewing dormant code *as if live* is validated** — the multi-angle review wave caught the
-  missing network-failure test on a dormant module.
 - **Fake-responder waves never exercise the agent def.** A prose agent-def paired with a code
   schema needs its own lockstep test — the fake responder writes already-valid reports straight
   into the run result, so a def regression (e.g. back to a retired fenced-JSON completion form)
@@ -767,18 +713,16 @@ Instances:
   engine deadline, settlement grace and collect grace (`PERK_WAVE_COLLECT_GRACE_MS`) distinct;
   the inside-grace regression delivers at `deadline + grace − 1`.
 - **Stop/proof and reload knobs.** The shared fake takes `stopReply`, `terminalProof`,
-  `statusReply: "error"`, records `statuses`, and rebinds via `extension(pi)` on reload; constants
-  `FAKE_DEFAULT_TERMINAL_PROOF` and `noLiveRunController`. The memory adapter takes `stopOutcome`,
+  `statusReply: "error"`, records `statuses`, and rebinds via `extension(pi)` on reload (constants
+  `FAKE_DEFAULT_TERMINAL_PROOF`, `noLiveRunController`); the memory adapter takes `stopOutcome`,
   `terminalProof`, `proofs` (`MEMORY_DEFAULT_TERMINAL_PROOF`) and answers a never-spawned handle
   like the engine. `awaitedChildEvent` (in `reportWaveRpc.test.ts`) is sent from inside
   `executeSettlement`; `plantFakeSubagentsResponder` (harness) plants `<cwd>/.pi/extensions/*.ts`
   importing the shared fake by absolute path, so headless worker e2e drives run RPC waves offline;
-  `classifyThenFinalize` drives the `/address` pair.
-- **The reload-harness idiom.** Enable `t.mock.timers` for `setTimeout` only after
-  `loadPerkSession`; drive via a bounded tick + `setImmediate` loop; drain the orphan transport
-  with `timeoutMs + WAVE_SETTLEMENT_GRACE_MS`. The old activation's `pi.events` throws the
-  stale-ctx error, which the never-throwing adapter turns into `acknowledged: false` /
-  `unavailable`.
+  `classifyThenFinalize` drives the `/address` pair. The reload idiom: enable `t.mock.timers` for
+  `setTimeout` only after `loadPerkSession`, drive a bounded tick + `setImmediate` loop, drain the
+  orphan transport with `timeoutMs + WAVE_SETTLEMENT_GRACE_MS`; the old activation's `pi.events`
+  stale-ctx throw becomes `acknowledged: false` / `unavailable` in the never-throwing adapter.
 - **Supplier reason text is DATA.** Assert the class; compose any verbatim expectation from the
   fake's exported constant or ONE test-local constant feeding both input and expectation; fake doc
   comments call their strings samples.
@@ -796,54 +740,61 @@ Instances:
   the constant packet, hostile-fields), `extension/waves/reportWaveRpc.test.ts` (the fake-RPC
   round-trip incl. the transport-tier withholding), and `extension/pi/v1/waveIsolation.test.ts`
   (composition at the registered-tool boundary). `lane.<ordinal>` conformance to `RUN_KEY_PATTERN`
-  is pinned **offline only** — the live-dogfood caveat in "Validate downstream identifier
-  contracts" still applies on every engine bump.
+  is pinned offline by the audit/harvest/dream wave suites (`laneIdentity.test.ts` pins the
+  routing-token fence, not the key pattern); the live legs are the ledger's, re-owed on every engine
+  bump.
+
+## Live-proof ledger (dated)
+
+- 2026-07-10 — the PR-review doors' live dogfood (`docs/design/archive/pr-review-doors-dogfood.md`;
+  its streaming-mechanics claims are superseded).
+- 2026-08-08 (2.3.0) — every flow onto code-owned waves over pi-subagents v1 (`/pr-review` the
+  migration template).
+- 2026-08-10 — the three browser doors live-confirmed (dedupe, `replace` reshape, typed collect
+  aggregates) under the historical held-turn streaming protocol only
+  (`docs/design/archive/streaming-doors-dogfood.md`).
+- 2026-08-20 (3.1.0) — the draft doors + `start_draft_review_wave`/`collect_draft_review_wave`.
+- 2026-09-05 — the 0.65.1 host-peer launch failure
+  (`docs/design/archive/pi-subagents-native-baseline-dogfood.md`) resolved on the repo-local
+  five-package dev host at `52c4fde5`
+  (`docs/design/archive/pi-subagents-native-streaming-dogfood.md`); no consumer/global repair
+  claimed.
+- 2026-09-10 (3.3.0) — `/pr-review-dynamic` retired wholesale, never run against real pi-subagents;
+  its render-then-execute test idiom left with it.
+- 2026-09-15/16 (3.4.0) — completion-only waves (bridge off at spawn, the streaming protocol and
+  `streamed` disclosures removed, the `perk:wave` marker);
+  `docs/design/archive/pi-subagents-0.68.0-reverify.md`: doctor half PASS, browser half not run.
+- 2026-09-21 (3.6.0) — stack reviews, reviewer diffs and routing on pinned commits (`PinnedStack`).
+- 2026-09-27 (#2557 → #2561) — the simplifier lane dormant → live the same day (the
+  dormant-qualifier inventory practice).
+- 2026-10-23/24 — Pi 1.1.0 + pi-subagents 0.76.1 certification HELD, W4/W6/W7a FAIL
+  (`docs/design/archive/pi-1.1.0-certification.md`); W6 repaired offline
+  (`docs/design/archive/pi-subagents-0.76.1-lifecycle.md`).
+- 2026-10-25 — Pi 1.4.0 + pi-subagents 0.81.0 certification, verdict PARTIAL
+  (`docs/design/archive/pi-1.4.0-certification.md`): live PASS for the review- and draft-wave
+  launches (I7b-PR, I7b-plan), both browser doors with the marker observed and N/N annotations
+  (X5a, X5b), scout (S3), the deadline partial with the roster-correlated unfinished lane (W6),
+  reload → per-activation `no_wave` (W4), cancel + reload-then-stop (W7a); duplicate load with
+  zero `no_active_session` (W3, INFO). What no run has observed: § "Watch items / residuals".
 
 ## Watch items / residuals
 
 - The module-rendered script's `runs.all(` … `);\nreturn` shape is parsed by ONE shared helper
-  (`testing/fakeSubagents.ts`'s `waveScriptItems`, adopted at the thirteen former slice sites) —
-  a renderer output-shape change now fails loudly in one place (the retired dynamic wave's
-  `const TASKS` slice and rendered-script execution were bespoke single-consumer idioms and left
-  with the flow).
-- The review-wave pair (and the draft pair) HAVE now run against real pi-subagents — the
-  2026-08-10 live dogfood of the three browser doors
-  (`docs/design/archive/streaming-doors-dogfood.md`: dedupe, `replace` reshape, typed collect
-  aggregates, all live-confirmed **for the historical held-turn streaming protocol only**). The
-  streaming-acceptance residual that followed was **discharged by retirement**: pi-subagents
-  0.68.0 discards progress updates, so the protocol was removed and the waves are completion-only.
-  The completion-only mechanics (the spawn's `intercomBridge` disable, the `perk:wave` marker at
-  launch/collect, the final push after collect) are pinned **offline only** (memory adapter +
-  fake HTTP); `docs/design/archive/pi-subagents-0.68.0-reverify.md` records the doctor half of
-  the 0.68.0 leg as PASS and the browser-door half as **not exercised** — the first live 0.68.0
-  browser wave (marker visible at launch, cleared at collect, N/N final annotations) is an
-  **outstanding residual**, owed from a read-write session on a 0.68.0 host. The original 0.65.1 host-peer launch
-  failure (`docs/design/archive/pi-subagents-native-baseline-dogfood.md`) is resolved for the
-  repo-local five-package 0.85.1 dev host: aliases and a real background smoke passed at
-  `52c4fde5` on 2026-09-05 (`docs/design/archive/pi-subagents-native-streaming-dogfood.md`); no
-  consumer/global repair is claimed. The dynamic-flow half of the residual was
-  discharged by retirement — `/pr-review-dynamic` was removed wholesale (see the CHANGELOG)
-  without ever running against real pi-subagents. The stale-session gotcha stands: a landing
-  session predates its own extension code (see `pi/extension-api.md` on dogfooding just-changed
-  extension code).
-- The 60 s settlement grace is verified only under mocked clocks; blocking flows may occupy ~31 min
-  per attempt (`/pr-review` ~62 min worst case with its retry); no live post-change deadline-partial
-  run has been observed; the live duplicate-load dogfood (user-scope `npm:pi-subagents` beside the
-  project entry) was not executed — its protocol is in
-  `docs/design/archive/pi-pre-trust-extension-leak.md`.
+  (`testing/fakeSubagents.ts`'s `waveScriptItems`) — a renderer output-shape change fails loudly in
+  one place.
 - **Wave accounting.** The supplier's `results[].usage` and root totals are not owned-run
   attribution (no reuse flag; the `cost` RPC includes the parent), so perk reads none of them and
   wave cost stays `unavailable` (§8.35; the raw-text pin enforces it).
-- **Next-bump hazard.** pi-subagents 0.82.0 defaults `autoResume: true`, resuming
-  reload/exit-interrupted workflows on reopen — this breaks per-activation collection unless perk
-  pins it `false` (`pi/subagents.md` § History; routed code follow-up).
-- `pr`/`worktree`/`bundle_dir` stay model-relayed (an accepted trust posture;
-  `decodeStartReviewWaveParams` is the single seam to adjust if door-recorded context is
-  adopted).
+- **Next-bump hazard.** pi-subagents 0.82.0's `autoResume: true` default conflicts with
+  per-activation collection — owned by `pi/subagents.md` § "History (dated)" (routed code
+  follow-up).
+- **Trust posture.** `pr`/`worktree` stay model-relayed (`decodeStartReviewWaveParams` in
+  `extension/pi/v1/codeReview/reviewWave.ts` is the single seam to adjust if door-recorded context
+  is adopted) while `stack` is bound to `StackPinState`; `bundle_dir` is `run_learn_wave`'s
+  analogous model-relayed param.
 - pi-subagents is PINNED for consumers (`SUBAGENTS_PACKAGE` in
   `src/perk/convergence/init/settings.py` — read the constant for the current pin; this adapter
-  sends the inline script as the RPC spawn key `script`, which pi-subagents accepts since
-  0.74.0); the guidance is source-re-verified at
+  sends the inline script as the RPC spawn key `script`); the guidance is source-re-verified at
   the version recorded by `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`
   (`src/perk/convergence/doctor/checks.py`), and the doctor `subagent-compat` version `warn` is the
   drift tripwire (it never reads the engine's source) — re-verify the adapter on any bump.
@@ -854,6 +805,13 @@ Instances:
   debt — route them explicitly (a follow-up node, or fold into the next node touching the
   module; PR #1910 → plan #1912 is the worked instance). A clean plan-fidelity lane does not
   mean a clean PR (#2000, #1991, #1999).
+- The 60 s `WAVE_SETTLEMENT_GRACE_MS` is still verified only under mocked clocks (W6 settled on the
+  engine deadline before the grace armed).
+- Blocking flows may occupy ~31 min per attempt (`/pr-review` ~62 min worst case with its retry).
+- A genuine single-responder `no_active_session` still surfaces only at the ~30 s reply timeout.
+- The simplifier's 40,000-char `proposal` cap fails a whole report (`lane-failed`, no retry) when a
+  draft cannot be cut under it — no live evidence; cap tuning is an ordinary plan.
+- §8.35's lead biconditional (#2583) is contracts drift outside this doc (§ "Lane semantics").
 
 ## Cross-references
 
@@ -865,6 +823,10 @@ Instances:
   `extension/learning/analystWave.ts`
 - `docs/learned/workflow/plan-review-flow.md` — the annotation-push module (the sibling
   prompt-discipline-into-code migration)
+- `docs/learned/workflow/learn-harvest-dream-core.md` — the dream preflight / reducer-prerequisite
+  owner
+- `docs/design/archive/pi-1.4.0-certification.md`, `docs/design/archive/pi-1.1.0-certification.md`
+  — the live ledger's latest rows
 - `extension/waves/reportWave.ts` (the logical tier + the opaque `ReportWave` lifecycle) +
   `waves/transport.ts` (the confined transport tier) + `rpcAdapter.ts` — the operational core
   and its live adapter; `extension/testing/memoryAdapter.ts` — the first-class test double
@@ -877,10 +839,13 @@ Instances:
   `dreamAnalysis.ts` — the flow entrypoints
 - `extension/waves/laneIdentity.ts` — `orchestrationKey` + the routing-token fence;
   `extension/waves/blockedReports.ts` — `reclassifyBlockedReports`
+- `extension/waves/ponytail.ts` — the Ponytail source preflight
 - `extension/waves/reportWave.test.ts`, `reportWaveRpc.test.ts`, `extension/pi/v1/waveIsolation.test.ts`
   — the surviving offline coverage
-- `extension/pi/v1/codeReview/reviewWave.ts` — the start/collect tool pair (live — the review
-  doors drive it)
+- `extension/pi/v1/codeReview/reviewWave.ts` — the start/collect tool pair (+ `StackPinState`;
+  live — the review doors drive it); `extension/pi/v1/codeReview/stack.ts` — the stack door's
+  digest check + pin builder
+- `src/perk/cli/commands/pr/review_context_cmd.py` — the pinned `review-context` arm
 - `extension/pi/v1/simplify.ts` — the simplify doors' installer (two warm doors, no tool)
 - `docs/design/pi-subagents-child-execution-policy.md` — the binding record for the two-boolean
   child policy (the constant packet is its producer half)
