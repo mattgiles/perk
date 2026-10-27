@@ -7,7 +7,11 @@
 //     import is allowed only from a dev file (`*.test.ts`, `testing/`) to `V1_DEV_ALLOWLIST`, or
 //     from a production file to `V1_PRODUCTION_ALLOWLIST` (empty — each addition is a reviewed
 //     edit, and an entry nothing imports is reported stale). Every v1 file, tests included, is
-//     checked for a relative import into the v2 workspace.
+//     checked for an import into the v2 workspace — relative, or by the workspace's npm package
+//     name (the install links `node_modules/perk-v2` to the workspace, and its manifest has no
+//     `exports` restriction, so `perk-v2/<file>` resolves to any v2 file). A v2 → v1 import by
+//     package name needs no rule here: v1's package is not linked, and any bare name v2 does not
+//     declare is `checkDependencyConfinement`'s `undeclared`.
 //   Dependency confinement (`checkDependencyConfinement`): every bare specifier in v2 names a
 //     package the workspace manifest declares; in production files bare specifiers live only in
 //     the Durable homes (the host entry and `durable/`); files under `kernel/` (tests included)
@@ -41,6 +45,9 @@ export const V1_DEV_ALLOWLIST: readonly string[] = ["testing/importGraph.ts"];
 /** The v1 files a v2 production file may import — empty; each addition is a reviewed edit here. */
 export const V1_PRODUCTION_ALLOWLIST: readonly string[] = [];
 
+/** The workspace's npm package name (its manifest `name`; the live guard pins the two equal). */
+export const V2_PACKAGE_NAME = "perk-v2";
+
 type Read = (file: string) => string;
 
 /** A v2 production file: under the workspace, not a test, not under `pi/v2/testing/`. */
@@ -69,9 +76,10 @@ function inDurableHome(file: string): boolean {
 }
 
 /**
- * v1 ↔ v2 relative imports. `v2ToV1`: a v2 import resolving outside the workspace that its file's
- * allowlist does not name. `v1ToV2`: any v1 import resolving into the workspace. `staleAllowlist`:
- * a production-allowlist entry that is not a v1 file or that no v2 production file imports.
+ * v1 ↔ v2 imports. `v2ToV1`: a v2 relative import resolving outside the workspace that its file's
+ * allowlist does not name. `v1ToV2`: any v1 relative import resolving into the workspace, and any
+ * v1 import of the workspace's package name or one of its subpaths. `staleAllowlist`: a
+ * production-allowlist entry that is not a v1 file or that no v2 production file imports.
  */
 export function checkCrossImports(
   v2Files: readonly string[],
@@ -102,9 +110,12 @@ export function checkCrossImports(
   }
   for (const file of v1Files) {
     for (const spec of extractSpecifiers(read(file))) {
-      if (!isRelative(spec)) continue;
-      const target = resolveRelative(file, spec);
-      if (target.startsWith(V2_PREFIX)) v1ToV2.push(`${file}: "${spec}" → ${target}`);
+      if (isRelative(spec)) {
+        const target = resolveRelative(file, spec);
+        if (target.startsWith(V2_PREFIX)) v1ToV2.push(`${file}: "${spec}" → ${target}`);
+      } else if (packageName(spec) === V2_PACKAGE_NAME) {
+        v1ToV2.push(`${file}: "${spec}" → the ${V2_PACKAGE_NAME} workspace package`);
+      }
     }
   }
   const v1Set = new Set(v1Files);

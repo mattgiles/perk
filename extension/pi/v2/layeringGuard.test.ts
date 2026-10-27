@@ -16,17 +16,23 @@ import {
   checkDependencyConfinement,
   checkLayering,
   packageName,
+  V2_PACKAGE_NAME,
 } from "./testing/layering.ts";
 
 const GUARD_FILE = "pi/v2/layeringGuard.test.ts";
 
-/** The workspace manifest's declared dependency names. */
-function declaredPackages(): Set<string> {
+/** The workspace manifest, parsed and narrowed to an object. */
+function v2Manifest(): object {
   const manifest: unknown = JSON.parse(
     readFileSync(resolve(import.meta.dirname, "package.json"), "utf8"),
   );
   assert.ok(typeof manifest === "object" && manifest !== null, "the manifest is an object");
-  const dependencies: unknown = Reflect.get(manifest, "dependencies");
+  return manifest;
+}
+
+/** The workspace manifest's declared dependency names. */
+function declaredPackages(): Set<string> {
+  const dependencies: unknown = Reflect.get(v2Manifest(), "dependencies");
   assert.ok(
     typeof dependencies === "object" && dependencies !== null,
     "the manifest declares dependencies",
@@ -71,6 +77,8 @@ test("both corpora are live: v2 holds the host and this guard; v1 holds index.ts
 });
 
 test("v1 and v2 never import each other", () => {
+  // The package-name arm guards the name the install actually links (`node_modules/perk-v2`).
+  assert.equal(Reflect.get(v2Manifest(), "name"), V2_PACKAGE_NAME, "the guarded package name");
   assert.deepEqual(checkCrossImports(v2Files(), v1Files(), readExtensionFile), {
     v2ToV1: [],
     v1ToV2: [],
@@ -132,6 +140,19 @@ test("control: cross-generation imports bite in both directions, tests included"
     'substrate/x.test.ts: "../pi/v2/host.ts" → pi/v2/host.ts',
   ]);
   assert.deepEqual(result.staleAllowlist, []);
+});
+
+test("control: a v1 import of the workspace's package name or a subpath bites; lookalikes do not", () => {
+  const v1 = corpus({
+    "substrate/y.test.ts": `import { openHost } from "${V2_PACKAGE_NAME}/host.ts";\n`,
+    "testing/z.ts": `import "${V2_PACKAGE_NAME}";\n`,
+    "substrate/w.ts": `import { x } from "${V2_PACKAGE_NAME}-extra/x.ts";\nimport { y } from "@scope/${V2_PACKAGE_NAME}";\n`,
+  });
+  const result = checkCrossImports([], v1.files, v1.read);
+  assert.deepEqual(result.v1ToV2, [
+    `substrate/y.test.ts: "${V2_PACKAGE_NAME}/host.ts" → the ${V2_PACKAGE_NAME} workspace package`,
+    `testing/z.ts: "${V2_PACKAGE_NAME}" → the ${V2_PACKAGE_NAME} workspace package`,
+  ]);
 });
 
 test("control: the production allowlist admits only used, existing v1 files", () => {

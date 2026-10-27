@@ -106,6 +106,7 @@ to this change.
 | `import "../../substrate/config.ts"` in `pi/v2/host.ts` | `layeringGuard` — `v2ToV1` |
 | `import "./pi/v2/host.ts"` in `extension/index.ts` | `layeringGuard` — `v1ToV2`; `importDirectionGuard` — unresolved specifier |
 | `import "../pi/v2/host.ts"` in `extension/substrate/config.test.ts` | `layeringGuard` — `v1ToV2` |
+| `import "perk-v2/host.ts"` in `extension/substrate/config.test.ts` (the npm workspace link `node_modules/perk-v2` resolves it to `extension/pi/v2/host.ts`) | `layeringGuard` — `v1ToV2` (added after review: the first cut checked only relative specifiers, and every guard passed this plant) |
 | `pi/v2/kernel/probe.ts` importing `../host.ts` | `layeringGuard` — layer `violations` |
 | `pi/v2/kernel/probe.ts` importing `@earendil-works/pi-durable` | `layeringGuard` — `leaked` |
 
