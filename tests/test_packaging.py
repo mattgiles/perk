@@ -402,6 +402,9 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
     # Dev-only surface must be excluded.
     assert not any(p.startswith("extension/testing/") for p in paths), paths
     assert not any(p.endswith(".test.ts") for p in paths), paths
+    # The private pi-durable v2 workspace never ships (the negation has something to exclude).
+    assert (REPO_ROOT / "extension/pi/v2/host.ts").is_file()
+    assert not any(p.startswith("extension/pi/v2/") for p in paths), paths
     # The docs tree (the Starlight site workspace and canonical docs alike) never ships.
     assert not any(p.startswith("docs/") for p in paths), paths
 
@@ -419,6 +422,8 @@ def test_package_engines_mirror_the_supported_node_lines():
     assert _package_json()["engines"]["node"] == expected
     site = json.loads((REPO_ROOT / "docs/site/package.json").read_text(encoding="utf-8"))
     assert site["engines"]["node"] == expected
+    v2 = json.loads((REPO_ROOT / "extension/pi/v2/package.json").read_text(encoding="utf-8"))
+    assert v2["engines"]["node"] == expected
 
 
 def test_docs_site_publish_isolation():
@@ -447,7 +452,7 @@ def test_docs_site_publish_isolation():
     }
 
     root = _package_json()
-    assert root["workspaces"] == ["docs/site", "tools/prose-review"]
+    assert root["workspaces"] == ["docs/site", "tools/prose-review", "extension/pi/v2"]
     assert not any(entry.startswith("docs") for entry in root["files"]), root["files"]
 
     # The prose-review workspace shares the same dev-only isolation posture: private, zero
@@ -471,6 +476,26 @@ def test_docs_site_publish_isolation():
         "vite": "8.2.1",
     }
     assert not any(entry.startswith("tools") for entry in root["files"]), root["files"]
+
+
+def test_v2_workspace_publish_isolation():
+    # The pi-durable v2 workspace is private and never ships; its runtime dependencies are the
+    # exact Durable pin set of docs/design/pi-durable-v2-foundations.md §2 — moving one is that
+    # record's own re-verification trigger (§15), so the literal below is the structural form of
+    # its reconciliation rule.
+    v2 = json.loads((REPO_ROOT / "extension/pi/v2/package.json").read_text(encoding="utf-8"))
+    assert v2["private"] is True
+    assert "devDependencies" not in v2, v2.get("devDependencies")
+    assert v2["dependencies"] == {
+        "@earendil-works/chord": "1.4.0",
+        "@earendil-works/pi-ai": "1.4.0",
+        "@earendil-works/pi-durable": "1.4.0",
+    }
+    assert v2["scripts"]["typecheck"] == "tsc --noEmit"
+
+    root = _package_json()
+    assert "!extension/pi/v2/" in root["files"], root["files"]
+    assert root["scripts"]["v2:typecheck"] == "npm run typecheck --workspace extension/pi/v2"
 
 
 @pytest.mark.slow

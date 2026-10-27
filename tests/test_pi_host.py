@@ -63,18 +63,53 @@ def _family_keys(deps: dict[str, str]) -> set[str]:
     return {dep for dep in deps if dep.startswith("@earendil-works/")}
 
 
-def test_pinned_install_family_is_closed_against_the_characterized_lockfile() -> None:
-    # The committed lockfile is the characterized graph: its top-level `@earendil-works/*` entries
-    # are exactly the pinned set (names), and every family range those entries declare names a
-    # member (closure) — a companion added or dropped upstream fails here before it can float.
+# The lockfile carries TWO separately pinned `@earendil-works/*` families on purpose. The host
+# family (`PI_NPM_SPEC` + `PI_COMPANION_PACKAGES`) moves with `PI_ADOPTED_VERSION`; the pi-durable
+# v2 workspace family is pinned by `extension/pi/v2/package.json` alone — a Durable pin bump is its
+# own re-verification trigger (docs/design/pi-durable-v2-foundations.md §15), never a side effect
+# of a Pi adoption. The v2 workspace also declares pi-ai, a host-family member shared at one pin.
+V2_WORKSPACE_FAMILY = frozenset({"@earendil-works/pi-durable", "@earendil-works/chord"})
+
+
+def _host_family() -> set[str]:
+    return {PI_NPM_SPEC, *PI_COMPANION_PACKAGES}
+
+
+def _v2_declared() -> dict[str, str]:
+    """The v2 workspace's own `@earendil-works/*` pins (host-family members excluded), by name.
+
+    Asserted equal to `V2_WORKSPACE_FAMILY` so a new v2 dependency cannot silently widen the
+    characterized lockfile's admitted set.
+    """
+    manifest = json.loads((REPO_ROOT / "extension/pi/v2/package.json").read_text(encoding="utf-8"))
+    deps: dict[str, str] = manifest["dependencies"]
+    own = {name: deps[name] for name in _family_keys(deps) - _host_family()}
+    assert set(own) == V2_WORKSPACE_FAMILY, set(own) ^ V2_WORKSPACE_FAMILY
+    return own
+
+
+def _pinned_version(name: str, v2: dict[str, str]) -> str:
+    """The exact version a family member is pinned at: the adopted Pi or the v2 manifest's pin."""
+    return v2[name] if name in V2_WORKSPACE_FAMILY else PI_ADOPTED_VERSION
+
+
+def _top_family_entries() -> dict[str, dict]:
     lock = json.loads((REPO_ROOT / "package-lock.json").read_text(encoding="utf-8"))
     packages: dict[str, dict] = lock["packages"]
-    top = {
+    return {
         key.removeprefix("node_modules/"): entry
         for key, entry in packages.items()
         if re.fullmatch(r"node_modules/@earendil-works/[^/]+", key)
     }
-    family = {PI_NPM_SPEC, *PI_COMPANION_PACKAGES}
+
+
+def test_pinned_install_family_is_closed_against_the_characterized_lockfile() -> None:
+    # The committed lockfile is the characterized graph: its top-level `@earendil-works/*` entries
+    # are exactly the two pinned families (names), and every family range those entries declare
+    # names a member (closure) — a companion added or dropped upstream fails here before it can
+    # float.
+    top = _top_family_entries()
+    family = _host_family() | V2_WORKSPACE_FAMILY
     assert set(top) == family
     for name, entry in top.items():
         declared = _family_keys(entry.get("dependencies", {}))
@@ -85,22 +120,22 @@ def test_pinned_install_family_is_closed_against_the_characterized_lockfile() ->
 
 def test_the_family_declares_itself_exactly_in_the_characterized_lockfile() -> None:
     # The single-spec install's premise, kept apart from the closed-names test on purpose: every
-    # family member sits at the adopted version and declares each `@earendil-works/*` dependency at
-    # exactly that version (no `^`/`~`). A Pi that returns to ranged declarations fails here — the
-    # one exact spec would then float its companions and the install must name the family again.
-    lock = json.loads((REPO_ROOT / "package-lock.json").read_text(encoding="utf-8"))
-    packages: dict[str, dict] = lock["packages"]
-    top = {
-        key.removeprefix("node_modules/"): entry
-        for key, entry in packages.items()
-        if re.fullmatch(r"node_modules/@earendil-works/[^/]+", key)
-    }
-    assert set(top) == {PI_NPM_SPEC, *PI_COMPANION_PACKAGES}
+    # host-family member sits at the adopted version, every v2-family member at its v2-manifest
+    # pin, and each declares every `@earendil-works/*` dependency at exactly that dependency's own
+    # pin (no `^`/`~`). A Pi that returns to ranged declarations fails here — the one exact spec
+    # would then float its companions and the install must name the family again.
+    top = _top_family_entries()
+    v2 = _v2_declared()
+    assert set(top) == _host_family() | V2_WORKSPACE_FAMILY
     for name, entry in top.items():
-        assert entry["version"] == PI_ADOPTED_VERSION, (name, entry["version"])
+        assert entry["version"] == _pinned_version(name, v2), (name, entry["version"])
         deps: dict[str, str] = entry.get("dependencies", {})
-        ranged = {dep: deps[dep] for dep in _family_keys(deps) if deps[dep] != PI_ADOPTED_VERSION}
+        ranged = {
+            dep: deps[dep] for dep in _family_keys(deps) if deps[dep] != _pinned_version(dep, v2)
+        }
         assert not ranged, (name, ranged)
+        peers = _family_keys(entry.get("peerDependencies", {}))
+        assert not peers, (name, peers)
 
 
 def test_remote_install_pin_is_the_adopted_pin() -> None:
