@@ -1,19 +1,27 @@
 ---
 title: Worktree node_modules resolution trap — stale SDK shadowing
-read_when: CI or the SDK census guard fails in files you never touched, a fresh worktree fails tsc before install, a Pi pin bump or host-floor raise, a stale or shared .pi/npm install, version-fact constants
+read_when: SDK census or CI red in files you never touched, a worktree resolving the parent's node_modules (setup skipped/failed), a Pi pin bump or host-floor raise, a stale or shared .pi/npm, version facts
 cluster: toolchain-gotchas
 ---
 
 # Worktree `node_modules` resolution
 
 A perk worktree has **two npm worlds** that never overlap. The **root `node_modules`** is perk's
-own dev-tool tree — what `tsc` / `node --test` resolve — and a linked worktree under `.worktrees/`
-has none of its own until `npm ci`/`npm install` runs there, so those tools walk **up to the
-parent repo's `node_modules`** (the shared root checkout). The **`.pi/npm/` install root** is Pi's
-separately staged extension-install world: `materialize_extensions`
+own dev-tool tree — what `tsc` / `node --test` resolve. A linked worktree under `.worktrees/`
+resolves **its own** `node_modules` once the marker-gated `[worktree] setup` hook has run (perk's
+own `.perk/config.toml` lists `uv sync --all-packages` + `npm ci`;
+`src/perk/run/launch/__init__.py::run_pending_setup`, also reached by `perk worktree create`) —
+until then those tools walk **up to the parent repo's `node_modules`** (the shared root checkout).
+"Until then" is the live state in four cases: a hand-made or detached `git worktree add`; a
+worktree whose setup **failed** (the `setup-pending` marker stays and the next launch retries);
+anything run in the worktree **before** its first launch (`--dry-run` never runs the hook); and a
+consumer repo whose `[worktree].setup` omits `npm ci`. The hook itself:
+`workflow/cold-door-launch.md` § "The `[worktree] setup` hook is marker-gated". The **`.pi/npm/`
+install root** is Pi's separately staged extension-install world: `materialize_extensions`
 (`src/perk/run/launch/materialize.py`) stages the converged repo-root `.pi/npm/` into fresh
-worktrees through `fsclone.clone_tree` (see `workflow/cold-door-launch.md` §"Launch banner + worktree `.pi/npm` pre-staging";
-drift/repair mechanics in `workflow/distribution.md`). The resolution trap below is entirely a
+worktrees through `fsclone.clone_tree` (see `workflow/cold-door-launch.md` §"Launch banner +
+worktree `.pi/npm` pre-staging"; drift/repair mechanics in `workflow/distribution.md` §
+"init/doctor/launch own the `@mgiles/perk` npm install"). The resolution trap below is entirely a
 **root-world** phenomenon, with two distinct symptoms.
 
 One `.pi/npm`-world rule in passing: an `npm ci --prefix .pi/npm` EUSAGE failure before a live run
@@ -22,8 +30,9 @@ is an environment preflight blocker (the gitignored root drifts) — repair with
 
 ## Distillation
 
-- Two npm worlds: the root `node_modules` (perk's dev tools; a fresh worktree resolves the
-  parent's) and `.pi/npm` (Pi's extension installs) — the intro above.
+- Two npm worlds: the root `node_modules` (perk's dev tools; a worktree whose setup hook has not
+  run — hand-made, failed, or pre-launch — resolves the parent's) and `.pi/npm` (Pi's extension
+  installs) — the intro above.
 - Red in files you never touched → `git stash` to prove it pre-existing, then compare installed vs
   pinned SDK — "Symptom 1"; a worktree pin bump is inert until `npm install` runs there —
   "Symptom 2"; peer-only `pi-tui`/`typebox` resolutions go stale independently — "Symptom 3".
@@ -33,8 +42,8 @@ is an environment preflight blocker (the gitignored root drifts) — repair with
   metadata); `stat -f %l .pi/npm/package.json` > 1 ⇒ the legacy shared layout; a `.pi/npm` package
   can be stale on disk while `npm ls` says it is correct — "The `.pi/npm` world in perk's own
   checkout".
-- `git checkout package-lock.json` drops incidental `"peer": true` churn — "Commit hygiene after
-  installing in a worktree".
+- `git checkout package-lock.json` drops incidental lockfile churn when the manifest did not
+  change; a pin bump keeps npm's full output — "Commit hygiene after installing in a worktree".
 - A Pi pin bump: `just bump-pi`, keep npm's whole canonical lockfile output and prove it,
   `npm run typecheck` is mandatory, the companions are exact-declared since 1.3.0 — "Pi pin-bump
   mechanics".
@@ -66,7 +75,9 @@ created that **shadows the parent**. Until then, typecheck/tests silently keep u
 version.
 
 **Rule:** any plan that bumps a pinned Pi/SDK version must run `npm install` in the worktree (or the
-root checkout, depending on which `node_modules` is resolving), or the bump is inert.
+root checkout, depending on which `node_modules` is resolving), or the bump is inert. The
+launch-path hook runs `npm ci` only at materialization, so a bump made *inside* an already-set-up
+worktree still needs an explicit `npm install` there.
 
 ## Symptom 3: wildcard-peer resolutions go stale independently of the direct pins
 
@@ -158,14 +169,18 @@ stale" — it was not. The rules:
 
 ## Commit hygiene after installing in a worktree
 
-A **fresh `.worktrees/plan-N` has no `node_modules`** — run `npm ci` (or `npm install`) first, or
-`tsc` / `node --test` cannot resolve `@earendil-works/*` (the same resolution-walk premise above).
-The allow-scripts warnings `npm ci` prints are benign.
+A worktree that **skipped or failed setup has no `node_modules`** — run the hook's commands
+(`npm ci`) before `tsc` / `node --test`, or they resolve `@earendil-works/*` from the parent
+checkout's (possibly stale) tree, or not at all (the resolution-walk premise above); the normal
+launch path has already done this. The allow-scripts warnings `npm ci` prints are benign.
 
-`npm install` in a worktree **dirties `package-lock.json`** with incidental `"peer": true`
-annotations on transitive deps (e.g. pi-tui, typebox, marked, get-east-asian-width). Run
-`git checkout package-lock.json` before committing to keep the PR diff clean — these annotations are
-not part of the change.
+**Revert only incidental lockfile diffs — never an intentional pin bump.** An incidental diff is a
+`package-lock.json` change with NO `package.json` change: the `"peer": true` annotations a worktree
+`npm install` adds on transitive deps (e.g. pi-tui, typebox, marked, get-east-asian-width), or the
+`pi-ai` bin-path normalization churn below. Run `git checkout package-lock.json` before committing
+to keep the PR diff clean. On an intentional pin bump the lockfile diff **is** part of the change:
+keep npm's full output and accept it by § "Pi pin-bump mechanics"' validation
+(`npm install --package-lock-only` byte-identical, `npm ci`, the `npm ls` gate).
 
 A second churn shape — `pi-ai` bin-path npm-normalization rewrites with no dependency change —
 has its rule and detail in `workflow/distribution.md` (§the git→npm install mirror):

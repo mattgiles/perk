@@ -7,11 +7,16 @@ cluster: config-and-convergence
 # Distribution — how perk ships as published packages
 
 perk ships as **two published packages from one repo**: a Python wheel/sdist (`perk` on PyPI, the
-CLI + the wheel-bundled `shared/`/`agents/` resources) and an npm tarball (`@mgiles/perk`, the Pi
-extension). This doc is the durable arc of *how* perk became publishable — the version SSOT, the
-build-backend decision that constrains every future packaging change, the one dual-plane release
-workflow, the install-pin policy, and how init/doctor/launch took ownership of the consumer-side npm
-install (the mirror of the git-clone lifecycle, and the four places that mirror breaks).
+CLI plus the wheel-bundled `shared/`, `prompts/`, `CHANGELOG.md` and the single Hunk feedback
+publisher — `pyproject.toml`'s force-include table is the census) and an npm tarball
+(`@mgiles/perk`, the Pi extension **plus** `shared/`, `prompts/`, the `agents/` subagent defs and
+`README.md` — `package.json` `files`;
+`tests/test_packaging.py::test_npm_pack_lists_shipped_and_excludes_dev`). The subagent defs are
+npm-only — `pi/subagents.md` owns them. This doc is the durable arc of *how* perk became
+publishable — the version SSOT, the build-backend decision that constrains every future packaging
+change, the one dual-plane release workflow, the install-pin policy, and how init/doctor/launch
+took ownership of the consumer-side npm install (the mirror of the git-clone lifecycle, and the
+four places that mirror breaks).
 
 ## Distillation
 
@@ -52,7 +57,7 @@ bump (Python + npm) is deliberately **two commands**; the lockstep test is what 
 
 This is the constraint that governs every future packaging node, so it is recorded as a decision, not
 just a fact: perk's wheel **force-includes** top-level payloads into the package (e.g. `shared/` →
-`perk/_shared`, `agents/` → `perk/_agents`) via hatchling's force-include — the live census is
+`perk/_shared`, `prompts/` → `perk/_prompts`) via hatchling's force-include — the live census is
 `pyproject.toml`'s `[tool.hatch.build.targets.wheel.force-include]` table, mirrored by the
 per-payload packaging tests (`tests/test_packaging.py`). `uv_build` cannot express this: it has
 **no wheel force-include**, and its `tool.uv.build-backend.data` keys are **fixed sysconfig
@@ -217,9 +222,13 @@ The `__version__` SSOT is enforced into the *running session* by three deliberat
 (and one deliberately-rejected one). This builds on the install-pin policy above.
 
 - **`PERK_CLI_VERSION` — a second, *informational* launch env var (the precedent).** The one Pi exec
-  pipeline's env builder (`perk/run/pi_exec.py::_build_exec_env`) injects **two** env vars into the
-  `os.execvpe` env dict: the existing run-control `PERK_RUN_ID` **and** the new
-  `PERK_CLI_VERSION = __version__`. The distinction (documented
+  pipeline's env builder (`src/perk/run/pi_exec.py::_build_exec_env`) stamps **two perk vars** onto
+  the child env: the run-control `PERK_RUN_ID` (stamped from the minted id, or *removed* when a
+  session reopen passes `run_id=None`) **and** the informational `PERK_CLI_VERSION = __version__`.
+  The same builder also normalizes `LINEAR_API_KEY` and `PI_CODING_AGENT_DIR` on blankness, so
+  "two" is the count of perk *stamps*, not of keys the builder touches — the merge order and
+  the four normalizations are owned by `workflow/cold-door-launch.md` § "Env setdefault via
+  merge order"; this doc only records the `PERK_CLI_VERSION` precedent. The distinction (documented
   in contracts §8.2/§8.6a): `PERK_RUN_ID` is run-control data the extension *acts on*; `PERK_CLI_VERSION`
   is **informational only** — read solely to *compare* versions, never to drive state. This is the
   template for any future "carry a CLI fact into the session for display/comparison" need: add it to the
@@ -368,8 +377,9 @@ already-installed unranged npm source, so the boundary that matters (a consumer 
   adds a runtime dep)
 - `docs/learned/pi/extension-api.md` — the `session_start` handler the version-drift signal rides;
   also the pi `git:`-package loading substrate (the internals the retired git-clone lifecycle sat on)
-- `perk/run/pi_exec.py::_build_exec_env`, `extension/pi/activation.ts::activatePerk` — the `PERK_CLI_VERSION` inject + the
-  `session_start` drift comparison
+- `src/perk/run/pi_exec.py::_build_exec_env` (merge order + normalizations: `cold-door-launch.md`
+  § "Env setdefault via merge order"), `extension/pi/activation.ts::activatePerk` — the
+  `PERK_CLI_VERSION` inject + the `session_start` drift comparison
 - `docs/learned/toolchain/worktree-node-modules.md` — the `package-lock.json` `pi-ai` bin-path churn
 - `docs/learned/toolchain/uv-workspace-src-layout.md` — the uv-workspace root-package `src`-layout
   mechanics + the `uv sync --all-packages` member-pruning trap (the `perk-dev` member's home layout)

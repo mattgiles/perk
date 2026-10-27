@@ -1,5 +1,5 @@
 ---
-title: Converting perk to a uv-workspace root-package src-layout — the ty/pytest resolution traps, the byte-identical-wheel proof, and the member-pruning gotcha
+title: Converting perk to a uv-workspace root-package src-layout — the ty/pytest resolution traps, the enumerated-allowed-diff wheel proof, and the member-pruning gotcha
 read_when: You are converting or maintaining the uv-workspace root-package `src`-layout (`src/perk`), hit the ty-root/pytest dotted-import trap, or editing the lockstep config surfaces (wheel/sdist/ty/ruff).
 cluster: code-migration
 ---
@@ -41,9 +41,15 @@ resolvers that had to move one level deeper (`parent.parent` → `parents[2]`) i
 `src/perk/_resources.py` + `src/perk/__init__.py`. The member counts are that build's event
 evidence, not a standing expectation — a later proof re-measures its own wheel.
 
-Those changed lines are the **editable/dev-only fallback** — dead code in the *installed* wheel,
-which resolves resources via `importlib.metadata` + the `_shared`/`_agents`/`_prompts` package data,
-not the `__file__` walk. So runtime is unchanged and `METADATA` is identical.
+Those changed lines are the **editable/dev-only sibling fallback** — dead in the *installed* wheel,
+where `src/perk/_resources.py` resolves each bundled payload through `importlib.resources`
+(`resources.files("perk")` + the force-included subtree: `_shared`, `_prompts`, `_data` (the
+changelog), `_hunk/perkFeedback.ts` — `pyproject.toml`'s force-include table is the live
+census, mirrored by the per-payload `tests/test_packaging.py::test_wheel_bundles_*` tests), not the
+`__file__` walk; `importlib.metadata` is used only for `perk.__version__` (`src/perk/__init__.py`).
+`agents/` is **not** wheel data — the subagent defs ship only in the npm tarball (`package.json`
+`files`; `test_wheel_and_sdist_exclude_agents`), so the `__file__` resolvers never need to find
+them. So runtime is unchanged and `METADATA` is identical.
 
 **Lesson:** write the proof to enumerate the *allowed* diff (the resolver files) rather than
 demanding a bare `IDENTICAL`. Note also: the **sdist** paths legitimately shift (`perk/…` →
@@ -57,8 +63,8 @@ force-includes — see `workflow/distribution.md`). Under hatchling, the lockste
 move are:
 
 - `[tool.hatch.build.targets.wheel] packages` `["perk"]` → `["src/perk"]` — hatchling **strips the
-  `src/` prefix**, so the built wheel still contains `perk/…` (this is why the wheel stays
-  byte-identical).
+  `src/` prefix**, so the built wheel still contains `perk/…` (this is why the wheel payload is
+  unchanged apart from the enumerated resolver diff).
 - sdist `only-include` `"perk"` → `"src/perk"`.
 - `[tool.ty.src] include` and `[tool.ruff] include` repathed to `src/perk`.
 - the two `__file__` resolvers `parent.parent` → `parents[2]` (one directory deeper).
