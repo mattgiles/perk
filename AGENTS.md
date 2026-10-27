@@ -35,8 +35,9 @@ and is owned by `perk init` — never hand-edit between its markers).*
   submitting (never bare `just ci` in bash; the `[[ci.checks]]` rows mirror `just ci`'s targets,
   `setup` being env prep owned by the `[worktree] setup` hook, except that the JS row runs only
   the fast node:test tier — the measured slow tier runs in `just ci`/GitHub CI and ad hoc via
-  `just test-js-slow`), and its green report is
-  definitive — no re-verification. While iterating, use narrow targeted checks. Grow a Python
+  `just test-js-slow` — and the pi-durable v2 workspace (`extension/pi/v2/`) is verified by its
+  own `typecheck-v2`/`test-v2`/`test-v2-slow` rows and recipes, carved out of every v1 surface),
+  and its green report is definitive — no re-verification. While iterating, use narrow targeted checks. Grow a Python
   test harness when it widens what the suite checks. The perk-dev prose suites
   (`tests/test_prose_review_*.py`, `tests/test_prose_map*.py`, `tools/prose-map/*.test.ts`,
   `tools/prose-review/*.test.ts`) are a deliberate opt-in carve-out from the two default

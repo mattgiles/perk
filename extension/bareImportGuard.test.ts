@@ -14,11 +14,14 @@
 // `dependencies`); together they durably pin the invariant the vendored miniYaml/miniJinja readers
 // restore. Comments are stripped before scanning so the explanatory `import … from "nunjucks"` /
 // `"yaml"` text in those vendored modules' headers is NOT mistaken for a real import.
+// The pi-durable v2 workspace (`pi/v2/`) declares its own dependencies and is outside this scan;
+// its dependency discipline is `pi/v2/layeringGuard.test.ts`.
 
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import { v1ExtensionFiles } from "./testing/v1Corpus.ts";
 
 // The host/peer packages pi resolves via its fixed alias set (package.json `peerDependencies`).
 const ALLOWED_PACKAGES = new Set([
@@ -41,17 +44,14 @@ const ALLOWED_PACKAGES = new Set([
 /**
  * Production sources: every `.ts` under extension/ except test files and the dev-only testing/
  * fakes — neither is reachable from the runtime import graph rooted at index.ts (testing/ is
- * imported only by *.test.ts), and the npm tarball ships neither.
+ * imported only by *.test.ts), and the npm tarball ships neither. The v2 workspace and installed
+ * `node_modules` are pruned by `testing/v1Corpus.ts`.
  */
 function productionFiles(): string[] {
-  const entries = readdirSync(import.meta.dirname, { recursive: true }) as string[];
-  return entries
-    .map((entry) => entry.split(path.sep).join("/"))
-    .filter(
-      (entry) =>
-        entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.startsWith("testing/"),
-    )
-    .sort();
+  return v1ExtensionFiles().filter(
+    (entry) =>
+      entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.startsWith("testing/"),
+  );
 }
 
 /** Strip block then line comments before scanning (mirrors surfacesGuard's deliberately-naive strip). */

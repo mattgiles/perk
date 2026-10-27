@@ -952,3 +952,15 @@ The closed-vocabulary domain reason a quiescent execution is not progressing —
 `unmet_prerequisite`, `assignment_incomplete`, `repair_required`, `parked`, `blocked`, `sleeping`,
 `cancelled`, `completed` — derived from records plus `inspect()`, never a stored flag.
 _Avoid_: status, blocked reason (Durable's derived task state), idle
+
+**v2 workspace**:
+The private npm workspace `extension/pi/v2/` (`perk-v2`): its own `package.json` dependencies,
+tsconfig, host entry, guards and node:test tiers, carved out of every v1 verification surface and
+the published tarball; a root-managed workspace sharing the root lockfile, never an independently
+installable artifact.
+_Avoid_: v2 package, plugin, sub-repo
+
+**v1 corpus**:
+Every source under `extension/` that v1's tree-walking guards and node:test tiers see: the walk
+prunes the v2 workspace and every `node_modules` directory (`extension/testing/v1Corpus.ts`).
+_Avoid_: production corpus (a guard's own filtered subset), extension tree

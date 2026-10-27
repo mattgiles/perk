@@ -7,9 +7,10 @@
 // is tests/test_cache_guard.py.
 
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import { v1ExtensionFiles } from "./testing/v1Corpus.ts";
 
 // The path-primitive seam: the only file allowed to carry the segment literals.
 // sessionData.ts composes via cache.ts helpers, so it needs no literal and no allowlisting.
@@ -20,17 +21,14 @@ const PATTERN = /["'](scratch|runs)["']/;
 
 /**
  * Discover production sources under extension/: every `.ts` file (recursively, so future
- * subdirectories are scanned by default) except test files and the testing/ fakes.
+ * subdirectories are scanned by default) except test files and the testing/ fakes. The v2
+ * workspace and installed `node_modules` are pruned by `testing/v1Corpus.ts`.
  */
 function productionFiles(): string[] {
-  const entries = readdirSync(import.meta.dirname, { recursive: true }) as string[];
-  return entries
-    .map((entry) => entry.split(path.sep).join("/"))
-    .filter(
-      (entry) =>
-        entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.startsWith("testing/"),
-    )
-    .sort();
+  return v1ExtensionFiles().filter(
+    (entry) =>
+      entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.startsWith("testing/"),
+  );
 }
 
 /**

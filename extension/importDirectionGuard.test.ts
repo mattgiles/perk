@@ -125,6 +125,7 @@ import {
   findCycles,
   resolveRelative,
 } from "./testing/importGraph.ts";
+import { v1ExtensionFiles } from "./testing/v1Corpus.ts";
 
 /**
  * The stable-mechanism homes (Rule B sources) — current (`substrate/`, `waves/`, `worker/`) and
@@ -367,17 +368,14 @@ function transportConfinement(edges: Map<string, string[]>): {
 
 /**
  * Production sources: every `.ts` under extension/ except test files and the dev-only testing/
- * fakes (the `bareImportGuard.test.ts` selector; recursive readdir, OS separators normalized).
+ * fakes (the `bareImportGuard.test.ts` selector over the shared v1 walk — the v2 workspace and
+ * installed `node_modules` are pruned by `testing/v1Corpus.ts`).
  */
 function productionFiles(): string[] {
-  const entries = readdirSync(import.meta.dirname, { recursive: true }) as string[];
-  return entries
-    .map((entry) => entry.split(path.sep).join("/"))
-    .filter(
-      (entry) =>
-        entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.startsWith("testing/"),
-    )
-    .sort();
+  return v1ExtensionFiles().filter(
+    (entry) =>
+      entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.startsWith("testing/"),
+  );
 }
 
 function readProductionFile(file: string): string {
@@ -388,21 +386,18 @@ function readProductionFile(file: string): string {
  * Rule G's token-census corpus: every `.ts` under extension/ — TESTS INCLUDED — except
  * `waves/` (where transport vocabulary lives), `testing/` (the shared fake responder implements
  * the envelope, and the graph machinery's controls ride there), and this guard file itself (the
- * one documented self-exemption: it necessarily names the tokens it polices).
+ * one documented self-exemption: it necessarily names the tokens it polices). The v2 workspace
+ * and installed `node_modules` are pruned by `testing/v1Corpus.ts`.
  */
 function tokenCensusFiles(): string[] {
   const guardFile = path.basename(import.meta.filename);
-  const entries = readdirSync(import.meta.dirname, { recursive: true }) as string[];
-  return entries
-    .map((entry) => entry.split(path.sep).join("/"))
-    .filter(
-      (entry) =>
-        entry.endsWith(".ts") &&
-        !entry.startsWith("waves/") &&
-        !entry.startsWith("testing/") &&
-        entry !== guardFile,
-    )
-    .sort();
+  return v1ExtensionFiles().filter(
+    (entry) =>
+      entry.endsWith(".ts") &&
+      !entry.startsWith("waves/") &&
+      !entry.startsWith("testing/") &&
+      entry !== guardFile,
+  );
 }
 
 function liveTopLevelDirs(): string[] {

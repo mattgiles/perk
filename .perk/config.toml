@@ -114,7 +114,17 @@ trusted = true
 # different, by design: the `test-js` row runs only the FAST tier (`just test-js-fast`). The slow
 # tier (the measured files listed in `extension/testing/jsTestTiers.ts`) would push the run-all
 # report far past its time budget, so it runs in `just test-js` / `just test` / GitHub CI, and ad
-# hoc via `just test-js-slow` — an in-session scope cut that `jsTestTiers.test.ts` pins.
+# hoc via `just test-js-slow` — an in-session scope cut that `jsTestTiers.test.ts` pins. The
+# pi-durable v2 workspace (`extension/pi/v2/`) is verified by its own three rows, which mirror
+# `just typecheck-v2` / `test-v2` / `test-v2-slow` (all reached by `just ci` through `typecheck`
+# and `test`); `extension/pi/v2/testing/tiers.test.ts` pins them. `typecheck-v2` lists
+# `tsconfig.json` because v2's tsconfig extends it, and `extension/testing/importGraph.ts` because
+# v2's program type-checks it through the guards' import. `test-v2` triggers on the whole
+# `extension/**`: its layering guard reads every v1 file (tests included) for the v1 → v2
+# direction, so a v1-only edit must still schedule it — and the row is cheap (a MemoryStorage
+# smoke plus static guards). `test-v2-slow` is v2-only (its tier reads nothing from v1).
+# `typecheck-js`'s `extension/**` glob also matches v2 edits — an accepted over-trigger (globs have
+# no negation; the root project excludes v2, so it passes quickly).
 [[ci.checks]]
 name = "lint-py"
 command = "just lint-py"
@@ -154,6 +164,21 @@ glob = "*.py"
 name = "test-js"
 command = "just test-js-fast"
 glob = "*.ts,*.tsx,*.js,*.jsx,*.mjs,docs/site/**,package.json,package-lock.json"
+
+[[ci.checks]]
+name = "typecheck-v2"
+command = "just typecheck-v2"
+glob = "extension/pi/v2/**,extension/testing/importGraph.ts,tsconfig.json,package.json,package-lock.json"
+
+[[ci.checks]]
+name = "test-v2"
+command = "just test-v2"
+glob = "extension/**,package.json,package-lock.json"
+
+[[ci.checks]]
+name = "test-v2-slow"
+command = "just test-v2-slow"
+glob = "extension/pi/v2/**,package.json,package-lock.json"
 
 [[ci.checks]]
 name = "docs-check"

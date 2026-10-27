@@ -10,10 +10,15 @@
 // Membership rule: a file whose own wall time was ≥ 20 s in a full-suite run under the recipe's
 // concurrency (the measurement is recorded in docs/design/archive/js-test-tiers.md). A new slow
 // file joins the list in the change that makes it slow.
+//
+// The pi-durable v2 workspace (`extension/pi/v2/`) has its own suite (`just test-v2` /
+// `just test-v2-slow`, with its own tier runner) and never enters this one: `allJsTestFiles`
+// drops it beside the `node_modules` prune.
 
 import { globSync } from "node:fs";
+import { V2_WORKSPACE_DIR } from "./v1Corpus.ts";
 
-/** The full suite's file globs — exactly the ones the `test-js` and `test` recipes pass. */
+/** The full suite's file globs (the `test-js` and `test` recipes run `runJsTestTier.ts all`). */
 export const JS_TEST_GLOBS = [
   "extension/**/*.test.ts",
   "docs/site/src/**/*.test.mjs",
@@ -63,13 +68,19 @@ export const SLOW_JS_TEST_FILES: readonly string[] = [
 
 export type JsTestTier = "fast" | "slow";
 
-/** Every file the full suite runs, repo-relative and sorted (`node_modules` never included). */
+/**
+ * Every file the full suite runs, repo-relative and sorted (`node_modules` and the v2 workspace
+ * never included).
+ */
 export function allJsTestFiles(root: string): string[] {
+  const v2Prefix = `extension/${V2_WORKSPACE_DIR}/`;
   const files = new Set<string>();
   for (const pattern of JS_TEST_GLOBS) {
     for (const file of globSync(pattern, { cwd: root })) {
       const normalized = file.split("\\").join("/");
-      if (!normalized.split("/").includes("node_modules")) files.add(normalized);
+      if (normalized.split("/").includes("node_modules")) continue;
+      if (normalized.startsWith(v2Prefix)) continue;
+      files.add(normalized);
     }
   }
   return [...files].sort();

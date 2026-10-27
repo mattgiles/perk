@@ -78,8 +78,12 @@ typecheck-js:
     npm run docs:typecheck
     npm run prose-review:typecheck
 
+# type-check the pi-durable v2 workspace (its own tsconfig; `typecheck-js` never reaches it)
+typecheck-v2:
+    npm run v2:typecheck
+
 # type-check everything (ty + tsc)
-typecheck: typecheck-py typecheck-js
+typecheck: typecheck-py typecheck-js typecheck-v2
 
 # run the python test suite (pytest)
 test-py *args:
@@ -97,11 +101,13 @@ test-py-fast *args:
 test-py-slow *args:
     uv run pytest -m slow {{args}}
 
+# The v1 selector in extension/testing/jsTestTiers.ts owns the corpus — the pi-durable v2
+# workspace (extension/pi/v2/) never enters it; `just test-v2` runs that suite instead.
 # run the node:test suite (extension TS + docs-site plugin .mjs + the perk-dev module tracer's
 # .mjs smoke). Mild 2x core oversubscription: session construction is I/O-bound, so more
 # in-flight files overlap their I/O waits.
 test-js:
-    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs" "packages/perk-dev/**/*.test.mjs"
+    node extension/testing/runJsTestTier.ts all
 
 # run the FAST node:test tier: every `test-js` file except the slow tier — the in-session
 # `run_ci` gate's JS row. Extra `node --test` flags pass through (e.g. --test-name-pattern=…).
@@ -114,11 +120,25 @@ test-js-fast *args:
 test-js-slow *args:
     node extension/testing/runJsTestTier.ts slow {{args}}
 
+# run the FAST tier of the v2 workspace's node:test suite — every extension/pi/v2 test except
+# `*.slow.test.ts`; the in-session `test-v2` row. Extra `node --test` flags pass through.
+test-v2 *args:
+    node extension/pi/v2/testing/runTier.ts fast {{args}}
+
+# run the SLOW tier of the v2 suite (`*.slow.test.ts`: real-process / SIGKILL cases). Exits 0
+# with a notice while the tier is empty. Same flag passthrough.
+test-v2-slow *args:
+    node extension/pi/v2/testing/runTier.ts slow {{args}}
+
+# The JS line runs v1's whole node:test corpus through the tier runner; the two v2 lines run the
+# pi-durable v2 workspace's own suite (both tiers).
 # run the test suite (python: pytest; extension TS + docs-site .mjs + perk-dev .mjs: node:test;
 # docs site: static build + post-build checks)
 test *args:
     uv run pytest {{args}}
-    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs" "packages/perk-dev/**/*.test.mjs"
+    node extension/testing/runJsTestTier.ts all
+    node extension/pi/v2/testing/runTier.ts fast
+    node extension/pi/v2/testing/runTier.ts slow
     npm run docs:check
 
 # build the python wheel + sdist (pinned to perk — perk-dev is never published)

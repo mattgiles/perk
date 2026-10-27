@@ -34,6 +34,8 @@ GUIDE_NAMED_RECIPES = (
     "just test-py-fast",
     "just test-py-slow",
     "just prose-review-test",
+    "just test-v2",
+    "just test-v2-slow",
 )
 TESTING_GUIDE = REPO_ROOT / "docs/developers/testing.md"
 

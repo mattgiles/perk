@@ -8,10 +8,11 @@
 // anywhere (charter D5 rescinded). This source-scan test fails CI on drift.
 
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { extractSpecifiers } from "./testing/importGraph.ts";
+import { v1ExtensionFiles } from "./testing/v1Corpus.ts";
 
 // The surfaces module: the only files allowed to make rich-UI calls (see the surfaces.ts header —
 // "the surfaces module" is surfaces.ts + report.ts for this node-4.1 guard).
@@ -69,17 +70,14 @@ const BANNED_EVERYWHERE: RegExp = /\.setWorkingIndicator\(/;
 /**
  * Discover production sources under extension/: every `.ts` file (recursively, so future
  * subdirectories are scanned by default) except test files and the testing/ fakes — test fakes
- * legitimately IMPLEMENT setStatus/setWidget/setFooter.
+ * legitimately IMPLEMENT setStatus/setWidget/setFooter. The v2 workspace and installed
+ * `node_modules` are pruned by `testing/v1Corpus.ts`.
  */
 function productionFiles(): string[] {
-  const entries = readdirSync(import.meta.dirname, { recursive: true }) as string[];
-  return entries
-    .map((entry) => entry.split(path.sep).join("/"))
-    .filter(
-      (entry) =>
-        entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.startsWith("testing/"),
-    )
-    .sort();
+  return v1ExtensionFiles().filter(
+    (entry) =>
+      entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.startsWith("testing/"),
+  );
 }
 
 /**

@@ -1,6 +1,7 @@
 // The node:test tier wiring: the slow list names real suite files, the two tiers partition the
-// full suite exactly, the recipes run what they claim, and the in-session gate's JS row is the
-// fast tier while every full entrypoint keeps the whole suite.
+// full suite exactly, the selector's corpus is its globs minus exactly the two carve-outs
+// (`node_modules`, the v2 workspace), the recipes run what they claim, and the in-session gate's
+// JS row is the fast tier while every full entrypoint keeps the whole suite.
 
 import assert from "node:assert/strict";
 import { globSync, readFileSync } from "node:fs";
@@ -15,6 +16,13 @@ import {
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 
+/** The suite's three cohorts, transcribed independently of `JS_TEST_GLOBS` (sorted). */
+const SUITE_GLOBS = [
+  "docs/site/src/**/*.test.mjs",
+  "extension/**/*.test.ts",
+  "packages/perk-dev/**/*.test.mjs",
+];
+
 /** One justfile recipe's body (the indented lines after `name…:`). */
 function recipeBody(name: string): string {
   const lines = readFileSync(resolve(ROOT, "justfile"), "utf8").split("\n");
@@ -28,25 +36,9 @@ function recipeBody(name: string): string {
   return body.join("\n");
 }
 
-/** The quoted glob arguments of a recipe's `node --test` line — read from the justfile itself. */
-function recipeGlobs(name: string): string[] {
-  const line = recipeBody(name)
-    .split("\n")
-    .find((l) => l.startsWith("node --test "));
-  assert.ok(line, `\`${name}\` runs node --test`);
-  return [...line.matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? "").sort();
-}
-
-/** The full suite as the `test-js` recipe defines it: its own globs, expanded independently. */
-function recipeSuite(): string[] {
-  const files = new Set<string>();
-  for (const pattern of recipeGlobs("test-js")) {
-    for (const file of globSync(pattern, { cwd: ROOT })) {
-      const normalized = file.split("\\").join("/");
-      if (!normalized.split("/").includes("node_modules")) files.add(normalized);
-    }
-  }
-  return [...files].sort();
+/** The raw expansion of one glob, with NO filtering (repo-relative, posix separators). */
+function rawExpansion(pattern: string): string[] {
+  return globSync(pattern, { cwd: ROOT }).map((file) => file.split("\\").join("/"));
 }
 
 test("the slow list is sorted, unique and names only real suite files", () => {
@@ -56,12 +48,28 @@ test("the slow list is sorted, unique and names only real suite files", () => {
   assert.deepEqual(stale, [], "a slow-tier entry that the full suite does not run");
 });
 
+test("the selector's globs are exactly the three suite cohorts", () => {
+  // An independent transcription: a cohort dropped from (or added to) `JS_TEST_GLOBS` fails here.
+  assert.deepEqual([...JS_TEST_GLOBS].sort(), SUITE_GLOBS);
+});
+
+test("the selector's corpus is the raw glob expansion minus node_modules and the v2 workspace", () => {
+  const raw = new Set<string>();
+  for (const pattern of SUITE_GLOBS) {
+    for (const file of rawExpansion(pattern)) raw.add(file);
+  }
+  // The carve is non-vacuous: the unfiltered globs DO reach the v2 workspace.
+  assert.ok(raw.has("extension/pi/v2/host.test.ts"), "the raw globs reach extension/pi/v2/");
+  const expected = [...raw]
+    .filter((file) => !file.split("/").includes("node_modules"))
+    .filter((file) => !file.startsWith("extension/pi/v2/"))
+    .sort();
+  assert.ok(expected.length > 0, "the globs select files");
+  assert.deepEqual(allJsTestFiles(ROOT), expected);
+});
+
 test("the tiers partition the full suite: disjoint, and their union is every file", () => {
-  // The oracle is the `test-js` recipe's own globs, not the selector's: a cohort dropped from
-  // `JS_TEST_GLOBS` (or added to the recipe only) fails here.
-  const all = recipeSuite();
-  assert.ok(all.length > 0, "the recipe's globs select files");
-  assert.deepEqual(allJsTestFiles(ROOT), all, "the selector's corpus is the recipe's suite");
+  const all = allJsTestFiles(ROOT);
   const fast = jsTestTierFiles("fast", ROOT);
   const slow = jsTestTierFiles("slow", ROOT);
   assert.ok(fast.length > 0 && slow.length > 0, "both tiers select files");
@@ -73,10 +81,16 @@ test("the tiers partition the full suite: disjoint, and their union is every fil
   assert.ok(fast.includes("extension/testing/jsTestTiers.test.ts"), "this guard runs in the gate");
 });
 
-test("the selector's globs are exactly the full recipes' globs, both ways", () => {
-  for (const recipe of ["test-js", "test"]) {
-    assert.deepEqual(recipeGlobs(recipe), [...JS_TEST_GLOBS].sort(), `\`${recipe}\`'s globs`);
-  }
+test("the full recipes run the whole v1 suite through the selector — never a raw glob", () => {
+  const full = "node extension/testing/runJsTestTier.ts all";
+  assert.equal(recipeBody("test-js"), full);
+  const test = recipeBody("test").split("\n");
+  assert.ok(test.includes(full), "`test` runs the whole v1 suite through the selector");
+  assert.deepEqual(
+    test.filter((line) => line.startsWith("node --test ")),
+    [],
+    "`test` carries no raw `node --test` glob line",
+  );
 });
 
 test("the tier recipes run the tier runner", () => {

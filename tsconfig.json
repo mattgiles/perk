@@ -16,5 +16,5 @@
     "noUnusedParameters": true
   },
   "include": ["extension", "tools"],
-  "exclude": ["tools/prose-review"]
+  "exclude": ["tools/prose-review", "extension/pi/v2"]
 }
