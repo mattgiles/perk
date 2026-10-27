@@ -19,8 +19,8 @@ in plan #51, PR #55; the patterns below generalize to any external CLI perk driv
 - Route the whole external-CLI shell through ONE module-level patchable seam so verified init
   tests stay offline — "A single patchable seam keeps the suite offline".
 - The `skills` CLI is the SINGLE materialization path for managed `.agents/skills/<name>` in
-  both self-repo and consumer trees (the pi package contributes only the extension) — "The
-  `skills` CLI is the single delivery path (both trees)".
+  both self-repo and consumer trees (the Pi package contributes no directly discovered skills)
+  — "The `skills` CLI is the single delivery path (both trees)".
 - `PERK_SKILLS` owns the perk-hosted names, authored or vendored: one alphabetical tuple edit
   cascades to the fragment and, through `MANAGED_SKILL_NAMES`, to post-sync verification and
   doctor — "The `PERK_SKILLS` SSOT cascade".
@@ -152,12 +152,14 @@ One function = one patch point. Don't scatter `subprocess.run` calls across the 
 
 The `skills` CLI materializes every managed `.agents/skills/<name>` in **both** self-repo and
 consumer trees via `skills update --sync`. Perk-hosted includes authored and vendored skills;
-required external skills use the same delivery path. The Pi package contributes only the
-**extension** — its `pi`
-manifest no longer lists `skills`, so Pi never discovers the package's top-level `skills/` dir
-(convention auto-discovery applies *only* when no `pi` manifest is present; the manifest stays for
-`extensions`). This kills the double-load that previously emitted a noisy `[Skill conflicts]` block
-(Pi found each `perk-*` skill twice — once from `.agents/skills/`, once from the package `skills/`).
+required external skills use the same delivery path. The Pi package contributes **no directly
+discovered skills**: its `pi` manifest lists only `extensions` (`package.json`; the `agents/` defs
+ship beside it under the separate `pi-subagents` manifest key, owned by `pi/subagents.md`), and
+`skills/` is not in the npm `files` list at all. Convention auto-discovery of a package's `skills/`
+dir applies *only* when no `pi` manifest is present, so neither a consumer's npm install nor the
+self-repo's `..` package entry (where `skills/` exists on disk) is discovered. This kills the
+double-load that previously emitted a noisy `[Skill conflicts]` block (Pi found each `perk-*` skill
+twice — once from `.agents/skills/`, once from the package `skills/`).
 
 **Negative correction (the original assumption was wrong):** **no** settings-level package filter
 (`.pi/settings.json` `"skills": []`) and **no** removal of the `..`/`git:` package are needed.
