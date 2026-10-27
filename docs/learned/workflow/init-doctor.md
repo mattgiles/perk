@@ -11,7 +11,8 @@ cluster: config-and-convergence
 - `perk init` converges forward (idempotent desired state, never migrations); `doctor --fix`
   repairs legacy oddities; bare `doctor` is the report-only diagnostic layer — "The split".
 - Doctor checks derive from the managed-convergence declarations — NEVER hand-author a parallel
-  check — "Managed convergence is the SSOT for doctor checks".
+  check; everything not derived from a convergence is report-only, verify-gated or offline —
+  "Managed convergence is the SSOT for doctor checks", "The current check scope".
 - Any new `Check.group` value — managed or report-only — needs `GROUP_ORDER` inclusion plus a
   render-visibility test — "`doctor`'s human output renders only the `GROUP_ORDER` groups".
 - Growing `managed_artifacts()` requires the three-part eligibility test — "The managed-artifact
@@ -25,16 +26,15 @@ cluster: config-and-convergence
 - The host floor makes `init` fatal but not `doctor --fix`; the Node row is a closed per-line
   table; a floor raise on a below-floor host is a gate before implement; settings converge in three
   shapes — "Host-floor rows and the three settings-convergence shapes".
-- A report-only check gated on an unpinned package's version range parses strict semver against a
-  half-open range (non-semver ⇒ `info`, never a mismatch), mirrors the foreign tool's own
-  precedence, and takes an `environ` seam with autouse test hermeticity — "Report-only checks
-  gated on an installed package's version range"; the source-literal probe table is retired
-  precedent — "Marker-probe table craft".
+- `_MIGRATIONS` run unconditionally on every `--fix`, must be idempotent, and land failures on
+  `fix_errors` — "Doctor migration idempotency rule".
 - Agent-dir pieces resolve through `launch_pi_agent_dir`, rewrite in place, need autouse
   `PI_CODING_AGENT_DIR` hermeticity — "Managed pieces and checks that act on files OUTSIDE the
   repo"; legacy cleanups model the retired writer — "Legacy-cleanup migrations…"; whole-directory
   checks use `:(literal)` pathspecs — "Whole-directory safety checks…"; fenced writes open
   link-blind — "Every write site behind an ignore-probe fence…".
+- Historical (dated one-liners): the retired precedents "Marker-probe table craft" and
+  "Report-only checks gated…"; the git-clone retirement "The retire-an-orphaned-lifecycle recipe".
 
 ## The split
 
@@ -72,9 +72,8 @@ So to add any new managed piece (the recipe is **three edits**, never a bespoke 
    grouping; absent ⇒ falls back to `"repository"`).
 
 **Do NOT hand-write a check in some `_build_checks`-style function** — that produces a *duplicate*
-check for the same piece. The skills-manifest work (#56) was originally planned with a bespoke
-`_skills_manifest_check`; that was wrong against this architecture and was dropped for the
-three-edit recipe.
+check for the same piece (the skills-manifest work, #56, first planned a bespoke check and dropped
+it for the three-edit recipe).
 
 The coherence guard `test_every_required_capability_has_a_doctor_check`
 (`tests/test_doctor.py`) enforces convergence↔capability parity: every dry-run convergence has a
@@ -93,6 +92,26 @@ only the `GROUP_ORDER` groups, so **any new `Check.group` value — managed or r
 surfaces only in `--json` and the exit code — see "`doctor`'s human output renders only the
 `GROUP_ORDER` groups" below. The test to apply: **does this piece have a `--fix`/converge side?**
 Yes → three-edit managed convergence; no → a report-only `_build_checks` entry.
+
+### The current check scope (dated census)
+
+As of 2026-10 — the authority is `src/perk/convergence/doctor/__init__.py::_build_checks` plus
+`src/perk/convergence/doctor/fixes.py::_apply_fixes`, never this list:
+
+- **Managed checks** are exactly the convergences `managed_convergences()` declares —
+  `settings-wiring`, `workflow-dir`, `skills-manifest`, `runner-workflow`,
+  `required-perk-version`, `gitignore-block`, `agents-block`, `library-readme` — one check each
+  via `_managed_checks`, repaired by `converge(True)` on `fail`.
+- **The only other `--fix` arms keyed on a `fail` check** are `config` (re-seed missing files,
+  never overwrite) and `extension-install`.
+- **`_MIGRATIONS` run unconditionally** on every `--fix` (§ "Doctor migration idempotency rule").
+- **Network repairs** are the fix-AND-verify gestures in `run_doctor`: `env.repair_pi`,
+  `converge_repo_skills_manifest(apply=True)`, `sync_skills`, the Linear label ensure, and
+  `ensure_review_cli`.
+- **Every non-managed check** is appended directly in `_build_checks`, in two tiers: verify-gated
+  (host or network shells — the env rows, `skills-delivery`, `extension-install`, `review-cli`, …)
+  and offline (config and file reads — `config`, `providers`, `stage-models`,
+  `subagent-package-scope`, …). Beyond the arms and gestures above, they are report-only.
 
 ## The managed-artifact set (`managed_artifacts()`) — the eligibility trio
 
@@ -115,23 +134,14 @@ user-authored `.perk/skills/`). **Similar names/locations ≠ same lifecycle mod
 artifact against the trio, not its neighbors. (The other deliberate exclusions — the state file
 itself, the gitignored caches — are enumerated in `managed_artifacts()`'s docstring.)
 
-**Self-repo reconvergence is whole-repo — expect unrelated hash rows in the diff.** `perk init`
-rewrites the *entire* `.perk/managed-state.toml`, so any reconvergence run (even one triggered for a
-single intended artifact) also refreshes **pre-existing stale rows** — a row that has drifted on main
-since an earlier PR (the `skills-manifest` row is the recorded instance) rides along in the same
-diff. Don't treat the extra hash rows as a mistake: verify each is a legitimate `desired == live`
-refresh rather than a regression, and commit them together with the intended move. A reconvergence
-diff that touches *only* the row you expected is the surprise, not the reverse. The same holds for
-a convergence run scoped to ONE key: it rewrites that artifact's recorded hash **and any
-already-stale hash it finds** in `.perk/managed-state.toml` — commit the companion file, and don't
-read "settings.json is the only diff" literally.
-
-The sharper variant: a mid-plan `uv run perk init` run for one piece can also **revert deliberate
-divergences**. The recorded instance rewrote `.github/workflows/perk-run.yml` +
-`.perk/managed-state.toml` because the branch's source template differed from what main's tip
-deliberately pinned — a human state-update commit had reverted the materialized artifact without
-reverting the template. Rule: inspect the **whole** init diff, use git history to classify each
-unexpected row/file, and restore deliberate pins before committing.
+**Self-repo reconvergence is whole-repo — expect unrelated rows in the diff.** `perk init` rewrites
+the *entire* `.perk/managed-state.toml`, so any reconvergence run — even one scoped to a single key
+— also refreshes **pre-existing stale rows** (the `skills-manifest` row is the recorded instance):
+verify each is a legitimate `desired == live` refresh and commit it with the intended move. A
+mid-plan `uv run perk init` can also **revert deliberate divergences** (the recorded instance
+rewrote `.github/workflows/perk-run.yml` because the branch's template differed from a pin a human
+state-update commit made on main): inspect the **whole** init diff, classify each unexpected
+row/file via git history, and restore deliberate pins before committing.
 
 ## Gitignore untrack pattern
 
@@ -194,25 +204,14 @@ Rule of thumb: at a fail-open boundary, "fall back to empty" is only safe when t
 
 ## Committed-tracked managed delivery vs the cold-door symlink mirror
 
-When a managed convergence delivers content into a subdir, *how* linked worktrees inherit it depends
-on whether the delivery is **tracked content** or **symlinks**:
-
-- **Committed (tracked) managed subdir ⇒ no worktree mirror needed.** A convergence that writes
-  byte-stable content into a **committed, tracked** subdir (a directory of byte-stable defs, say)
-  is inherited by linked worktrees via plain `git checkout` — so it needs **no** cold-door worktree
-  symlink mirror. Contrast skills' `materialize_skills` `.agents/skills/` mirror, required **only**
-  because those are *symlinks* the cold door must repoint (see `cold-door-launch.md` /
-  `skill-bindings.md`). Choose committed-tracked delivery when worktree inheritance matters and the
-  content is byte-stable.
-- **Perk owns the WHOLE subdir: prune inside, never outside.** Such a convergence prunes stray files
-  *within* its owned subdir (stray files under `<owned>/`) but **never** touches sibling user
-  files outside it (a user's `<parent>/<mine>.md`) — and, reaffirming the idempotency
-  rule above, computes the **same change-list for `apply=True`/`apply=False`**.
-
-No realized committed-tracked instance remains: perk's agent defs, the last one, now ship in the
-npm package — `pi/subagents.md` § "Agent-def delivery". Retiring that delivery left a legacy
-directory in consumer repos, removed by a `doctor --fix` migration — § "Legacy-cleanup migrations
-model the retired writer's shape".
+A convergence that writes byte-stable content into a **committed, tracked** subdir is inherited by
+linked worktrees via plain `git checkout`, so it needs **no** cold-door worktree symlink mirror
+(skills' `materialize_skills` `.agents/skills/` mirror exists only because those are *symlinks* the
+cold door must repoint — `cold-door-launch.md`, `skill-bindings.md`); perk owns the WHOLE subdir —
+it prunes stray files inside, never touches sibling user files outside — and computes the same
+change-list for `apply=True`/`apply=False`. No committed-tracked instance remains: the agent defs
+ship in the npm package (`pi/subagents.md` § "Agent-def delivery") and the legacy directory is
+removed by the `--fix` migration in § "Legacy-cleanup migrations model the retired writer's shape".
 
 ## "doctor checks disk; selfcheck checks the prompt"
 
@@ -270,6 +269,12 @@ convergence's group name, falling back to `"repository"`); assigning a group the
 make it render unless that group is also in the render module's `GROUP_ORDER`
 (`src/perk/cli/commands/doctor/render.py`). Any new doctor groups will remain completely invisible in
 the condensed human text unless explicitly added there.
+
+The latent trap: "mirror an existing group" instructions inherit that group's own render status —
+the `bindings` and `providers` groups were unrendered for a long time before the skills-delivery
+fix added them. Extending `GROUP_ORDER` changes long-standing behavior for previously-invisible
+groups, so treat it as a deliberate cross-cutting change, not a drive-by. **Verify render
+visibility empirically with `perk doctor`, not just `--json`.**
 
 ## The optional `EnvCheck` tier (a non-fatal tool — #617)
 
@@ -353,8 +358,7 @@ refuses on an outdated Pi/Node, while `perk doctor` reports the `fail` row and d
 - **The `pi` row has side effects** (Pi 1.0.0): `pi --version` runs `cleanupManagedInstall()` and
   takes the global settings lock before its version branch. The probe runs in the invocation
   directory, so a directory-dependent version-manager shim could report a different Pi (untested).
-  A corrupt bundled floor crashes as `HostFloorError` rather than a typed refusal (routed follow-up
-  #2705 F3).
+  A corrupt bundled floor crashes as `HostFloorError` rather than a typed refusal.
 
 **The three shapes in `init/settings.py::_converge_settings`:**
 
@@ -443,10 +447,9 @@ onto the operator's global prefix — when a host bump is in flight, regenerate 
 PAT is invisible) — run `perk doctor workflow smoke-test --wait` before relying on remote legs (an
 age advisory is a routed code follow-up).
 
-**The extension-clone lifecycle is retired** (npm delivery supersedes it — see `distribution.md`),
-but the durable cross-cutting lesson it produced stands: **commit-freshness ≠ dependency
-installation** — a correct "nothing to install" check retirement left freshness uncovered until a
-separate fix. When retiring a bundled check, separate the concerns it covered.
+*Dated:* the extension-clone lifecycle is retired (npm delivery, `distribution.md`; § "The
+retire-an-orphaned-lifecycle recipe"); its lesson stands — **commit-freshness ≠ dependency
+installation**: when retiring a bundled check, separate the concerns it covered.
 
 ## Adding a NEW gated probe beside an existing gated check (#603)
 
@@ -454,75 +457,50 @@ The project-backed objective readiness probe (`check_project_readiness`, a SEPAR
 `check_readiness` — see `linear-backend.md`) wired two new doctor checks + a nullable init sub-report,
 and surfaced three reusable disciplines:
 
-- **A new gated probe beside an existing gated check ⇒ census ALL its monkeypatches.** When a new
-  probe fires inside a `team_ok` branch, **every** existing test that monkeypatches the *sibling*
-  readiness function to return `auth_ok && team_ok` AND drives a path that now reaches the new probe
-  must ALSO monkeypatch the new probe — else it falls through to the **real network probe** (an auth
-  error). This bit **four** pre-existing tests: the two ok/warn doctor tests *and* both `--fix` tests
-  (`run_doctor(fix=True, verify=True)` runs the checks under verify, so the probe fires there too).
-  The auth/team-FAILURE tests are unaffected (the probe is gated behind early-return) and are the
-  natural place to assert the new checks are **ABSENT** (monkeypatch the probe to `raise` to prove
-  it's never called).
-- **`report.healthy` is the WRONG assertion for "this check stays non-fatal."** A freshly-scaffolded
-  synthetic repo's doctor report is **not** globally healthy (unrelated fail-level checks exist), so
-  `report.healthy` can never prove a single warn-level check didn't fail the run. Assert
-  `all(c.status != "fail" for c in <the relevant group>)` instead — no `fail`-status check *within
-  the relevant group*.
+- **A new gated probe beside an existing gated check ⇒ census ALL its monkeypatches.** Every
+  existing test that monkeypatches the *sibling* readiness function to `auth_ok && team_ok` AND
+  reaches the new probe must ALSO monkeypatch it, else it falls through to the **real network
+  probe** — four pre-existing tests broke, both `--fix` tests among them (`run_doctor(fix=True,
+  verify=True)` runs the checks under verify). The auth/team-FAILURE tests are the natural place to
+  assert the new checks are **ABSENT** (monkeypatch the probe to `raise`).
+- **`report.healthy` is the WRONG assertion for "this check stays non-fatal."** A scaffolded
+  synthetic repo is never globally healthy (unrelated fail-level checks exist), so assert
+  `all(c.status != "fail" for c in <the relevant group>)` instead.
 - **Two-phase independent probe + honest-scope-proxy.** Projects-read and states-coverage are
-  **separate** `try/except` with **no early return between them** (a projects error must not
-  short-circuit the states phase — test it explicitly: the states query still issues and its result
-  populates). Write/create scope isn't probeable without a mutation, so a **non-mutating read is the
-  honest proxy** and the message says "read-access", not "scope verified". The new probe field is
-  **nullable and must NOT flip the report's `ok`** — project readiness runs only when
-  `auth_ok && team_ok` (the same gate as doctor; both planes early-return on auth/team failure, so a
-  degraded repo reports `project: None`).
+  **separate** `try/except` with **no early return between them** (test that the states query
+  still issues after a projects error). Write scope isn't probeable without a mutation, so a
+  **non-mutating read is the honest proxy** and the message says "read-access". The new probe field
+  is **nullable and must NOT flip the report's `ok`**; it runs only when `auth_ok && team_ok`, so a
+  degraded repo reports `project: None`.
 
 ## Marker-probe table craft (#2005) — retired precedent
 
-The doctor `subagent-compat` marker-probe table (source-literal presence probes over the installed
-pi-subagents tree) is **gone**: doctor never reads a borrowed package's source any more
-(`pi/subagents.md` § "Engine-coupling posture"), and `subagent-compat` is a plain version tripwire.
-The craft survives for any future probe over a surface perk *does* own or vendor:
+*Dated:* the doctor `subagent-compat` source-literal marker-probe table is gone — doctor never reads
+a borrowed package's source, and `subagent-compat` is a plain version tripwire (`pi/subagents.md`
+§ "Engine-coupling posture — public surfaces only"). Its craft, for any probe over a surface perk
+owns or vendors:
 
-- **Never pin a probe to a removal/cutover message** — upstream restoring the capability erases
-  the marker and the probe warns on every later release. Pin POSITIVE load-bearing surface
-  literals the guidance depends on.
-- **When no stable literal distinguishes a compatible surface, deliberately leave it unprobed**
-  with an intent comment at the table site.
-- **The exact-pin test (version + one full row) is what forces bumps to be deliberate,
-  reviewed re-verifies.**
+- Never pin a probe to a removal/cutover message — pin positive load-bearing surface literals.
+- Leave a surface no stable literal distinguishes unprobed, with an intent comment at the table.
+- The exact-pin test (version + one full row) forces bumps to be deliberate, reviewed re-verifies.
 
 ## Report-only checks gated on an installed package's version range (retired precedent)
 
-`_subagent_host_tools_check(root, *, environ=None)` (formerly in
-`src/perk/convergence/doctor/checks.py`) was the precedent for a report-only check that fires only
-while an installed, **unpinned** package sits in a known-affected version range — pi-subagents
-0.67.x's host-builtin intersection (`pi/subagents.md` § "History (dated)"). *Retired 2026-09*:
-pi-subagents 0.70.0 removed the intersection, so the check, its
-`_SUBAGENTS_HOST_INTERSECTION_AFFECTED` range and the `PI_FFF_MODE` launch injection were deleted
-(like the marker-probe table above, the shape outlives the instance). Four disciplines it settled:
+*Dated 2026-09:* the doctor check that fired only while pi-subagents 0.67.x's host-builtin
+intersection was installed — with its half-open affected range and the `PI_FFF_MODE` launch
+injection — was deleted when pi-subagents 0.70.0 removed the intersection (records:
+`docs/design/archive/pi-subagents-0.68.0-reverify.md` closed the range,
+`docs/design/archive/pi-subagents-0.70.1-reverify.md` retired it). Its four disciplines:
 
-- **Gate on a strict `X.Y.Z` against a half-open `[lower, upper)` range**
-  (`_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0", "0.68.0")`; `_parse_strict_semver`). A
-  non-semver or unreadable version ⇒ `info` "not evaluated", **never** a mismatch — and the
-  sibling `subagent-compat` check owns the "unreadable manifest" complaint, so there is no
-  duplicate warn. The range opened with an open upper bound and was closed by the 0.68.0
-  re-verify; a closed range's two `ok` arms must stay distinguishable (below the range: no
-  intersection at all; at/above the fix: the intersection runs with a corrected census) so an
-  operator reading doctor learns which world they are in.
-- **Mirror the foreign extension's OWN precedence** (pi-fff: CLI flag → env → config file →
-  default, minus the unobservable CLI flag): a valid `PI_FFF_MODE` wins and an invalid value falls
-  through to the file exactly as pi-fff's own parser ignores it; the env arm reports "every
-  perk-launched AND warm session" while the file arm reports only warm/bare `pi` (perk's injected
-  env beats the file). Reproducing precedence *approximately* would make doctor disagree with the
-  tool it is diagnosing.
-- **An `environ: Mapping[str, str] | None` seam defaulting to `os.environ` at call time**, paired
-  with an autouse `monkeypatch.delenv("PI_FFF_MODE")` in `tests/conftest.py` (both gone with the
-  check) — a check reading the developer's real shell otherwise lets an exported value flip
-  unrelated doctor tests.
-- **Parity between the doctor's literal detail and a launch-seam constant is pinned by a test,
-  not an import** (`tests/test_doctor.py` asserted the injected `FFF_MODE_ENV` value appeared in
-  the detail): the `convergence.doctor` package deliberately has no edge into `perk.run.launch`.
+- Gate on a strict `X.Y.Z` against a half-open `[lower, upper)` range; a non-semver or unreadable
+  version ⇒ `info` "not evaluated", never a mismatch; keep a closed range's two `ok` arms
+  distinguishable (below the range vs at/above the fix).
+- Mirror the foreign tool's OWN precedence exactly — an approximation makes doctor disagree with
+  the tool it diagnoses.
+- Take an `environ` seam defaulting to `os.environ` at call time, paired with an autouse `delenv`
+  in `tests/conftest.py`, so a developer's exported value never flips unrelated doctor tests.
+- Pin parity between a doctor detail and a launch-seam constant by a test, not an import
+  (`convergence.doctor` has no edge into `perk.run.launch`).
 
 ## Extending a report-only advisory warn silently flips fixture arms
 
@@ -538,25 +516,23 @@ nudge, grep for every fixture that plants the artifact the nudge inspects.
 
 ## Managed pieces and checks that act on files OUTSIDE the repo (the user's agent dir)
 
-Some pieces read or rewrite files inside the user's Pi agent directory rather than the repo: the
-`subagent-package-scope` check's user-scope `settings.json` read, and pi-subagents' native
-`extensions/subagent/config.json` (the retired `subagent-bridge-config` check's user-scope
-`settings.json` read and the retired `subagent-host-tools` check's `pi-fff.json` read were
-others). Three rules govern them:
+Some checks read files inside the user's Pi agent directory rather than the repo. The live
+instances are the `subagent-package-scope` check's user-scope `settings.json` read and
+pi-subagents' private `extensions/subagent/config.json`, which perk observes and refuses but never
+converges (`workflow/borrowed-packages.md` § "Borrowed-engine stances"; the refusal surface is in
+`workflow/mergeability-and-conflict-resolution.md`). *Dated:* the `subagent-bridge-config` and
+host-tools reads and the `subagent-worktree-default` convergence — the one worked example of
+*writing* there — are retired. Three rules govern them:
 
 - **Resolve the user scope through the ONE shared resolver `launch_stage` also consumes** —
   `src/perk/substrate/config.py::launch_pi_agent_dir` (env `PI_CODING_AGENT_DIR` → main-checkout
   `[pi] agent_dir` → `~/.pi/agent`; `None` on an unresolvable home; `ConfigError` /
   `TOMLDecodeError` propagate and each caller keeps its own posture). Never a parallel
   `Path.home()`/env copy: the check must act on exactly the store a perk session's engine reads.
-- **The retired `subagent-worktree-default` `ManagedConvergence`** was the one worked example of
-  *writing* there (rewrite ONE key in place via atomic replace, never create the file, only a
-  genuinely missing path counts as compatible — every other unreadable shape is the loud arm,
-  `workflow/broad-catch-narrowing.md`). It is **gone**: perk now observes-and-refuses pi-subagents'
-  private `config.json` and never converges it (`workflow/borrowed-packages.md` § "Borrowed-engine
-  stances"; the refusal surface is in `workflow/mergeability-and-conflict-resolution.md`). The
-  read-side disciplines still apply to any check that inspects the user's agent dir — the
-  `subagent-package-scope` check's user-scope `settings.json` read is the live instance.
+- **Writing there: rewrite ONE key in place via atomic replace, never create the file**, and treat
+  only a genuinely missing path as compatible — every other unreadable shape is the loud arm
+  (`workflow/broad-catch-narrowing.md`). (The retired `subagent-worktree-default` convergence was
+  the instance.) The read-side disciplines apply to any check that inspects the user's agent dir.
 - **Doctor `--fix` catches `UserFacingCliError` from a managed `converge(True)`** and records
   `"<check>: <message>"` on `fix_errors` instead of aborting, so a refusal on one piece never
   blocks the rest of the repair pass.
@@ -568,8 +544,8 @@ init package-identity helper against the constant dirname (the borrowed-entry in
 in a test). Model none/user/project/both explicitly — the first cut's `ok` arm claimed "project
 scope only" when neither scope listed it. `Path.absolute()`-normalize both paths (the resolver
 preserves a relative `PI_CODING_AGENT_DIR`); a project `autoload: false` entry never counts (pi
-keeps both entries of such a delta). Planning lesson: specify a state machine and a cause
-vocabulary for a report-only check up front.
+keeps both entries of such a delta). Specify a report-only check's state machine and cause
+vocabulary up front.
 
 Such pieces force **hermetic isolation in EVERY test that reaches them** — not just the
 user-scope arms — or a developer's real agent dir flips unrelated assertions (and a test can poison
@@ -641,7 +617,7 @@ a symlinked `README.md` or `docs/` ancestor let `init`/`doctor --fix` overwrite 
 **The rule:** check the leaf and each owned ancestor link-blind, confirm the root `resolve()`s where
 expected, open with `O_NOFOLLOW` after an `lstat` check, then `fstat` for a regular file (with
 `O_NONBLOCK`, so a swapped-in FIFO cannot hang the open) — realized in `src/perk/library/lock.py`.
-`src/perk/delivery/oplock.py` still follows symlinks (routed, #2584).
+`src/perk/delivery/oplock.py` still follows symlinks (a known gap).
 
 ### "Refused before the lock, zero writes" has a structural limit
 
@@ -691,48 +667,34 @@ The `register_with_aliases` helper in `src/perk/cli/alias.py` is strictly design
 registration. Attempting to pass extra positionals (e.g., trying to register multiple commands in a
 single call) will fail loudly at import time.
 
-The latent trap: "mirror an existing group" instructions inherit that group's own render status —
-the `bindings` and `providers` groups were unrendered for a long time before the skills-delivery
-fix added them. Extending `GROUP_ORDER` changes long-standing behavior for previously-invisible
-groups, so treat it as a deliberate cross-cutting change, not a drive-by. **Verify render
-visibility empirically with `perk doctor`, not just `--json`.**
-
 ## The retire-an-orphaned-lifecycle recipe
 
-When a substrate lifecycle module is superseded and you remove it (the recorded instance: the
-git-clone extension-delivery lifecycle, superseded by the npm install — see `distribution.md`),
-this is the reusable recipe:
+*Dated:* when the git-clone extension-delivery lifecycle was superseded by the npm install
+(`distribution.md`), its removal settled a reusable recipe:
 
-- **Relocate the one surviving primitive to its dependency's home — don't keep the dead module
-  alive for it.** `consumer_git_clone_root` moved **verbatim** into `settings.py` **beside its sole
-  dependency `GIT_PACKAGE`**, re-exported through the `init/__init__.py` facade so the
-  `init.consumer_git_clone_root` attribute path keeps resolving for every consumer unchanged. The
-  facade is a real surface to scrub: drop the dead module's whole import block + its `__all__`
-  entries, re-add the relocated survivor to the settings import — **RUF022 isort-alphabetical in
-  BOTH the import list and `__all__`** — delete the orchestrator helper + its call site, and **fix
-  the package docstring** (it enumerated the now-gone submodule + a now-gone monkeypatch target).
+- **Relocate the one surviving primitive beside its dependency and scrub the facade.**
+  `consumer_git_clone_root` moved verbatim into `settings.py` beside its sole dependency
+  `GIT_PACKAGE`, re-exported through the `init/__init__.py` facade so the attribute path keeps
+  resolving; scrub the dead module's imports, `__all__` entries and the package docstring —
+  RUF022 isort-alphabetical in BOTH the import list and `__all__`.
 - **Removing a doctor check is a three-site edit:** the `_xxx_check` def in `checks.py`; the
-  import + `__all__` entry + `checks.append(...)` registration in `doctor/__init__.py` (reword the
-  grouping comment that paired it with a sibling); and the `elif check.name == "..."` fix branch
-  in `fixes.py`. Keep the sibling check (`extension-install`) intact.
-- **Dead substrate primitives go last, after proving sole-consumption.** `git.clone` /
-  `reset_hard` / `head_sha` / `ls_remote_sha` were verified (repo-wide grep) consumed **only** by
-  the deleted module → removed with their tests. **Shared** primitives (`git.fetch`, used by
-  `worktree.py`) and shared fixtures **stay** — prove sole-consumption before deleting.
-- **The `_MIGRATIONS` forward-migration seam (a filesystem `rmtree`).** `doctor --fix` migrates a
-  former consumer forward via `_remove_orphaned_git_clone(root)` appended to the `_MIGRATIONS`
-  tuple (`src/perk/convergence/doctor/fixes.py`): forward-only, filesystem-only on a gitignored path
-  (no network), returning `(changes, errors)` so a failed `shutil.rmtree` lands on
-  `report.fix_errors` **loudly** (`OSError` → append to errors); a
-  `run_doctor(fix=True, verify=False)` test exercises it without seeding a failing check. The
-  unconditional-run + idempotency requirements are the `## Doctor migration idempotency rule`
-  directly below.
+  import + `__all__` entry + `checks.append(...)` in `doctor/__init__.py`; the fix branch in
+  `fixes.py`.
+- **Dead substrate primitives go last**, after a repo-wide sole-consumption proof — shared
+  primitives (`git.fetch`) and shared fixtures stay.
+- **The forward migration is a `_MIGRATIONS` entry** (`_remove_orphaned_git_clone`):
+  forward-only, filesystem-only on a gitignored path, returning `(changes, errors)` — the full
+  contract is § "Doctor migration idempotency rule".
 
 ## Doctor migration idempotency rule
 
-`_MIGRATIONS` run **unconditionally on every `--fix`** (not gated on a failing check), so each
-migration must be **idempotent** — it must return `[]` once converged. Failing idempotency breaks
-the `again.fixed == []` idempotency tests.
+`_MIGRATIONS` (`src/perk/convergence/doctor/fixes.py`) is the forward-migration contract:
+
+- They run **unconditionally on every `--fix`** — not gated on a failing check, even when every
+  check is green.
+- Each must be **idempotent**: no changes once converged (the `again.fixed == []` tests).
+- Each returns `(changes, errors)`; an `OSError` lands on `report.fix_errors` loudly.
+- A `run_doctor(fix=True, verify=False)` test exercises a migration without seeding a failing check.
 
 ## Cross-references
 
@@ -748,7 +710,15 @@ the `again.fixed == []` idempotency tests.
   `lstat` + `O_NOFOLLOW` + `fstat` lock open
 - `docs/learned/workflow/git-substrate.md` — the ignore-probe mechanics (name-only, beyond-a-symlink
   fatal)
-- `src/perk/substrate/config.py` — `launch_pi_agent_dir` (the one agent-dir precedence); `src/perk/convergence/doctor/checks.py` — `_subagent_host_tools_check` (the version-range-gated report-only precedent), `_subagent_compat_check`
+- `src/perk/substrate/config.py` — `launch_pi_agent_dir` (the one agent-dir precedence);
+  `src/perk/convergence/doctor/checks.py` — `_subagent_compat_check`,
+  `_subagent_package_scope_check`, `_stage_models_check`
+- `src/perk/convergence/doctor/__init__.py` — `run_doctor`, `_build_checks` (the live check census)
+- `src/perk/convergence/write_admission.py` — `write_refusal`
+- `src/perk/convergence/doctor/legacy_agent_defs.py` — the legacy agent-def classification shared
+  by its check and its `--fix` migration
+- `docs/design/archive/pi-subagents-0.68.0-reverify.md` +
+  `docs/design/archive/pi-subagents-0.70.1-reverify.md` — the retired version-gated check's records
 - `docs/learned/workflow/cold-door-launch.md` — the launch side of the agent-dir precedence; `docs/learned/workflow/broad-catch-narrowing.md` — classifying every read outcome of a file perk does not own
 - `tests/test_doctor.py` — `test_every_required_capability_has_a_doctor_check`
 - `tests/test_init_t5.py` — `test_cli_idempotent_second_run`
@@ -756,6 +726,6 @@ the `again.fixed == []` idempotency tests.
 - `docs/learned/pi/extension-api.md` — why selfcheck must be a command handler
 - `docs/learned/workflow/linear-backend.md` — the full Linear readiness probe shape
 - `docs/learned/workflow/distribution.md` — the npm extension-delivery lifecycle that superseded the git-clone lifecycle
-- `src/perk/convergence/env.py` (`_check_pi`, `_check_node`), `shared/host-floor.yaml`,
+- `src/perk/convergence/env.py` (`_check_pi`, `_check_node`, `repair_pi`), `shared/host-floor.yaml`,
   `src/perk/convergence/init/settings.py` (`_converge_settings` and its three shapes)
 - `docs/learned/pi/tool-loadout.md` — the `defaultTools` resolution the seed must respect
