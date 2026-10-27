@@ -33,9 +33,9 @@ the session-data path guards in both planes.
 - External-SDK policy registries pair compile-time key exhaustiveness with runtime unknown-field
   findings; adoption of a corpus guard includes the normalization sweep — "Compile-time census
   pins" and "Guard-adoption ripple".
-- Registration stays in `pi/` (Rule E), raw tool registration in `pi/perkTool.ts` (Rule I),
-  writes behind `atomicWriteFileSync`; run the repo-wide guards while iterating — "Registration
-  and write seams".
+- Registration stays in `pi/` or the two entry roots, with a frozen shrink-only legacy census
+  (Rule E); raw tool registration in `pi/perkTool.ts` (Rule I); writes behind
+  `atomicWriteFileSync`; run the repo-wide guards while iterating — "Registration and write seams".
 - Import-graph guards fail on unresolvable specifiers, freeze birth censuses, and pin direction
   prefix arrays to literal lists — "Import-graph guard vacuity holes"; docstring-only matches and
   "everything found was excluded" prove nothing — "Guards that pass while proving nothing";
@@ -273,11 +273,16 @@ seam to stay hermetic without weakening production behavior.
 
 `extension/importDirectionGuard.test.ts` carries two seam rules beside the direction rules:
 
-- **Rule E** — Pi registration tokens (`pi.on(`, `pi.registerCommand(`, …) appear only under `pi/`
-  or in the approved registrar files (`index.ts`, `workerMain.ts`; the bootstrap entry still
-  listed though it registers nothing — routed follow-up #2705 F10). Never rename the `pi`
-  parameter to slip the token regex. Keep decisions pure in `substrate/`/`worker/` and register
-  through a generic `pi/` factory — `pi/v1/toolCallRefusal.ts::toolCallRefusalHook(decision)` over
+- **Rule E** — Pi registration tokens (`pi.on(`, `pi.registerCommand(`, … — raw text,
+  whitespace-tolerant, comments included) appear only in three tiers: under `pi/` (where every NEW
+  registration goes), in the two entry roots `index.ts` + `workerMain.ts` (approved by role), or in
+  the `LEGACY_REGISTRANTS` census of seven frozen literals — `substrate/agentScratch.ts`,
+  `substrate/bindingDelivery.ts`, `substrate/command.ts`, `substrate/toolGating.ts`,
+  `surfaces/surfaces.ts`, `vendor/btw/btw.ts`, `vendor/whimsical/whimsical.ts`. The census is
+  shrink-only: a listed file that stops registering must leave it in the same change (the `stale`
+  arm fails otherwise), and no file may join. Never rename the `pi` parameter to slip the token
+  regex. Keep decisions pure in `substrate/`/`worker/` and register through a generic `pi/`
+  factory — `pi/v1/toolCallRefusal.ts::toolCallRefusalHook(decision)` over
   `worker/modelCallPolicy.ts::codemodeCallRefusal` is the reusable shape; worker → `pi/` imports
   are allowed.
 - **Rule I** — only `pi/perkTool.ts` calls `pi.registerTool(`. The source-slice tripwire in

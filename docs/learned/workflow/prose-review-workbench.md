@@ -14,9 +14,9 @@ surfaces beside them evolve.
 
 ## Distillation
 
-- The launcher contains every URL-derived read, passes websockets through only under the current
-  no-websocket-route posture, rebuilds from disk, and has one `dist/` writer — "Launcher security
-  and the development loop".
+- URL-derived reads are one resolve→contain→`is_file`→read chain per request (a check-to-open
+  symlink swap is a named residual); websockets pass only under the no-websocket-route posture;
+  rebuild from disk; one `dist/` writer — "Launcher security and the development loop".
 - Catalog failures are fail-closed by result trustworthiness; `sync` is whole-projection (sweep
   foreign `unmapped-unit` drift, re-measure count pins from the catalog); a new governed tool bumps
   three pins under the opt-in suites `run_ci` never runs; a prose-free perk registration is
@@ -45,12 +45,19 @@ surfaces beside them evolve.
 
 ## Launcher security and the development loop
 
-The launcher-facing web layer treats URL paths as untrusted input. The whole contained-read chain
-belongs to one refusal boundary: resolve both candidate and root, prove containment, verify a regular
-file, and read it. `Path.resolve()` itself can reject an embedded NUL, so guarding only the final
-read is incomplete. The exception-taxonomy rationale lives in
-`workflow/broad-catch-narrowing.md`; the owning implementation is
-`packages/perk-dev/src/perk_dev/prose_review/web.py`.
+The launcher-facing web layer treats URL paths as untrusted input. The contained-read helper
+(`read_contained`) is a **sequential path-checked chain** inside one refusal boundary: resolve the
+dist root and require it under the resolved repo root, resolve the candidate and require it under
+the dist root, then separately `is_file` and `read_bytes`. The single boundary catches
+`Path.resolve()`'s own NUL rejection (guarding only the final read would be incomplete), but the
+chain is NOT descriptor-authoritative: a concurrent symlink replacement of a path component
+between the containment check and the open is the **named residual** — a race that raises
+degrades to `None`, one that succeeds reads the swapped target. Contrast § "EditWorkspace
+invariants", where the canonical-source read is descriptor-authoritative (no-follow open →
+`fstat` → read from the same descriptor) precisely to close that race; the dist tree is the
+workbench's own build output under the one-writer rule below, which bounds the exposure. The
+exception-taxonomy rationale lives in `workflow/broad-catch-narrowing.md`; the owning
+implementation is `packages/perk-dev/src/perk_dev/prose_review/web.py`.
 
 The ASGI host guard deliberately passes websocket scopes through because the application currently
 has no websocket route. That is a posture, not generic websocket security: adding any websocket

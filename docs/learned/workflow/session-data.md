@@ -268,9 +268,12 @@ any future reclaim/cleanup feature:
 Key policies:
 
 - **Registry-derived terminal set**: `terminal_stage_ids()` (`src/perk/state/gc.py`) computes the
-  successor-less stages from the bundled registry (currently `{gist-save, learn, audit}`),
-  degrading to `frozenset()` with a stderr warn on `RegistryError` — never hardcode stage names
-  into GC-like policies; a graph change must flow through automatically.
+  terminal set as every `shared/registry.yaml` stage with empty `successors` — five at this
+  writing (`gist-save`, `learn`, `audit`, `objective-refine`, `stack-review`), a dated census whose
+  live authority is the registry (`rg -n 'successors: \[\]' shared/registry.yaml`), never this doc
+  and not the function's docstring (which still names the first three — known drift, a code
+  lead). It degrades to `frozenset()` with a stderr warn on `RegistryError` — never hardcode stage
+  names into GC-like policies; a graph change must flow through automatically.
 - **Conservative eligibility ladder**: current-run protection (`PERK_RUN_ID` base-ULID match covers
   fork children) → terminal-stage rule (requires a *consumed* handoff; unreadable handoff ⇒ never
   terminal-pruned, age rule only) → age rule (ULID self-date, `st_mtime` fallback for non-ULID

@@ -397,14 +397,17 @@ instance, "ALWAYS" labels included; prose awareness does not enforce itself:
   Recorded evidence lands on a carrier written *before* `/submit` — the implementation commit
   message (PR-scoped), a plan-issue comment, or a tracked artifact the plan names — never the PR
   body, where hand-added content does not survive a republish.
-- **Carrier lifetimes (#2520).** perk's squash land replaces the body with `<title>\n\nCloses #N`
-  (`perk/delivery/landing.py::squash_commit_message`), so branch commit bodies are invisible to
-  `git log main`, `git log -S` and `perk-dev changelog`. PR body = until the next republish;
-  branch commit message = PR-scoped forever; plan-issue comment = durable + backend-visible;
-  tracked artifact = durable + greppable. Verify a carrier claim at BOTH ends of the delivery path
-  (`_compose_pr_body` and `squash_commit_message`); the squash-title composition is
-  `objective-store.md` § "Node↔plan unification is one `ObjectiveRef | None` capability". For a
-  docs-only node the natural evidence homes are the implementation commit message and the node's
+- **Carrier lifetimes (#2520).** perk's squash land replaces the body with `<title>\n\n<footer>`
+  (`src/perk/delivery/landing.py::squash_commit_message`, shared by the incremental land engine and
+  the stacked singleton's direct squash): the footer is `Closes #N` on GitHub (the autoclose
+  target) and a plain `Plan: <id> — <url>` line on any other backend — no commit magic words;
+  perk closes the plan issue explicitly at land — so on every backend branch commit bodies are
+  invisible to `git log main`, `git log -S` and `perk-dev changelog`. PR body = until the next
+  republish; branch commit message = PR-scoped forever; plan-issue comment = durable +
+  backend-visible; tracked artifact = durable + greppable. Verify a carrier claim at BOTH ends of
+  the delivery path (`_compose_pr_body` and `squash_commit_message`); the squash-title composition
+  is `objective-store.md` § "Node↔plan unification is one `ObjectiveRef | None` capability". For
+  a docs-only node the natural evidence homes are the implementation commit message and the node's
   reconciled description — never "the PR description" (#2504, #2506).
 - **Recurrence tally: prose is not stopping it.** Plans put evidence in the PR body a SIXTH time
   (#2748, #2784, after #2549/#2541/#2543 and #2504/#2506) even with this section in the planner's

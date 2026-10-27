@@ -11,9 +11,9 @@ cluster: plan-lifecycle
 - `plan-ref.json` plays TWO roles keyed on cwd: a mutable selector at the repo root, a durable
   binding in a `plan-<N>` worktree — the fix shape is gating only, no clearing — "Two-role
   duality of `plan-ref.json`".
-- ANY foreign `plan save` executed with a worktree cwd hijacks that worktree's binding (backend
-  match notwithstanding; surfaces late, at /submit); recovery rebuilds from the canonical
-  plan-header — "The plan-ref clobber hazard".
+- Selector writes anchor to the MAIN root (`write_plan_ref(main_repo_root(…))`, §8.1): a
+  worktree-cwd foreign `plan save` churns that selector, never the worktree's binding; the #621
+  hijack is closed, its recovery fits any clobbered binding — "The plan-ref clobber incident".
 - Growing a stored header byte-compatibly is a five-step recipe (declare LAST, emit
   conditionally/stripping, grow the merge allowlist, pin absent ≡ null, prove with an omission
   test) — "The additive stored-field recipe".
@@ -140,30 +140,29 @@ caught mechanically** (the parity field census forces writer+reconstructor toget
 goldens/snapshots fail loudly). The pre-existing tripwires worked as designed — **budget for the
 sweep, don't fear it**.
 
-## The plan-ref clobber hazard — any foreign `plan save` with a worktree cwd (#621)
+## The plan-ref clobber incident (#621) — closed by the main-root selector anchor
 
-**Any `plan save` for a *different* plan executed with an active worktree as cwd hijacks that
-worktree's `plan-ref.json` binding** — backend match notwithstanding. First seen cross-backend
-(an objective-linked `perk plan save --objective-id <uuid> --node-id <id>` overwrote the
-worktree's GitHub plan-ref with a Linear node-issue ref, so `/submit` failed with
-`GitHub issue ids are numeric; got 'PER-15'`), but since **reproduced same-backend**
-(GitHub→GitHub) — the hazard is the worktree-cwd save itself, not the backend mismatch.
+**The rule.** `_plan_save_impl` (`src/perk/cli/commands/plan/save_cmd.py`) writes the selector
+via `cache.write_plan_ref(main_repo_root(repo_root), …)` (contracts §8.1): a `plan save` executed
+with a worktree cwd updates the **main-root selector** and never touches that worktree's own
+`plan-ref.json` binding. Root-invoked saves are byte-identical (main root == invocation root).
+The only remaining worktree-cwd effect of a foreign save is selector churn at the main root,
+which self-heals at the next save.
 
-The failure surfaces **late**: nothing reads the binding until the submit boundary, so the
-clobber is discovered only after all code/tests/docs are committed (same-backend symptom:
-`/submit` derives the wrong branch, e.g. "No commits between main and plan-<other>").
+**The incident (dated history).** Before the anchor, any `plan save` for a *different* plan
+executed with an active worktree as cwd hijacked that worktree's binding — first seen
+cross-backend (an objective-linked save overwrote a GitHub plan-ref with a Linear node-issue ref;
+`/submit` failed with `GitHub issue ids are numeric; got 'PER-15'`), then reproduced same-backend
+(`/submit` derived the wrong branch — "No commits between main and plan-<other>"). It surfaced
+**late** because nothing reads the binding until the submit boundary.
 
-Validated recovery recipe: `plan-ref.json` is **gitignored** (no `git restore`); rebuild it from
-the plan issue's canonical `perk:metadata-block:plan-header` (`gh issue view <N>` →
-`objective_id`, `base`, labels, `consumed_learn`), then `/submit` succeeds. **Lesson: never run a
-`plan save` for another plan inside an active worktree — it hijacks the active plan-ref.**
-
-> **Update (the selector-anchor fix shipped).** `_plan_save_impl` now writes the selector via
-> `cache.write_plan_ref(main_repo_root(repo_root), …)` (contracts §8.1), so a worktree-cwd save
-> updates the **main-root selector** and never touches the worktree's own binding — the hijack
-> mechanism above is closed (the account stays as the incident record). The remaining
-> worktree-cwd effect of a foreign save is selector churn at the main root, which self-heals at
-> the next save.
+**Recovery for ANY clobbered binding.** Whatever the cause — this incident, or the
+`--worktree NAME` resolver regression in § "Non-default `base` branch" (the same family) — the
+validated recipe holds: `plan-ref.json` is **gitignored** (no `git restore`); rebuild it from the
+plan issue's canonical `perk:metadata-block:plan-header` (`gh issue view <N>` → `objective_id`,
+`base`, labels, `consumed_learn`), then `/submit` succeeds. **Lesson: a cwd-keyed two-role file
+needs each writer anchored to the role it means** — selector writes to the main root, binding
+writes only by the positioner (§ "The two-roots rule").
 
 ## Non-default `base` branch — resolve-once-then-pin (#636)
 
@@ -192,7 +191,7 @@ the plan issue's canonical `perk:metadata-block:plan-header` (`gh issue view <N>
   recover the base into a **separate local variable** (`base_ref`/`plan_base`), keep the returned
   `plan_ref = None`. **Lesson: when threading a new read through a shared resolver, never reuse the
   returned struct's field as scratch — use a dedicated local.** (Same clobber **family** as the
-  cross-backend `plan save` hazard below — cross-linked.)
+  worktree-cwd `plan save` incident above — cross-linked.)
 - **Residual cleanup flagged.** Three `review-*.md` files (`review-correctness.md`,
   `review-tests.md`, `review-maintainability-docs.md`) leaked onto `main` because adversarial
   reviewers were spawned with `output:` paths into the worktree root and a later `git add -A` swept

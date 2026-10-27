@@ -13,8 +13,9 @@ worktree-batch command.
 
 ## Distillation
 
-- On PR-state lookup failure (any `GitHubError`, `state is None`, `pr is None`): SKIP the
-  worktree, never delete — an offline run is a safe no-op — "Uncertainty ⇒ skip, never delete".
+- On PR-state lookup failure (any `IssueBackendError` — backend resolution or `get_plan` —
+  `state is None`, `pr is None`): SKIP the worktree, never delete — an offline run is a safe
+  no-op — "Uncertainty ⇒ skip, never delete".
 - `--force` bypasses only LOCAL safety guards; it never relaxes the MERGED requirement — push
   the decision into a pure classifier, keep I/O in the loop — "`--force` semantics are split".
 - Batch ops split gather (parallel classify) from act (parallel removal + batched deletes) —
@@ -53,9 +54,14 @@ paths (see `session-data.md`).
 
 ## Uncertainty ⇒ skip, never delete
 
-Per-worktree PR-state lookup goes through `github.get_plan(number=...)`. Any `GitHubError`,
-`state is None`, or `pr is None` **skips** that worktree. Consequence: the command does **not** call
-`require_github`, so a fully-offline run is a safe no-op that skips everything — no hard auth gate.
+Per-worktree PR-state lookup goes through the resolved issue backend's `get_plan(issue_id=...)`
+inside `_gather_facts`. Any `IssueBackendError`, `state is None`, or `state.pr is None` **skips**
+that worktree; the stranded-branch twin `_gather_branch_pr_state` yields `None` (⇒ keep) on the
+same three conditions. The backend is resolved once per sweep, and only when a PR-gated candidate
+(a registered worktree or a stranded branch) exists: a resolution `IssueBackendError` skips every
+target with `could not determine PR state (...)`, while a residue-only sweep needs no backend at
+all. Consequence: the command does **not** call `require_github`, so a fully-offline run is a safe
+no-op that skips everything — no hard auth gate.
 
 ## `--force` semantics are split
 
