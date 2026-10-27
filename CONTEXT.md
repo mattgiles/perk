@@ -864,3 +864,91 @@ The library's executing git operations, run without global/system config and wit
 disabled, so nothing a cloned tree or the user's global/system config selects can execute; env
 config and a checkout's own repo-local config remain trusted (unaudited).
 _Avoid_: sandboxed git, safe clone
+
+### pi-durable v2
+
+**Execution** (pi-durable v2):
+One v2 workflow instance, identified by its door-minted execution id, owning one Durable store
+under `.perk/executions/<execution-id>/`, that store's subject snapshots, and every record written
+about it.
+_Avoid_: run (a Durable run is one input-to-answer sequence), session, workflow instance
+
+**Assignment**:
+Bounded work admitted against one subject under one capability set, identified by kind + role +
+subject digest + capability-set digest; the unit a report is validated against.
+_Avoid_: task (Durable's unit), job, lane
+
+**Role**:
+The label that tells apart assignments of the same kind over the same subject (the fixture's
+reviewers `a` and `b`); part of the assignment identity, never a capability.
+_Avoid_: reviewer name, lane id, persona
+
+**Attempt** (of an assignment):
+One concrete try at an assignment, numbered by a 1-based ordinal under the assignment id. Distinct
+from the report-wave attempt receipts pi-subagents writes per spawn.
+_Avoid_: retry, run, attempt receipt
+
+**Subject**:
+The content-addressed digest of exactly what an assignment judges, of a kind declared per execution
+kind — for the fixture review the git tree oid at the tracked ref, so a same-tree commit is the same
+subject; an outcome or decision authorizes only its exact subject.
+_Avoid_: target, revision, head, commit (unless the kind is `git-commit`)
+
+**Subject snapshot**:
+The immutable read-only materialization of a subject under `<store>/subjects/<digest>/`, verified
+against its tree-derived sha256 manifest; the only tree a worker reads.
+_Avoid_: checkout, worktree, copy
+
+**Observation** (pi-durable v2):
+A recorded, immutable read of an authority fact — the tracked ref resolved to commit, tree and
+manifest digest at a time — taken outside any commit and passed into the reconcile commit it
+authorizes; a new observation of an unchanged subject invalidates nothing.
+_Avoid_: poll, refresh, watch, snapshot (the materialization)
+
+**Accepted outcome**:
+The immutable record written when a typed report validates against its assignment (schema, verified
+subject digest, capability set, attempt); accepted once per key, corrections appended.
+_Avoid_: result, task outcome, done
+
+**Pending decision**:
+A persisted record asking a human for one of its allowed actions over an exact subject, naming its
+actor; open until a reply consumes it, or cancellation or supersession closes it.
+_Avoid_: approval request, prompt, question, waiter
+
+**Reply** (pi-durable v2):
+The semantic operation that consumes a pending decision — observe, then one reconcile commit that
+returns the existing receipt for a replayed reply or else records the reply under its op id,
+validates identity, freshness, cancellation and supersession, consumes the decision and creates
+exactly one continuation.
+_Avoid_: answer, approval, callback
+
+**Continuation** (pi-durable v2):
+The single conversation-owned, background Durable task a reply creates to carry a decision forward;
+its id is the reply's receipt. Distinct from the delivery glossary's **Continuation manifest**.
+_Avoid_: follow-up, resume task, waiter
+
+**Reconcile commit**:
+The one commit shape every v2 write uses — look up or record the input under its operation id, run
+the pure kernel `reconcile(records) → actions` over in-transaction records, apply the actions —
+atomically; the step task is the input-less case.
+_Avoid_: transaction, save, update, mutation
+
+**Store owner lock**:
+The exclusive claim a v2 host takes before storage opens by creating the next epoch directory
+`<store>/owner/<epoch>/` with an atomic rename; the highest epoch holds the store while its process
+is live and unreleased, so a live owner refuses the next host with `owner_busy` and a dead or
+released one simply lets the next epoch be created. Distinct from the delivery
+glossary's **Execution lock**.
+_Avoid_: execution lock, db lock, lease
+
+**Owner epoch**:
+The integer naming a store-owner-lock directory — one more than the highest existing epoch at
+acquisition, unique and strictly increasing because the directory name is the claim; fencing of
+effects left by earlier owners keys on it.
+_Avoid_: generation, version, term
+
+**Wait reason**:
+The closed-vocabulary domain reason a quiescent execution is not progressing — `pending_decision`,
+`unmet_prerequisite`, `assignment_incomplete`, `repair_required`, `parked`, `blocked`, `sleeping`,
+`cancelled`, `completed` — derived from records plus `inspect()`, never a stored flag.
+_Avoid_: status, blocked reason (Durable's derived task state), idle
