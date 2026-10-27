@@ -444,8 +444,7 @@ included, and only under fix AND verify; a failing `node` row blocks it; anythin
 the install lands on `fix_errors`. Consequence: a worktree `doctor --fix` installs the adopted set
 onto the operator's global prefix — when a host bump is in flight, regenerate managed artifacts with
 `uv run perk init --no-interactive` instead. `runner-pat-secret` checks presence only (an expired
-PAT is invisible) — run `perk doctor workflow smoke-test --wait` before relying on remote legs (an
-age advisory is a routed code follow-up).
+PAT is invisible) — run `perk doctor workflow smoke-test --wait` before relying on remote legs.
 
 *Dated:* the extension-clone lifecycle is retired (npm delivery, `distribution.md`; § "The
 retire-an-orphaned-lifecycle recipe"); its lesson stands — **commit-freshness ≠ dependency
