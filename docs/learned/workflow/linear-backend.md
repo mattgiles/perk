@@ -6,46 +6,40 @@ cluster: backends-and-integrations
 
 # The Linear issue backend
 
-Objective #252 Phase 2/3 built the Linear backend in layers: the httpx GraphQL client
-(`src/perk/backends/linear/client.py`), the `LinearIssueBackend` adapter
-(`src/perk/backends/linear/backend.py`; both originally flat `linear.py` / `linear_backend.py`
-modules, since folded into the `src/perk/backends/linear/` package), dual-encoding
-metadata markers in `src/perk/plan.py` / the `src/perk/objective/` package, init/doctor readiness
-wiring, and backend-aware prompt rendering. Backend-agnostic protocol learnings live in `issue-backend.md`;
-this doc is the Linear-specific knowledge. Since #1355 the header/node/manifest metadata kinds
-ride native Linear attachments (see the attachment-native section below); dual-encoding governs
-only the still-inline surfaces.
+The `src/perk/backends/linear/` package: the httpx GraphQL client `client.py`; the
+`LinearIssueBackend` adapter `backend.py` over `issue_ops.py`; the project-backed objective store
+`project_store.py` over `project_ops.py`; `attachments.py` (the metadata carrier); `readiness.py`
+(init/doctor); `agent.py` (agent-session emission). Every perk metadata kind rides a native issue
+attachment (§ "Attachment-native perk metadata"); dual-encoding inline sentinels govern only the
+still-inline surfaces. The backend-agnostic protocol lives in `issue-backend.md`.
 
 ## Distillation
 
-- Auth is a *plain* `Authorization: <key>` header (Bearer is OAuth2-only); rate limiting arrives
-  as HTTP 400 with `errors[].extensions.code == "RATELIMITED"`, so the client parses the body
-  errors-array-first regardless of status; partial GraphQL success fails loud and discards
-  partial data — "Linear API facts".
-- The client returns `data` or raises (`LinearGraphQLError.codes`, never message substrings);
-  lookup-miss `None` semantics belong to the backend — "The client/consumer contract".
-- Perk metadata kinds ride **native issue attachments** (URL-as-upsert-identity,
-  REPLACE-whole-envelope, the URL-reuse invariant) since #1355 — "Attachment-native perk
-  metadata"; dual-encoding governs only the still-inline surfaces — "Dual-encoding metadata
-  markers" (+ the presence-check bug class beside it).
-- init/doctor readiness is ONE never-raising report-shaped probe with two consumers (doctor
-  lookup-only vs init converge, split by `ensure_labels`) — "Readiness wiring (init/doctor)".
-- Issue mutations take the **bare boundary identifier** through the module-level
-  `_request_issue_mutation` wrapper — no resolve-on-demand layer (`uuid_for` deleted) —
-  "Bare-identifier mutations + the module-level mutation wrapper".
-- The project-backed objective store's live ops (node-issue materialization, milestone reuse,
-  relations) — "Linear Projects substrate" + "Project-backed objective ops".
-- Offline testing: httpx `MockTransport` recipes + the scripted GraphQL fake — "Offline test
-  recipes"; register more-specific query needles FIRST — "`_FakeLinear` insertion-order
-  substring footgun"; the stateful-fake lifecycle discipline — "E2E lifecycle test craft".
-- `upload_file` is one resolver-owned method; strict marker parsing never strips first;
-  byte-identity across a lossy transcoder rejects its whole normalization domain — "File upload
-  + strict-parse boundary craft".
-- Node refinement persistence: a state-bearing sibling query, presence-not-parse plan
-  disqualification, guarded marked-comment convergence, and the ownership-only coexistence
-  predicate applied before plan-body extraction — "Objective-node refinement persistence".
-- Historical: "Live-validation record (dated)" + "Live-spike process craft" carry the dated
-  live-run evidence.
+- Auth is a *plain* `Authorization: <key>` header; RATELIMITED arrives as HTTP 400, so the client
+  parses errors-array-first; partial success fails loud — "Linear API facts".
+- The client returns `data` or raises; branch on `LinearGraphQLError.codes` **paired** with the
+  message (`INPUT_ERROR` alone over-matches); lookup-miss `None` is the backend's — "The
+  client/consumer contract", "Not-found discrimination".
+- Every metadata kind rides a native attachment (URL = upsert identity, REPLACE-whole-envelope,
+  reuse the found URL); one run_id-keyed `attachmentsForURL` find backs the issue-tier finds AND
+  `find_objective`, whose hit is the canceled metadata sentinel (project ref = its own `project`)
+  — "Attachment-native perk metadata"; dual-encoding governs only still-inline surfaces —
+  "Dual-encoding metadata markers" (+ the presence-check bug class).
+- init/doctor readiness is ONE never-raising report-shaped probe with two consumers — "Readiness
+  wiring (init/doctor)".
+- Issue mutations take the **bare boundary identifier** through the module-level wrapper, no
+  resolve-on-demand layer — "Bare-identifier mutations + the module-level mutation wrapper".
+- A Linear objective is a Project: sentinel first (fail-loud), milestones by name, node-issues in
+  sort order with an `objective-node` attachment, blocking relations; the roadmap is derived live
+  — "Project/node materialization", "Project-backed objective ops".
+- Never widen a byte-stable query — add a sibling selection — "Byte-stable sibling selection",
+  "Native cancellation vs perk's attachment status", "Objective-node refinement persistence".
+- Offline testing: httpx `MockTransport`, the scripted fake (more-specific needles FIRST), the
+  stateful-workspace discipline — "Offline test recipes", "The `_FakeLinear` substring-keyed
+  fake", "E2E lifecycle test craft".
+- `upload_file` is one resolver-owned method; never strip before strict marker parsing — "File
+  upload + strict-parse boundary craft".
+- What is proven live vs offline-only — "Live-proof status (dated)", "Still-deferred register".
 
 ## Linear API facts (audited against official docs)
 
@@ -90,22 +84,19 @@ only the still-inline surfaces.
 ### Not-found discrimination (#558, proven live 2026-06)
 
 - **The canonical discriminator is a PAIRING**: `INPUT_ERROR` present in `exc.codes` **AND** the
-  `"entity not found"` message prefix — because `INPUT_ERROR` is **generic** (it also fires on
-  argument-validation errors), a code alone over-matches. One module-level helper
-  `_is_entity_not_found(exc)` in the client layer (`src/perk/backends/linear/client.py`) backs
-  every not-found read site.
+  `"entity not found"` message **substring**, matched case-insensitively over the enriched text —
+  because `INPUT_ERROR` is **generic** (it also fires on argument-validation errors), a code alone
+  over-matches. One module-level helper `_is_entity_not_found(exc)` in the client layer
+  (`src/perk/backends/linear/client.py`) backs every not-found read site.
 - **Before tightening an error predicate to a GraphQL `extensions.code`, confirm the code is
   *specific*.** Linear reuses generic codes across unrelated failure classes.
-- **Folding a live observation into a predicate means re-shaping the offline twins to the observed
-  reality in the same change.** The fakes emitted `codes=()`; a naive predicate tightening silently
-  re-raised the *whole* not-found suite until the twins gained the observed code.
 - **Discrimination tests must prove the tightening NARROWED** — the valuable cases are the
   *negative* ones: a not-found message under `RATELIMITED` (or with no code) **re-raises**; a
   generic `INPUT_ERROR` carrying a non-not-found message **re-raises**. Only the paired shape is
   swallowed.
-- **An unfired gating observation ships as a documented deferral, not an edit** (#558, 2026-06:
-  RATELIMITED fail-loud kept; `uuid_for` kept, later collapsed — the bare-identifier-mutations
-  section below).
+- **Re-shape the offline twins to the observed code in the same change** (the fakes once emitted
+  `codes=()` and silently re-raised the whole not-found suite); an unfired gating observation
+  ships as a documented deferral, not an edit.
 
 ## Bare-identifier mutations + the module-level mutation wrapper (#562/#620)
 
@@ -128,11 +119,9 @@ no resolve-on-demand layer remains. The durable architecture:
   checks stay AFTER the wrapper returns). And **capture-at-create beats resolve-on-demand** for the
   one consumer that still needs a UUID: a raw create variant returns the create-time UUID for the
   UUID-only `issueRelationCreate` (relations still take UUIDs; zero extra queries).
-- One intentional `uuid_for` string survives in production — a docstring back-reference on the
-  request wrapper (a `grep` for `uuid_for` in `src/perk/` hits it; **expected, not a leftover**).
-  The test-fakes dropped their scripted `UuidForIssue` reply entries / branch and **flipped
-  mutation-id assertions from the resolved UUID to the boundary identifier** (plus `assert not` a
-  resolution query fired).
+- Docstring back-references to `uuid_for` in `src/perk/backends/linear/_helpers.py` and
+  `project_ops.py` are **expected, not leftovers**. The fakes assert the boundary identifier on
+  mutations and that no resolution query fires.
 
 ## Attachment-native perk metadata (the #1355 storage model)
 
@@ -155,9 +144,24 @@ bodies. The envelope shape is `source` / `schema_version` / `kind` / `payload_js
   public project-attachment mutation and no arbitrary project metadata, so a canceled, empty
   sentinel issue titled "Perk: objective metadata" attached to the project carries the
   `objective-header` + `objective-manifest` envelopes. It is state-independent by design (born
-  canceled) and never an adoptable/mappable candidate.
-- **`attachmentsForURL` O(1) finds** back the run_id-keyed idempotency lookups (`backend.py`) —
-  with the broader-lookup parity trap below.
+  canceled) and never an adoptable/mappable candidate. It is created fail-loud immediately after
+  `projectCreate`, before milestones/node-issues
+  (`src/perk/backends/linear/project_store.py::_create_metadata_sentinel`); readers locate it
+  inside the `project_issues` rows they already hold (`_sentinel_from_rows`, zero extra queries);
+  it is excluded from roadmap reads, engagement and adoption candidates; a sentinel-less project
+  is not a perk objective.
+- **The run_id-keyed finds — issue tier and objective tier alike.**
+  `src/perk/backends/linear/issue_ops.py::find_issue_by_attachment_url` is one workspace-wide
+  `attachmentsForURL` query selecting each hit's issue (`identifier`/`url`/`state.type`/
+  `project`); the first **non-terminal** hit wins, and when every hit is terminal the first is
+  returned. `src/perk/backends/linear/backend.py::find_plan_issue` layers the open-only parity
+  filter on top (the retired scan listed open issues only — the broader-lookup trap below).
+  `src/perk/backends/linear/project_store.py::find_objective` queries
+  `attachments.objective_header_url(run_id)` and is state-independent by design — its hit is the
+  born-canceled sentinel, served by the all-terminal arm — taking the project ref from the hit's
+  `project` selection and raising on a header hit with no project (a broken sentinel); infra
+  failures propagate as `ObjectiveStoreError`, never `None`. Contracts §8.24
+  ("Native-attachment metadata") is the cross-plane owner of this rule.
 - **Tolerant vs fail-loud decode twins** (`attachments.py`). `has_perk_attachment` is
   presence-only and never raises — classification/gather paths take it; `find_perk_attachment`
   fails loud on a malformed payload — mutation-path reads take it. Review found two sites using
@@ -179,19 +183,15 @@ bodies. The envelope shape is `source` / `schema_version` / `kind` / `payload_js
 
 ### Migration traps (#1355)
 
-- **Sequential-identifier shift.** Inserting a new "first issue" into a Linear create flow (the
-  sentinel is created before node-issues) shifts every subsequent `ENG-N` identifier — ~60
-  lifecycle-test assertions needed renumbering. When adding an issue to an existing creation
-  sequence, check position-in-sequence impact on identifier-pinning tests first.
-- **Broader-lookup migrations lose implicit filters.** Replacing the label-scoped *open-issues*
-  scan with the state-independent `attachmentsForURL` silently dropped the "open only" filter,
-  and the single-node variant was order-dependent on multi-hit. When swapping a scoped query for
-  a broader primitive, enumerate the old query's implicit filters (state, label, team scope) and
-  re-apply them explicitly — and make multi-hit behavior deterministic (first non-terminal wins).
-- **"Dormant" code isn't insulated from shared-infrastructure deletions.** The migration assumed
-  the dormant `objectives.py` store stays byte-untouched, but deleting a shared find-by-run-id op
-  forced relocating it into the dormant store (a third consumer the plan undercounted). Count ALL
-  consumers of a shared op before deleting it, including dormant ones.
+- **Sequential-identifier shift.** Inserting a new "first issue" into a create flow (the sentinel
+  precedes node-issues) shifted every later `ENG-N` (~60 lifecycle assertions renumbered) — check
+  position-in-sequence impact on identifier-pinning tests first.
+- **Broader-lookup migrations lose implicit filters.** Swapping the label-scoped *open-issues* scan
+  for state-independent `attachmentsForURL` dropped "open only" and made multi-hit order-dependent
+  — re-apply the old query's implicit filters explicitly and make multi-hit deterministic.
+- **"Dormant" code isn't insulated from shared-infrastructure deletions.** Deleting a shared
+  find-by-run-id op forced relocating it into the dormant `objectives.py` store — count ALL
+  consumers of a shared op before deleting it, dormant ones included.
 
 ## Dual-encoding metadata markers
 
@@ -250,7 +250,7 @@ Two distinct disciplines in one backend — keep them straight when adding ops.
   first-match semantics — never trust Linear's default connection ordering.
 - Label idempotency is **lookup-first and unscoped** (a workspace-level label counts; a
   team-scoped create on a duplicate name errors), with a duplicate-race re-lookup arm.
-- `LinearIssueBackend.backend_id` is a module-level `"linear"` literal — never import
+- `LinearIssueBackend.backend_id` is a class-attribute `"linear"` literal — never import
   `perk.backends.resolve` for it (the resolver imports the Linear backend module at wiring time; the
   import-direction test pins this).
 - The ensured perk labels live in `src/perk/backends/linear/readiness.py`'s `_PERK_LABELS`
@@ -260,6 +260,10 @@ Two distinct disciplines in one backend — keep them straight when adding ops.
   name (#554, observed live). A name silently fails team resolution and surfaces only at **land**
   as the *non-fatal* `plan issue close skipped (non-fatal): Linear team '<x>' not found`
   (`plan_issue_closed: false`); the GitHub squash-merge still succeeds.
+- **Running Linear from a GitHub-default repo**: backend selection reads the **committed
+  `.perk/config.toml` only** — a local overlay silently no-ops (see `config-tables.md`); use
+  **`uv run perk`**, never a stale global install (see `toolchain/worktree-node-modules.md`); the
+  doctor `linear` group appears only once committed config selects linear.
 
 ## Readiness wiring (init/doctor)
 
@@ -290,13 +294,13 @@ gesture, never a `ManagedConvergence`.
   partially-true "the env-seed carries it" framing that masked this). One reader feeds both the
   cold-door fallback and the env-seed; the env-seed still wins when env is set. See
   `docs/learned/workflow/worktree-lifecycle.md` for the `main_worktree_root` primitive.
-- Threaded at four in-process sites (`resolve_issue_backend`, `resolve_objective_store`,
-  `doctor._linear_checks`, `init._linear_readiness`); a **fifth** (`doctor._fix_linear_labels`)
-  deliberately stays env-only pending a "config fallback everywhere" symmetry pass.
-- **Signature-widening rule (#654)**: adding the `repo_root` kwarg broke 21 lifecycle tests faking
-  `monkeypatch.setattr(linear, "client_from_env", lambda: ws)`. When you widen a function's
-  signature, grep ALL `monkeypatch.setattr(..., "<fn>", lambda ...)` fakes of it and loosen them to
-  `lambda *a, **k`.
+- **Every production `client_from_env` call passes `repo_root`** — the three resolver arms in
+  `src/perk/backends/resolve.py` (issue backend, objective store, dream-artifact publish),
+  doctor's `src/perk/convergence/doctor/linear_checks.py`, and init's Linear readiness in
+  `src/perk/convergence/init/__init__.py` — **except** the doctor label fix in
+  `src/perk/convergence/doctor/fixes.py`, which deliberately stays env-only (no symmetry pass yet).
+- **Signature-widening rule (#654)**: widening a signature breaks lambda fakes of it (21 here) —
+  grep every `monkeypatch.setattr(..., "<fn>", lambda …)` fake and loosen it to `lambda *a, **k`.
 - **Out of scope (flagged):** `LINEAR_AGENT_TOKEN` (a distinct secret; the `[linear]` table leaves
   room for a future `agent_token` key, not added); `--remote` (the remote runner provides its own
   secrets); no TS-plane mirror (the TS extension reads no Linear key).
@@ -342,8 +346,8 @@ every request the emitters compose without touching emitter code or the real cli
 
 - **Named GraphQL operations make substring-keyed fakes routable**: naming an operation gives the
   substring-keyed fakes a distinct needle, and most-specific-needle-first insertion order does the
-  rest (historical exhibit: the resolution layer's `UuidForIssue` named op, deleted with the #562
-  collapse). Needle-ordering detail is owned by the two insertion-order sections below.
+  rest (e.g. the since-deleted `UuidForIssue` op). Needle-ordering detail is owned by the two
+  insertion-order sections below.
 - **The stateful `FakeLinearWorkspace` discipline**: the fake tolerates identifier-or-UUID on
   reads AND mutations (the Mode 2 live finding, 2026-06-15) — there is no resolution layer to pin.
   Lifecycle tests instead assert **no `UuidForIssue` query fires**
@@ -355,18 +359,13 @@ every request the emitters compose without touching emitter code or the real cli
   gateway fakes. **One shared workspace threading the entire lifecycle in a single test** catches
   cross-command contract drift (e.g. the plan-body comment must be patched, not duplicated, on
   re-save) that per-command tests can't.
-- **A new mutation needs the fake to ROUTE it AND have the needed workflow states (#855).**
-  Exercising objective replan (supersede) surfaced three `FakeLinearWorkspace`
-  (`tests/_linear_fakes.py`) gaps: (a) a **`"projectId"` arm in the `issueUpdate(` handler**
-  (attach-to-project was previously unrouted); (b) a **new `projectUpdateCreate(` arm** — the
-  fail-open status update previously hit the `unrouted` `AssertionError`, and `objective create`'s
-  status update only survived because its caller wraps it in `except Exception`; and (c) a
-  **`canceled`-type workflow state in `_STATES`** — without it `_workflow_state_id("canceled")`
-  returns `None`, so the cancel-dropped path is a silent no-op that can't be asserted. **General
-  rule:** when testing a new Linear mutation against the fake, confirm it actually routes the
-  operation AND has the workflow states the path needs.
+- **A new mutation needs the fake to ROUTE it AND to have the workflow states the path needs**
+  (#855, `tests/_linear_fakes.py`): supersede surfaced an unrouted `projectId` arm in
+  `issueUpdate(`, an unrouted `projectUpdateCreate(` arm whose failure only survived under a
+  caller's `except Exception`, and a missing `canceled` state that made the cancel path a silent
+  no-op.
 
-## Backend-aware prompts (Node 3.1)
+## Backend-aware prompts
 
 - **Per-plane plan-read SSOT helpers**: `src/perk/run/launch/prompts.py::_plan_read_instruction`
   (re-exported by the `src/perk/run/launch/` package) ↔
@@ -384,36 +383,24 @@ every request the emitters compose without touching emitter code or the real cli
   `/land`, the address prompts, learn's `gh pr list --head plan-<pr_id> --state merged`
   derivation all stay untouched.
 
-### The third backend-aware seam: `objective_read_instruction` (Node 4.1, #600)
+### The objective-read seam: `objective_read_instruction` (#600)
 
-Objective seed prompts gained their own backend-aware read clause, mirroring the plan-read precedent:
-one parity-pinned helper per plane — `objective_read_instruction` (Python,
-`src/perk/cli/commands/objective/shared.py`) ↔ byte-identical `objectiveReadInstruction` (TS,
-`extension/authoring/objective/prose.ts`) — appended as a **supplemental clause** to the existing
-`perk objective show <id>` step in the three objective seed prompts (cold `_seed_prompt`, warm
-`factoryGuidance` + `reconcileGuidance`). Byte-parity is pinned by a paired `OBJECTIVE_LINEAR_SUBSTRINGS`
-lockstep substring list in `tests/test_objective_prompt_parity.py` ↔
-`extension/authoring/objective/prose.test.ts` — the **same `LINEAR_READ_SUBSTRINGS` discipline**
-documented above (a third instance; see `shared-contracts.md`).
+Objective seed prompts carry their own backend-aware read clause, mirroring the plan-read
+precedent: `src/perk/cli/commands/objective/shared.py::objective_read_instruction` ↔
+`extension/authoring/objective/prose.ts::objectiveReadInstruction`, byte-parity pinned by lockstep
+`OBJECTIVE_LINEAR_SUBSTRINGS` lists (`tests/test_objective_prompt_parity.py` ↔
+`extension/authoring/objective/prose.test.ts` — a third instance of the `LINEAR_READ_SUBSTRINGS`
+discipline; see `shared-contracts.md`).
 
-- **The supplemental-clause pattern beats replacement.** The helper returns `""` for github (and any
-  non-linear) so the existing prompt is **byte-unchanged** (no churn) — achieved by injecting the
-  clause *around* the existing punctuation (the clause carries a **leading space**), NOT by rewording
-  the line. A naive `; mark` → `. Mark` rewrite churns the github arm; the guard is to **verify the
-  github-arm output is literally byte-identical** after the change (no test pins it).
-- **Cold-vs-warm backend-source asymmetry is the load-bearing design call.** Cold has
-  `store.backend_id` + `state.url` already in hand (free). Warm must resolve the backend from
-  `resolveIssueBackendId(ctx.cwd)` (the committed `.perk/config.toml`, main-checkout-anchored —
-  **NOT** `loadPerkConfig`'s overlay) and
-  fetch the url via a `runColdDoor(["objective","show",id,"--json"])` round-trip **only when
-  `backend === "linear"`** (github needs no clause → no fetch), and **fail-open** to the indirect
-  `run \`perk objective show <id>\` for its URL` form. Config is authoritative for the warm plane
-  because cross-backend objectives are unsupported by policy (no store-vs-config skew to guard). This
-  consumed the previously-**dormant** `resolveIssueBackendId` — its first real consumer.
-- **Skills `references:` frontmatter + `backends/{github,linear}.md` subdirectory routing** works
-  with zero init/doctor changes — delivery is whole-directory sync; the launch prompt naming the
-  backend is the routing signal the model uses to pick `backends/<backend>.md` (see
-  `skill-bindings.md`).
+- **A supplemental clause beats replacement.** The helper returns `""` for github (and any
+  non-linear backend), so the existing `perk objective show <id>` step stays byte-unchanged —
+  verify the github-arm output is byte-identical by hand (no test pins it).
+- **The cold-vs-warm backend-source asymmetry.** Cold has `store.backend_id` + the url in hand;
+  warm resolves `resolveIssueBackendId(ctx.cwd)` (committed config, main-checkout-anchored — not
+  the overlay) and round-trips `objective show --json` only when linear, failing open to the
+  indirect "run `perk objective show <id>` for its URL" form. Config is authoritative because
+  cross-backend objectives are unsupported.
+- The `backends/<backend>.md` skill-reference routing lives in `skill-bindings.md`.
 
 ## Offline test recipes
 
@@ -434,48 +421,30 @@ documented above (a third instance; see `shared-contracts.md`).
   must be pinned on the *recorded query* — scripted fakes return fields regardless of the
   selection (extends the doc's existing selection-pin discipline).
 
-## Live-validation record (dated)
+## Live-proof status (dated)
 
-The live smoke gate ran **green** across every mode — no backend defect, docs-only PRs; the items
-the live runs did *not* answer live in the Still-deferred register below.
+- **2026-06-15 — issue tier + the Projects spike (#554/#558/#564/#567).** ProseMirror round-trip
+  clean and a re-save patches the body comment in place (the pre-#1355 inline model); string
+  `PER-*` identifiers flow through every `--json` envelope; closure is the explicit `close_issue`
+  call; the generic-`INPUT_ERROR` observation seeded the paired not-found discriminator. The
+  GitHub integration links PRs as **attachments, not comments** (the linkback-tolerance twin is
+  stricter than reality); `plan-PER-<n>` auto-links; on-land close beside Done-on-merge automation
+  is a same-state write; "installed ≠ connected" — test with a control PR in `issue.branchName`'s
+  canonical format (`team.gitAutomationStates` only proves config).
+- **2026-06-16 — the project-backed lifecycle (#621).** Find-by-run-id idempotent; Project Updates
+  on create/land/reconcile; close drives the Project to `completed`; the node workflow-state
+  mirror fires both directions; `list_projects` / `set_project_state` / `_workflow_state_id` /
+  the #626 milestone ops proven; no RATELIMITED at low volume.
+- **2026-09-10 — the authenticated refine→plan run**
+  (`docs/design/archive/objective-refinement-linear-planning-dogfood.md`; offline gate
+  `docs/design/archive/objective-refinement-linear-persistence.md`): a real project with the
+  metadata sentinel and node-issues created, found by `perk objective plan`, a real plan saved
+  onto the node-issue — the one live exercise of the attachment-native create → find/get →
+  `save_node_plan` path; a point-in-time proof, not a per-workspace guarantee.
 
-- **2026-06-15 — Modes 1 & 2 + the Projects spike (#554/#558/#564/#567):**
-  - **ProseMirror round-trip is CLEAN** — `find_metadata_block` survives a real round-trip with no
-    raw-HTML artifacts; a re-save **patches the body comment in place** (count stays 1: the
-    form-preserving `replace_metadata_block` path, live). *(Predates #1355 — proved the inline
-    model.)*
-  - **String `PER-*` identifiers flow through every `--json` envelope** end-to-end; closure is the
-    explicit `close_issue` call, never a merge-message magic word.
-  - The generic-`INPUT_ERROR` missing-entity observation seeded the paired not-found
-    discriminator — see the Not-found discrimination section above.
-- **2026-06-16 — Mode 4, project-backed objective lifecycle (#621):**
-  - **Find-by-run-id is idempotent** (same UUID / `existed:true`, no duplicates); metadata
-    round-trips clean through create→reconcile; node↔plan unification creates **no new
-    `perk:plan` issue**.
-  - **Project Updates post on create / land / reconcile**; **close** drives the Project to
-    `completed`; the node workflow-state mirror fires **both directions** (in-progress→started,
-    done→completed).
-  - Also proven live: `projectUpdateCreate`, `set_project_state`, `list_projects`,
-    `_workflow_state_id`, and the #626 ops (`attach_issue_to_milestone`,
-    `project_issues_with_milestones`). No RATELIMITED at low volume.
-  - **Setup gotchas** (running Linear from a GitHub-default repo): backend selection reads the
-    **committed `.perk/config.toml` only** — a local overlay silently no-ops (see
-    `config-tables.md`); use **`uv run perk`**, never a stale global install (see
-    `toolchain/worktree-node-modules.md`); the doctor `linear` group appears only once committed
-    config selects linear.
+What no run has observed lives in "Still-deferred register".
 
-### GitHub-integration coexistence (#564, 2026-06-15)
-
-- The Linear GitHub integration links PRs as **attachments, not comments** — the linkback-tolerance
-  concern is structurally moot (the offline twin
-  `test_foreign_linkback_comment_does_not_perturb_marker_scans` is *stricter* than reality); perk's
-  `plan-PER-<n>` branch auto-links without Linear's branch template; on-land `close_issue` beside a
-  Done-on-merge automation is a **same-state write**.
-- **"Installed ≠ connected"**: the decisive isolation test is a control PR in `issue.branchName`'s
-  canonical format — `team.gitAutomationStates` confirms automation *config*, and the App
-  installation is not introspectable from a normal `gh` token.
-
-## Linear Projects substrate + `LinearProjectObjectiveStore` (now BUILT)
+## Linear Projects substrate + `LinearProjectObjectiveStore`
 
 The project-backed objective store was built on the #567 spike substrate (Objective #548 Phase 3,
 2026-06); the tier contract lives in `shared/contracts.md` §8.24
@@ -488,12 +457,8 @@ classes (`_LinearIssueOps`, `_LinearProjectOps`) must each register **only the c
 another. Shared machinery — team-id/viewer-id resolution + caches, pagination, the `_require_*`
 narrowing helpers, the not-found discriminator — belongs **on the client**.
 
-- **Treat prior standing architectural guidance as load-bearing; don't re-litigate it with leading
-  questions** (#582: a leading confirm-this question manufactured a plan-level "Confirmed with the
-  user" against the user's standing guidance, so a faithful implementer shipped the composition
-  defect — the error must be caught at planning time).
-- **Acknowledge-don't-revert** (#586): the defective node stayed `done` with its description
-  rewritten to name the defect; the correction was overloaded onto the next node.
+- **Standing guidance is load-bearing — never re-litigate it with a leading question** (#582).
+- **Acknowledge-don't-revert** (#586): the defective node stayed `done`; the next node fixed it.
 
 ### The re-homing recipe (#586)
 
@@ -504,40 +469,60 @@ inherit the real machinery routed through their overridden `request` and every e
 document assertion stays byte-green. This is the general recipe for promoting machinery off a
 delegated collaborator onto its client tier.
 
-- The `_require_*` helpers + the not-found discriminator moved **DOWN** to the client layer
-  (`src/perk/backends/linear/client.py`, re-imported by `backend.py`) to avoid an import cycle. The `INPUT_ERROR`-in-`.codes`
-  AND `"entity not found"`-message pairing stayed intact (do not loosen to `.codes`-only).
-- The **team-id cache is keyed by `team_key`** (the client stays team-agnostic at construction; op
-  classes pass their bound team_key). A single shared cache via the client beats op-class
-  composition — it de-dupes when only one op class is in play.
-- **Decoupling over DRY:** symmetric client-only op classes inline a tiny mutation (e.g.
+- The `_require_*` helpers + the not-found discriminator moved **DOWN** to
+  `src/perk/backends/linear/client.py` (re-imported by `backend.py`) to dodge an import cycle; the
+  `INPUT_ERROR` + `"entity not found"` pairing stayed intact (never loosen to `.codes`-only).
+- The **team-id cache is keyed by `team_key`** (the client stays team-agnostic; op classes pass
+  their bound key) — one shared client cache beats op-class composition, de-duping even when only
+  one op class is in play.
+- **Decoupling over DRY:** client-only op classes inline a tiny mutation (e.g.
   attach-issue-to-project) rather than reach a sibling.
 
-### `_create_issue` made label-optional
+### `_create_issue` is label-optional; node-issues carry an additive label
 
-Build `labelIds` into the input **only when non-None** (node-issues carry no perk label — they are
-discovered by project membership + the node block); the same conditional-key shape as
-`project_id` / `milestone_id`: omit the key, never an explicit `null`.
+`labelIds` enters the input **only when a label id is given** — the same omit-the-key shape as
+`project_id` / `milestone_id`, never an explicit `null`. Node-issues DO carry the workspace
+`perk:objective-node` label (`objective.OBJECTIVE_NODE_LABEL`, resolved once per create via
+`_ensure_label_id`) — additive human filterability, never load-bearing: discovery is project
+membership + the `objective-node` attachment
+(`src/perk/backends/linear/project_store.py::_find_node_issue`), so a hand-removed label changes
+nothing.
 
-### Project-backed `create_objective` shape (#586)
+### Project/node materialization — the `create_objective` pipeline
 
-- **Overview = inline-code `objective-header` block + a Reconcilable prose region, NO roadmap
-  table** *(the header half is superseded by #1355: the `objective-header` now rides the
-  per-project metadata sentinel issue as an attachment — see the attachment-native section; the
-  overview keeps the Reconcilable prose region)*. Compose the markers in HTML form, then pass the
-  WHOLE overview through the Linear-markdown transcoder so markers become inline-code sentinels.
-  **The roadmap is derived LIVE from node-issues — never stored as a YAML block on the Linear
-  side.**
-- **`find_objective` dedup** scans projects and parses each overview's header block
-  (dual-encoding-tolerant), matching the header `run_id`; the project id is opaque. Infra failures
-  propagate (mapped to `ObjectiveStoreError`), never masked as `None`.
+`create_objective` is idempotent on `run_id` (`find_objective` first) and refuses a node-less
+roadmap before any write. The write order:
+
+1. **Overview** = Reconcilable prose only, composed in HTML-marker form and transcoded whole
+   (`_compose_overview`) — no header block, no roadmap table: **the roadmap is derived LIVE from
+   node-issues**.
+2. **`projectCreate`** (the 80-char name cap — "Linear API facts").
+3. **The metadata sentinel, fail-loud** (`_create_metadata_sentinel`: born canceled, header +
+   manifest attachments, one fail-open Resources link via `create_entity_external_link`) — a crash
+   before it lands orphans a header-less project invisible to `find_objective`, the accepted
+   one-round-trip window.
+4. **The copyable `perk objective plan <project-uuid>` callout**, prepended once the UUID is known
+   (`plan.prepend_callout` → `update_project_content`).
+5. **One milestone per phase**, keyed by **name** through `ensure_phase_milestone` with `known`
+   seeded empty — § "The phase→milestone seam".
+6. **One node-issue per node** in `node_sort_key` order (`_materialize_node_issue`: clean prose
+   description, the additive label, the `objective-node` attachment keyed on the fresh
+   identifier; the UUID comes straight off `issueCreate` because `issueRelationCreate` takes
+   UUIDs).
+7. **Explicit-`depends_on`-only blocking relations** (skip `None`-inferred and `()`-explicit-none;
+   dep-BLOCKS-node). The node payload excludes `pr` (plan-header authority) and `depends_on`
+   (derived from relations).
+
 - **Natural node ordering** uses a sort key with a numeric/lexical **discriminator slot** (so a
   numeric trailing segment sorts ahead of a non-numeric one AND `int`/`str` never mix in one
   comparison slot) — this makes `3.2 < 3.10`. Shared by the create-order (3.2) and read-order (3.3)
   paths.
-- **Explicit-`depends_on`-only blocking relations** (skip both `None`-inferred and `()`-explicit-
-  none); direction is dep-BLOCKS-node. The node block excludes `pr` (plan-header authority) and
-  `depends_on` (derived from relations).
+
+*Dated (pre-#1355):* the overview once carried an inline-code `objective-header` block and
+`find_objective` listed projects and parsed each overview's header for the `run_id`; the overview
+carries no header today and that scan is gone (the dormant, never-resolver-wired issue-backed
+store in `src/perk/backends/linear/objectives.py` still finds by a label-scoped inline-header
+scan).
 
 ### Read + mutation surface (#589)
 
@@ -563,7 +548,9 @@ needle is a substring of another's, register the **more-specific needle FIRST**.
 `project_issues` (whose query contains both `"project(id"` and `"issues(first"`). If `"project(id"`
 is registered first, the project-issues call wrongly resolves to the project response and pagination
 blows up. **General rule: when two scripted queries share a prefix, order the dict so the
-longer/more-specific needle wins.**
+longer/more-specific needle wins.** Reconfirmed since: the #711 adoption writer
+(`project_issues_for_adoption` / `project_milestones` / `project_or_none`) and #1355
+(`issues(first` / `projectMilestones(` registered before `project(id`).
 
 ### `FakeLinearWorkspace` Projects routing arm-ORDER (#595)
 
@@ -602,15 +589,13 @@ inline literal fails validation; pass it via a typed `$input` variable.
   fallback in reserve.
 - **Milestone list order is NOT insertion order** — key phases by milestone **name**, never list
   position.
-- **`list_projects` was proven live 2026-06-16 (#621)** — see the Live-validation record above
-  (the #567 spike had covered create/overview/milestone/attach/relation, not list-projects). No
-  RATELIMITED at spike volume.
+- The #567 spike covered create/overview/milestone/attach/relation; `list_projects` was proven
+  later — § "Live-proof status (dated)".
 
-## Project-backed objective ops (Phase 4: Nodes 4.1–4.4)
+## Project-backed objective ops
 
-Objective #548 Phase 4 layered four additive enrichments onto `LinearProjectObjectiveStore`
-(backend-aware seed prompts are in the Backend-aware-prompts section above; GitHub stayed
-unchanged throughout).
+Four additive enrichments over `LinearProjectObjectiveStore` (GitHub unchanged); the seed-prompt
+seam lives in § "Backend-aware prompts".
 
 ### `add_objective_node` project-store flow (#614)
 
@@ -638,13 +623,12 @@ assert the "collision" message maps to the CLI `invalid_input` arm.
 
 ### The phase→milestone seam: route an existing caller through a future seam without behavior change (#606)
 
-`ensure_phase_milestone(*, project_id, name, known=None)` routed the current create-objective
-caller through the future add-node seam by seeding that caller's `known` map **empty** — the
-lookup branch never fires, so the mutation sequence is byte-equivalent to the old blind loop with
-**no extra `projectMilestones` read**. **Prove byte-equivalence with a *negative* assertion**
-(`assert not _queries(fake, "projectMilestones(")`), not output equality. **Name is the dedup key**
-(no phase-key→id registry); the phase-header-text-drift duplicate-milestone edge was deferred to
-the drift-repair node.
+`ensure_phase_milestone(*, project_id, name, known=None)` routes the create caller through the
+add-node seam by seeding `known` **empty** — the lookup never fires, so the mutation sequence stays
+byte-equivalent to the old blind loop (**no extra `projectMilestones` read**). **Prove
+byte-equivalence with a *negative* assertion** (`assert not _queries(fake, "projectMilestones(")`),
+not output equality. **Name is the dedup key** (no phase-key→id registry); the phase-header-drift
+duplicate-milestone edge was deferred to drift repair.
 
 ### Fail-open Project Updates (#606)
 
@@ -656,7 +640,7 @@ the post lives in its own helper (`_post_landed_update`) so a failure can't disc
 node ids. `projectUpdateCreate(` does not substring-collide with `projectUpdate(` (next char `C`),
 but place the more-specific needle first defensively.
 
-### The manifest-drift architecture (#609) — for the follow-up implementer
+### The manifest-drift architecture (#609)
 
 The load-bearing decisions:
 
@@ -664,16 +648,11 @@ The load-bearing decisions:
   derives the roadmap **live** from node-issues (no stored roadmap table — Node 3.2), so there is no
   baseline to diff; baseline-free heuristics (sequence-gap, empty-milestone) can't *repair* a deleted
   node's slug/description and were rejected as more complex long-term.
-- **Linear has no invisible project-level metadata field** — ProseMirror drops HTML comments (the
-  reason markers are transcoded to inline code), and attachment `metadata` is issue-scoped.
-  *Historical (superseded by #1355):* the manifest originally landed as a
-  visible-but-unobtrusive inline-code block in the project overview, beside `objective-header`,
-  written through the idempotent `update_project_content` path — it is now an
-  `objective-manifest` attachment on the metadata sentinel issue (see the attachment-native
-  section). Still true: the manifest owns structural identity, and status stays observed-only
-  (next bullet).
+- **Linear has no invisible project-level metadata** — ProseMirror drops HTML comments and
+  attachment `metadata` is issue-scoped — which is why the manifest rides the sentinel issue's
+  `objective-manifest` attachment.
 - **The manifest owns structural identity; status stays observed-only** (live state owned by each
-  node-issue's `objective-node` block) — the split is what makes recreate repairs safe (restore
+  node-issue's `objective-node` attachment) — the split is what makes recreate repairs safe (restore
   structure without inventing status).
 - **The observed snapshot needs a new sibling op:** `_LinearProjectOps.project_issues` carries no
   milestone membership, so don't perturb `get_objective`'s byte-stable query — add a sibling.
@@ -688,18 +667,11 @@ The **Linear-backend-specific** mechanics:
   through the module-level mutation wrapper, **no UUID resolution** (consistent with the #562 collapse
   above). The observed-snapshot read is a `project_issues` **sibling**, `project_issues_with_milestones`,
   that joins each issue's milestone id/name; the byte-stable `project_issues` query is left untouched.
-- *Historical (superseded by #1355 — the manifest now rides the sentinel issue as an
-  attachment):* **the `replace_metadata_block` append-when-absent path emits an HTML form** (bad
-  for Linear's ProseMirror), so a *fresh* manifest insert did **not** go through that path: render
-  the block as inline-code and splice it manually before the reconcilable marker (derive the split
-  point from the Linear-markdown rendering of the reconcilable start marker). The *present*-block
-  update path stays form-preserving and is safe.
 - **`FakeLinearWorkspace` must cascade-delete relations on issue delete** (mirrors Linear's real
   cascade) — else a stale `(blocker, blocked)` tuple survives a deleted issue and crashes the
   blocked-by lookup on the missing uuid. Store-level drift tests drive the real project store, then
   mutate the fake's issues/relations/milestones directly to inject each drift class.
-- Both new ops were **offline-only / not-live-proven** at authoring time — now live-proven, see the
-  Live-validation record above.
+- Both new ops are live-proven (2026-06-16, #621 — § "Live-proof status (dated)").
 
 ### `check_project_readiness` (#603) — a separate function
 
@@ -722,9 +694,9 @@ avoid duplication.
   position its worktree via `perk worktree create plan-<id>` and copy
   `.perk/workflow/plan-ref.json` into the new worktree (the PR-workers read the worktree-local
   plan-ref).
-- **Probe side-effects clobber idempotency**: overwriting an issue *description* while probing
-  destroys its `plan-header` sentinel, so a later `perk plan save` creates a **new** issue — use a
-  throwaway field or restore immediately.
+- **Probe side-effects clobber idempotency**: a probe that deletes or rewrites an issue's perk
+  **attachment** (pre-#1355: its description block) breaks the run_id-keyed find, so a later
+  `perk plan save` mints a **new** issue — probe a throwaway field or restore immediately.
 - **Python `urllib` HTTPS fails on this host** (`CERTIFICATE_VERIFY_FAILED`) — use `curl` for
   ad-hoc Linear GraphQL probes.
 
@@ -752,11 +724,8 @@ for `/objective-reconcile` to flip. (Terse by design; the full reconciliation pa
   wired fail-open into `update_plan_header` (catches `(IssueBackendError, GitHubError,
   ValueError)` — the `ValueError` covers `int(pr_field)`). Bookkeeping must never fail a header
   stamp.
-- **Reads are position-independent (marker scans); one write wasn't**: the prose-first reorder
-  flipped the manifest backfill insert point from before the Reconcilable START marker to after
-  the END marker (the manifest has since moved to a sentinel-issue attachment, #1355). **Never
-  guess-and-ship an unverified externally-rendered form** — the collapsible-toggle wrapper shipped
-  as a recorded decision point, not a guess (a lossy round-trip would break marker-matching).
+- **Never guess-and-ship an unverified externally-rendered form** — record it as a decision
+  point, not a guess (a lossy round-trip would break marker-matching).
 
 ## Byte-stable sibling selection + `_is_entity_not_found` (#687)
 
@@ -768,7 +737,7 @@ discriminator (`_is_entity_not_found`) folds a missing issue/session → empty; 
 (fail-loud accommodates the unproven personal-key-vs-agent-token question). (See
 `human-engagement-reads.md`.)
 
-## GraphQL type-literacy consolidation (Node 3.1, PR #731)
+## GraphQL type-literacy consolidation (#731)
 
 - **Substrate-home placement** (#731): the *generic* narrowing helpers (`_opt_*`/`_require_*`)
   live in the client layer (`src/perk/backends/linear/client.py`); the *domain* payload mapping
@@ -781,32 +750,20 @@ discriminator (`_is_entity_not_found`) folds a missing issue/session → empty; 
 - The generic `_opt_*`/`_require_*` detail and the disposition-matching rule live in
   `toolchain/ty.md` (the lenient-twin section) — don't duplicate it here.
 
-## Issue-tier boundary model (the `TypedDict` pilot retired)
+## Issue-tier boundary model
 
-The Node-3.1 `LinearIssueNode` `TypedDict` pilot (PR #731) was **retired** for a lenient response model
-(`LinearIssueNodeModel` + nested `_IssueStateNode` in `src/perk/backends/linear/_helpers.py`), mirroring
-the GitHub node-2.1 boundary→domain pattern. Because the one recurring selection
-(`id identifier url title description state{type}`) feeds **two** domain objects — `PlanState` via
-`get_plan` AND `AdoptableIssue` via `read_issue` — there is **no single `to_domain()`**: the model
-exposes validated field accessors + a `normalized_state()` helper and each call site assembles its
-own domain object (the model-crosses-the-boundary / call-site-assembles split). `identifier` is the
-only required field (it IS the boundary id `PlanState.id` / `AdoptableIssue.id`); the rest are
-tolerant-default, so only the present-but-malformed error TYPE changes (→ a labelled
-`IssueBackendError` with a `"read plan issue …"` source). The `translate_validation_errors` wraps
-ONLY `model_validate`, never the downstream `_get_pr` (which already raises `IssueBackendError`). The
-engagement-mapper helpers (`_require_str` / `_opt_str` / `_opt_dict`) STAY — they back the still-inline
-out-of-scope engagement reads. Full recipe in `pydantic-boundary-models.md` (the
+The recurring issue selection (`id identifier url title description state { type }` + the
+attachment nodes) parses through a lenient `LinearIssueNodeModel` + nested `_IssueStateNode` in
+`src/perk/backends/linear/_helpers.py` (a `TypedDict` pilot, #731, was retired for it). One
+selection feeds **two** domain objects — `PlanState` via `get_plan` AND `AdoptableIssue` via
+`read_issue` — so there is **no single `to_domain()`**: the model exposes validated accessors + a
+`normalized_state()` helper and each call site assembles its own domain object. `identifier` is
+the only required field (it IS the boundary id); the rest are tolerant-default, so only the
+present-but-malformed error TYPE changes (→ a labelled `IssueBackendError`).
+`translate_validation_errors` wraps ONLY `model_validate`, never the downstream `_get_pr`. The
+engagement-mapper helpers (`_require_str` / `_opt_str` / `_opt_dict`) stay — they back the
+still-inline engagement reads. Full recipe in `pydantic-boundary-models.md` (the
 gateway-application section).
-
-## `_FakeLinear` insertion-order substring footgun (RECONFIRMED, #711)
-
-Every `project(id` sub-query contains the `project(id` substring; in the scripted-response dict
-register the **more-specific needles** (`projectMilestones(`, `issues(first`) **BEFORE** the generic
-`project(id`, else the wrong response matches. (Reconfirms the established more-specific-needle-first
-rule.) The adoption-writer instance: the `project_issues_for_adoption` / `project_milestones` /
-`project_or_none` collision in the project-backed adoption flow. The #1355 instance: the
-more-specific needles `issues(first` / `projectMilestones(` registered before the generic
-`project(id`.
 
 ## Native cancellation vs perk's attachment status — orthogonal authorities
 
@@ -861,7 +818,7 @@ The Linear persistence has four load-bearing shapes:
   plan-body example — even under a damaged header — is never read or overwritten as the plan.
 
 Fakes: route the real new query and never manufacture omitted completeness fields; register
-specific needles before generic ones (the insertion-order footgun below); assert semantic
+specific needles before generic ones (the `_FakeLinear` footgun section above); assert semantic
 completeness (pagination, mutation identity, at-most-one attempt) rather than freezing GraphQL
 documents. Digest discipline: SHA-256 lowercase hex, 64 chars, no prefix — the `target-key` over
 the 5-field identity, `source_digest` over the 6-field source (excluding statuses, backlinks,
@@ -891,7 +848,7 @@ From the dream-companion artifact work:
 
 ## Still-deferred register (trimmed)
 
-The live runs in the Live-validation record above resolved the fidelity / not-found /
+The runs in § "Live-proof status (dated)" resolved the fidelity / not-found /
 mutation-acceptance items; what remains unobserved:
 
 - **RATELIMITED retry/backoff** — still unobserved at low CLI volume; the typed loud failure stands.
@@ -901,15 +858,13 @@ mutation-acceptance items; what remains unobserved:
 - **Remote-vs-local agent-session pointer residual**: a remote-created agent session is invisible to
   a later *local* land (`agent-session.json` lives in the runner's checkout, so the local land skips
   its emission with a stderr note) — accepted; a durable issue-tier session pointer would fix it.
-- **#1355 attachment lifecycle not live-proven**: validated offline + a one-day API-mechanics
-  spike only; it has not run against live Linear (notably `entityExternalLinkCreate`'s live
-  evidence is a docstring claim).
-- **#1355 crash windows**: accepted create→attachment crash windows (issue tier + sentinel) have
-  no recovery script or chaos coverage.
-- **#1355 fail-open arms** (Resources link, PR card, status mirror) are only scripted to succeed
-  in tests.
-- **#1355 clean break**: pre-#1355 Linear artifacts are invisible to reads — accepted as
-  disposable dogfood data; no migration playbook exists if that assumption changes.
+- **#1355 attachment lifecycle — partly live-proven**: the attachment-native create → find/get →
+  `save_node_plan` path ran once against live Linear (2026-09-10, the archive record). Still
+  unobserved live: the sentinel Resources link (`create_entity_external_link`'s docstring claim),
+  the status-mirror and PR-card fail-open arms (only scripted to succeed in tests), the
+  create→attachment crash windows (issue tier + sentinel; no recovery script or chaos coverage),
+  and the pre-#1355 clean break (old artifacts are invisible to reads — accepted as disposable
+  dogfood data; no migration playbook).
 
 ## Cross-references
 
@@ -930,3 +885,7 @@ mutation-acceptance items; what remains unobserved:
 - `docs/learned/workflow/human-engagement-reads.md` — Linear's honest engagement-read mechanics
 - `docs/learned/workflow/in-place-adoption.md` — the Linear project-backed adoption writer
 - `docs/learned/toolchain/ty.md` — the narrowing-helper family for deep untyped payloads
+- `shared/contracts.md` §8.24 — the attachment-native metadata + metadata-sentinel contract
+- `docs/design/archive/objective-refinement-linear-persistence.md` — the offline refinement gate
+- `docs/design/archive/objective-refinement-linear-planning-dogfood.md` — the authenticated
+  refine→plan run (the 2026-09-10 ledger entry)
