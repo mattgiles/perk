@@ -20,6 +20,7 @@
     "extension/",
     "!extension/**/*.test.ts",
     "!extension/testing/",
+    "!extension/pi/v2/",
     "shared/",
     "prompts/",
     "agents/",
@@ -37,7 +38,8 @@
   },
   "workspaces": [
     "docs/site",
-    "tools/prose-review"
+    "tools/prose-review",
+    "extension/pi/v2"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -49,7 +51,8 @@
     "docs:typecheck": "npm run typecheck --workspace docs/site",
     "docs:check": "npm run check --workspace docs/site",
     "prose-review:build": "npm run build --workspace tools/prose-review",
-    "prose-review:typecheck": "npm run typecheck --workspace tools/prose-review"
+    "prose-review:typecheck": "npm run typecheck --workspace tools/prose-review",
+    "v2:typecheck": "npm run typecheck --workspace extension/pi/v2"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",
