@@ -92,7 +92,12 @@ The census/corpus/vintage subsystem lives in `packages/perk-dev/src/perk_dev/aud
 
 - **Trigger evidence is intentionally asymmetric.** An observed workflow-state stage yields
   `stage:<id>` trigger evidence; a binding marker yields `command:<id>` evidence or corroboration
-  only — a binding marker is **never** independent stage proof. Don't symmetrize the two when
+  only — a binding marker is **never** independent stage proof. The derivation
+  (`corpus.py::derive_evidence`) maps each marker skill through the **shipped default** bindings
+  (the user overlay is vintage-unstable): a `command:<x>` binding evidences `command:x`; a
+  `stage:<x>` binding whose stage was NOT observed evidences `command:x` (the warm-slash-command
+  derivation); a `stage:<x>` binding whose stage WAS observed is corroboration only; a skill with
+  several default bindings marks its evidence `ambiguous`. Don't symmetrize the two when
   extending the census.
 - **`vintage-unknown` is visible uncertainty, not a grading veto.** Unknown-vintage sessions stay
   eligible for checks and may produce `satisfied`/`violated` verdicts; the conservative
@@ -276,8 +281,13 @@ packet.
 
 ## Known open edges for checker work
 
-- `command:<id>` `applies_to` selectors are declared but **not existence-validated**; their
-  session-mapping semantics land only with the classifier.
+- `command:<id>` `applies_to` selectors are declared but **not existence-validated** —
+  `expectations.py::validate` is shape-only and the committed-catalog self-check
+  (`tests/test_perk_dev_expectations.py::test_committed_stage_triggers_are_real_stages`)
+  cross-checks only `stage:` ids against the registry; no authority is consulted for a `command:`
+  id. Their session-mapping semantics are LIVE (`corpus.py::derive_evidence` joins binding markers
+  to `command:<id>` evidence, and the coverage report intersects `applies_to` with it) — the open
+  edge is the existence check, not the mapping.
 - `vintage_floor` values are round-up estimates; a release-history mapping may lower some — a
   data edit, not a schema event.
 - One entry's headless exemption (grill-before-review) lives only in its evidence prose — the
