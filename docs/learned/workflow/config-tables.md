@@ -7,47 +7,23 @@ cluster: config-and-convergence
 # Adding a `.perk/config.toml` config table
 
 perk's `.perk/config.toml` is read by **both planes** — the TypeScript extension (interior) and the
-Python CLI (exterior) — through deliberately narrow parsers. Two additions (repo trust,
-consumed at runtime by a TS gate; `[compaction]`, converged by `init` into `settings.json`) expose a
-small set of cross-cutting decisions worth preserving. The durable insight is the **contrast** between
-the two models, not either table in isolation.
-
-> **Update (config schema v2, 2026-07, #1212).** The schema was redesigned with **no backwards
-> compatibility**: `[trust] ci = "true"` → `[ci] trusted = true` (native boolean), `[[ci]]` →
-> `[[ci.checks]]`, `[subagents]` → `[models.subagents]`, `[stages.<id>]` → `[models.stages.<id>]`,
-> `[objective] compact_threshold = "0.8"` → `[compaction] objective_threshold = 0.8` (native
-> float), `[models] model` → `[models] default`. Three consequences for this doc:
->
-> - **The string-values-only TS parser fact is dead.** `parseTomlSubset` now reads native
->   booleans and numeric literals (`TomlScalar`); the quoted-string workaround is retired.
-> - **The silently-vanishes trap now has a tripwire for retired spellings.** A `mode="before"`
->   validator on `ConfigFileModel` (and `ModelsTable`) raises `ConfigError` for each legacy
->   top-level table / the `[models] model` key, naming the new home — loud-over-silent. New
->   unknown keys still vanish via `extra="ignore"`, so the trap below remains real for typos.
-> - Sections below that name old spellings (`[trust]`, `[[ci]]`, `[stages.<id>]`, `[subagents]`)
->   are **historical**: the placement/consumption reasoning stands; map spellings through the
->   rename table above. Trust now lives *with* the thing it governs (`[ci] trusted` above the
->   `[[ci.checks]]` rows it green-lights) — the "own section" placement rule below was superseded
->   by "settings that govern a thing live with the thing" once the map→array migration removed
->   the wholesale-map collision.
-> - **Pinned: the TS-side fail-safe posture and the doctor surface.** The design is "Python
->   trips loudly, TS fails safe", and both halves have regression pins: the retired-spellings
->   cases in `extension/substrate/config.test.ts` load each spelling the Python tripwire knows
->   (`[trust]`, `[objective]`, `[stages.<id>]`, `[subagents]`, `[[ci]]`, `[models] model`)
->   byte-identically to an empty config (whole-object `deepEqual`), with the execute-time
->   `subagentModel` reader pinned separately; `tests/test_doctor.py`'s legacy-spelling case
->   asserts `perk doctor`'s config check fails with the tripwire's own message naming both the
->   legacy table and its new home.
+Python CLI (exterior) — through deliberately narrow parsers. Two live tables are the archetypes:
+`[ci] trusted`, consumed at runtime by a TS gate, and `[compaction]`, converged by `init` into
+`settings.json`. The durable insight is the **contrast** between the two models, not either table
+in isolation.
 
 ## Distillation
 
-- Placement rubric for a new knob — own `[section]` vs a sub-key — "Placement: own `[section]`
-  vs a sub-key" (superseded in part: settings that govern a thing live WITH the thing — see the
-  schema-v2 blockquote above).
+- Placement: settings that govern a thing live WITH the thing (`[ci] trusted` beside its
+  `[[ci.checks]]` rows; the `[models]` namespace); never add a non-homogeneous key under a table
+  consumed wholesale as a map — "Placement: settings that govern a thing live with the thing".
 - Ill-typed values trap differently per plane: TS silently drops unsupported shapes (fail-safe);
-  Python trips loudly — "Ill-typed values — the trap differs per plane".
-- Know which read you need: the committed-only read vs the overlaid `load_config` (local.toml
-  overlay, main-checkout anchoring) — "Committed-only read vs the overlaid `load_config`".
+  Python raises `ConfigError`. Unknown keys still vanish via `extra="ignore"`, while retired
+  spellings trip loudly — "Ill-typed values…", "Schema v2 migration (dated…)".
+- Three reader policies: committed-only (config that lands in a committed artifact or selects a
+  canonical store), the overlaid `load_config` (session-transient), and the local-only secret
+  fallback — "Committed-only read vs the overlaid `load_config`", "The local-only
+  secret-fallback reader".
 - Config authority, overlay policy, and resolution phase are separate decisions (`[pi] agent_dir`
   reads committed + local overlay FROM THE MAIN CHECKOUT at the consumer); a validated path string
   still has a runtime `expanduser()` boundary; the repo's own committed table is guarded against
@@ -56,46 +32,48 @@ the two models, not either table in isolation.
 - `[[ci.checks]]` rows are an execution contract (declared order, glob change-scoping decides
   what gates a diff) — "The `[[ci.checks]]` execution contract and change-scoped gating".
 - Two consumption models decide where a knob lands: runtime interior gate vs init convergence
-  into `settings.json` (pi reads settings before extensions load) — "Two consumption models".
-- Historical: the schema-v2 blockquote at the top maps retired spellings (`[trust]`, `[[ci]]`,
-  `[subagents]`, `[stages.<id>]`) — sections naming them are historical; the reasoning stands.
+  into `settings.json` (pi reads settings before extensions load); `[models]` is one validated
+  table feeding three paths (init convergence, Python cold launch, TS runtime) — "Two consumption
+  models", "The `[models]` namespace — three consumption paths under one table".
+- Historical: "Schema v2 migration (dated 2026-07)" holds the retired spellings (`[trust]`,
+  `[[ci]]`, `[stages.<id>]`, `[subagents]`, `[objective]`, `[models] model`), their tripwires
+  and pins.
 
-## Placement: own `[section]` vs a sub-key
+## Placement: settings that govern a thing live with the thing
 
-A sibling key under an existing table is silently mis-parsed when that table is consumed *wholesale*.
-`loadPerkConfig` consumed the entire `[ci]` table as the named-checks map, so a `[ci] trust = …`
-sub-key would have been swallowed as a (bogus) named check. Trust therefore had to be its own
-`[trust]` section:
+A knob sits in the table of the thing it governs, so the operator finds it beside its subject and
+the parser validates related keys together:
 
-> **Update (#490):** `[ci]` migrated from a `name = "command"` **map** to a `[[ci]]`
-> **array-of-tables** (each row `name`/`command`/optional `glob`), parsed by `parseCiChecks` into
-> `CiCheck[]`. The wholesale-map collision footgun above **no longer applies** under
-> array-of-tables (a `trust` key would just be an ignored row field) — but the placement decision
-> (trust as its own `[trust]` section) stands and is now also the cleaner shape.
-
-```toml
-[trust]
-ci = "true"
-```
+- `[ci]` holds `trusted` beside the `[[ci.checks]]` rows it green-lights — both read by the TS
+  plane (`loadPerkConfig`); Python only trips on the legacy list shape.
+- `[models]` holds `default`/`thinking`/`stages.<id>`/`subagents` and validates as one
+  `ModelsTable` (§"The `[models]` namespace").
+- `[compaction]` holds the settings-converged keys and the TS-read `objective_threshold`.
 
 **General rule:** never add a non-homogeneous key under a table that is consumed wholesale as a map.
-If the table *is* a map, the new knob needs its own section.
+If the table *is* a map, the new knob needs its own section. The array-of-tables rows
+(`[[ci.checks]]`, `[[bindings]]`) cannot collide — a stray row field is simply ignored — so today
+the rule bites in one place: `[models.stages]` is a stage-id-keyed map (`dict[str, StageTable]`),
+so a cross-stage knob cannot be a sibling key there (a scalar fails `StageTable` validation; a
+sub-table is kept as a bogus stage id doctor warns about) — the repo-wide default sits one level
+up as `[models] default`. It bites again whenever a NEW map-shaped table appears. The `[trust]`
+instance that once forced an own-section rule is told in §"Schema v2 migration".
 
 ## Ill-typed values — the trap differs per plane
 
 The two planes handle values they can't use differently:
 
-- **TS — unsupported value shapes silently dropped.** *(Historical: pre-v2 the parser kept only
-  string values, forcing quoted `ci = "true"` / `"0.8"` workarounds.)* `parseTomlSubset`
-  (`extension/substrate/config.ts`) now reads strings plus **native booleans and numbers**
-  (`TomlScalar`); anything else (dates, arrays, inline tables) is still silently dropped, and
-  consumers guard with `typeof` checks (a string `"true"` no longer grants trust).
+- **TS — unsupported value shapes silently dropped.** `parseTomlSubset`
+  (`extension/substrate/config.ts`) reads strings plus **native booleans and numbers**
+  (`TomlScalar`); anything else (dates, arrays, inline tables) is silently dropped, and consumers
+  guard with `typeof` checks (a string `"true"` does not grant trust).
 - **Python — ill-typed values raise.** The pydantic table models in `src/perk/substrate/config.py`
   no longer silently discard: an ill-typed value raises `ConfigError` (field-path message via
-  `translate_validation_errors`), surfaced by doctor's `config` check. The `bool`-is-`int`-subclass
-  trap (`isinstance(True, int)` is `True`, so `reserve_tokens = true` would otherwise read as `1`)
-  is now an explicit `_reject_bool` before-validator on `CompactionTable` — it raises, never reads
-  `true` as 1:
+  `translate_validation_errors`), surfaced by doctor's `config` check; retired top-level spellings
+  trip the schema-v2 tripwire (§"Schema v2 migration") rather than vanishing. The
+  `bool`-is-`int`-subclass trap (`isinstance(True, int)` is `True`, so `reserve_tokens = true`
+  would otherwise read as `1`) is an explicit `_reject_bool` before-validator on
+  `CompactionTable` — it raises, never reads `true` as 1:
 
   ```toml
   [compaction]
@@ -111,8 +89,9 @@ exceptions.
 
 ## Committed-only read vs the overlaid `load_config`
 
-Most tables (`[providers]`, `[subagents]`, `[[bindings]]`) read through `load_config`, which overlays
-the gitignored `.perk/local.toml` for per-user, session-transient overrides. Config that converges
+Most tables (`[providers]`, `[models.stages.<id>]`, `[models.subagents]`, `[worktree]`,
+`[[bindings]]`) read through `load_config`, which overlays the gitignored `.perk/local.toml` for
+per-user, session-transient overrides. Config that converges
 into a **committed** artifact must not. `[compaction]` lands in `settings.json` (committed), so
 `load_committed_compaction` (`src/perk/substrate/config.py`) reads committed `.perk/config.toml` **only**, bypassing the
 overlay — otherwise a per-user local override would produce a stray committed git diff. Per-user
@@ -123,11 +102,11 @@ project settings).
 lands in committed files — the scope of "unsafe" is *committed artifacts*, not every canonical
 store (see the authority/overlay/phase distinction under "Main-checkout anchoring" below).
 
-Committed-only knobs now have **three precedents** (`[compaction]`, `[issues]`, the
-settings-convergence reads); the recipe is fixed: a pure `parse_*(raw)` parser + a
-`load_committed_*(repo_root)` that reads `.perk/config.toml` via `_read_toml` only, lets
-`TOMLDecodeError` propagate, and stays OUT of the overlaid `Config` dataclass. Tests must include
-the **"local overlay is ignored"** case — it's the whole point of the shape.
+Committed-only knobs have **three precedents** (`[compaction]`, `[issues]`, and
+`load_committed_models_table` for `[models] default`/`thinking`); the recipe is fixed: a pure
+`parse_*(raw)` parser + a `load_committed_*(repo_root)` that reads `.perk/config.toml` via
+`_read_toml` only, lets `TOMLDecodeError` propagate, and stays OUT of the overlaid `Config`
+dataclass. Tests must include the **"local overlay is ignored"** case — it's the whole point of the shape.
 
 ### Main-checkout anchoring for committed canonical-store selectors
 
@@ -335,17 +314,23 @@ runs). Deterministic injected-exec gating lives instead at the `runCiChecks` **u
 
 ### Plumbing boundary: Python never reads `[ci]`
 
-`[[ci.checks]]` is a **TS-only** concern — no Python plumbing reads it (init only scaffolds a
-commented `[[ci.checks]]` example in `PERK_TOML_TEMPLATE`). To make the globs gate per-toolchain, the **justfile
-split** `lint`/`typecheck`/`test` into per-language recipes (`-py`/`-js`) with aggregates retained,
-so a `glob = "*.py"` row can run only the Python toolchain.
+Python never *consumes* `[ci]`: `ConfigFileModel` drops the dict via `extra="ignore"` and only
+trips on the legacy list-valued spelling (§"Schema v2 migration"). `[[ci.checks]]` is a
+**TS-only** concern — init only scaffolds a commented `[[ci.checks]]` example in
+`PERK_TOML_TEMPLATE` (`src/perk/convergence/init/templates.py`). To make the globs gate
+per-toolchain, the **justfile split** `lint`/`typecheck`/`test` into per-language recipes
+(`-py`/`-js`) with aggregates retained, so a `glob = "*.py"` row can run only the Python toolchain.
 
 ## Two consumption models
 
-- **Interior gate (`[trust]`).** Consumed at runtime by a TS gate — `decideCiScope` in
-  `extension/delivery/ci.ts`. The session must honor it live.
-- **init convergence (`[compaction]`).** Converged by `init` into `settings.json`, which pi reads
-  natively at boot. No extension change is even possible here: the interactive pi CLI builds its
+- **Interior gate (`[ci] trusted`).** Consumed at runtime by `decideCiScope`
+  (`extension/delivery/ci.ts`): `trusted` short-circuits to `run` alongside the
+  `--allow-project-ci` flag and a per-session UI approval, else confirm-with-UI /
+  refuse-headless. `runCiImpl` (`extension/pi/v1/delivery/ci.ts`) feeds it from
+  `loadPerkConfig(cwd).ci.trusted`. The session must honor it live.
+- **init convergence (`[compaction]`, `[models] default`/`thinking`).** Converged by `init` into
+  `settings.json` via `_converge_settings`, which pi reads natively at boot. No extension change
+  is even possible here: the interactive pi CLI builds its
   `SettingsManager` *before* extensions load, so the extension can never set
   `reserveTokens`/`keepRecentTokens`.
 
@@ -393,59 +378,91 @@ parses, false/blank → absent, local-overlay-wins). When a gate's pure signatur
 `decideCiScope` gaining `trusted`), it's a small cross-file contract: update **all** call sites + the
 test matrix in lockstep.
 
-## The cloned-repo tradeoff (`[trust]`)
+## The cloned-repo tradeoff (`[ci] trusted`)
 
-A repo committing `[trust] ci` auto-runs its own CI and suppresses even the headless fail-closed refuse
-(documented in `shared/contracts.md`). `perk init` therefore scaffolds only a *commented* `[trust]`
-example so new repos stay safe-by-default. No Python parser mirrors `[trust]` — it is pure-TS /
-interior-only.
+A repo committing `[ci] trusted = true` auto-runs its own CI and suppresses even the headless
+fail-closed refuse. `perk init` therefore scaffolds only a *commented* `[ci]` / `trusted = true`
+example in `PERK_TOML_TEMPLATE` so new repos stay safe-by-default. No Python parser reads it — it is
+pure-TS / interior-only; the owning statement is the `ci` field doc-comment on `PerkConfig` in
+`extension/substrate/config.ts`.
 
-## Single-plane (Python-only) launch-seam config feature (`[stages.<id>]`)
+## The `[models]` namespace — three consumption paths under one table
 
-The cross-cutting insight: **a config knob that only shapes the local cold-launch `pi` argv needs no
-cross-plane work.** `[stages.<id>]` lets a repo pass per-stage `pi` args (e.g. a per-stage `--model`)
-at the cold launch. The end-to-end recipe is single-plane (Python only):
+The cross-cutting insight: **one validated table (`ModelsTable`, `src/perk/substrate/config.py`)
+feeds three consumption paths, each the right one for its key's lifecycle.**
 
-- **Parser** (`config.py`): a frozen stdlib `@dataclass` held **by identity** in both `ConfigFileModel`
-  (pydantic) and the frozen `Config` — the exact `user_bindings` precedent
-  (`revalidate_instances="never"` preserves instances; `to_domain()` does explicit attribute copy).
-  LBYL silent-omit (non-dict table → `{}`; blank/ill-typed sub-keys dropped; an empty sub-table stays
-  inert). **Unknown stage ids are KEPT at the parser** — registry validation is the doctor check's
-  job, which keeps `config.py` free of a registry import.
-- **Injection** (`launch_stage`): splice the per-stage model args into the **single** argv vector,
-  mirroring the existing `--approve` trust-arg precedent. Two free wins from building argv **once
-  before** the `dry_run` branch: `--dry-run --json` previews the injected flags, and
-  inject-before-pass-through gives user-`--model`-wins for free (see `cold-door-launch.md`'s
-  build-argv-once rule). The remote path early-returns before this block, so `--remote` carries no
-  per-stage args (a documented non-goal).
-- **Doctor check**: returns **`None` to contribute nothing when unconfigured** (keeps a clean repo's
-  `perk doctor` quiet), wired with a walrus conditional-append and **NOT** gated behind `if verify:`
-  (offline: reads config + the bundled registry). Malformed-TOML → `warn` deferring to the config
-  check; a registry error skips the stage-id check (the registry check owns that finding — don't
-  double-fail). Reuses an existing check group → no `GROUP_ORDER` change. No `--fix` arm (user-owned
-  config).
+- **`default`/`thinking` → init convergence.** `_converge_models`
+  (`src/perk/convergence/init/settings.py`) writes `defaultProvider`/`defaultModel`/
+  `defaultThinkingLevel` write-when-present from the committed-only `load_committed_models_table`.
+  Validation is hard — a typo must never converge into the committed `settings.json` — and
+  `default` must be `provider/id` (pi's settings default is an exact provider+id lookup).
+- **`stages.<id>` → Python cold launch only.** `_stage_model_argv`
+  (`src/perk/run/launch/__init__.py`) emits `--model`/`--thinking`, which `_build_argv` splices
+  before the user's pi args so an explicit `perk <stage> --model` wins (pi parses last-wins;
+  `cold-door-launch.md`'s build-argv-once rule — `--dry-run --json` previews the injected flags).
+  Unknown stage ids are KEPT at the parser: doctor's `stage-models` check (`_stage_models_check`
+  — offline, `None` when unconfigured, no `--fix` arm, warns on unknown ids and invalid thinking
+  levels, reuses the `repository` group) owns registry validation, keeping `config.py`
+  registry-free. Inert for `--json` workers (no pi launched); warm in-session transitions inherit
+  the launched session's model; the remote runner is unaffected.
+- **`subagents` → TS runtime.** `subagentModel` (`extension/substrate/config.ts`) reads the
+  per-agent override at execute time under the per-file worktree overlay rule from
+  §"Main-checkout anchoring".
 
-Specifics worth keeping: the TS plane needs **no change** (`parseTomlSubset` keys `[stages.*]` as an
-unread section); overlay-aware for free (the recursive `_overlay` leaf-merges nested `[stages.<id>]`
-tables); `contracts.md` is deliberately **not** amended (it documents only cross-plane config — a
-Python-launch-only knob is out of scope) while `docs/user-docs/` + the `perk-expert` reference mirror
-**are** updated.
+Doctor's `models` check (`_models_check`) validates the model strings' thinking suffixes across
+all three. The generalizable parser recipe for a keyed sub-table: a pydantic sub-model for types
+only (`StageTable` — blank strings normalize to `None` via `StrippedStr`, ill-typed values raise)
+mapped by `to_domain()` into a frozen stdlib dataclass (`StageModel`) that the frozen `Config`
+holds directly — the `user_bindings` precedent of domain values never re-validated past the
+boundary; an all-`None` entry is omitted so an empty sub-table stays inert; overlay-aware for free
+via the recursive `_overlay` leaf-merge. Contracts §8.10 documents the convergence and the launch
+precedence (flag > `[models.stages.<id>]` > converged default > pi's own default);
+`docs/user-docs/` and the `perk-expert` reference mirror it.
 
-Residual scope: `[stages.<id>]` applies only where a stage cold-launches an interactive pi session;
-deterministic `--json` workers launch no pi (inert there); warm in-session transitions inherit the
-launched session's model; the remote runner is unaffected.
+## Schema v2 migration (dated 2026-07, #1212) — the retired spellings and their tripwires
+
+The schema was redesigned with **no backwards compatibility**; each retired spelling has one home:
+
+| Retired spelling | Live home |
+|---|---|
+| `[trust] ci = "true"` | `[ci] trusted = true` (native boolean) |
+| `[[ci]]` | `[[ci.checks]]` |
+| `[subagents]` / `[stages.<id>]` | `[models.subagents]` / `[models.stages.<id>]` |
+| `[objective] compact_threshold = "0.8"` | `[compaction] objective_threshold = 0.8` (a float) |
+| `[models] model` | `[models] default` |
+
+- **Python trips loudly.** `ConfigFileModel._reject_legacy_tables` (`mode="before"`, driven by
+  `_LEGACY_TABLE_HOMES`; a list-valued `ci` is the legacy `[[ci]]`) and `ModelsTable`'s
+  `[models] model` tripwire raise `ConfigError` naming the new home, surfaced by doctor's `config`
+  check (`tests/test_doctor.py::test_config_check_fails_on_legacy_spelling_naming_the_new_home`).
+- **TS fails safe.** Every retired spelling loads byte-identically to an empty config (the
+  retired-spellings cases in `extension/substrate/config.test.ts`, whole-object `deepEqual`; the
+  execute-time `subagentModel` reader pinned separately).
+- **The dead facts.** The string-values-only TS parser (quoted `ci = "true"` / `"0.8"`
+  workarounds; `parseTomlSubset` now reads native booleans/numbers via `TomlScalar`), and the
+  own-`[trust]`-section placement rule — forced while `[ci]` was consumed wholesale as a
+  named-checks map (a `[ci] trust` key would have parsed as a bogus check), dissolved by the
+  map→array migration (#490) and the v2 move of trust beside the checks it governs
+  (§"Placement").
 
 ## Cross-references
 
 - `extension/substrate/config.ts` — `parseTomlSubset` (the scalar-subset TS parser); `parseCiChecks` (`[[ci.checks]]` → `CiCheck[]`)
 - `extension/delivery/ci.ts` — `decideCiScope` (the `[ci] trusted` interior gate); the glob-match/skip plumbing (the `[[ci.checks]]` glob gating)
-- `extension/pi/v1/delivery/ci.ts` — `changedFiles` (the changed-set observation the glob gate consumes)
+- `extension/pi/v1/delivery/ci.ts` — `changedFiles` (the changed-set observation the glob gate
+  consumes); `runCiImpl` (feeds `[ci] trusted` into `decideCiScope`)
 - `src/perk/substrate/config.py` — the pydantic table models (`ConfigFileModel`, `CompactionTable`,
   `WorktreeTable`, …); `load_committed_compaction`, `load_committed_issues_backend` (the
   committed-only reads)
-- `src/perk/convergence/init/settings.py` — `_converge_settings` / `_converge_compaction` composition
+- `src/perk/convergence/init/settings.py` — `_converge_settings` / `_converge_compaction` /
+  `_converge_models` composition
+- `src/perk/convergence/init/templates.py` — `PERK_TOML_TEMPLATE` (the commented `[ci]` scaffold)
+- `src/perk/run/launch/__init__.py` — `_stage_model_argv` / `_build_argv` (the
+  `[models.stages.<id>]` launch splice)
+- `src/perk/convergence/doctor/checks.py` — `_stage_models_check`, `_models_check`
 - `docs/learned/workflow/init-doctor.md` — the managed-convergence SSOT
 - `docs/learned/workflow/provider-seam.md` — the mirrored selection shape
 - `docs/learned/workflow/linear-backend.md` — the consumer side of the local-only `[linear] api_key` reader
 - `docs/learned/workflow/worktree-lifecycle.md` — the `[worktree] setup` hook + the `created`-flag dry-run asymmetry
-- `shared/contracts.md` — the `[trust]` + `[compaction]` cross-plane prose
+- `shared/contracts.md` — §8.10 — the `[compaction]` + `[models]` settings convergence and the
+  model precedence
