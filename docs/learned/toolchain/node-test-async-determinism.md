@@ -1,14 +1,22 @@
 ---
 title: Deterministic async & timer coverage in node:test
-read_when: You are testing interval/timer lifecycles or streamed progress in node:test — mock.timers setup, a leaked/unasserted ticker, or an immediately-resolving fake that hides completion-only streaming.
+read_when: You are testing timers, streamed progress, env-isolated or concurrent node:test files, lease races, isolation proofs or currency fences — mock.timers, FakeTimers, race hooks, real-I/O bounds
 cluster: toolchain-gotchas
 ---
 
 # Deterministic async & timer coverage in node:test
 
-Two failure families from testing timer-driven and streamed-progress code with `node:test`, both
-resolved deterministically — no real-time sleeps, no timeouts. Source pointer: the run-CI
-progress work in `extension/delivery/ci.ts` and its interval/`onUpdate` tests in
+The deterministic shapes for async code under `node:test`, in two tiers. **Pure mocked time**
+(timer lifecycles, streamed progress, seam-injected FakeTimers, env-knob timing): no real-time
+sleeps and no timeouts — every effect seam is injected or mocked, so the test drives causality,
+not the clock. **Real I/O under a mocked clock** (a child process, a file read, a network bridge):
+the driver needs a **real-time bound** — § "Mocked-clock drivers over real I/O need a real-time
+bound". Beside the timer families the doc also carries the env-isolation rules for concurrent test
+files (§ "Process-global env vars are not completion barriers"), the race-hook and isolation-proof
+recipes (§ "Sequential "race" tests are fiction" and its "Proving *isolation*" subsection), the
+currency-fence case (§ "Async currency fences need a fence-between-awaits case") and the
+fake-bridge settle rule (§ "Settle fake bridges in `finally`"). Timer-family source pointer: the
+run-CI progress work in `extension/delivery/ci.ts` and its interval/`onUpdate` tests in
 `extension/pi/v1/delivery/ci.test.ts`.
 
 ## Interval lifecycle needs deterministic coverage, not real-time luck
