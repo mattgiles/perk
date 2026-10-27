@@ -3,8 +3,13 @@
 // round sets `control.terminate`, the run is done with no further model request — the answer is
 // the tool-calling assistant entry, not a model-written recap.
 //
+// A model-issued call's structured output is checked against the tool's schema and then kept
+// nowhere (the model reads only `output`); a missing or invalid one is dropped and reported to the
+// host, while the text result and the termination still stand. So the host report channel is the
+// only witness that the structured output was accepted, and D7 asserts it stayed silent.
+//
 // Upstream evidence (packages/durable at the mirrored 1.4.0 pin):
-// src/harness/generation.ts::finishToolRound;
+// src/harness/generation.ts::finishToolRound; src/harness/tool.ts::finalResult;
 // test/harness-tools.test.ts::"applies addTools and terminates only when every result of the round
 // asks to".
 
@@ -62,6 +67,9 @@ test("D7 (P6): structured tool output + control.terminate ends a run without a r
   assert.ok(result, "the round has a tool result");
   assert.notEqual(result.isError, true);
   assert.equal(resultText(result), "accepted");
+  // A dropped structured output would surface here as an `extension_error` report.
+  assert.deepEqual(setup.infos, [], "the structured output passed its schema: nothing reported");
+  assert.deepEqual(setup.reports, []);
 
   assert.ok(settled.type === "input" && settled.status === "done");
   const answer = entries.find((entry) => entry.id === settled.answer);
