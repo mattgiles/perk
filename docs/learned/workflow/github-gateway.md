@@ -158,9 +158,11 @@ was later **reshaped** from a single posting child to a parent-driven classify-t
   **Generalize: any "submittable" verdict must cover every deterministic platform-rejection class,
   not just payload shape.**
 
-Residual: the reviewer agent-def is hand-committed in `.pi/agents/`, and agent-def delivery to
-consumer repos is a known gap — a consumer running an old prompt against a new CLI gets a typed
-bad-batch error. Acceptable at 0.0.1; remember it when the delivery gap closes.
+The reviewer's judgment lives in `agents/pr-reviewer.md`, shipped in the npm package and
+discovered as a package agent (`pi/subagents.md` § "Agent-def delivery to consumer repos"), so
+def↔CLI skew is governed by the package pin, not a hand-committed copy; a leftover
+`.pi/agents/perk/` copy would shadow it — doctor's `subagent-engine` check warns and `--fix`
+removes it (same section).
 
 ## The pure unified-diff anchor parser (`diff_anchors.py`)
 
@@ -205,9 +207,12 @@ and the lenient `_failed` path raises (no special-casing needed). The re-export 
 `src/perk/github/__init__.py` keeps `__all__` isort-sorted (`RepoIdentity` before `Review`,
 `repo_identity` before `rerun_workflow_run`).
 
-The read's **sole consumer** is the repo-authored-skills source derivation (`derive_repo_source`),
-so this read and `init-external-cli.md`'s "Repo-authored skills" section move together — see that
-doc for the network-skip-ordering and self-exclusion patterns that wrap this single read.
+The read has **two consumers**: the repo-authored-skills source derivation
+(`src/perk/convergence/init/repo_skills.py::derive_repo_source` — see `init-external-cli.md`
+§ "Repo-authored skills" for the network-skip-ordering and self-exclusion patterns that wrap it)
+and the stack chain-walk's home-repo identity
+(`src/perk/cli/commands/pr/review/stack_resolve.py::_home_repo_full_name`, which derives
+`owner/name` from the identity URL — § "The stack chain-walk reads").
 
 ## gh GraphQL transport facts (#690)
 
@@ -251,12 +256,14 @@ Three platform ceilings perk has hit live; each has a durable handling shape.
   every diagnostic carries the trigger (`LocalDiffReason = too-large | forced`) so a forced `--local`
   never claims a 406. Presence guards are strip-aware (`base_ref is None or not base_ref.strip()`).
   The git mechanics (config-pinned diff, temp-ref fetch) live in `workflow/git-substrate.md`.
-- **A PR body over 65,536 characters is refused with 422 on both create and PATCH.**
-  `pr/submit_cmd.py` treats the `<details>` plan embed as best-effort: `_plan_embed_fits` judges the
-  footer-inclusive body **with the footer reserved on both passes** (`_FOOTER_RESERVE` — the create
-  pass does not yet know the PR number the update pass appends), so create and update can never
-  disagree about whether the embed fits; when it does not, the body carries a one-line pointer and
-  the result reports `plan_embedded: false`.
+- **A PR body over `PR_BODY_MAX_CHARS` (65,536) is refused with 422 on create and PATCH alike.**
+  The shared kernel `src/perk/delivery/pr_body.py::compose` treats the `<details>` plan embed as
+  best-effort and judges the fit **with `FOOTER_RESERVE` reserved on both passes** (the create pass
+  does not yet know the PR number the update pass's checkout footer appends), so create and update
+  never disagree; when it does not fit, the body carries a one-line pointer and
+  `ComposedBody.plan_embedded` is false (surfaced as `plan_embedded: false`). Both
+  `src/perk/cli/commands/pr/submit_cmd.py::_compose_pr_body` and the stacked Publish engine
+  (`src/perk/delivery/publish.py`) delegate to it.
 
 ## GitHub `Closes #N` autoclose fires ONLY on a default-branch merge (#694)
 
@@ -367,8 +374,9 @@ without a layering violation. The clean fix is a single move:
 **Generalizable signal: a layering violation forcing backend-specific branching into a neutral layer
 means the read belongs in the CONSUMER, passed down as a value.** Two corroborating details: the
 load-bearing **import-direction guard** now actually bites (the gateway imports neither the backends
-nor the state tier), and the `backend_id = "github"` module-level **literal** that breaks the
-resolver↔adapter import cycle (cross-ref `objective-store.md`, where it's already noted).
+nor the state tier), and the `backend_id = "github"` class-attribute **literal** (never imported
+from the resolver) that breaks the resolver↔adapter import cycle (cross-ref `objective-store.md`,
+where it's already noted).
 
 ## The resolved `dry_run` ruling (record)
 
@@ -397,12 +405,14 @@ composition) lives in `pydantic-boundary-models.md` — not duplicated here.
 - `src/perk/github/` — the gateway and the helper family
 - `docs/learned/workflow/pydantic-boundary-models.md` — the boundary↔domain conversion recipe (the
   gateway response converters apply its lenient-parse-model → frozen-dataclass pattern)
-- `docs/learned/workflow/init-external-cli.md` — the repo-authored-skills convergence, sole consumer
-  of the `repo_identity` read (network-skip ordering, sibling-fragment self-exclusion)
+- `docs/learned/workflow/init-external-cli.md` — the repo-authored-skills convergence, one of the
+  two `repo_identity` consumers (network-skip ordering, sibling-fragment self-exclusion)
+- `src/perk/delivery/pr_body.py` — the PR-body size kernel (`compose`, `FOOTER_RESERVE`)
 - `docs/learned/pi/extension-seams.md` — the TS sibling of idiom consolidation (minimal structural
   seams)
 - `docs/learned/toolchain/ruff.md` — the preview-rule enablement collateral from the same sweep
 - `docs/learned/workflow/cold-door-client.md` — the parent-posts warm-tool recipe (`post_pr_review`)
-- `docs/learned/pi/subagents.md` — the report-only reviewer-agent change (read-only fan-out)
+- `docs/learned/pi/subagents.md` — agent-def shipping (npm `agents/`) + the report-only
+  reviewer-agent change (read-only fan-out)
 - `docs/learned/toolchain/python-package-splits.md` — the cross-package relocation arc that produced
   the gateway-purification refinement (the `backend_id` literal, the import-direction guard)
