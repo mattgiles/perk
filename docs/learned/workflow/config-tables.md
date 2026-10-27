@@ -106,7 +106,8 @@ Committed-only knobs have **three precedents** (`[compaction]`, `[issues]`, and
 `load_committed_models_table` for `[models] default`/`thinking`); the recipe is fixed: a pure
 `parse_*(raw)` parser + a `load_committed_*(repo_root)` that reads `.perk/config.toml` via
 `_read_toml` only, lets `TOMLDecodeError` propagate, and stays OUT of the overlaid `Config`
-dataclass. Tests must include the **"local overlay is ignored"** case — it's the whole point of the shape.
+dataclass. Tests must include the **"local overlay is ignored"** case — it's the whole point of
+the shape.
 
 ### Main-checkout anchoring for committed canonical-store selectors
 
