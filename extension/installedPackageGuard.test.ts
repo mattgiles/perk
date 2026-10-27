@@ -10,9 +10,10 @@
 // `"npm", "node_modules"` segments (imports: bareImportGuard).
 
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import { v1ExtensionFiles } from "./testing/v1Corpus.ts";
 
 // Whole path tokens: the exception matches exactly (not by prefix); its presence keeps the scan live.
 const INSTALL_ROOT_SPELLING =
@@ -34,10 +35,10 @@ function installRootSpellings(source: string): string[] {
 }
 
 test("no extension source spells a path into .pi/npm/node_modules/ except the two sanctioned roots", () => {
-  const files = (readdirSync(import.meta.dirname, { recursive: true }) as string[])
-    .map((f) => f.split(path.sep).join("/"))
-    .filter((f) => /\.(ts|mjs|js)$/.test(f) && f !== path.basename(import.meta.filename))
-    .sort();
+  // The shared v1 walk (`testing/v1Corpus.ts`) prunes the v2 workspace and installed node_modules.
+  const files = v1ExtensionFiles().filter(
+    (f) => /\.(ts|mjs|js)$/.test(f) && f !== path.basename(import.meta.filename),
+  );
   assert.ok(
     files.includes("index.ts") && Object.keys(SANCTIONED).every((f) => files.includes(f)),
     "scan misaimed",

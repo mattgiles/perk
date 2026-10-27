@@ -10,9 +10,10 @@
 // docs/learned/workflow/source-scan-guards.md). The Python twin is tests/test_write_guard.py.
 
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import { v1ExtensionFiles } from "./testing/v1Corpus.ts";
 
 // Per-API allowlist: pattern → files allowed to call it. Each pattern requires `(` immediately
 // after the API name (a call site), so `writeFileSync(` never double-matches `writeFile(`'s
@@ -44,17 +45,14 @@ const RULES: { api: string; pattern: RegExp; allowed: string[] }[] = [
 
 /**
  * Discover production sources under extension/: every `.ts` file (recursively, so future
- * subdirectories are scanned by default) except test files and the testing/ fakes.
+ * subdirectories are scanned by default) except test files and the testing/ fakes. The v2
+ * workspace and installed `node_modules` are pruned by `testing/v1Corpus.ts`.
  */
 function productionFiles(): string[] {
-  const entries = readdirSync(import.meta.dirname, { recursive: true }) as string[];
-  return entries
-    .map((entry) => entry.split(path.sep).join("/"))
-    .filter(
-      (entry) =>
-        entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.startsWith("testing/"),
-    )
-    .sort();
+  return v1ExtensionFiles().filter(
+    (entry) =>
+      entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.startsWith("testing/"),
+  );
 }
 
 /**
