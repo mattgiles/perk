@@ -219,9 +219,10 @@ and submission IDs are *mapped to* Perk identities in the commit that creates th
 cannot be recomputed from Perk inputs, so they cannot be identity. A deterministic op id lets a
 retry find its own receipt: the retry derives the same id and looks it up. Durable's `requestId`
 deduplication compares only the submission type, so Perk itself must decide whether a repeated
-operation means the same thing. That is the replay rule's payload comparison (§4). Observation op
-ids derive from the observation itself, its commit and its timestamp, so every observation is a
-new fact (P5). It is the verb's own op id that converges on a retry.
+operation means the same thing. That is the replay rule's payload comparison (§4). An
+observation's op id is the next store-local observation ordinal, assigned inside the commit that
+records it (§5), so every observation is a new fact (P5). It is the verb's own op id that
+converges on a retry.
 
 **Evidence.**
 
@@ -578,7 +579,7 @@ decision      v2/<execution-id>/decision/<subject-digest>/<decision-kind>
 
 | `op-kind` | Scope | `op-key` | Duplicate-compared payload |
 |---|---|---|---|
-| `observe` | execution | `<commit-oid>/<observed-at-ms>` | the observation record (always a fresh key, never a duplicate) |
+| `observe` | execution | `<seq>`: the next observation ordinal, assigned in the recording commit | the observation record (always a fresh key, never a duplicate) |
 | `admit` | assignment | — | `{capabilitySet}` |
 | `submit` | attempt | — | `{conversationId}`. This op id is the Durable `requestId`. |
 | `accept-report` | attempt | — | the report + the verified digest |
@@ -611,9 +612,9 @@ part of the compared payload.
 
 **Durable ids are mapped, never adopted.** A Durable task, conversation or submission id is mapped
 to its Perk id in the commit that creates it. The mapping lives in the `perk.v2.durable-map`
-family, keyed by the Perk id. A Durable id is never used as a Perk identity, because storage
-`mintId` allocates sequence numbers. A retry after an uncertain commit re-derives the same
-operation id and finds its receipt.
+family, keyed by the Perk id the Durable object was created for (§6). A Durable id is never used
+as a Perk identity, because storage `mintId` allocates sequence numbers. A retry after an
+uncertain commit re-derives the same operation id and finds its receipt.
 
 ## 5. The subject rule
 
@@ -626,7 +627,22 @@ subject.** Assignment and decision keys are reused, and subject-bound outcomes s
 ref advanced" alone never invalidates an approval, but "the tree changed" does. No "stale" flag is
 ever stored. Staleness is derived by comparing a record's subject digest with the digest of the
 latest observation. An observation record is
-`{repo, ref, commit, tree, manifestDigest, observedAt}`.
+`{seq, repo, ref, commit, tree, manifestDigest, observedAt}`.
+
+**Observation order.** Observations are ordered by `seq`, never by wall-clock time:
+
+- `seq` is one more than the highest `seq` among the observation records in the transaction
+  (1 for the first). The recording commit assigns it from in-transaction records, and the op id
+  is `v2/<execution-id>/observe/<seq>`.
+- The owner lock admits one host at a time, and one host commits on one mutation line, so two
+  observations never receive the same `seq`. A refused commit rolls its observation back, so the
+  sequence has no gaps.
+- `seq` derives from retained records, so it continues unchanged across reopen and owner epochs.
+- The **latest observation** is the one with the highest `seq`. Stale-subject checks (§12) and
+  every other freshness rule read only this.
+- `observedAt` is wall-clock time (epoch milliseconds). It is display data, used only for the age
+  `status` reports. Nothing orders, keys or authorizes by it, so equal timestamps or a clock
+  rollback cannot collide two observations or select an older one.
 
 **Snapshot manifest.** The snapshot manifest is derived from the git tree, never from walking the
 snapshot. It has one line per `git ls-tree -r` entry:
@@ -696,20 +712,48 @@ list includes a symlink entry and a gitlink entry.
 | **Disposable runtime state** | Durable task checkpoints, memos, task-scoped documents, `pi.*` documents, transcripts, inbox, `pi.usage`, SQLite schema | Durable | until the task ends, or Durable's own policy | Durable, plus diagnostics via `inspect()` |
 | **Derived views** | status snapshot, wait reason, door payloads, `inspect()` | nobody: computed on read | never stored | the door, the status view |
 
-Every record is keyed by the op id of the operation that wrote it (§4), so a receipt lookup by op
-id addresses exactly one family:
+**Record keys.** v2 documents come in three key shapes, and each family has exactly one:
 
-| Operation | Family |
-|---|---|
-| `observe` | observation |
-| `admit` | assignment |
-| `submit` | attempt |
-| `accept-report`, `aggregate` | outcome |
-| `open-decision` | decision |
-| `reply` | reply |
-| `cancel` | cancellation |
-| `continuation`, plus the conversation and submission ids `submit` creates | durable-map |
-| `start` | the manifest singleton |
+| Family | Shape | Key | Written by | Holds |
+|---|---|---|---|---|
+| `perk.v2.manifest` | singleton | none | `start`'s commit, once | the execution manifest (§10) |
+| `perk.v2.observation` | operation record | the `observe` op id | the observing verb's commit | the observation record (§5) |
+| `perk.v2.assignment` | operation record | the `admit` op id | admission | the §4 payload |
+| `perk.v2.attempt` | operation record | the `submit` op id | submission | the §4 payload |
+| `perk.v2.outcome` | operation record | the `accept-report` or `aggregate` op id | acceptance, aggregation | the §4 payload |
+| `perk.v2.decision` | operation record | the `open-decision` op id | opening a decision | the §4 payload |
+| `perk.v2.reply` | operation record | the `reply` op id | the reply | the §4 payload |
+| `perk.v2.cancellation` | operation record | the `cancel` op id | cancellation | the §4 payload |
+| `perk.v2.durable-map` | identity mapping | the Perk id the Durable object was created for | the commit that creates the Durable object | `{durableKind: task \| conversation \| submission, durableId}` |
+
+- **Operation records.** An operation record is keyed by its op id and holds the operation's
+  duplicate-compared payload (§4). The op id's `op-kind` names its family, so receipt lookup by op
+  id addresses exactly one family.
+- **Identity mappings.** A `perk.v2.durable-map` row is keyed by the Perk id the Durable object was
+  created for. The fixture's rows are:
+  - the worker conversation, under its attempt id;
+  - the Durable submission, under the `submit` op id;
+  - the continuation task, under the `continuation` op id.
+
+  The `continuation` op kind has no family of its own: its record is its durable-map row. The step
+  task is input-less and idempotent and is created for no Perk identity, so it has no row.
+- **The singleton.** `perk.v2.manifest` has no key and no op id, and `start` is not an operation
+  kind. A repeated `start` is caught by the gate (`already_started`, §10), never by receipt
+  lookup.
+
+**Receipt lookup.** For op id *X*, read the family that *X*'s `op-kind` names (durable-map for
+`continuation`). The receipt is that record plus the durable-map rows for the result ids *X*
+derives:
+
+- `submit`: the submission row under *X*;
+- `reply`: the continuation row under `<decision-id>/continuation`. That continuation task id is
+  the reply's receipt.
+
+**Binding constraint (node 2.2).** Durable's `Tx` cannot enumerate a document family, and
+`tx.doc()` is get-or-create (`packages/durable/docs/spec.md#3.3 Access and creation`). A family
+acquisition seeded with the input therefore performs §7 step 2's "look up or record" in a single
+call. How the binding presents every record to the kernel without a family scan, the highest
+observation `seq` included, is node 2.2's to pin, as an amendment to this section.
 
 Every v2 task name and document kind starts with `perk.v2.`, because Durable reserves `pi.`
 (`packages/durable/docs/spec.md#12. API footguns` "Reserved `pi.` names"). A record family
@@ -731,7 +775,8 @@ audit is a record.
 2. **Receipt lookup.** If the input's op id exists with an equal payload, return its receipt and
    stop: the commit records nothing, not even the observation the verb took. If the op id exists
    with a different payload, throw `duplicate_conflict`. Otherwise record the input under its op
-   id.
+   id. An observation has no caller-derived op id; it is recorded here under the next `seq`
+   (§5).
 3. **Reconcile.** Run the pure kernel `reconcile(records) → actions` over the v2 documents as they
    stand in the transaction. Documents stay readable after table writes.
 4. **Apply.** Apply the actions in the same commit: write records, create tasks and conversations,
@@ -748,9 +793,9 @@ audit is a record.
 **The step task.** `perk.v2.step` is `operate()` with no input: the shape reconcile takes when
 there is no new fact, as after a reopen.
 
-**Receipts.** A receipt is the recorded input record plus the result keys derived from it, such as
-the continuation id. It is looked up by op id, both immediately and after a reopen. Callers never
-compose raw transactions or retry rules.
+**Receipts.** A receipt is the recorded operation record plus the durable-map rows for the result
+ids it derives (§6), such as a reply's continuation id. It is looked up by op id, both
+immediately and after a reopen. Callers never compose raw transactions or retry rules.
 
 **Task ownership.** Continuation and step tasks are **conversation-owned on the execution
 conversation and created with `background: true`**. The execution conversation is the store's
@@ -1033,8 +1078,8 @@ feature.
 | 1.2 | §2 location and verification; P10 layering |
 | 1.3 | §3 evidence pointers, one test per Durable behavior, each naming its principle. A failure amends this record before dependents proceed. |
 | 1.4 | §10 step 2 and its reserved verdict; P7, P8 |
-| 2.1 | §4 including the replay rule; §5 digests; §6; §7 kernel; §9 refusal reasons; §10 wait reasons; §12 rules |
-| 2.2 | §6 families and checkpoint policy; §7 `operate`, receipt-first lookup and task ownership; §9 |
+| 2.1 | §4 including the replay rule; §5 digests and observation order; §6; §7 kernel; §9 refusal reasons; §10 wait reasons; §12 rules |
+| 2.2 | §6 families, record keys, receipt lookup, checkpoint policy and the binding constraint; §7 `operate`, receipt-first lookup and task ownership; §9 |
 | 2.3 | §10 lifecycle, the lock protocol and its proof list; §11 outcomes |
 | 2.4 | §5 snapshot-manifest grammar, verifier and the symlink/gitlink proofs; §8. Its proof "a new commit at the ref yields a new subject" reads as "a new *tree* at the ref yields a new subject, and a commit with the same tree yields a new observation of the same subject". |
 | 3.1 | P7 enforcement seam; §5 verification points; §12 |
