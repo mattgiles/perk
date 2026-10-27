@@ -22,7 +22,7 @@ still-inline surfaces. The backend-agnostic protocol lives in `issue-backend.md`
   client/consumer contract", "Not-found discrimination".
 - Every metadata kind rides a native attachment (URL = upsert identity, REPLACE-whole-envelope,
   reuse the found URL); one run_id-keyed `attachmentsForURL` find backs the issue-tier finds AND
-  `find_objective`, whose hit is the canceled metadata sentinel (project ref = its own `project`)
+  `find_objective`, whose hit is the metadata sentinel in any state (project ref = its `project`)
   — "Attachment-native perk metadata"; dual-encoding governs only still-inline surfaces —
   "Dual-encoding metadata markers" (+ the presence-check bug class).
 - init/doctor readiness is ONE never-raising report-shaped probe with two consumers — "Readiness
@@ -140,11 +140,12 @@ bodies. The envelope shape is `source` / `schema_version` / `kind` / `payload_js
   it. This started as one line in the plan-header update and hardened into a contract rule
   enforced on every writer (including the node-issue writers) — when adding a new attachment
   writer, thread the found URL through, don't recompute.
-- **The per-project canceled metadata sentinel issue** (`project_store.py`). Linear exposes no
-  public project-attachment mutation and no arbitrary project metadata, so a canceled, empty
-  sentinel issue titled "Perk: objective metadata" attached to the project carries the
-  `objective-header` + `objective-manifest` envelopes. It is state-independent by design (born
-  canceled) and never an adoptable/mappable candidate. It is created fail-loud immediately after
+- **The per-project metadata sentinel issue** (`project_store.py`). Linear exposes no public
+  project-attachment mutation and no arbitrary project metadata, so an empty sentinel issue titled
+  "Perk: objective metadata" attached to the project carries the `objective-header` +
+  `objective-manifest` envelopes. It is born in the team's canceled state — cosmetic: a team with
+  no canceled state gets an open sentinel, equally valid storage — and is never an
+  adoptable/mappable candidate. It is created fail-loud immediately after
   `projectCreate`, before milestones/node-issues
   (`src/perk/backends/linear/project_store.py::_create_metadata_sentinel`); readers locate it
   inside the `project_issues` rows they already hold (`_sentinel_from_rows`, zero extra queries);
@@ -158,8 +159,9 @@ bodies. The envelope shape is `source` / `schema_version` / `kind` / `payload_js
   filter on top (the retired scan listed open issues only — the broader-lookup trap below).
   `src/perk/backends/linear/project_store.py::find_objective` queries
   `attachments.objective_header_url(run_id)` and is state-independent by design — its hit is the
-  born-canceled sentinel, served by the all-terminal arm — taking the project ref from the hit's
-  `project` selection and raising on a header hit with no project (a broken sentinel); infra
+  sentinel, normally canceled and served by the all-terminal arm, or open (the non-terminal arm)
+  on a team with no canceled state — taking the project ref from the hit's `project` selection
+  and raising on a header hit with no project (a broken sentinel); infra
   failures propagate as `ObjectiveStoreError`, never `None`. Contracts §8.24
   ("Native-attachment metadata") is the cross-plane owner of this rule.
 - **Tolerant vs fail-loud decode twins** (`attachments.py`). `has_perk_attachment` is
@@ -497,10 +499,10 @@ roadmap before any write. The write order:
    (`_compose_overview`) — no header block, no roadmap table: **the roadmap is derived LIVE from
    node-issues**.
 2. **`projectCreate`** (the 80-char name cap — "Linear API facts").
-3. **The metadata sentinel, fail-loud** (`_create_metadata_sentinel`: born canceled, header +
-   manifest attachments, one fail-open Resources link via `create_entity_external_link`) — a crash
-   before it lands orphans a header-less project invisible to `find_objective`, the accepted
-   one-round-trip window.
+3. **The metadata sentinel, fail-loud** (`_create_metadata_sentinel`: born canceled, or open on
+   a team with no canceled state; header + manifest attachments; one fail-open Resources link via
+   `create_entity_external_link`) — a crash before it lands orphans a header-less project
+   invisible to `find_objective`, the accepted one-round-trip window.
 4. **The copyable `perk objective plan <project-uuid>` callout**, prepended once the UUID is known
    (`plan.prepend_callout` → `update_project_content`).
 5. **One milestone per phase**, keyed by **name** through `ensure_phase_milestone` with `known`
@@ -694,9 +696,11 @@ avoid duplication.
   position its worktree via `perk worktree create plan-<id>` and copy
   `.perk/workflow/plan-ref.json` into the new worktree (the PR-workers read the worktree-local
   plan-ref).
-- **Probe side-effects clobber idempotency**: a probe that deletes or rewrites an issue's perk
-  **attachment** (pre-#1355: its description block) breaks the run_id-keyed find, so a later
-  `perk plan save` mints a **new** issue — probe a throwaway field or restore immediately.
+- **Probe side-effects clobber idempotency**: the find matches the attachment URL only, so a probe
+  that deletes the run_id-keyed **plan-header attachment** or replaces its URL (pre-#1355:
+  overwrote the description block) makes a later `perk plan save` mint a **new** issue; corrupting
+  the payload at the same URL keeps the find but makes later strict reads fail loud — probe a
+  throwaway field or restore immediately.
 - **Python `urllib` HTTPS fails on this host** (`CERTIFICATE_VERIFY_FAILED`) — use `curl` for
   ad-hoc Linear GraphQL probes.
 
@@ -862,9 +866,12 @@ mutation-acceptance items; what remains unobserved:
   `save_node_plan` path ran once against live Linear (2026-09-10, the archive record). Still
   unobserved live: the sentinel Resources link (`create_entity_external_link`'s docstring claim),
   the status-mirror and PR-card fail-open arms (only scripted to succeed in tests), the
-  create→attachment crash windows (issue tier + sentinel; no recovery script or chaos coverage),
-  and the pre-#1355 clean break (old artifacts are invisible to reads — accepted as disposable
-  dogfood data; no migration playbook).
+  create→attachment crash windows, and the pre-#1355 clean break (old artifacts are invisible to
+  reads — accepted as disposable dogfood data; no migration playbook). Offline, the supersession
+  transfer's windows have fault-injection coverage (`tests/test_delivery_transfer_linear.py`: the
+  pre-sentinel death; the interrupted node attachment, resumed by `_recover_fresh_node_issue`),
+  but the ordinary create/save windows (issue-tier plan/learn creates, a plain `create_objective`)
+  have no recovery path or chaos coverage.
 
 ## Cross-references
 
