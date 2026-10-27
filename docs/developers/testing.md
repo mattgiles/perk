@@ -7,12 +7,15 @@ tier honestly.
 ## The suites and the gates
 
 Regression coverage lives in two framework suites — **pytest** (`tests/`) and **node:test**
-(`extension/**/*.test.ts`, `docs/site/src/**/*.test.mjs`, `packages/perk-dev/**/*.test.mjs`). Four
-entrypoints run the Python suite, and all four run the **full default Python suite** — every case
-ordinarily collected from `tests/`, slow cases included:
+(`extension/**/*.test.ts`, `docs/site/src/**/*.test.mjs`, `packages/perk-dev/**/*.test.mjs`). The
+pi-durable v2 workspace (`extension/pi/v2/`) is excluded from that node:test suite and has its own
+— see [The v2 workspace suite](#the-v2-workspace-suite). Four entrypoints run the Python suite, and
+all four run the **full default Python suite** — every case ordinarily collected from `tests/`,
+slow cases included:
 
 - `just test-py` — pytest alone.
-- `just test` — pytest, then node:test, then the docs-site check.
+- `just test` — pytest, then node:test, then the v2 workspace suite (both tiers), then the
+  docs-site check.
 - GitHub CI (`.github/workflows/ci.yml`) — `just lint`, `just typecheck`, `just test`.
 - perk's in-session `run_ci` — two `[[ci.checks]]` rows in `.perk/config.toml`, `test-py-fast`
   (`just test-py-fast`) and `test-py-slow` (`just test-py-slow`), both on the same `*.py` glob
@@ -49,9 +52,11 @@ near those files; the PR's GitHub CI runs it either way. See
 | `just test-py-slow` | Default cases selected by `-m slow` |
 | `just test`, GitHub CI, perk's Python gate | Full default Python suite under existing gate scope rules |
 | `just prose-review-test` | Existing separately opt-in prose suite |
-| `just test-js` | Full node:test suite (all three globs) |
+| `just test-js` | Full node:test suite (all three globs, minus the v2 workspace) |
 | `just test-js-fast` | node:test files outside the slow list — the in-session `run_ci` JS row |
 | `just test-js-slow` | node:test files on the slow list — ad hoc, and inside every full gate |
+| `just test-v2` | v2 workspace tests except `*.slow.test.ts` — the in-session `test-v2` row |
+| `just test-v2-slow` | v2 workspace `*.slow.test.ts` files — the in-session `test-v2-slow` row |
 
 `test-py-fast` and `test-py-slow` are complementary selections of the same suite: together they
 collect exactly what `test-py` collects, and neither is a different regression standard.
@@ -90,18 +95,40 @@ the slow tier neither needs nor runs it.
 
 ## The node:test tiers
 
-`extension/testing/jsTestTiers.ts` holds the suite's globs and the slow list;
-`extension/testing/runJsTestTier.ts` runs one tier with the full recipe's flags (dot reporter,
-2× core concurrency) over the tier's explicit file list. Extra `node --test` flags pass through
-the tier recipes before the files, e.g. `just test-js-slow --test-name-pattern=submit`.
+`extension/testing/jsTestTiers.ts` holds the suite's globs and the slow list, and its selector
+owns the corpus — it drops `node_modules` and the v2 workspace, which a raw `node --test "<glob>"`
+cannot exclude. `extension/testing/runJsTestTier.ts` runs `fast`, `slow` or `all` (the whole
+suite — what `just test-js` and `just test` run) with the dot reporter and 2× core concurrency over
+the selection's explicit file list. Extra `node --test` flags pass through the tier recipes before
+the files, e.g. `just test-js-slow --test-name-pattern=submit`.
 
 A file joins the slow list when its own wall time is ≥ 20 s in a full-suite run under the recipe's
 concurrency; the measurement behind the current list is recorded in
 `docs/design/archive/js-test-tiers.md`. Add a file in the change that makes it slow. Like the
 Python marker, the list is a **selection**: `extension/testing/jsTestTiers.test.ts` pins that
 every entry is a real suite file, that the tiers are disjoint and together are exactly the full
-suite, that `test-js` and `test` still pass every glob, and that the in-session gate runs the fast
-tier and nothing broader.
+suite, that the selector's corpus is its globs minus exactly `node_modules` and the v2 workspace,
+that `test-js` and `test` run the whole suite through the selector (never a raw glob), and that
+the in-session gate runs the fast tier and nothing broader.
+
+## The v2 workspace suite
+
+The pi-durable v2 workspace (`extension/pi/v2/` — its own `package.json`, tsconfig, host entry,
+guards and tests) is carved out of every v1 surface, so it carries its own recipes:
+
+- `just typecheck-v2` — the workspace's own tsconfig (`typecheck-js` never reaches it).
+- `just test-v2` — the **fast** tier: every v2 test except `*.slow.test.ts`.
+- `just test-v2-slow` — the **slow** tier: `*.slow.test.ts` files (real-process / SIGKILL cases).
+  A slow test is born with the suffix — tiering is by filename, not a list. While the tier is
+  empty, the recipe prints a notice and exits 0; an empty fast tier is an error.
+
+`extension/pi/v2/testing/runTier.ts` is the v2-owned runner (v2 may not import v1's).
+`just typecheck` and `just test` reach all three, so `just ci` and GitHub CI cover v2. In-session,
+three `[[ci.checks]]` rows of the same names mirror them; `extension/pi/v2/testing/tiers.test.ts`
+pins the partition and that wiring. The `test-v2` row triggers on all of `extension/**`, not just
+the workspace: its layering guard reads every v1 file (tests included) to prove v1 never imports
+v2, so a v1-only edit must still schedule it. `just test-js` never reaches v2, and `just test-v2`
+never reaches v1's suite.
 
 ## Passing arguments
 

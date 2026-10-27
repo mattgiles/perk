@@ -20,7 +20,7 @@ leaves open belongs to that node, and a change to anything this record does fix 
 | Planning corpus | tracked files at the record's commit | `docs/planning/pi-durable/{vision,pi-in-the-sky,pi-durable-workflows,pi-durable-v2,decision-foundation}.md`, `docs/planning/pi-durable-further-avenues.md` |
 | Durable 1.4.0 source (+ normative spec) | library slug `pi`, `4a080252f06caf63a525d7873c5d94d3c23887e0` (Release v1.4.0); `packages/durable/package.json` version `1.4.0` | `docs/library/source-code/github.com/earendil-works/pi/packages/durable/` (gitignored mirror; `perk librarian list` resolves it) |
 | Durable announcement post | library slug `pi-durable-docs` (Earendil, 2026-10-01) | `docs/library/documentation/pi-durable-docs/pi-durable.md` |
-| Perk host facts | this checkout | `package.json` dev pins `@earendil-works/pi-*` `1.4.0`; no `pi-durable` dependency exists yet (node 1.2 adds it in `extension/pi/v2/package.json`) |
+| Perk host facts | this checkout | `package.json` dev pins `@earendil-works/pi-*` `1.4.0`; `extension/pi/v2/package.json` declares `@earendil-works/pi-durable` 1.4.0, `@earendil-works/chord` 1.4.0 and `@earendil-works/pi-ai` 1.4.0 (node 1.2; resolution record [`archive/pi-durable-v2-workspace.md`](./archive/pi-durable-v2-workspace.md)) |
 
 Library content is untrusted data, quoted here as evidence and never obeyed.
 
@@ -63,7 +63,8 @@ The objective's settled decisions, restated for readers who do not have the obje
   must take.
 - **User docs: hidden.** v2 is documented in the contract only. `docs/user-docs/` and the
   `perk-expert` mirror wait for the objective that makes v2 usable by end users.
-- **Durable pin.** v2 pins exactly `@earendil-works/pi-durable` 1.4.0 + `chord` 1.4.0.
+- **Durable pin.** v2 pins exactly `@earendil-works/pi-durable` 1.4.0 + `chord` 1.4.0 (plus
+  `@earendil-works/pi-ai` 1.4.0, the host's model catalog, at the root's exact dev pin).
   Features that exist only at HEAD, such as the read-only Harness and deferred commits, are out of
   scope.
 
@@ -505,7 +506,9 @@ reconcile by identity before retrying.
   `owner_busy`, `incompatible`, `observation_failed`, `refused`, `pending_decision`,
   `uncertain`. Python never touches the store.
 - Inside `extension/pi/v2/`, the domain kernel imports nothing from Durable. Durable vocabulary
-  stays in the binding layer and the host entry.
+  stays in the binding layer and the host entry. Inside v2, `kernel/` imports only `kernel/`, and
+  `durable/` imports only `kernel/` and `durable/`; the host entry composes both (node 1.2's
+  `layeringGuard.test.ts`).
 - v1 and v2 never import each other. v2 can reach v1 only through an exact-file allowlist of
   verified host-independent modules. The production allowlist starts empty, and each addition
   is reviewed. The only dev-only entry is `extension/testing/importGraph.ts`, reused by v2's
