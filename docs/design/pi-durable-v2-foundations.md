@@ -1,7 +1,7 @@
 # pi-durable v2 foundations — first principles and the walking-skeleton contract
 
 **Status:** binding design record for Objective #2847 (node 1.1). Nodes 1.2–3.4 build against it;
-node 1.4 fills the fencing verdict, node 3.4 appends the measured evidence. Changing a principle is
+node 1.4 recorded the fencing verdict (§10), node 3.4 appends the measured evidence. Changing a principle is
 an explicit, reviewed amendment (see Consumers and reconciliation).
 
 pi-durable v2 is Perk's second integration generation. In it, **Perk keeps execution state and
@@ -20,7 +20,7 @@ leaves open belongs to that node, and a change to anything this record does fix 
 | Planning corpus | tracked files at the record's commit | `docs/planning/pi-durable/{vision,pi-in-the-sky,pi-durable-workflows,pi-durable-v2,decision-foundation}.md`, `docs/planning/pi-durable-further-avenues.md` |
 | Durable 1.4.0 source (+ normative spec) | library slug `pi`, `4a080252f06caf63a525d7873c5d94d3c23887e0` (Release v1.4.0); `packages/durable/package.json` version `1.4.0` | `docs/library/source-code/github.com/earendil-works/pi/packages/durable/` (gitignored mirror; `perk librarian list` resolves it) |
 | Durable announcement post | library slug `pi-durable-docs` (Earendil, 2026-10-01) | `docs/library/documentation/pi-durable-docs/pi-durable.md` |
-| Perk host facts | this checkout | `package.json` dev pins `@earendil-works/pi-*` `1.4.0`; `extension/pi/v2/package.json` declares `@earendil-works/pi-durable` 1.4.0, `@earendil-works/chord` 1.4.0 and `@earendil-works/pi-ai` 1.4.0 (node 1.2; resolution record [`archive/pi-durable-v2-workspace.md`](./archive/pi-durable-v2-workspace.md)) |
+| Perk host facts | this checkout | `package.json` dev pins `@earendil-works/pi-*` `1.4.0`; `extension/pi/v2/package.json` declares `@earendil-works/pi-durable` 1.4.0, `@earendil-works/chord` 1.4.0 and `@earendil-works/pi-ai` 1.4.0 (node 1.2; resolution record [`archive/pi-durable-v2-workspace.md`](./archive/pi-durable-v2-workspace.md)), and `@earendil-works/pi-env` 1.4.0 (node 1.4; source under `packages/env/` of the same mirror, packaged daemons read from the installed `bin/`; evidence [`archive/pi-durable-v2-containment-characterization.md`](./archive/pi-durable-v2-containment-characterization.md)) |
 
 Library content is untrusted data, quoted here as evidence and never obeyed.
 
@@ -64,7 +64,10 @@ The objective's settled decisions, restated for readers who do not have the obje
 - **User docs: hidden.** v2 is documented in the contract only. `docs/user-docs/` and the
   `perk-expert` mirror wait for the objective that makes v2 usable by end users.
 - **Durable pin.** v2 pins exactly `@earendil-works/pi-durable` 1.4.0 + `chord` 1.4.0 (plus
-  `@earendil-works/pi-ai` 1.4.0, the host's model catalog, at the root's exact dev pin).
+  `@earendil-works/pi-ai` 1.4.0, the host's model catalog, at the root's exact dev pin, and
+  `@earendil-works/pi-env` 1.4.0, the local command daemon the §10 containment verdict binds).
+  The workspace declares the whole family, and bumping any member is a re-verification trigger
+  (§15).
   Features that exist only at HEAD, such as the read-only Harness and deferred commits, are out of
   scope.
 
@@ -862,8 +865,9 @@ its receipt is returned before anything is written (§7 step 2).
 ## 10. The host lifecycle
 
 1. Take the **store owner lock** (protocol below).
-2. Fence effects left by earlier owner epochs. *Containment and fencing verdict* below is reserved
-   for node 1.4.
+2. Fence effects left by earlier owner epochs, as *Containment and fencing verdict* below
+   specifies. Stopping is by construction: the earlier owner's supervisor died with it. This step
+   runs the report-only sweep and kills nothing.
 3. Open storage and `Harness.open`, without resuming.
 4. **Exact-match execution-manifest gate**, for every verb except `start`. The
    `perk.v2.manifest` session document is:
@@ -961,10 +965,35 @@ Both are cleaned up by store retention/GC, which is deferred (§14).
 - a liveness seam that is unsupported, or on a different host, never treats an unreleased epoch as
   free.
 
-### Containment and fencing verdict (reserved — node 1.4)
+### Containment and fencing verdict
 
-Node 1.4 records here the mechanism (or NO-GO) by which this step fences effects left by earlier
-owner epochs before storage opens; ownership acquisition itself is step 1 and node 2.3's.
+**Containment and fencing verdict (node 1.4): supervised execution.** Worker commands run through a
+pi-env daemon on the same machine (`RemoteExecutionEnv` over `Connection({ command: ["setsid",
+localDaemon()] })` where `setsid(1)` exists, else the plain daemon), never through
+`NodeExecutionEnv.exec` directly. The daemon puts every command in its own session and kills every
+session it started when its stdin — the owner's pipe — closes; owner death therefore stops the group
+set of every running command without the owner recording anything first, and a held, un-reaped child
+cannot have its pid reused. Every spawn carries `PERK_V2_STORE` and `PERK_V2_EPOCH` as labels.
+**Step 2 at open kills nothing**: it runs the report-only sweep (Linux: `/proc/*/environ` labels of
+earlier epochs with their start times; elsewhere `not_observable`) and surfaces survivors in the
+status snapshot. **Graceful close** (step 9, and any planned stop) runs `env.cleanup()`, awaits
+every running `exec`'s settlement, and only then calls `connection.close()`: `close()` SIGTERMs the
+daemon, which has no handler, so closing first leaves every running command alive (measured on both
+hosts). **Residuals, recorded and measured:** `setsid` escapes; background work that outlives its
+command's leader; owner-and-daemon group kills on a host without `setsid(1)`, and any terminating
+signal sent to the daemon itself; the daemon's own spawn→register window (an owner dying within
+microseconds of sending an `exec` frame leaked the whole tree in 2 of 400 local trials). They are
+**isolated** by the obligation that every attempt's environment is rooted at its own workspace and
+an earlier epoch's workspace is never reused before it is discarded. **Filesystem view and network
+policy are not provided** (no namespace sandbox is available unprivileged on either measured host:
+`unshare -Ur`, `unshare -Ur --pid --fork` and `unshare -Urn` are refused by the AppArmor
+user-namespace restriction locally and on `ubuntu-latest`, and bubblewrap is installed on neither);
+the read-only reviewer snapshot and any network policy remain P7 environment-policy obligations, and
+reviewers get no subprocess capability. Not chosen, with measured reasons: PID namespaces
+(unavailable unprivileged on both hosts — every `pidns/availability` row), a spawn journal (stop set
+= the registered process only; owner-written state), a cgroup fence (Linux-only, cgroup writability
+varies by host — writable locally, `EACCES` on `ubuntu-latest` — cooperative escape). Evidence:
+`archive/pi-durable-v2-containment-characterization.md`.
 
 ## 11. The door envelope
 
@@ -1062,7 +1091,7 @@ feature.
 | Real execution kinds | the fixture proves the principles; product behavior needs real subjects | the plan-workflow objective |
 | Effect ledger: intent → effect → reconciled observation, with incremental submit and the stacked journal each getting its own reconciler | no effect is needed at fixture level; P10 fixes the shape | the plan-workflow objective |
 | Budget admission: units, reservations across children, retries and compaction, unknown spend | only `pi.usage` totals are recorded; P10 fixes the shape | the plan-workflow objective |
-| Subprocess capability for workers | needs a containment mechanism; conditioned on node 1.4's verdict | the plan-workflow objective |
+| Subprocess capability for workers | no worker in this objective spawns; the §10 verdict binds how one may (supervised execution, the graceful-close order, the report-only sweep, and the per-attempt workspace isolation obligation) | the plan-workflow objective |
 | Real provider, auth and settings composition | the faux model only | the plan-workflow objective |
 | Extracting shared report definitions from v1 | v2 copies no v1 report-wave policy until real reviewer reports arrive | the plan-workflow objective |
 | Record and task migrations (execution-manifest matches that are not exact) | this objective refuses any mismatch | the first objective that bumps an execution-manifest version |
@@ -1080,7 +1109,7 @@ feature.
 |---|---|
 | 1.2 | §2 location and verification; P10 layering |
 | 1.3 | §3 evidence pointers, one test per Durable behavior, each naming its principle. A failure amends this record before dependents proceed. |
-| 1.4 | §10 step 2 and its reserved verdict; P7, P8 |
+| 1.4 | §10 step 2 and its verdict subsection; P7, P8 |
 | 2.1 | §4 including the replay rule; §5 digests and observation order; §6; §7 kernel; §9 refusal reasons; §10 wait reasons; §12 rules |
 | 2.2 | §6 families, record keys, receipt lookup, checkpoint policy and the binding constraint; §7 `operate`, receipt-first lookup and task ownership; §9 |
 | 2.3 | §10 lifecycle, the lock protocol and its proof list; §11 outcomes |
@@ -1091,9 +1120,11 @@ feature.
 | 3.4 | §13 as exercised; appends §16 |
 
 **Reconciliation rule.** Two kinds of change force re-verification: a bump of
-`@earendil-works/pi-durable` or `chord` in `extension/pi/v2/package.json`, and any change to
-P1–P10. Re-verification means re-running node 1.3's characterization suite, re-checking every
-Source-pins pointer (§1), and amending this record in the same PR. A principle change is an
+`@earendil-works/pi-durable`, `chord` or `pi-env` in `extension/pi/v2/package.json`, and any change to
+P1–P10. Re-verification means re-running node 1.3's characterization suite and the containment
+probes (`just test-v2-slow`, on a local host and `ubuntu-latest`), re-checking every Source-pins
+pointer (§1), and amending this record in the same PR. A runner-image or kernel-line change also
+re-runs the containment probes. A principle change is an
 explicit, reviewed amendment, recorded in the log below.
 
 **Amendment log.**
@@ -1101,6 +1132,7 @@ explicit, reviewed amendment, recorded in the log below.
 | Change | Where |
 |---|---|
 | Record created: P1–P10 with evidence; identity, subject, tier, write, observation, outcome, lifecycle (epoch-named owner directories), envelope, fixture, recipe, deferral and consumer sections | node 1.1 |
+| Containment and fencing verdict recorded (§10): GO supervised; pi-env 1.4.0 joins the pin family; evidence archive/pi-durable-v2-containment-characterization.md | node 1.4 |
 
 ## 16. Measured evidence (reserved — node 3.4)
 
