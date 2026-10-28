@@ -5,6 +5,8 @@
 // reads which processes died. The rule-required rows (availability, crash-A/B/C, descendants,
 // pid-reuse, group-kill-mitigated) assert PASS where the lane is available; the residual rows
 // (setsid-escape, leader-exited, group-kill) record a survival map and assert nothing about it.
+// The `survival` rows record what a GRACEFUL close leaves behind, by close order — outside the
+// decision rule, but the close order a host must follow (`Connection.close()` signals the daemon).
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -20,7 +22,9 @@ import {
   killOwner,
   LEADER_EXITS,
   type Owner,
+  type OwnerConfig,
   probeDir,
+  READY_TIMEOUT_MS,
   readPids,
   shProgram,
   startOwner,
@@ -75,6 +79,7 @@ async function supervisedOwner(
     readonly expect?: readonly string[];
     readonly daemonWrap?: "setsid";
     readonly detached?: boolean;
+    readonly closeOnStdinEnd?: OwnerConfig["closeOnStdinEnd"];
   } = {},
 ): Promise<{ dir: string; owner: Owner }> {
   const dir = await probeDir(t);
@@ -83,6 +88,9 @@ async function supervisedOwner(
     {
       env: "supervised",
       ...(options.daemonWrap === undefined ? {} : { daemonWrap: options.daemonWrap }),
+      ...(options.closeOnStdinEnd === undefined
+        ? {}
+        : { closeOnStdinEnd: options.closeOnStdinEnd }),
       cwd: dir,
       dir,
       store: randomUUID(),
@@ -334,4 +342,31 @@ test("supervised/group-kill-mitigated: a setsid-wrapped daemon outlives the owne
   const setsid = ids.get("setsid");
   if (setsid !== undefined) killIdentity(setsid);
   assert.equal(result, "PASS", detail);
+});
+
+test("supervised/survival: a graceful close — connection.close() alone, then cleanup → settle → close()", {
+  timeout: CASE_TIMEOUT_MS,
+}, async (t) => {
+  if (unavailable(t, { mechanism: "supervised", criterion: "survival" })) return;
+  for (const order of ["close-only", "cleanup-settle-close"] as const) {
+    const { dir, owner } = await supervisedOwner(t, { closeOnStdinEnd: order });
+    await owner.line("ready");
+    const ids = readPids(t, dir, TREE_NAMES);
+    owner.closeStdin();
+    const exit = await Promise.race([
+      owner.exited,
+      new Promise<undefined>((resolve) => {
+        setTimeout(() => resolve(undefined), READY_TIMEOUT_MS);
+      }),
+    ]);
+    await waitGone(pick(ids, TREE_GROUP_SET), GRACE_MS);
+    const map = await survivalMap(dir, ids);
+    evidence(t, {
+      mechanism: "supervised",
+      criterion: "survival",
+      result: "recorded",
+      detail: `graceful close (${order}): owner exit=${JSON.stringify(exit)}; ${JSON.stringify(map)}; ${daemonState(owner)}`,
+    });
+    for (const id of ids.values()) killIdentity(id);
+  }
 });

@@ -11,8 +11,9 @@
 //
 // It never exits on its own before its 60 s lifetime bound, except on stdin EOF: with
 // `cleanOnStdinEnd` it first runs `env.cleanup()` and closes the connection (the clean-close
-// control); without it, it just exits (teardown only). Stdout writes to a pipe are synchronous on
-// Linux, so a milestone line is out before the step that follows it runs.
+// control); with `closeOnStdinEnd` it closes in the named order and stays up briefly, as a
+// long-lived host would; with neither, it just exits (teardown only). Stdout writes to a pipe are
+// synchronous on Linux, so a milestone line is out before the step that follows it runs.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,7 +26,13 @@ import type { OwnerConfig } from "./fixture.ts";
 import { MARKER_EPOCH, MARKER_STORE, readIdentity } from "./procfs.ts";
 
 const LIFETIME_MS = 60_000;
+/** How long a gracefully closing owner stays up after `connection.close()`. */
+const CLOSE_GRACE_MS = 300;
 const context = BACKGROUND_CONTEXT;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function say(line: string): void {
   stdout.write(`${line}\n`);
@@ -65,11 +72,22 @@ if (config.env === "supervised") {
 }
 say("connected");
 
+/** The command's `exec` promise, once it was called. */
+let running: Promise<unknown> | undefined;
+
 stdin.on("end", () => {
   void (async () => {
     if (config.cleanOnStdinEnd === true) {
       await env.cleanup(context);
       connection?.close();
+    } else if (config.closeOnStdinEnd === "close-only") {
+      connection?.close();
+      await sleep(CLOSE_GRACE_MS);
+    } else if (config.closeOnStdinEnd === "cleanup-settle-close") {
+      await env.cleanup(context);
+      await running;
+      connection?.close();
+      await sleep(CLOSE_GRACE_MS);
     }
     exit(0);
   })();
@@ -85,7 +103,7 @@ const poll = setInterval(() => {
 
 let started = false;
 say("exec");
-env
+running = env
   .exec(
     config.program,
     {

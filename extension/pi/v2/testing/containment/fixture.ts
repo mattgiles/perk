@@ -120,6 +120,11 @@ export type OwnerConfig = {
   readonly expect: readonly string[];
   /** On stdin EOF: `env.cleanup()`, close the connection, exit 0 (the clean-close control). */
   readonly cleanOnStdinEnd?: boolean;
+  /**
+   * On stdin EOF, a graceful close in this order: `connection.close()` alone, or `env.cleanup()`
+   * → await the command's settlement → `connection.close()`; then stay up briefly and exit 0.
+   */
+  readonly closeOnStdinEnd?: "close-only" | "cleanup-settle-close";
 };
 
 export type OwnerExit = { readonly code: number | null; readonly signal: NodeJS.Signals | null };
