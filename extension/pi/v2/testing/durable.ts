@@ -58,8 +58,12 @@ type Cleanup = () => void | Promise<void>;
 
 const cleanups = new WeakMap<TestContext, Cleanup[]>();
 
-/** Register `cleanup` on `t`'s LIFO stack; the first registration installs the one draining hook. */
-function defer(t: TestContext, cleanup: Cleanup): void {
+/**
+ * Register `cleanup` on `t`'s LIFO stack; the first registration installs the one draining hook.
+ * Every acquisition a test makes — here and in `containment/` — registers through this one stack,
+ * so a process is killed before the directory it writes into is removed.
+ */
+export function defer(t: TestContext, cleanup: Cleanup): void {
   let stack = cleanups.get(t);
   if (stack === undefined) {
     const owned: Cleanup[] = [];
