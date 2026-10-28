@@ -1,6 +1,9 @@
 // Run one v2 node:test tier: `node extension/pi/v2/testing/runTier.ts <fast|slow> [node --test
-// flags…]` (the `test-v2` / `test-v2-slow` recipes). The dot reporter and 2× core concurrency over
-// the tier's explicit file list; extra flags ride before the files. Exits with node's own status.
+// flags…]` (the `test-v2` / `test-v2-slow` recipes). 2× core concurrency over the tier's explicit
+// file list; extra flags ride before the files. Exits with node's own status. The fast tier uses
+// the dot reporter; the slow tier uses `spec`, because the containment probes report their
+// `perk-v2-containment …` evidence rows as test diagnostics, which `dot` drops and `spec` prints
+// into the (CI) log.
 // An independent, v2-owned copy of `extension/testing/runJsTestTier.ts` — v2 may not import v1's
 // runner (`layering.ts`' cross-generation rule).
 
@@ -31,11 +34,12 @@ if (files.length === 0) {
   console.error("perk v2: the fast tier selected no files");
   exit(1);
 }
+const reporter = tier === "slow" ? "spec" : "dot";
 const result = spawnSync(
   execPath,
   [
     "--test",
-    "--test-reporter=dot",
+    `--test-reporter=${reporter}`,
     `--test-concurrency=${availableParallelism() * 2}`,
     ...flags,
     ...files,
