@@ -6,8 +6,10 @@
 verdict*), §1/§2 (the pin family) and §14 (*Subprocess capability for workers*).
 
 - **Cited CI run:** [`ubuntu-latest` run 40773234033](https://github.com/mattgiles/perk/actions/runs/40773234033)
-  at commit `b74167f315afbe1b7d409dc0c655e90c820fca66`, the last commit that touches the probes.
-  The commit that adds this record changes only documentation.
+  at commit `b74167f315afbe1b7d409dc0c655e90c820fca66`, the last commit that changes a measured
+  probe path. The commit that adds this record changes only documentation. A later review commit
+  touches only each supervised probe's *unavailable* branch, which now emits every row the probe
+  reports, and the census guard for it. The measured paths are unchanged, so the cited rows stand.
 - **local host:** Ubuntu 24.04.5 LTS, kernel `7.0.0-1013-aws`, x64, Node v24.22.1, uid 1000. The
   rows were collected by `just test-v2-slow` at `b74167f3` with a clean tree.
 - **github host:** `ubuntu-latest` (`ImageOS` `ubuntu24`, `ImageVersion` `20261026.354.1`),
@@ -20,13 +22,17 @@ verdict*), §1/§2 (the pin family) and §14 (*Subprocess capability for workers
 
 **Verdict.** **GO: supervised execution.** Every rule-required `supervised` row is `PASS` on both
 hosts, and `setsid(1)` exists on both. The binding text is §10 of the foundations record, quoted in
-[Verdict](#verdict). Measurement also surfaced two obligations that the plan did not anticipate.
+[Verdict](#verdict). Measurement and review also surfaced three things the plan did not anticipate.
 They do not move the rule, and the verdict carries them as obligations:
 
 - a graceful `Connection.close()` leaks every running command unless the owner first runs
   `env.cleanup()` and waits for each `exec` to settle;
 - the daemon's spawn→register window is real. An owner that dies within microseconds of sending
-  an `exec` frame leaked the whole tree in 2 of 400 ad hoc trials.
+  an `exec` frame leaked the whole tree in 2 of 400 ad hoc trials;
+- the daemon can signal a reused pid. A reaped leader's pid stays registered for as long as an
+  escaped descendant keeps writing to the inherited output pipe, and workspaces do not isolate
+  signals. This is SOURCE-DERIVED and confirmed ad hoc. The verdict makes closing this window a
+  **prerequisite** before any worker gets a subprocess capability.
 
 ## Decision rule (pinned before measuring)
 
@@ -140,7 +146,11 @@ Nothing in this section was measured. Each claim points at the pinned source.
   - `groups.lock().unwrap().insert(pid)` runs right after `spawn`.
   - A waiter thread `child.wait()`s, so the daemon reaps its leader as soon as the leader exits.
   - `groups.lock().unwrap().remove(&pid)` runs at settle: once the leader has exited and both
-    pipes have ended, or once `EXIT_STDIO_GRACE` (100 ms) has passed.
+    pipes have ended, or once no output has arrived for `EXIT_STDIO_GRACE` (100 ms). Every output
+    chunk received after the exit (`Message::Data`) re-arms `idle_until`, so the grace is an
+    **idle** bound, not a total one.
+  - Every kill path inside that loop — the timeout, an abort, and a `kill` cancel (what
+    `cleanup()` sends) — also goes through `kill_group(pid)` → `kill_tree`.
 - `packages/env/daemon/src/main.rs::serve` — when `serve_frames` returns, the daemon runs
   `kill_all(&server.groups)` ("However input ended, the client is gone: stop everything it
   started."). A ping thread runs `kill_all` and then `exit(0)` once no byte has arrived for
@@ -175,11 +185,32 @@ Nothing in this section was measured. Each claim points at the pinned source.
   (thread start, program resolution, cwd check, fork/exec, sub-millisecond to about a
   millisecond) of writing an `exec` frame can hit it. No retained probe can aim at it. The ad hoc
   measurement under [MEASURED](#measured) hit it 2 times in 400.
-- **The settle→remove window (pid reuse).** While a pid is in `groups`, its leader is either an
-  un-reaped child of the daemon, so its pid cannot be reused, or reaped but not yet settled, for
-  at most about 100 ms of grace plus one loop turn. If `kill_all` lands in that second case and the
-  group is empty, `kill(-pid)` fails with ESRCH and the fallback `kill(pid)` could reach a pid
-  reused within those 100 ms. This is a bounded, recorded residual.
+- **The reaped-leader window (pid reuse): unbounded, and not isolated.** While a pid is in
+  `groups`, its leader is in one of two states:
+  - an un-reaped child of the daemon, whose pid cannot be reused (the retained `pid-reuse` row
+    measures this half);
+  - already reaped but not yet settled.
+
+  The second state has **no total bound**. Settlement waits for both pipes to end, or for 100 ms
+  *without* output. So any process that inherited the command's stdout/stderr and keeps writing
+  keeps the reaped leader's pid registered for as long as it writes. Typically that is a `setsid`
+  escape, which has also left the group. Once every group member has exited, the kernel is free
+  to reuse the pid number. A `kill_group(pid)` then reaches the wrong process. It can come from
+  `kill_all` at owner death, or from the loop's own timeout, abort or `cleanup()` kill:
+  - `kill(-pid)` hits whatever group a reusing process leads;
+  - on `ESRCH`, the fallback `kill(pid)` hits the reusing process itself.
+
+  Either way an unrelated process can be SIGKILLed. Per-attempt workspaces isolate files, not
+  signals, so the isolation obligation does **not** cover this residual. Hitting it needs pid
+  reuse while the escape keeps writing (`kernel.pid_max` is 4 194 304 locally), but the window
+  itself is unbounded. Confirmed ad hoc under [MEASURED](#measured). Closing it is the verdict's
+  prerequisite before workers spawn.
+  - **Upstream route:** a pi-env that stops signalling a pid once its leader was reaped, for
+    example by deregistering at reap, or by dropping the `kill(pid)` fallback and killing the
+    group only while the leader is un-reaped. Adopting it is a pin bump, and so a
+    re-verification.
+  - **Perk-side route:** a leader that stays alive, and so holds its pid, until its descendants
+    exit, for example a subreaper-and-join wrapper. This route is unmeasured.
 - **The 30 s silence rule.** A SIGSTOPped owner, or one whose event loop stays blocked for more
   than 30 s, sends no pings, so the daemon kills everything and exits. That costs liveness but
   never leaks. The reverse case does leak: a daemon that stalls makes the client tear the
@@ -216,7 +247,7 @@ Nothing in this section was measured. Each claim points at the pinned source.
 
 | Mechanism | Crash safety (A/B/C) | Descendants incl. grandchild, scrubbed, `setsid` | PID reuse | Filesystem view | Network policy | Prerequisites | Fail-closed posture |
 |---|---|---|---|---|---|---|---|
-| **supervised** (pi-env local daemon) | by construction: the pipe closes on any owner death; spawn→register window residual | the whole group set; not `setsid` escapes, not background work after the leader settles | kills only un-reaped children or live groups; settle→remove window residual | none (a cwd is no sandbox) | none | the packaged daemon for the platform (`localDaemon()`); `setsid(1)` for the group-kill mitigation | `localDaemon()` throws on an unknown platform; a missing daemon fails `exec` (`spawn_error`) |
+| **supervised** (pi-env local daemon) | by construction: the pipe closes on any owner death; spawn→register window residual | the whole group set; not `setsid` escapes, not background work after the leader settles | safe while the leader is un-reaped (pid held); after reap, an escape that keeps writing keeps the pid registered without bound, so a group kill can reach a reused pid — **not isolated; a prerequisite** | none (a cwd is no sandbox) | none | the packaged daemon for the platform (`localDaemon()`); `setsid(1)` for the group-kill mitigation | `localDaemon()` throws on an unknown platform; a missing daemon fails `exec` (`spawn_error`) |
 | **pdeathsig** (`PR_SET_PDEATHSIG`) | the armed process dies with its parent thread | the armed process only; its children are unarmed | kernel-delivered, no pid lookup | none | none | `setpriv` or a prctl seam per spawn | n/a (per-process) |
 | **pidns / bwrap** | the namespace init dies with its parent and the kernel kills every member | everything in the namespace, `setsid` escapes included | kernel-scoped | a mount namespace can give a read-only view | a network namespace can deny the network | an unprivileged user namespace, which is **blocked** on both hosts; bwrap is not installed | unavailable means no sandbox; the gate fails closed (`not_measured`) |
 | **journal** (intent-first record, start-time identity) | only what the fence kills at the next open, and only if the record was written before death | the registered process only, unless it also kills groups | a start-time match refuses a reused pid | none | none | owner-written state; an fsync'd record before spawn | a missing or stale record kills nothing |
@@ -398,7 +429,7 @@ perk-v2-containment {"kind":"probe","host":"github","mechanism":"marker","criter
 
 ### Ad hoc measurements (local only, not retained)
 
-These two scripts lived in the run's scratch directory. Each placed a variant owner beside
+These scripts lived in the run's scratch directory. Each placed a variant owner beside
 `owner.ts` for the length of the run and deleted it afterwards. They bound two windows the
 retained matrix cannot target.
 
@@ -422,6 +453,15 @@ retained matrix cannot target.
   | `connection.close()` alone | the whole tree, 20/20 |
   | `env.cleanup()` then `connection.close()`, without waiting | `setsid` 19/20; the whole tree 1/20 |
   | `env.cleanup()`, await the `exec` settlement, then `connection.close()` | `setsid` 20/20 |
+- **Reaped-leader registration (added in review).** This ran as a scratch `node:test` file over the
+  retained fixture and `owner.ts`. A supervised owner ran a leader that recorded its identity,
+  started a `setsid` writer that echoed to the inherited stdout every 50 ms (for at most 10 s),
+  and exited. In 5 of 5 trials:
+  - after 3 s the leader was gone from `/proc`, so the daemon had reaped it;
+  - `exec` had **not** settled, so by `exec.rs::run` the pid was still in `groups`;
+  - `exec` settled about 20 ms after the test killed the writer.
+
+  This confirms the unbounded registration. It does not exercise an actual pid reuse.
 
 ### Instrument notes (where the probes refine the plan's text)
 
@@ -476,10 +516,17 @@ retained matrix cannot target.
 **The rule selects GO.** On both hosts every required row (`supervised/availability`, `crash-A`,
 `crash-B`, `crash-C`, `descendants`, `pid-reuse`) is `PASS`. `setsid(1)` exists on both, and
 `group-kill-mitigated` is `PASS` on both. The GO arm's two placeholders are filled from the
-per-host availability rows. The arm also carries two measured additions that the rule's outcome
-does not depend on: the graceful-close order, and the measured size of the spawn→register window
-(with terminating signals to the daemon named as a residual). The §10 text, as written into the
-foundations record:
+per-host availability rows. The arm also carries three additions that the rule's outcome does not
+depend on:
+- the graceful-close order;
+- the measured size of the spawn→register window, with terminating signals to the daemon named as
+  a residual;
+- the reaped-leader pid-reuse window, which review surfaced from source.
+
+The rule's `pid-reuse` row measures only the un-reaped half and passes. The reaped half is a
+residual the rule did not anticipate. It does not change the rule's GO, but the verdict binds
+closing it as a **prerequisite**: GO does not yet authorize subprocess workers. The §10 text, as
+written into the foundations record:
 
 > **Containment and fencing verdict (node 1.4): supervised execution.** Worker commands run through
 > a pi-env daemon on the same machine (`RemoteExecutionEnv` over `Connection({ command: ["setsid",
@@ -499,11 +546,18 @@ foundations record:
 > own spawn→register window (an owner dying within microseconds of sending an `exec` frame leaked
 > the whole tree in 2 of 400 local trials). They are **isolated** by the obligation that every
 > attempt's environment is rooted at its own workspace and an earlier epoch's workspace is never
-> reused before it is discarded. **Filesystem view and network policy are not provided** (no
-> namespace sandbox is available unprivileged on either measured host: `unshare -Ur`, `unshare -Ur
-> --pid --fork` and `unshare -Urn` are refused by the AppArmor user-namespace restriction locally
-> and on `ubuntu-latest`, and bubblewrap is installed on neither); the read-only reviewer snapshot
-> and any network policy remain P7 environment-policy obligations, and reviewers get no subprocess
+> reused before it is discarded. **One residual is not isolated, and closing it is a prerequisite:**
+> a reaped leader's pid stays registered for as long as any process that inherited the command's
+> output keeps writing (settlement waits for 100 ms *without* output), so a group kill — at owner
+> death, on a timeout or abort, or from `cleanup()` — can signal an unrelated process that reused
+> that pid. Before any worker gets a subprocess capability, the implementing objective closes that
+> window — a re-verified pi-env pin that stops signalling a reaped leader's pid, or a Perk-side
+> leader that stays alive, holding its pid, until its descendants exit — and measures the fix on
+> both hosts. **Filesystem view and network policy are not provided** (no namespace sandbox is
+> available unprivileged on either measured host: `unshare -Ur`, `unshare -Ur --pid --fork` and
+> `unshare -Urn` are refused by the AppArmor user-namespace restriction locally and on
+> `ubuntu-latest`, and bubblewrap is installed on neither); the read-only reviewer snapshot and any
+> network policy remain P7 environment-policy obligations, and reviewers get no subprocess
 > capability. Not chosen, with measured reasons: PID namespaces (unavailable unprivileged on both
 > hosts — every `pidns/availability` row), a spawn journal (stop set = the registered process only;
 > owner-written state), a cgroup fence (Linux-only, cgroup writability varies by host — writable
@@ -519,19 +573,25 @@ hosts for the same reason, so any network policy remains a P7 environment obliga
 
 ## Consumers and reconciliation
 
-- **The plan-workflow objective**, the first to give a worker a subprocess capability, adopts:
+- **The plan-workflow objective**, the first to give a worker a subprocess capability, first
+  closes the reaped-leader pid-reuse window (the prerequisite: an upstream pi-env fix adopted by a
+  re-verified pin bump, or a Perk-side leader that holds its pid until its descendants exit,
+  measured on both hosts). It then adopts:
   - supervised execution;
   - the close order (`cleanup()` → await settlements → `close()`);
   - the setsid-wrapped daemon where `setsid(1)` exists;
   - `PERK_V2_STORE`/`PERK_V2_EPOCH` labels on every spawn;
   - the per-attempt workspace obligation;
   - the report-only sweep at open.
-- **Node 3.4** carries the residual list and the two unanticipated obligations into its
-  hand-off.
-- **Upstream (optional).** Two pi-env changes would shrink the residuals: a SIGTERM handler that
-  runs `kill_all`, which would make `close()` safe, and an exec thread that re-checks a "stopping"
-  flag under the `groups` lock after `spawn`, which would close the spawn→register window. Either
-  would be a pin bump, and so a re-verification.
+- **Node 3.4** carries the residual list, the unanticipated obligations and the pid-reuse
+  prerequisite into its hand-off.
+- **Upstream.** Three pi-env changes would shrink the residuals. Each would be a pin bump, and so a
+  re-verification:
+  - a SIGTERM handler that runs `kill_all`, which would make `close()` safe;
+  - an exec thread that re-checks a "stopping" flag under the `groups` lock after `spawn`, which
+    would close the spawn→register window;
+  - stopping signalling once the leader is reaped, which would close the pid-reuse window. This one
+    is the prerequisite's upstream route, not an option.
 - **Re-verify** by re-running `just test-v2-slow` on both hosts when any of these change:
   - the runner image (`ImageOS`/`ImageVersion`);
   - the kernel line;
@@ -546,6 +606,6 @@ After the local `just test-v2-slow` at `b74167f3`:
 - `ls /tmp | grep perk-v2-containment` printed nothing;
 - `git status --porcelain` printed nothing.
 
-The ad hoc runs above cleaned up after themselves the same way: they killed each trial's
+The ad hoc runs above, including the review-time reaped-leader trials, cleaned up after themselves the same way: they killed each trial's
 survivors by start-time-checked identity and removed every directory. After the documentation
 commit, `git status --porcelain` prints nothing.

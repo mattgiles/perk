@@ -61,13 +61,16 @@ function laneUnavailable(): string | undefined {
 
 const UNAVAILABLE = laneUnavailable();
 
-/** Emit `row` as `unavailable` (returning true) when the lane cannot run here. */
+/**
+ * Emit every row a probe would report as `unavailable` (returning true) when the lane cannot run
+ * here, so an unavailable host still yields the complete matrix.
+ */
 function unavailable(
   t: TestContext,
-  row: { readonly mechanism: "supervised"; readonly criterion: Criterion },
+  ...rows: readonly { readonly mechanism: "supervised"; readonly criterion: Criterion }[]
 ): boolean {
   if (UNAVAILABLE === undefined) return false;
-  evidence(t, { ...row, result: "unavailable", detail: UNAVAILABLE });
+  for (const row of rows) evidence(t, { ...row, result: "unavailable", detail: UNAVAILABLE });
   return true;
 }
 
@@ -182,7 +185,15 @@ test("supervised/crash-B: owner killed at the command's first output — the gro
 test("supervised/crash-C + descendants + setsid-escape: owner killed with the whole tree running", {
   timeout: CASE_TIMEOUT_MS,
 }, async (t) => {
-  if (unavailable(t, { mechanism: "supervised", criterion: "crash-C" })) return;
+  if (
+    unavailable(
+      t,
+      { mechanism: "supervised", criterion: "crash-C" },
+      { mechanism: "supervised", criterion: "descendants" },
+      { mechanism: "supervised", criterion: "setsid-escape" },
+    )
+  )
+    return;
   const { dir, owner } = await supervisedOwner(t);
   await owner.line("ready");
   const ids = readPids(t, dir, TREE_NAMES);

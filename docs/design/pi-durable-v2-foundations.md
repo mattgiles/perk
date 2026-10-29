@@ -984,15 +984,22 @@ command's leader; owner-and-daemon group kills on a host without `setsid(1)`, an
 signal sent to the daemon itself; the daemon's own spawn→register window (an owner dying within
 microseconds of sending an `exec` frame leaked the whole tree in 2 of 400 local trials). They are
 **isolated** by the obligation that every attempt's environment is rooted at its own workspace and
-an earlier epoch's workspace is never reused before it is discarded. **Filesystem view and network
-policy are not provided** (no namespace sandbox is available unprivileged on either measured host:
-`unshare -Ur`, `unshare -Ur --pid --fork` and `unshare -Urn` are refused by the AppArmor
-user-namespace restriction locally and on `ubuntu-latest`, and bubblewrap is installed on neither);
-the read-only reviewer snapshot and any network policy remain P7 environment-policy obligations, and
-reviewers get no subprocess capability. Not chosen, with measured reasons: PID namespaces
-(unavailable unprivileged on both hosts — every `pidns/availability` row), a spawn journal (stop set
-= the registered process only; owner-written state), a cgroup fence (Linux-only, cgroup writability
-varies by host — writable locally, `EACCES` on `ubuntu-latest` — cooperative escape). Evidence:
+an earlier epoch's workspace is never reused before it is discarded. **One residual is not isolated,
+and closing it is a prerequisite:** a reaped leader's pid stays registered for as long as any
+process that inherited the command's output keeps writing (settlement waits for 100 ms *without*
+output), so a group kill — at owner death, on a timeout or abort, or from `cleanup()` — can signal
+an unrelated process that reused that pid. Before any worker gets a subprocess capability, the
+implementing objective closes that window — a re-verified pi-env pin that stops signalling a reaped
+leader's pid, or a Perk-side leader that stays alive, holding its pid, until its descendants exit —
+and measures the fix on both hosts. **Filesystem view and network policy are not provided** (no
+namespace sandbox is available unprivileged on either measured host: `unshare -Ur`, `unshare -Ur
+--pid --fork` and `unshare -Urn` are refused by the AppArmor user-namespace restriction locally and
+on `ubuntu-latest`, and bubblewrap is installed on neither); the read-only reviewer snapshot and any
+network policy remain P7 environment-policy obligations, and reviewers get no subprocess capability.
+Not chosen, with measured reasons: PID namespaces (unavailable unprivileged on both hosts — every
+`pidns/availability` row), a spawn journal (stop set = the registered process only; owner-written
+state), a cgroup fence (Linux-only, cgroup writability varies by host — writable locally, `EACCES`
+on `ubuntu-latest` — cooperative escape). Evidence:
 `archive/pi-durable-v2-containment-characterization.md`.
 
 ## 11. The door envelope
@@ -1091,7 +1098,7 @@ feature.
 | Real execution kinds | the fixture proves the principles; product behavior needs real subjects | the plan-workflow objective |
 | Effect ledger: intent → effect → reconciled observation, with incremental submit and the stacked journal each getting its own reconciler | no effect is needed at fixture level; P10 fixes the shape | the plan-workflow objective |
 | Budget admission: units, reservations across children, retries and compaction, unknown spend | only `pi.usage` totals are recorded; P10 fixes the shape | the plan-workflow objective |
-| Subprocess capability for workers | no worker in this objective spawns; the §10 verdict binds how one may (supervised execution, the graceful-close order, the report-only sweep, and the per-attempt workspace isolation obligation) | the plan-workflow objective |
+| Subprocess capability for workers | no worker in this objective spawns; the §10 verdict binds how one may (supervised execution, the graceful-close order, the report-only sweep, and the per-attempt workspace isolation obligation) and the prerequisite before any may (closing the reaped-leader pid-reuse window) | the plan-workflow objective |
 | Real provider, auth and settings composition | the faux model only | the plan-workflow objective |
 | Extracting shared report definitions from v1 | v2 copies no v1 report-wave policy until real reviewer reports arrive | the plan-workflow objective |
 | Record and task migrations (execution-manifest matches that are not exact) | this objective refuses any mismatch | the first objective that bumps an execution-manifest version |
@@ -1132,7 +1139,7 @@ explicit, reviewed amendment, recorded in the log below.
 | Change | Where |
 |---|---|
 | Record created: P1–P10 with evidence; identity, subject, tier, write, observation, outcome, lifecycle (epoch-named owner directories), envelope, fixture, recipe, deferral and consumer sections | node 1.1 |
-| Containment and fencing verdict recorded (§10): GO supervised; pi-env 1.4.0 joins the pin family; evidence archive/pi-durable-v2-containment-characterization.md | node 1.4 |
+| Containment and fencing verdict recorded (§10): GO supervised, with closing the reaped-leader pid-reuse window as a prerequisite before workers spawn; pi-env 1.4.0 joins the pin family; evidence archive/pi-durable-v2-containment-characterization.md | node 1.4 |
 
 ## 16. Measured evidence (reserved — node 3.4)
 

@@ -2,8 +2,9 @@
 // probe files and this census; all three run in the slow tier; every `mechanism` / `criterion`
 // literal they emit is in the evidence vocabulary pinned here (the vocabulary of the evidence
 // record's decision rule — docs/design/archive/pi-durable-v2-containment-characterization.md);
-// every row the rule requires, and every residual it names, is emitted by the supervised file; and
-// every probe is bounded by the per-case timeout. Changing the vocabulary means editing it here.
+// every row the rule requires, and every residual it names, is emitted by the supervised file —
+// by each supervised probe's unavailable branch too, so an unavailable host still reports the
+// complete matrix; and every probe is bounded by the per-case timeout. Changing the vocabulary means editing it here.
 
 import assert from "node:assert/strict";
 import { globSync, readFileSync } from "node:fs";
@@ -127,6 +128,29 @@ test("the supervised file emits every required and every residual row of the rul
   );
   for (const criterion of [...REQUIRED, ...RESIDUAL]) {
     assert.ok(pairs.has(`supervised/${criterion}`), `supervised/${criterion} is emitted`);
+  }
+});
+
+test("every supervised probe emits all its rows as unavailable when the lane cannot run", () => {
+  const blocks = source("supervised.slow.test.ts")
+    .split(/^test\(/m)
+    .slice(1);
+  assert.ok(blocks.length > 0, "the supervised file holds probes");
+  for (const block of blocks) {
+    const call = block.search(/\bunavailable\(\s*t,/);
+    assert.notEqual(
+      call,
+      -1,
+      `every supervised probe gates on unavailable(): ${block.slice(0, 80)}`,
+    );
+    const gate = block.slice(call, block.indexOf("return;", call));
+    const gated = new Set(literals(gate, "criterion"));
+    const emitted = new Set(literals(block, "criterion"));
+    assert.deepEqual(
+      [...emitted].filter((criterion) => !gated.has(criterion)),
+      [],
+      `the unavailable branch of ${block.slice(0, 80)} emits every row the probe emits`,
+    );
   }
 });
 

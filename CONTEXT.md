@@ -955,7 +955,8 @@ _Avoid_: sandbox, container, subprocess isolation
 
 **Stop set** / **Residual** (pi-durable v2):
 What a containment mechanism kills on owner death, vs. what it provably cannot; residuals are
-isolated by per-attempt workspaces and reported, never pretended away.
+isolated by per-attempt workspaces where files are the harm, closed before adoption where they are
+not (a signal to a reused pid), and reported — never pretended away.
 _Avoid_: leak list, known issues, blast radius
 
 **Report-only sweep** (pi-durable v2):
