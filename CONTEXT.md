@@ -894,6 +894,11 @@ kind — for the fixture review the git tree oid at the tracked ref, so a same-t
 subject; an outcome or decision authorizes only its exact subject.
 _Avoid_: target, revision, head, commit (unless the kind is `git-commit`)
 
+**Current subject**:
+The subject of the latest observation (highest `seq`); every fixture rule reads it, a different
+tree starts a fresh round, and records over earlier subjects are stale by derivation.
+_Avoid_: active subject, head
+
 **Subject snapshot**:
 The immutable read-only materialization of a subject under `<store>/subjects/<digest>/`, verified
 against its tree-derived sha256 manifest; the only tree a worker reads.
@@ -912,7 +917,8 @@ _Avoid_: result, task outcome, done
 
 **Pending decision**:
 A persisted record asking a human for one of its allowed actions over an exact subject, naming its
-actor; open until a reply consumes it, or cancellation or supersession closes it.
+actor; open until a reply consumes it, or cancellation or supersession (another decision of the
+execution already consumed) closes it.
 _Avoid_: approval request, prompt, question, waiter
 
 **Reply** (pi-durable v2):
@@ -926,6 +932,12 @@ _Avoid_: answer, approval, callback
 The single conversation-owned, background Durable task a reply creates to carry a decision forward;
 its id is the reply's receipt. Distinct from the delivery glossary's **Continuation manifest**.
 _Avoid_: follow-up, resume task, waiter
+
+**Domain kernel**:
+The pure, synchronous, Durable-free modules under `extension/pi/v2/kernel/` — identities,
+subjects, records, vocabularies and `reconcile` — that decide every v2 action from records alone;
+they import only kernel files and `node:crypto`.
+_Avoid_: core, engine, binding (the Durable layer)
 
 **Reconcile commit**:
 The one commit shape every v2 write uses — look up or record the input under its operation id, run

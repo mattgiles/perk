@@ -58,9 +58,10 @@ function corpus(sources: Record<string, string>): {
 
 // ── live ────────────────────────────────────────────────────────────────────────────────────────
 
-test("both corpora are live: v2 holds the host and this guard; v1 holds index.ts and no v2 file", () => {
+test("both corpora are live: v2 holds the host, the kernel and this guard; v1 holds index.ts and no v2 file", () => {
   const v2 = v2Files();
   assert.ok(v2.includes("pi/v2/host.ts"), "the v2 corpus contains the host entry");
+  assert.ok(v2.includes("pi/v2/kernel/reconcile.ts"), "the v2 corpus contains the kernel");
   assert.ok(v2.includes(GUARD_FILE), "the v2 corpus contains this guard");
   const v1 = v1Files();
   assert.ok(v1.includes("index.ts"), "the v1 corpus contains index.ts");
@@ -102,7 +103,7 @@ test("every bare package v2 names is declared and confined to the Durable homes"
   );
 });
 
-test("inside v2, every relative edge obeys the layers — no cycles, nothing unresolved", () => {
+test("inside v2, every relative edge obeys the layers — no cycles, nothing unresolved, live kernel edges", () => {
   const { edges, violations, cycles, unresolved } = checkLayering(v2Files(), readExtensionFile);
   assert.deepEqual(
     { violations, cycles, unresolved },
@@ -111,6 +112,10 @@ test("inside v2, every relative edge obeys the layers — no cycles, nothing unr
   assert.ok(
     edges.get("pi/v2/host.test.ts")?.includes("pi/v2/host.ts"),
     "the edge map carries the live host.test.ts → host.ts edge",
+  );
+  assert.ok(
+    edges.get("pi/v2/kernel/reconcile.ts")?.includes("pi/v2/kernel/records.ts"),
+    "the edge map carries the live kernel → kernel edge reconcile.ts → records.ts",
   );
 });
 

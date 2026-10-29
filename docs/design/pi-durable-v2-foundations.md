@@ -788,13 +788,15 @@ audit is a record.
 4. **Apply.** Apply the actions in the same commit: write records, create tasks and conversations,
    consume decisions.
 
-**Kernel properties** (node 2.1 proves them):
+**Kernel properties**, proved as `K1`–`K6` in
+[`extension/pi/v2/kernel/reconcile.test.ts`](../../extension/pi/v2/kernel/reconcile.test.ts):
 
 - deterministic;
 - idempotent: apply the actions, reconcile again, and no new actions appear;
 - cancellation dominates admission;
 - a stale subject is refused;
-- incomplete coverage stays visible.
+- incomplete coverage stays visible;
+- recording a reply and reconciling in one commit yields exactly one continuation.
 
 **The step task.** `perk.v2.step` is `operate()` with no input: the shape reconcile takes when
 there is no new fact, as after a reopen.
@@ -1070,6 +1072,41 @@ boundary model (node 3.3) and never touches the store.
   - a subject (tree) that differs from the latest observation's refuses admission, acceptance and
     reply (`stale_subject`). A ref move with the same tree does not.
 
+**Rule precisions (node 2.1).** The kernel (`extension/pi/v2/kernel/`) settles what the rules
+above left open:
+
+- **The current subject.** Every rule reads the latest observation's tree. A new tree starts a
+  fresh round: reconcile admits both roles over it, under new assignment ids, and records over
+  earlier trees stay inert. They are stale only by derivation (§5). A same-tree observation
+  changes nothing.
+- **Attempts.** Reconcile starts attempt 1 of each admitted assignment in the commit that admits
+  it. The attempt record carries Perk ids only. Its Durable conversation and submission are
+  durable-map rows (§6), so §4's `submit` payload is the binding's to compare (node 2.2). The
+  fixture never starts a second attempt, and an incomplete attempt stays visible.
+- **Terminal states.** Once a cancellation is recorded or a continuation exists, reconcile emits
+  no action of any kind. Observations are still recorded, and `cancel` is still accepted.
+- **The policy.** The fixture rules take a host-resolved policy `{capabilitySet}`, so the kernel
+  signature is `reconcile(records, policy)`. The policy is code-owned, and the execution
+  manifest's `policyVersion` versions it.
+- **Refusal order.** Receipt lookup comes first (§4). Then identity (`unknown_decision`,
+  `invalid_input`), freshness (`stale_subject`), cancellation (`cancelled`), supersession
+  (`superseded`), and last the report content (`invalid_report`).
+- **Supersession.** A reply or a report acceptance is `superseded` once the execution has consumed
+  a decision, i.e. once a continuation exists.
+- **Report validity.** `invalid_report` covers the strict report schema (non-empty `summary` and
+  notes, snapshot-relative finding paths, no extra keys), a report subject other than the
+  assignment's, and a verified digest other than the latest observation's manifest digest.
+- **Well-formed text.** Every caller-supplied string the kernel records is well-formed Unicode (no
+  lone surrogates), so every recorded payload has a canonical form and its operation replays
+  (§4). Ill-formed report text is `invalid_report`; any other ill-formed input is
+  `invalid_input`.
+- **Tracked ref.** Every observation names the repo and ref of the execution's first observation;
+  any other is `invalid_input`.
+- **Record integrity.** The kernel refuses to decide over a record set whose references do not
+  resolve, for example a reply without its decision or an outcome that disagrees with its
+  attempt. That is a binding fault, not a refusal. Presenting every record is the binding's
+  obligation (§6, node 2.2).
+
 ## 13. The four-question extension recipe
 
 A new v2 capability is added by answering four questions, and nothing else should be needed:
@@ -1140,6 +1177,7 @@ explicit, reviewed amendment, recorded in the log below.
 |---|---|
 | Record created: P1–P10 with evidence; identity, subject, tier, write, observation, outcome, lifecycle (epoch-named owner directories), envelope, fixture, recipe, deferral and consumer sections | node 1.1 |
 | Containment and fencing verdict recorded (§10): GO supervised, with closing the reaped-leader pid-reuse window as a prerequisite before workers spawn; pi-env 1.4.0 joins the pin family; evidence archive/pi-durable-v2-containment-characterization.md | node 1.4 |
+| §12 rule precisions — current-subject rounds, attempt 1 started with admission, terminal cancellation and completion, the policy parameter, the refusal order, `superseded` as a spent decision, report validity, well-formed text, the tracked ref, record integrity | node 2.1 |
 
 ## 16. Measured evidence (reserved — node 3.4)
 
