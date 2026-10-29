@@ -425,13 +425,10 @@ export function evaluateOperation(
     }
     case "reply": {
       const { decisionId, action, actor } = operation;
-      for (const [field, value] of [
-        ["decisionId", decisionId],
-        ["action", action],
-        ["actor", actor],
-      ] as const) {
-        if (typeof value !== "string") return refused("invalid_input", `${field} is not a string`);
-      }
+      // Only the decision id names the operation; action and actor are payload, compared by the
+      // lookup first (an ill-typed payload against a receipt is `duplicate_conflict`).
+      if (typeof decisionId !== "string")
+        return refused("invalid_input", "decisionId is not a string");
       const opId = replyOpId(decisionId);
       const replay = lookup(records, index, opId, "reply", { decisionId, action, actor });
       if (replay !== null) return replay;
@@ -442,12 +439,14 @@ export function evaluateOperation(
       if (decision === undefined) {
         return refused("unknown_decision", `no decision ${JSON.stringify(decisionId)}`);
       }
+      if (typeof action !== "string") return refused("invalid_input", "action is not a string");
       if (!decision.allowedActions.includes(action)) {
         return refused(
           "invalid_input",
           `action ${JSON.stringify(action)} is not allowed by ${decisionId}`,
         );
       }
+      if (typeof actor !== "string") return refused("invalid_input", "actor is not a string");
       if (actor !== decision.actor) {
         return refused("invalid_input", `actor ${JSON.stringify(actor)} is not ${decision.actor}`);
       }

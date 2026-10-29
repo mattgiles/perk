@@ -497,6 +497,29 @@ test("text boundary: replays across it — astral text replays; ill-formed text 
   assert.doesNotThrow(() => refusedWith(cancelled, cancel("\uD800"), "duplicate_conflict"));
 });
 
+/** A reply operation whose payload fields carry runtime values outside the declared types. */
+function malformedReply(tree: string, fields: Record<string, unknown>): Operation {
+  return { ...reply(tree), ...fields } as unknown as Operation;
+}
+
+test("an ill-typed reply payload is compared by the lookup first: duplicate_conflict against a receipt", () => {
+  const ill = [
+    { action: undefined },
+    { action: 1 },
+    { actor: 42 },
+    { actor: 1n },
+    { action: null },
+  ];
+  for (const fields of ill) {
+    assert.doesNotThrow(() => refusedWith(S3, malformedReply(T1, fields), "duplicate_conflict"));
+    // Without a receipt the same payload is an identity refusal, after the decision lookup.
+    refusedWith(S2, malformedReply(T1, fields), "invalid_input");
+    refusedWith(S2, malformedReply(T2, fields), "unknown_decision");
+  }
+  // The decision id names the operation, so an ill-typed one is refused before any lookup.
+  refusedWith(S3, malformedReply(T1, { decisionId: 7 }), "invalid_input");
+});
+
 test("superseded is reachable: an accept after the execution consumed a decision", () => {
   assert.ok(SUPERSEDED_ACCEPT.every((step) => step.result.kind === "applied"));
   assert.deepEqual(stepAt(SUPERSEDED_ACCEPT, 4).result, {
