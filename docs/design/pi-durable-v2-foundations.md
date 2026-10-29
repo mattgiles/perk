@@ -1024,6 +1024,47 @@ with a fake assignment task standing in for the launched work:
 - `B5`: no record lives only in task-scoped state;
 - `B6`: the presented record set is complete, including records nothing references.
 
+**The reply (node 3.2).** The host's third observing verb is
+`{type: "reply", observe, decisionId, action, actor}`, carrying the kernel's payload verbatim: the
+host neither validates nor derives it, and never derives the decision id from the current
+observation, so a tree change surfaces as `stale_subject`, never `unknown_decision`. It runs like
+`run` (§10 *The host*): the missing-store rule, lock, open, the gate, observe, the execution
+conversation, then **one** `operate` whose kernel evaluation does everything else in order — the
+receipt lookup under the reply op id, recording the reply and its fresh observation, the identity,
+freshness (against that just-built observation), cancellation and supersession checks, consuming
+the decision, and creating exactly one continuation.
+
+- A `refused` or `uncertain` reply returns at once and never resumes. An applied **or replayed**
+  reply resumes and quiesces: a continuation an earlier, unacknowledged commit created runs then,
+  exactly once.
+- The quiescent outcome carries `receipt`, the reply's `BindingReceipt`, whose continuation row
+  names the continuation it created. It is the same for an applied and a replayed reply — the
+  verb is idempotent, so there is no `replayed` flag — and `null` for `start` and `run`.
+- The receipt is found later by the reply op id: `lookupReceipt` below the host, or an equal reply
+  whose observation succeeds (§8 *Observation precedes receipt lookup*).
+- **No waiter.** The pending decision is a record that nothing waits on: once the run that opened
+  it quiesces, every attempt task is terminal, no task is live and the owner lock is released. The
+  continuation is conversation-owned on the execution conversation and background (*Task
+  ownership*, above), never owned by the requesting attempt task, which is terminal by then.
+
+Proved in [`extension/pi/v2/decision/`](../../extension/pi/v2/decision/), over real temp git repos
+and SQLite stores:
+
+- `R1`: the decision is bound to the aggregate's subject, actions and actor; with no waiter, a
+  reply after the requesting task is terminal creates one conversation-owned continuation and
+  returns its receipt, found later by the reply op id (the fake program, and the native
+  assignment);
+- `R2`: a duplicate reply returns the same continuation, even after a later subject change or a
+  cancellation; another payload is `duplicate_conflict` and records nothing;
+- `R3`: a changed-subject, superseded, cancelled or unknown decision is refused with its typed
+  reason after observing once, and nothing is recorded; a same-tree commit is not stale;
+- `R4`: an observation failure is `observation_failed` and records nothing, a duplicate's
+  included, whose receipt stays findable;
+- `R5`: after storage success and a lost acknowledgement, reopening finds the receipt by reply op
+  id with one unrun continuation, and the retry replays it and runs exactly that continuation;
+- the gate: a reply over a missing store directory or a mismatched manifest is `incompatible`
+  without observing.
+
 ## 8. The observation policy
 
 **Which verbs observe.** `start`, `run` and `reply` observe the tracked ref first. Each resolves
@@ -1046,6 +1087,12 @@ lock, because it writes under `<store>/subjects/`. The observer is
 **Refusals.** A kernel refusal rolls back the whole commit, the observation input included, so a
 refused operation leaves no record (node 2.2's proof `B4`, §7). A replayed operation also records
 nothing: its receipt is returned before anything is written (§7 step 2).
+
+**Observation precedes receipt lookup.** A verb observes before its commit, and the commit's
+receipt lookup runs first inside it (§7 step 2). A duplicate reply whose observation fails is
+therefore `observation_failed` and records nothing; there is no receipt read before observing.
+Its receipt stays findable by `lookupReceipt` and by an equal reply that observes successfully
+(§7 *The reply*, `R4`).
 
 ## 9. The outcome taxonomy
 
@@ -1218,8 +1265,8 @@ Both are cleaned up by store retention/GC, which is deferred (§14).
 - `kernel/compatibility.ts`: the gate's pure comparison.
 - `durable/waitReason.ts`: wait-reason derivation from records plus `inspect()` and the attempt
   endings (`durable/ending.ts`, node 3.1).
-- `host.ts`: `composeProgram`, `expectedManifest`, `runHost` (the `start` and `run` verbs) and
-  `readStatus`.
+- `host.ts`: `composeProgram`, `expectedManifest`, `runHost` (the `start`, `run` and `reply`
+  verbs) and `readStatus`.
 
 The store's SQLite file is `<store>/durable.sqlite`.
 
@@ -1245,17 +1292,19 @@ by construction. Every violation is a `RangeError`, raised before any lock or fi
 **A run, in order:**
 
 1. compose the program;
-2. the store-directory rule: `start` creates the store directory. `run` (and status) on a missing
-   one returns `incompatible` (`manifest_missing`) with `epoch: null`, taking no lock and creating
-   nothing;
+2. the store-directory rule: `start` creates the store directory. `run`, `reply` (and status) on
+   a missing one return `incompatible` (`manifest_missing`) with `epoch: null`, taking no lock and
+   creating nothing;
 3. lock; `owner_busy` carries the live holder's epoch;
 4. open storage and the Harness, without resuming, counting published commits for its lifetime;
-5. the gate: `start` refuses `already_started` when a manifest exists, and `run` refuses
-   `incompatible`;
+5. the gate: `start` refuses `already_started` when a manifest exists, and `run` and `reply`
+   refuse `incompatible`;
 6. observe, through an injected seam; `observation_failed` records nothing;
 7. create the execution conversation (`harness.root()`), right before the verb's commit. Status
    never creates it;
-8. `operate(input)`. A `refused` or `uncertain` verb returns at once and never resumes;
+8. `operate(input)`. A `refused` or `uncertain` verb returns at once and never resumes; an applied
+   or replayed verb resumes, and the quiescent outcome carries the verb's receipt (§7 *The
+   reply*);
 9. the quiescence loop;
 10. close;
 11. release.
@@ -1700,6 +1749,7 @@ explicit, reviewed amendment, recorded in the log below.
 | §10 the host (node 2.3): host modules, program seam and one-composition rule, extension-name refusal, liveness and release precisions, gate field order and mismatch shape, the missing-store rule, vacuous step 2, the consistent-view quiescence loop, wait-reason precedence, open failure as `uncertain`, commit-free failure detection, `H1`–`H8`; §9 open-failure row; §11 null epoch | node 2.3 |
 | §5 the observer (node 2.4): `subject/` modules, ref-name rule and single resolution, repo-root realpath, ceiling and discovered-root check, scrubbed git environment, raw-object reads with the manifest re-derived per observation, materialization order (temp directory → rename, directory before manifest, never overwritten), fail-closed reuse, no fsync, BOM-keeping strict decoding and CR as path data, strict verifier and canonical manifest parser, removal via `discardTree`, `S1`–`S6`; §8 observer pointer | node 2.4 |
 | §6 the worker rows and the `submit` receipt's submission row; §9 the verification row's recovery (`repair_required`); §10 wait reasons derived with attempt endings and `repair_required`'s precedence, the host program's models and env; §12 the capability set (the report tool, the instructions digest), the native assignment (task phases and endings, fail-closed capability resolution, the snapshot environment and its residual, the tools, the report tool's order and the requested-not-relied-on termination rule, the `prepareArguments` argument check, `repair_required` derivation, measured settlements, `A1`–`A8`) and the stop-condition verdict (holds); §13 executor name; §14 attempt retry deferral | node 3.1 |
+| §7 the reply (node 3.2): the host verb and its order, the quiescent outcome's receipt (applied or replayed, `null` for `start`/`run`), a replayed reply resumes, no-waiter task ownership, `R1`–`R5`; §8 observation precedes receipt lookup; §10 the host's verbs, the missing-store rule and gate for `reply`, and the receipt | node 3.2 |
 
 ## 16. Measured evidence (reserved — node 3.4)
 

@@ -41,6 +41,7 @@ import {
 } from "../host.ts";
 import type { FixturePolicy } from "../kernel/fixture.ts";
 import type { ExecutionManifest } from "../kernel/records.ts";
+import type { RefusalReason } from "../kernel/refusal.ts";
 import type { HolderIdentity, Liveness } from "../store/liveness.ts";
 import {
   asOwnerMeta,
@@ -441,6 +442,21 @@ export function expectIncompatible(
     assert.fail(`expected incompatible ${field}: ${shown(outcome)}`);
   assert.equal(outcome.mismatch.field, field, shown(outcome));
   return outcome;
+}
+
+/** Assert a `refused` run outcome with `reason`; its detail. */
+export function expectHostRefused(outcome: HostRunOutcome, reason: RefusalReason): string {
+  if (outcome.kind !== "refused") assert.fail(`expected refused ${reason}: ${shown(outcome)}`);
+  assert.equal(outcome.refusal.reason, reason, outcome.refusal.detail);
+  return outcome.refusal.detail;
+}
+
+/** Assert an `observation_failed` run outcome; its detail. */
+export function expectObservationFailed(outcome: HostRunOutcome): string {
+  if (outcome.kind !== "observation_failed") {
+    assert.fail(`expected observation_failed: ${shown(outcome)}`);
+  }
+  return outcome.detail;
 }
 
 // ── the host child ──────────────────────────────────────────────────────────────────────────────
