@@ -904,6 +904,24 @@ The immutable read-only materialization of a subject under `<store>/subjects/<di
 against its tree-derived sha256 manifest; the only tree a worker reads.
 _Avoid_: checkout, worktree, copy
 
+**Worker conversation** (pi-durable v2):
+The task-owned conversation an assignment task creates and configures explicitly from the
+assignment's recorded capability set (model, extensions, tools, instructions, the symbolic
+workspace root), mapped under the attempt id; the worker reads and reports only through it.
+_Avoid_: subagent, child session, lane
+
+**Snapshot environment** (pi-durable v2):
+The read-only `ExecutionEnv` rooted at a subject snapshot that every worker tool reads through; it
+refuses escapes, symlinks (the root included), writes and exec, and only a worker conversation
+gets one.
+_Avoid_: sandbox, workspace, checkout
+
+**Attempt ending** (pi-durable v2):
+The native assignment task's typed terminal result — `accepted`, `incomplete` or `repair` — read
+back through the attempt's `launch` row. Diagnostic only: it explains an incomplete attempt (and
+derives `repair_required`) and never authorizes anything.
+_Avoid_: outcome (the accepted record), task status
+
 **Snapshot manifest** (pi-durable v2):
 The text derived from a subject's git tree — one line per entry,
 `<kind> <sha256|-> <git-mode> <oid> <path>`, sorted bytewise by path — stored beside the snapshot
@@ -1002,7 +1020,8 @@ _Avoid_: reaper, fence kill, orphan cleanup
 **Wait reason**:
 The closed-vocabulary domain reason a quiescent execution is not progressing — `pending_decision`,
 `unmet_prerequisite`, `assignment_incomplete`, `repair_required`, `parked`, `blocked`, `sleeping`,
-`cancelled`, `completed` — derived from records plus `inspect()`, never a stored flag.
+`cancelled`, `completed` — derived from records plus `inspect()` and attempt endings, never a
+stored flag.
 _Avoid_: status, blocked reason (Durable's derived task state), idle
 
 **Execution manifest** (pi-durable v2):

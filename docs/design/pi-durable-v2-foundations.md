@@ -705,11 +705,14 @@ immediately before it (P2). It runs at three points:
 
 - after materialization (node 2.4), where a failure is an observation failure
   (`observation_failed`);
-- at every attempt start (node 3.1);
-- inside the accept-report tool, before the accept-once commit (node 3.1).
+- at every attempt start (node 3.1), where a failure ends the attempt in a `snapshot_tampered`
+  repair before any worker exists;
+- inside the accept-report tool, before the accept-once commit (node 3.1), where a failure is the
+  refusal `snapshot_tampered` (§9).
 
-At the last two points a failure is the refusal `snapshot_tampered` (§9). The accepted outcome
-records the digest it verified. An outcome authorizes only its exact subject. Node 2.4's proof
+The native assignment also verifies once more at settle, diagnostically. A failure at any point
+leaves the attempt incomplete with wait reason `repair_required` (§12 the native assignment). The
+accepted outcome records the digest it verified. An outcome authorizes only its exact subject. Node 2.4's proof
 list includes a symlink entry and a gitlink entry.
 
 ### The observer (node 2.4)
@@ -872,6 +875,13 @@ the decoder in `subject/git.test.ts`, and the exact-names case in `subject/snaps
   The `continuation` and `launch` op kinds have no family of their own: each one's record is its
   durable-map row. The step task is input-less and idempotent and is created for no Perk identity,
   so it has no row.
+- **The worker rows (node 3.1).** The worker conversation's row lands in the assignment task's
+  commit that creates the conversation. The submission is created by Durable's own admission
+  commit, so its creating-commit mapping is its Durable `requestId`, which *is* the `submit` op id:
+  the Perk identity is bound in that commit. Its durable-map row lands in the task's next commit,
+  which also owns §4's `submit` `{conversationId}` comparison. A crash between the two reruns the
+  task's phase, and Durable deduplicates the resubmission by `requestId` (§12 the native
+  assignment, `A5`).
 - **The singletons.** `perk.v2.manifest` has no key and no op id, and `start` is not an operation
   kind. A repeated `start` is caught by the gate (`already_started`, §10), never by receipt
   lookup. `perk.v2.catalog` holds no record: it is the record catalog (record presentation,
@@ -881,8 +891,8 @@ the decoder in `subject/git.test.ts`, and the exact-names case in `subject/snaps
 `continuation`; a `launch` row is reached through its attempt's receipt). The receipt is that
 record plus the durable-map rows for the result ids *X* derives:
 
-- `submit`: the launch row under `<attempt-id>/launch`, and, once node 3.1 maps the worker
-  submission, the submission row under *X*;
+- `submit`: the launch row under `<attempt-id>/launch`, and the submission row under *X* once the
+  assignment task has mapped the worker submission;
 - `reply`: the continuation row under `<decision-id>/continuation`. That continuation task id is
   the reply's receipt;
 - `continuation`: its own row.
@@ -901,8 +911,8 @@ creation:
   cataloged member, an already-cataloged write, or an uncataloged member holding another value is
   a binding fault (`KernelInvariantError`, §9).
 - **The presented set.** The kernel sees the manifest, every cataloged operation record, and each
-  `<decision-id>/continuation` row projected to its continuation record. `launch` rows, and node
-  3.1's conversation and submission rows, are bookkeeping the kernel never sees. Unreferenced
+  `<decision-id>/continuation` row projected to its continuation record. An attempt's `launch`,
+  worker-conversation and `submit` rows are bookkeeping the kernel never sees. Unreferenced
   records (an attempt without an outcome, the latest observation, the cancellation) arrive like
   any other, because the catalog lists keys, not references.
 - **The highest seq.** Observations are cataloged one per commit in seq order, so the cataloged
@@ -1039,7 +1049,7 @@ nothing: its receipt is returned before anything is written (§7 step 2).
 |---|---|---|---|
 | Storage commit failure | the Harness closes; every later call gets `SessionFailed` | `uncertain` | reopen under §10, then let the step task and receipt lookup decide whether the input landed |
 | Kernel refusal | the kernel throws inside the commit callback; that commit rolls back and the Harness stays open | `refused` with a typed reason; nothing recorded | fix the input, or accept the refusal |
-| Snapshot verification failure at attempt start or acceptance | detected outside the commit, immediately before it (§5); the guarded commit never runs | `refused` (`snapshot_tampered`); nothing recorded | repair: the attempt stays incomplete |
+| Snapshot verification failure at attempt start or acceptance | detected outside the commit, immediately before it (§5); the guarded commit never runs | `refused` (`snapshot_tampered`); nothing recorded | the attempt stays incomplete; wait reason `repair_required` |
 | Observation failure | none; it happens before any commit | `observation_failed`; nothing recorded | fix the ref or repo, then re-run the verb |
 | Lock busy | none; it happens before storage opens | `owner_busy` | retry after the live owner exits |
 | Storage open or `Harness.open` failure, after the lock | none; the Harness never became usable | `uncertain` | reopen under §10 |
@@ -1105,12 +1115,14 @@ The host (node 2.3, §10) classifies its own rejections by the same failure latc
    admissions (§7).
 7. `resume()`, then wait until `wake().active === false` and a view collected after it is
    consistent (*The host*, below).
-8. Derive the **wait reason** from records plus `inspect()`. The vocabulary is closed:
+8. Derive the **wait reason** from records, `inspect()` and the launched attempt tasks' typed
+   endings (read with `getTask`). The vocabulary is closed:
    `pending_decision`, `unmet_prerequisite`, `assignment_incomplete`, `repair_required`,
    `parked`, `blocked`, `sleeping`, `cancelled`, `completed`.
 9. `close()`, then release the lock. The epoch directory stays behind as the record of that epoch.
 
-**Status** runs lock → open → gate → read records + `inspect()` → close → release. It never calls
+**Status** runs lock → open → gate → read records + `inspect()` + attempt endings → close →
+release. It never calls
 `resume()`, never commits, and makes no other call that enables progress. Submit and wait enable scheduling, while
 `inspect()` and reads do not (`packages/durable/docs/spec.md#2.2 Public Harness surface`).
 
@@ -1200,7 +1212,8 @@ Both are cleaned up by store retention/GC, which is deferred (§14).
   `store/` is a Durable-free open-layer directory with `node:` imports only, so P10's layering is
   unchanged.
 - `kernel/compatibility.ts`: the gate's pure comparison.
-- `durable/waitReason.ts`: wait-reason derivation from records plus `inspect()`.
+- `durable/waitReason.ts`: wait-reason derivation from records plus `inspect()` and the attempt
+  endings (`durable/ending.ts`, node 3.1).
 - `host.ts`: `composeProgram`, `expectedManifest`, `runHost` (the `start` and `run` verbs) and
   `readStatus`.
 
@@ -1208,8 +1221,9 @@ The store's SQLite file is `<store>/durable.sqlite`.
 
 **The host program.** A host executes a *host program*: the host-resolved policy, its
 `policyVersion`, and an assignment factory returning the attempt launcher plus the Durable
-extension that registers the assignment's tasks. Each host call composes it **exactly once**,
-before the lock:
+extension that registers the assignment's tasks, and optionally the model catalog and the
+environment factory its workers need, which the host forwards to `Harness.open` (an empty catalog
+and no environment by default). Each host call composes it **exactly once**, before the lock:
 
 - it validates the program: a normalized capability set, `policyVersion` an integer ≥ 1, and
   every assignment task named `perk.v2.*`, unrepeated, and not a binding name;
@@ -1259,12 +1273,14 @@ compares sleeping deadlines with the clock on every call, so an inactive answer 
 Otherwise the driver calls `resume()` again, which makes due sleepers runnable, and returns to
 polling. There is no iteration cap: an execution that keeps producing work keeps the run going.
 
-**Wait reasons** are derived in precedence order: `completed` > `cancelled` >
-`pending_decision` (a decision over the current subject only) > `blocked` (any block but
-`restart_limit`) > `parked` > `sleeping` > `assignment_incomplete`. `unmet_prerequisite` and
-`repair_required` have no fixture producer yet; the native assignment derives `repair_required`.
-A consistent, inactive view with no derivable reason throws `HostFault`, a host or binding bug,
-never an outcome.
+**Wait reasons** are derived from the records, `inspect()` and the launched attempt tasks' typed
+endings, read with `getTask` (a committed read) inside the same collection window, in precedence
+order: `completed` > `cancelled` > `pending_decision` (a decision over the current subject only) >
+`blocked` (any block but `restart_limit`) > `parked` > `sleeping` > `repair_required` (a
+current-subject role with no accepted outcome whose attempt ended `repair`, §12 the native
+assignment) > `assignment_incomplete`. `unmet_prerequisite` is the only reason with no producer. A
+consistent, inactive view with no derivable reason throws `HostFault`, a host or binding bug, never
+an outcome.
 
 **Uncertain.**
 
@@ -1279,7 +1295,7 @@ never an outcome.
 Status therefore makes no commit call on any path, the exceptional ones included.
 
 **Status** is one collection, with no loop because nothing is scheduled: `inspect()`, the records,
-then `wake()`. Its wait reason is `null` (running) while `wake().active`, and otherwise the derived
+the attempt endings, then `wake()`. Its wait reason is `null` (running) while `wake().active`, and otherwise the derived
 reason. It never calls `commit`, `root()`, `operate`, `resume()`, a submit, a wait, `retryTask` or
 `abortTask`.
 
@@ -1392,9 +1408,11 @@ boundary model (node 3.3) and never touches the store.
   which defaults to `HEAD`.
 - **Assignments:** two of kind `fixture-report`, with roles `a` and `b` and an identical
   capability set:
-  - model: the faux model;
-  - extensions: the Perk report extension;
-  - tools: Durable `read` plus Perk `ls`/`grep`/`find`;
+  - model: the faux model (`faux/faux-1`);
+  - extensions: the Perk report extension `perk.v2.report`;
+  - tools: `find`, `grep`, `ls`, `read`, `report` — Durable `read`, Perk `ls`/`grep`/`find`, and
+    the Perk report tool, listed because every enabled tool is in the capability set (P7);
+  - the digest of the worker's one instructions text;
   - posture: read-only;
   - workspace root: the snapshot.
 - **Report schema:** `{subjectDigest, summary, findings: [{path, note}]}`.
@@ -1446,6 +1464,162 @@ above left open:
   attempt. That is a binding fault, not a refusal (§9 classification). Presenting every record
   is the binding's obligation (§6 record presentation).
 
+### The native assignment (node 3.1)
+
+**Modules.** Under `extension/pi/v2/`:
+
+- `kernel/fixture.ts`: the worker policy as pure text and names — the extension `perk.v2.report`,
+  the tools, the faux model, the one instructions text (`renderFixtureInstructions`), the
+  per-attempt prompt (`fixtureWorkerPrompt(role, tree)`), and `fixturePolicy()` at
+  `FIXTURE_POLICY_VERSION`, whose `instructionsDigest` is the text's sha256.
+- `durable/assignment.ts`: the task `perk.v2.fixture-report`, `compareSubmit`, the launcher and the
+  composed work (`nativeAssignment`).
+- `durable/snapshotEnv.ts`: the snapshot environment and its env factory.
+- `durable/workerTools.ts`: `ls`, `find`, `grep` and the report tool, carried by the extension
+  `perk.v2.report` beside Durable's built-in `read`, registered exactly as built (replay-unsafe).
+- `durable/ending.ts`: the attempt ending, and its reader over the `launch` rows.
+- `program.ts`: `fixtureProgram`, the host program a door composes. It brings the subject layer's
+  `verifySnapshot` and `snapshotDir` to the binding, which never imports `subject/`, and exposes
+  `onVerify(point, tree)`, the test seam that runs before every verification.
+
+**The task.** The attempt launcher creates `perk.v2.fixture-report` conversation-owned and
+`background: true` on the execution conversation, with input `{attemptId}` only. Every other fact
+comes from records: the assignment, its recorded capability set (bound at admission, P7: the
+host's current policy is never consulted), role and subject, and the observed manifest digest. It
+always completes with an **attempt ending**, committed as its result:
+
+1. **`prepare`.** Render the instructions; resolve every capability; verify the snapshot
+   (`attempt-start`). Then one commit creates the worker conversation, task-owned, configures it
+   with `configure()` — `model`, exactly the capability set's `extensions`, `tools` with
+   `modelTools` the same list, the rendered `instructions`, and `cwd` the symbolic workspace root
+   `subject-snapshot`; `thinkingLevel` stays unset — and maps it under the attempt id.
+2. **`submit`.** Submit `fixtureWorkerPrompt(role, tree)` with the `submit` op id as Durable's
+   `requestId`, then one commit maps the submission (§6 the worker rows) through `compareSubmit`:
+   absent → record, equal → replayed, anything else → a `duplicate_conflict` repair ending.
+3. **`settle`.** Wait for the worker conversation to be idle, verify (`settle`), and commit the
+   ending: `accepted` when the attempt has an outcome; else a `snapshot_tampered` repair when the
+   worker transcript holds a `perk.v2.refusal:snapshot_tampered` diagnostic or the settle
+   verification failed; else `incomplete`, naming the submission's status and reason and the last
+   report refusal.
+
+The endings are `accepted {outcomeId}`, `incomplete {submission, reason, refusal}` and
+`repair {cause, detail}`, with the causes `instructions_unrenderable`, `capability_missing`,
+`snapshot_tampered` and `duplicate_conflict`. An ending explains an incomplete attempt and
+authorizes nothing (P6); it is Durable runtime state, never a record.
+
+**Capabilities fail closed.** Every capability resolves before the worker exists: the model through
+`Models.getModel(provider, modelId)` (models are not in the registry), each extension through the
+registry, and each tool to exactly one tool among the selected extensions' tools. The first failure
+is a `capability_missing` repair, with no worker conversation. Required instructions render when
+the renderer does not throw, returns non-empty well-formed text, and that text's sha256 is the
+recorded `instructionsDigest`; otherwise `instructions_unrenderable`.
+
+**The snapshot environment.** A read-only `ExecutionEnv` over one subject snapshot:
+
+- **The env factory resolves the snapshot from records**, never from conversation config. A
+  conversation gets the environment only when its agent `cwd` is `subject-snapshot` and the
+  durable map names it as some attempt's worker conversation; that attempt's assignment subject
+  picks the snapshot. Every other conversation, the execution conversation included, gets none,
+  so its tools fail closed.
+- **One path gate.** A non-string, empty or NUL-bearing path is `invalid`. A path normalized
+  outside the root is `permission_denied`. The root is trusted only as a real directory: only its
+  parent is canonicalized, and the root must `lstat` as a directory, never a symlink, when the
+  environment opens and again at every gate. Every symlink component below the root is refused,
+  even one pointing inside, because a genuine snapshot holds none. Read members delegate only the
+  contained path (`openBinaryReader` always with `noFollow`), and a refused path is never reported
+  as absent.
+- Every write member is `permission_denied`, `watch` is `not_supported`, `exec` is
+  `shell_unavailable`, and `listFiles` is not implemented.
+- **Residual.** Each gate checks, then the delegate opens, so a component swapped between the two is
+  not refused at read time. Only an outside process with the user's privileges can swap one — the
+  worker has no write capability — and that process could equally write outside content into the
+  snapshot, which the verification before acceptance refuses.
+
+**The tools** read only through `api.env` and fail closed without one. Output is sorted bytewise
+and capped, with a final `[truncated]` line. `ls` lists one directory (`/` after a directory, `@`
+after a symlink entry); `find` walks from its search root (symlinks never descended, depth 64) and
+lists the paths whose path relative to the search root matches the glob under
+`posix.matchesGlob`; `grep` is a literal, case-sensitive substring search — never a regular
+expression, which could backtrack catastrophically in the host process — over files of at most
+1 MiB without NUL. `ls`, `find`, `grep` and the report tool are replay-safe.
+
+**The report tool**, in order:
+
+1. find the attempt whose worker conversation is calling (none: refuse `invalid_input`);
+2. **receipt first**: with an outcome already recorded under the attempt's `accept-report` op id,
+   skip verification, so §4's lookup still precedes every other check on a replay;
+3. otherwise verify the snapshot (`acceptance`), refusing `snapshot_tampered` on a problem;
+4. accept in one reconcile commit (`operateInTx`), after checking that the calling conversation is
+   owned by the attempt's launched task.
+
+On acceptance (applied or replayed) it returns the outcome's report as its structured output and
+asks to terminate. Every refusal is an error result carrying the diagnostic
+`perk.v2.refusal:<reason>` — the only tool that emits that prefix, which `settle` reads back — and
+asks to terminate unless the reason is `invalid_report`, which the model may correct within the
+run.
+
+**Termination is requested, never relied on.** Durable ends a run without another model request
+only when every call of the round asks to terminate, so the instructions tell the worker to call
+`report` alone, as its last action. Acceptance never depends on it: in a mixed round the report
+still commits once and the run continues, and a later report call replays the receipt. A
+continued run can cost model calls; it can never accept twice.
+
+**The report arguments.** The schema states `parseFixtureReport`'s rule for the model, but pi-ai's
+validation converts types before checking (a numeric summary becomes text, an object `findings` a
+one-element list), so a schema cannot express the rule. The report tool's `prepareArguments` is
+`parseFixtureReport` itself: Durable runs it before validation, and a throw is an
+`invalid_arguments` result. `A8` proves that pipeline accepts exactly what `parseFixtureReport`
+accepts, pinning the two converted cases, and `A2` proves the numeric summary is
+`invalid_arguments` in a run.
+
+**`repair_required`** is derived (§10 the host), never recorded: a current-subject role with no
+accepted outcome one of whose attempts ended `repair`. An observed tamper stays a repair even when
+the snapshot was restored before `settle`, because the refusal is read back from the worker
+transcript.
+
+**Measured settlements** (`A2`, `A4`): a token-limited answer settles the input `done`; a
+provider error settles it `unanswered` with reason `model_error`; an error result that asks to
+terminate still terminates.
+
+**Node 3.1 proves** (files under `extension/pi/v2/`, faux provider, real temp git repos):
+
+- `A1` a valid report is accepted once, with no recap: the worker is task-owned, explicitly
+  configured and mapped with its submission, the `submit` receipt carries both rows, and a second
+  run requests nothing; plus the mixed-round variant (`assignment/acceptance.test.ts`);
+- `A2` failed runs leave a visible incomplete attempt: no report, an `invalid_report` refusal,
+  invalid arguments, a token limit, a tool error, a model error (`assignment/incomplete.test.ts`);
+- `A3` the environment refuses path escapes, symlinks, writes and exec, the root included, in a
+  run too, and the factory fails closed (`assignment/environment.test.ts`);
+- `A4` a tampered snapshot — at attempt start, before acceptance, or restored before settle — is
+  refused and the attempt is repair-incomplete (`assignment/repair.test.ts`);
+- `A5` the refusals hold for a tool replayed after a crash, and a crash never duplicates work: a
+  blocked report reruns into `snapshot_tampered`, a landed acceptance reruns into a replay,
+  interrupted escaping `ls`/`grep` rerun into the same refusal, and a crash between the
+  submission's admission and its mapping submits once (`assignment/replay.test.ts`, SQLite);
+- `A6` required instructions must render and capabilities must resolve
+  (`assignment/repair.test.ts`);
+- `A7` the `submit` payload comparison and the ending's shape (`durable/assignment.test.ts`);
+- `A8` the report argument check agrees with `parseFixtureReport`, and the tools behave as
+  specified (`assignment/tools.test.ts`).
+
+**Stop-condition verdict (the objective's *Report worker* condition): holds.** A native Durable
+report worker holds the read-only report floor through the snapshot-rooted environment without
+copying v1 feature policy or weakening a guarantee:
+
+- **The read-only floor:** the worker's tools are `find`, `grep`, `ls`, `read` and `report`, with no
+  write or shell tool (`bash` is `tool_unavailable`), and every write member, `watch` and `exec` is
+  refused (`A3`); no worker exists before its instructions render and its capabilities resolve
+  (`A6`).
+- **Through the snapshot-rooted environment:** every tool reads only through `api.env`, the root is
+  trusted only as a real directory at open and at every gate, and the factory gives every
+  non-worker conversation no environment (`A3`).
+- **No v1 feature policy:** `layeringGuard.test.ts` is green with an empty production allowlist,
+  and the tools are written for v2.
+- **No weakened guarantee:** P4 through the `submit` op id as Durable's request id (the `A1` rows;
+  `A5` (ii) and (iv) converge); P6 acceptance only in the reconcile commit, never through
+  termination (`A1` with its mixed round, `A2`); P7 on replay (`A5`); P9 refusals record nothing
+  (`A4`, `A5`).
+
 ## 13. The four-question extension recipe
 
 A new v2 capability is added by answering four questions, and nothing else should be needed:
@@ -1461,7 +1635,7 @@ A new v2 capability is added by answering four questions, and nothing else shoul
 | 1. Subject | `git-tree`: the tree oid at the tracked ref, materialized as the read-only snapshot with its tree-derived snapshot manifest (§5) |
 | 2. Observations and records | the `perk.v2.observation` family, plus the §6 families (manifest, assignment, attempt, outcome, decision, reply, cancellation, durable-map) |
 | 3. Reconcile rules | §12's rules |
-| 4. Executors | the `fixture-report` assignment task, with the §12 capability set, and the `perk.v2.continuation` task |
+| 4. Executors | the `fixture-report` assignment task `perk.v2.fixture-report`, with the §12 capability set, and the `perk.v2.continuation` task |
 
 Question 1 is where a kind chooses content identity or commit identity (`git-tree` vs
 `git-commit`, §5). A capability that needs a fifth question is a principle amendment, not a
@@ -1476,6 +1650,7 @@ feature.
 | Budget admission: units, reservations across children, retries and compaction, unknown spend | only `pi.usage` totals are recorded; P10 fixes the shape | the plan-workflow objective |
 | Subprocess capability for workers | no worker in this objective spawns; the §10 verdict binds how one may (supervised execution, the graceful-close order, the report-only sweep, and the per-attempt workspace isolation obligation) and the prerequisite before any may (closing the reaped-leader pid-reuse window) | the plan-workflow objective |
 | Real provider, auth and settings composition | the faux model only | the plan-workflow objective |
+| Attempt retry after repair (attempt 2) | the fixture never starts a second attempt: `repair_required` is terminal for that subject's round | the plan-workflow objective |
 | Extracting shared report definitions from v1 | v2 copies no v1 report-wave policy until real reviewer reports arrive | the plan-workflow objective |
 | Record and task migrations (execution-manifest matches that are not exact) | this objective refuses any mismatch | the first objective that bumps an execution-manifest version |
 | Store retention and GC of `.perk/executions/`, including owner epoch directories and abandoned temp directories | fixture executions are disposable | the first objective that produces non-fixture executions |
@@ -1520,6 +1695,7 @@ explicit, reviewed amendment, recorded in the log below.
 | §4 `launch` op kind; §6 record presentation (the record catalog `perk.v2.catalog`) and the `launch` durable-map row; §7 the binding's `operate`, the attempt launcher contract and `B1`–`B6`; §9 commit-failure classification (the failure-latch probe) and `BindingFault` | node 2.2 |
 | §10 the host (node 2.3): host modules, program seam and one-composition rule, extension-name refusal, liveness and release precisions, gate field order and mismatch shape, the missing-store rule, vacuous step 2, the consistent-view quiescence loop, wait-reason precedence, open failure as `uncertain`, commit-free failure detection, `H1`–`H8`; §9 open-failure row; §11 null epoch | node 2.3 |
 | §5 the observer (node 2.4): `subject/` modules, ref-name rule and single resolution, repo-root realpath, ceiling and discovered-root check, scrubbed git environment, raw-object reads with the manifest re-derived per observation, materialization order (temp directory → rename, directory before manifest, never overwritten), fail-closed reuse, no fsync, BOM-keeping strict decoding and CR as path data, strict verifier and canonical manifest parser, removal via `discardTree`, `S1`–`S6`; §8 observer pointer | node 2.4 |
+| §6 the worker rows and the `submit` receipt's submission row; §9 the verification row's recovery (`repair_required`); §10 wait reasons derived with attempt endings and `repair_required`'s precedence, the host program's models and env; §12 the capability set (the report tool, the instructions digest), the native assignment (task phases and endings, fail-closed capability resolution, the snapshot environment and its residual, the tools, the report tool's order and the requested-not-relied-on termination rule, the `prepareArguments` argument check, `repair_required` derivation, measured settlements, `A1`–`A8`) and the stop-condition verdict (holds); §13 executor name; §14 attempt retry deferral | node 3.1 |
 
 ## 16. Measured evidence (reserved — node 3.4)
 
