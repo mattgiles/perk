@@ -283,7 +283,7 @@ export class CountingStorage extends MemoryStorage {
 }
 
 /** A delegating proxy over `inner` whose method `name` is replaced by `method(target)`. */
-function withMethod<K extends "commit" | "mintId">(
+function withMethod<K extends "commit" | "mintId" | "findDocument">(
   inner: Storage,
   name: K,
   method: (target: Storage) => Storage[K],
@@ -380,6 +380,32 @@ export function failingMint(inner: Storage): {
   return {
     storage,
     armNextMint: (error) => {
+      armed = error;
+    },
+  };
+}
+
+/**
+ * Delegate everything to `inner`, unarmed. `arm(error)` makes exactly the next `findDocument` whose
+ * address names `kind` reject with `error`, then disarms; every other call delegates. The kind
+ * filter makes arming before `Harness.open` safe: nothing but v2 code reads a `perk.v2.*` kind.
+ */
+export function failingFind(
+  inner: Storage,
+  kind: string,
+): { storage: Storage; arm(error: Error): void } {
+  let armed: Error | undefined;
+  const storage = withMethod(inner, "findDocument", (target) => (address, at, callContext) => {
+    const error = armed;
+    if (error === undefined || address.kind !== kind) {
+      return target.findDocument(address, at, callContext);
+    }
+    armed = undefined;
+    return Promise.reject(error);
+  });
+  return {
+    storage,
+    arm: (error) => {
       armed = error;
     },
   };
