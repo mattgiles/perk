@@ -3,8 +3,10 @@
 This is the **sole** construction site for the perk-owned dot-path families —
 the config files (`config.toml`/`local.toml`), the required-perk-version pin, the
 committed managed-state file (`managed-state.toml`), the
-repo-authored skills dir, the perk library root (`docs/library/`, the gitignored offline reference
-cache — not a dot-path, but perk-owned and constructed only here), and the user-level `~/.perk`
+repo-authored skills dir, the experimental pi-durable v2 execution stores
+(`.perk/executions/`, gitignored; contracts.md §8.77), the perk library root (`docs/library/`, the
+gitignored offline reference cache — not a dot-path, but perk-owned and constructed only here),
+and the user-level `~/.perk`
 family (the last-seen-version store — the one perk-owned path outside the repo). The config family
 now lives at `.perk/`; the legacy `.pi/perk.toml` / `.pi/perk.local.toml` paths are exposed only as
 `legacy_*` helpers for the doctor migration (never read). The workflow family lives in the
@@ -26,6 +28,7 @@ LOCAL_CONFIG_FILENAME = "local.toml"
 REQUIRED_VERSION_FILENAME = "required-perk-version"
 MANAGED_STATE_FILENAME = "managed-state.toml"
 LAST_SEEN_VERSION_FILENAME = "last-seen-version"
+EXECUTIONS_DIRNAME = "executions"
 # Legacy (pre-`.perk/`) config filenames — constructed only via the ``legacy_*`` helpers below for
 # the doctor migration; never read by any config reader.
 LEGACY_CONFIG_FILENAME = "perk.toml"
@@ -83,6 +86,20 @@ def legacy_local_config_file(root: Path) -> Path:
 def repo_skills_dir(root: Path) -> Path:
     """The repo-authored skill source root."""
     return root / ".perk" / "skills"
+
+
+def executions_dir(root: Path) -> Path:
+    """The pi-durable v2 execution-store family root — its own redirection point.
+
+    Pure construction: execution stores live in the **main checkout**, so callers pass the main
+    checkout's root. Only the v2 host writes beneath it (contracts.md §8.77).
+    """
+    return root / ".perk" / EXECUTIONS_DIRNAME
+
+
+def execution_store_dir(root: Path, execution_id: str) -> Path:
+    """One v2 execution's store directory under ``root``'s execution-store family."""
+    return executions_dir(root) / execution_id
 
 
 def library_dir(root: Path) -> Path:

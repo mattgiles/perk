@@ -1,0 +1,79 @@
+{
+  "envelope": 1,
+  "outcome": "pending_decision",
+  "verb": "start",
+  "executionId": "01HZY3V8Q2M5N7P9R1T3V5X7Z9",
+  "epoch": 1,
+  "status": {
+    "state": "waiting",
+    "waitReason": "pending_decision",
+    "observation": {
+      "seq": 1,
+      "repo": "/repo/.git",
+      "ref": "refs/heads/main",
+      "commit": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+      "tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+      "manifestDigest": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "observedAt": 1000,
+      "ageMs": 60000
+    },
+    "assignments": [
+      {
+        "assignmentId": "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/fixture-report/a/4b825dc642cb6eb9a060e54bf8d69288fbee4904/50d915f20f78d304fbf06ab9a4633429c8d06c65f221c8259b61a58c5aef1689",
+        "role": "a",
+        "subjectDigest": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        "current": true,
+        "acceptedOutcomeId": "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/fixture-report/a/4b825dc642cb6eb9a060e54bf8d69288fbee4904/50d915f20f78d304fbf06ab9a4633429c8d06c65f221c8259b61a58c5aef1689/1/accept-report",
+        "attempts": [
+          {
+            "attemptId": "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/fixture-report/a/4b825dc642cb6eb9a060e54bf8d69288fbee4904/50d915f20f78d304fbf06ab9a4633429c8d06c65f221c8259b61a58c5aef1689/1",
+            "ordinal": 1,
+            "outcomeId": "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/fixture-report/a/4b825dc642cb6eb9a060e54bf8d69288fbee4904/50d915f20f78d304fbf06ab9a4633429c8d06c65f221c8259b61a58c5aef1689/1/accept-report",
+            "ending": {
+              "end": "accepted",
+              "outcomeId": "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/fixture-report/a/4b825dc642cb6eb9a060e54bf8d69288fbee4904/50d915f20f78d304fbf06ab9a4633429c8d06c65f221c8259b61a58c5aef1689/1/accept-report"
+            }
+          }
+        ]
+      },
+      {
+        "assignmentId": "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/fixture-report/b/4b825dc642cb6eb9a060e54bf8d69288fbee4904/50d915f20f78d304fbf06ab9a4633429c8d06c65f221c8259b61a58c5aef1689",
+        "role": "b",
+        "subjectDigest": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        "current": true,
+        "acceptedOutcomeId": "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/fixture-report/b/4b825dc642cb6eb9a060e54bf8d69288fbee4904/50d915f20f78d304fbf06ab9a4633429c8d06c65f221c8259b61a58c5aef1689/1/accept-report",
+        "attempts": [
+          {
+            "attemptId": "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/fixture-report/b/4b825dc642cb6eb9a060e54bf8d69288fbee4904/50d915f20f78d304fbf06ab9a4633429c8d06c65f221c8259b61a58c5aef1689/1",
+            "ordinal": 1,
+            "outcomeId": "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/fixture-report/b/4b825dc642cb6eb9a060e54bf8d69288fbee4904/50d915f20f78d304fbf06ab9a4633429c8d06c65f221c8259b61a58c5aef1689/1/accept-report",
+            "ending": {
+              "end": "accepted",
+              "outcomeId": "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/fixture-report/b/4b825dc642cb6eb9a060e54bf8d69288fbee4904/50d915f20f78d304fbf06ab9a4633429c8d06c65f221c8259b61a58c5aef1689/1/accept-report"
+            }
+          }
+        ]
+      }
+    ],
+    "decision": {
+      "decisionId": "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/decision/4b825dc642cb6eb9a060e54bf8d69288fbee4904/fixture-approval",
+      "subjectDigest": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+      "allowedActions": [
+        "approve",
+        "reject"
+      ],
+      "actor": "human:cli"
+    },
+    "cancellation": null,
+    "diagnostics": {
+      "runnable": false,
+      "blocked": 0,
+      "parked": 0,
+      "sleeping": 0
+    }
+  },
+  "receipt": null,
+  "refusal": null,
+  "mismatch": null,
+  "error": null
+}

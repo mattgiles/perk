@@ -62,9 +62,9 @@ test("a storage failure in the verb's commit is uncertain, and nothing of it lan
   const error = expectUncertain(
     await runHost(options, {
       type: "run",
-      observe: async () => {
+      observe: async (tracked) => {
         storage.armNextCommit(boom);
-        return await observed(T1, C1B)();
+        return await observed(T1, C1B)(tracked);
       },
     }),
   );

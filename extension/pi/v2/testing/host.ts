@@ -38,6 +38,7 @@ import {
   type Observe,
   type OpenHarness,
   STORE_DATABASE,
+  type TrackedRef,
 } from "../host.ts";
 import type { FixturePolicy } from "../kernel/fixture.ts";
 import type { ExecutionManifest } from "../kernel/records.ts";
@@ -209,15 +210,22 @@ export function failedObservation(detail: string): Observe {
   return () => Promise.resolve({ kind: "observation_failed", detail });
 }
 
-/** `inner`, counting its calls. */
-export function spyObserve(inner: Observe): { observe: Observe; calls(): number } {
+/** `inner`, counting its calls and recording every tracked argument it received, in order. */
+export function spyObserve(inner: Observe): {
+  observe: Observe;
+  calls(): number;
+  seen(): readonly (TrackedRef | null)[];
+} {
   let calls = 0;
+  const seen: (TrackedRef | null)[] = [];
   return {
-    observe: () => {
+    observe: (tracked) => {
       calls++;
-      return inner();
+      seen.push(tracked);
+      return inner(tracked);
     },
     calls: () => calls,
+    seen: () => [...seen],
   };
 }
 

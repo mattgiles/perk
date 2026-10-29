@@ -1,0 +1,14 @@
+{
+  "envelope": 1,
+  "outcome": "observation_failed",
+  "verb": "start",
+  "executionId": "01HZY3V8Q2M5N7P9R1T3V5X7Z9",
+  "epoch": 1,
+  "status": null,
+  "receipt": null,
+  "refusal": null,
+  "mismatch": null,
+  "error": {
+    "message": "ref \"refs/heads/missing\" does not resolve to a commit in /repo"
+  }
+}

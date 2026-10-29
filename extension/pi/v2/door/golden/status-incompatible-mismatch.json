@@ -1,0 +1,18 @@
+{
+  "envelope": 1,
+  "outcome": "incompatible",
+  "verb": "status",
+  "executionId": "01HZY3V8Q2M5N7P9R1T3V5X7Z9",
+  "epoch": 2,
+  "status": {
+    "state": "incompatible"
+  },
+  "receipt": null,
+  "refusal": null,
+  "mismatch": {
+    "field": "policyVersion",
+    "expected": 1,
+    "found": 2
+  },
+  "error": null
+}

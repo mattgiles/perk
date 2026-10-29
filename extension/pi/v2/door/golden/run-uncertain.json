@@ -1,0 +1,16 @@
+{
+  "envelope": 1,
+  "outcome": "uncertain",
+  "verb": "run",
+  "executionId": "01HZY3V8Q2M5N7P9R1T3V5X7Z9",
+  "epoch": 2,
+  "status": {
+    "state": "uncertain"
+  },
+  "receipt": null,
+  "refusal": null,
+  "mismatch": null,
+  "error": {
+    "message": "commit failed"
+  }
+}

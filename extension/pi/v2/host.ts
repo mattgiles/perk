@@ -5,9 +5,14 @@
 // import stays `@earendil-works/chord/context`: the bare-checkout load proof pins the failure there.
 //
 // A run, in order: compose the program (once per call) → the store-directory rule → lock → open
-// storage and the Harness (never resumed) → gate → observe → the execution conversation → one
-// `operate` (a reply's lookup, recording, checks, consumption and continuation all happen in it) →
-// resume and wait for a consistent quiescent view → close → release.
+// storage and the Harness (never resumed) → one stored-state read (the manifest and the tracked
+// ref) → gate → observe (`start`, `run` and `reply` only; `cancel` never observes) → the execution
+// conversation → one `operate` (a reply's lookup, recording, checks, consumption and continuation
+// all happen in it) → resume and wait for a consistent quiescent view → close → release.
+//
+// Observation names the tracked ref: `start` hands its observer `null` (its observer names the
+// repo and ref the execution will track), while `run` and `reply` hand theirs the `{repo, ref}` of
+// the execution's `seq` 1 observation, read from the stored records inside the lock after the gate.
 //
 // Invariants:
 // - One composition per host call feeds the registry, the binding's dependencies, the gate's
@@ -139,8 +144,15 @@ export type Observation =
   | { readonly kind: "observed"; readonly facts: ObservationFacts }
   | { readonly kind: "observation_failed"; readonly detail: string };
 
-/** The observing verb's pre-commit read (§8), injected by the caller. */
-export type Observe = () => Promise<Observation>;
+/** The repo and ref of an execution's first observation, which every later observation names. */
+export type TrackedRef = { readonly repo: string; readonly ref: string };
+
+/**
+ * The observing verb's pre-commit read (§8), injected by the caller. The host passes the tracked
+ * ref read from the records (`run`, `reply`), or `null` for `start`, whose observer names the ref
+ * the execution will track. A bound observer that names its own repo and ref may ignore it.
+ */
+export type Observe = (tracked: TrackedRef | null) => Promise<Observation>;
 
 export type HostVerb =
   | { readonly type: "start"; readonly observe: Observe }
@@ -151,7 +163,8 @@ export type HostVerb =
       readonly decisionId: string;
       readonly action: string;
       readonly actor: string;
-    };
+    }
+  | { readonly type: "cancel"; readonly reason: string };
 
 export type HostMismatch =
   | ManifestMismatch
@@ -182,7 +195,7 @@ export type HostRunOutcome =
   | {
       readonly kind: "quiescent";
       readonly epoch: number;
-      /** The verb's own receipt: a reply's, applied or replayed; `null` for `start` and `run`. */
+      /** The verb's own receipt: a reply's or a cancel's, applied or replayed; `null` for `start` and `run`. */
       readonly receipt: BindingReceipt | null;
       readonly view: HostView & { readonly waitReason: WaitReason };
     }
@@ -393,10 +406,32 @@ async function withHarness<T>(
   }
 }
 
+/** What one stored-state read yields: the manifest and the tracked ref, each `null` when absent. */
+type StoredState = {
+  readonly manifest: ExecutionManifest | null;
+  readonly tracked: TrackedRef | null;
+};
+
+/**
+ * One read of the stored records: the execution manifest, and the tracked ref — the `{repo, ref}`
+ * of the `seq` 1 observation — or `null` for either when the store has none.
+ */
+async function storedState(harness: Harness): Promise<StoredState> {
+  const { records } = await readRecords(harness);
+  let manifest: ExecutionManifest | null = null;
+  let tracked: TrackedRef | null = null;
+  for (const record of records) {
+    if (record.type === "manifest") manifest = record;
+    else if (record.type === "observation" && record.seq === 1) {
+      tracked = { repo: record.repo, ref: record.ref };
+    }
+  }
+  return { manifest, tracked };
+}
+
 /** The stored execution manifest, or `null` when the store has none. */
 async function storedManifest(harness: Harness): Promise<ExecutionManifest | null> {
-  const { records } = await readRecords(harness);
-  return records.find((record) => record.type === "manifest") ?? null;
+  return (await storedState(harness)).manifest;
 }
 
 /** The exact-match gate: `incompatible` naming the first differing field, or `null` to proceed. */
@@ -458,35 +493,50 @@ async function collectStatus(harness: Harness, policy: FixturePolicy): Promise<H
   return { records, inspection, wake, endings, waitReason };
 }
 
-/** The verb's commit input over its observation; `manifest` is called for `start` only. */
+function missingObservation(verb: HostVerb): never {
+  throw new HostFault(`the observing verb ${verb.type} reached its commit without an observation`);
+}
+
+/**
+ * The verb's commit input; `manifest` is called for `start` only. `facts` is the observation of an
+ * observing verb and `null` for `cancel`, which never observes.
+ */
 function verbInput(
   verb: HostVerb,
-  facts: ObservationFacts,
+  facts: ObservationFacts | null,
   manifest: () => ExecutionManifest,
 ): CommitInput {
   switch (verb.type) {
     case "start":
-      return { type: "start", manifest: manifest(), observation: facts };
+      return {
+        type: "start",
+        manifest: manifest(),
+        observation: facts ?? missingObservation(verb),
+      };
     case "run":
-      return { type: "run", observation: facts };
+      return { type: "run", observation: facts ?? missingObservation(verb) };
     case "reply":
       return {
         type: "reply",
         decisionId: verb.decisionId,
         action: verb.action,
         actor: verb.actor,
-        observation: facts,
+        observation: facts ?? missingObservation(verb),
       };
+    case "cancel":
+      return { type: "cancel", reason: verb.reason };
   }
 }
 
 /**
- * Run one verb (`start`, `run` or `reply`) to quiescence under the store owner lock. `start`
- * creates the store directory and refuses `already_started` on a started store; `run` and `reply`
- * on a missing store directory are `incompatible` (`manifest_missing`, `epoch: null`) and create
- * nothing, and both pass the gate before observing. An applied or replayed verb resumes; the
- * quiescent outcome carries the verb's own receipt: a reply's, applied or replayed, whose
- * continuation row names the continuation it created; `null` for `start` and `run`.
+ * Run one verb (`start`, `run`, `reply` or `cancel`) to quiescence under the store owner lock.
+ * `start` creates the store directory and refuses `already_started` on a started store; `run`,
+ * `reply` and `cancel` on a missing store directory are `incompatible` (`manifest_missing`,
+ * `epoch: null`) and create nothing, and each passes the gate first. `start` observes with `null`;
+ * `run` and `reply` observe the tracked ref read from the records; `cancel` never observes. An
+ * applied or replayed verb resumes; the quiescent outcome carries the verb's own receipt: a
+ * reply's, whose continuation row names the continuation it created, or a cancel's, applied or
+ * replayed; `null` for `start` and `run`.
  */
 export async function runHost(options: HostOptions, verb: HostVerb): Promise<HostRunOutcome> {
   const composition = composeProgram(options);
@@ -505,7 +555,7 @@ export async function runHost(options: HostOptions, verb: HostVerb): Promise<Hos
       epoch,
       async (session): Promise<HostRunOutcome> => {
         const { harness } = session;
-        const stored = await storedManifest(harness);
+        const { manifest: stored, tracked } = await storedState(harness);
         if (verb.type === "start" && stored !== null) {
           return {
             kind: "refused",
@@ -520,12 +570,16 @@ export async function runHost(options: HostOptions, verb: HostVerb): Promise<Hos
           const incompatible = compatibility(stored, composition, options, epoch);
           if (incompatible !== null) return incompatible;
         }
-        const observation = await verb.observe();
-        if (observation.kind === "observation_failed") {
-          return { kind: "observation_failed", epoch, detail: observation.detail };
+        let facts: ObservationFacts | null = null;
+        if (verb.type !== "cancel") {
+          const observation = await verb.observe(verb.type === "start" ? null : tracked);
+          if (observation.kind === "observation_failed") {
+            return { kind: "observation_failed", epoch, detail: observation.detail };
+          }
+          facts = observation.facts;
         }
         const root = await harness.root(context);
-        const input = verbInput(verb, observation.facts, () =>
+        const input = verbInput(verb, facts, () =>
           expectedManifest(composition.definitions, options, (options.now ?? Date.now)()),
         );
         const outcome = await operate(

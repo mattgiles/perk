@@ -25,6 +25,7 @@ GITIGNORE_BODY = "\n".join(
         f"/.perk/{LOCAL_CONFIG_FILENAME}",
         "/.worktrees/",
         "/.perk/workflow/",
+        "/.perk/executions/",
         "/.pi-subagents/",
         "/docs/library/**",
         "!/docs/library/README.md",

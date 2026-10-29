@@ -84,7 +84,7 @@ async function firstProcess(
   env?: (composition: Composition, subject: Subject) => HarnessOptions["env"],
 ): Promise<FirstProcess> {
   const subject = await fixtureSubject(t);
-  const observation = await subject.observe();
+  const observation = await subject.observe(null);
   assert.equal(observation.kind, "observed");
   if (observation.kind !== "observed") throw new Error("unobserved");
   const setup = fauxSetup();

@@ -247,6 +247,23 @@ def main_worktree_root(cwd: Path) -> Path | None:
     return common.parent
 
 
+def git_common_dir(cwd: Path) -> Path | None:
+    """The canonical (``.resolve()``d) shared git dir of the repository containing ``cwd``.
+
+    ``git rev-parse --git-common-dir``, absolutized against ``cwd`` when relative: the same path
+    from the main checkout and from every linked worktree, so it names the workspace whatever
+    checkout asks. ``None`` when ``cwd`` is not inside a git repo.
+    """
+    try:
+        out = _run(["rev-parse", "--git-common-dir"], cwd=cwd)
+    except GitError:
+        return None
+    common = Path(out.strip())
+    if not common.is_absolute():
+        common = cwd / common
+    return common.resolve()
+
+
 def config_get(root: Path, key: str) -> str | None:
     """The effective ``git config <key>`` value read from ``root``, or ``None`` when unset.
 
