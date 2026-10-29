@@ -936,6 +936,24 @@ manifest digest at a time — taken outside any commit and passed into the recon
 authorizes; a new observation of an unchanged subject invalidates nothing.
 _Avoid_: poll, refresh, watch, snapshot (the materialization)
 
+**Tracked ref** (pi-durable v2):
+The repo and ref of an execution's first observation (`seq` 1), which every later observation
+names; only `start` chooses it, and `run`/`reply` observe it as read from the records.
+_Avoid_: target, head
+
+**Door envelope** (pi-durable v2):
+The versioned JSON result of one v2 host CLI call — outcome, verb, execution id, epoch, status
+snapshot, receipt, refusal, mismatch, error, every key always present — which the Python door
+validates strictly and prints verbatim under `--json` (contracts.md §8.77).
+_Avoid_: response, result, payload
+
+**Status snapshot** (pi-durable v2):
+The derived view a door envelope carries — state and wait reason, the latest observation and its
+age, every assignment with its attempts, the open decision, the cancellation and live diagnostics
+(or just a marker state for `incompatible`/`uncertain`); never stored. Distinct from the **Subject
+snapshot**.
+_Avoid_: status file, state dump
+
 **Accepted outcome**:
 The immutable record written when a typed report validates against its assignment (schema, verified
 subject digest, capability set, attempt); accepted once per key, corrections appended.

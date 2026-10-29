@@ -16297,3 +16297,139 @@ reading, and a passing `pi --version` certifies neither runtime.
 
 **Not checked.** Node (its floor is the environment rows' and `engines.node`'s); the remote
 `REMOTE_PI_VERSION` pin ((b)) is what the remote installs, not what is read.
+
+## §8.77 · pi-durable v2 executions (experimental): the `perk v2` door, the envelope, the store
+
+**Visibility.** Hidden (`perk v2` never lists without `PERK_SHOW_HIDDEN`), experimental, and runnable
+only inside perk's own source checkout (`[tool.perk] self = true`); it is not shipped, so there are
+no user docs and no `perk-expert` mirror. The design record is
+`docs/design/pi-durable-v2-foundations.md` (§8 observation, §10 the host, §11 the door envelope).
+Owning modules: `extension/pi/v2/host.ts` (the host verbs), `extension/pi/v2/door/` (`snapshot.ts`
+the status snapshot, `envelope.ts` the envelope, `cli.ts` the host CLI, `main.ts` the process
+entry, `golden/` the committed envelope goldens), `extension/pi/v2/durable/fauxWorker.ts` (the
+production faux worker), `src/perk/v2/` (`envelope.py` the strict wire models, `door.py` target
+resolution and invocation, `render.py` the human lines), `src/perk/cli/commands/v2/` (the hidden
+group), `src/perk/substrate/paths.py::execution_store_dir` (the store location).
+
+### (a) The two-plane boundary for v2 executions
+
+The general two-plane split is revised for v2 executions:
+
+- **The TypeScript v2 host is the one advancement owner.** Every execution write is a reconcile
+  commit the host makes under the store owner lock.
+- **The Python door is exterior launch only.** It mints the execution id, chooses the store
+  directory and the workspace identity, invokes the host, and validates the envelope it prints.
+- The door never reads or writes the store. A v2 execution uses no `.perk/workflow/` cache, no
+  handoff and no `PERK_RUN_ID`, and the v1 extension never touches a v2 execution.
+
+### (b) Store location and ownership
+
+- One execution's store is `<main checkout>/.perk/executions/<execution-id>/`, built only by
+  `paths.py::execution_store_dir` (the family's redirection point is `executions_dir`); the main
+  checkout is resolved from the invocation checkout, so every linked worktree addresses the same
+  store. There is no override.
+- Layout: `durable.sqlite` (the Durable store), `owner/<epoch>/` (the owner lock), `subjects/` (the
+  materialized subject snapshots).
+- Created only by the host's `start`; every access is guarded by the store owner lock.
+- Gitignored wholesale by the managed `.gitignore` block (`/.perk/executions/`). `perk state prune`
+  and the `cache-gc` doctor check never reach it; retention and GC are deferred (design §14).
+
+### (c) Invocation
+
+The door runs `node <invocation checkout>/extension/pi/v2/door/main.ts <verb> --store=<abs>
+--execution=<ulid> --repo-identity=<abs> [verb options]` with the invocation checkout as `cwd`, so
+the Python and TypeScript halves come from the same tree. Every option is one `--name=value` token,
+so a value starting with `--` cannot be misparsed; the host CLI requires every option explicitly
+(a missing, empty, foreign or unknown option, or anything but exactly one known verb, is a usage
+error), and every default lives in Python. `--store` and `--repo-identity` must be absolute and
+`--execution` must be a ULID. `--repo-identity` is the canonical (`.resolve()`d) git common dir of
+the invocation checkout — the same for the main checkout and every linked worktree.
+
+The exit contract: one JSON envelope line on stdout and exit `0`; a usage error on stderr and exit
+`2`; a fault (a `HostFault`, a `BindingFault`, any throw) on stderr and exit `1`. Stdout stays
+empty on every non-zero exit. The host's Durable reports go to stderr, one line each. The door's
+timeout is 600 s (`HOST_TIMEOUT_S`); a killed host leaves an unreleased owner epoch that belongs to
+a dead process, so the next host frees it.
+
+### (d) The envelope
+
+```text
+{ "envelope": 1, "outcome", "verb", "executionId", "epoch": <int | null>,
+  "status": <view snapshot | marker snapshot | null>, "receipt": <receipt | null>,
+  "refusal": {reason, detail} | null, "mismatch": {field, expected, found} | null,
+  "error": {message} | null }
+```
+
+Every key is always present, in that order; a field an outcome does not set is an explicit `null`.
+`verb` makes the envelope self-describing (`start | run | status | reply | cancel`); `epoch` is the
+owner epoch the call held (`owner_busy`: the live holder's; `null` only when no lock was taken).
+
+- **View snapshot** (`ok`, `pending_decision`): `{state, waitReason, observation, assignments,
+  decision, cancellation, diagnostics}`. `state` is `running | waiting | completed | cancelled`;
+  `waitReason` is set exactly when `state` is `waiting` (one of the seven non-terminal wait
+  reasons). `observation` is the latest observation's `{seq, repo, ref, commit, tree,
+  manifestDigest, observedAt, ageMs}` (`ageMs` clamped at 0) or `null`. `assignments` lists every
+  assignment record in op-id order, each `{assignmentId, role, subjectDigest, current,
+  acceptedOutcomeId, attempts: [{attemptId, ordinal, outcomeId, ending}]}` — `current` against the
+  latest observation's tree, `ending` the attempt task's typed ending or `null`. `decision` is the
+  current subject's open decision `{decisionId, subjectDigest, allowedActions, actor}`, `null` once
+  the execution is cancelled or continued. `cancellation` is `{reason}` or `null`. `diagnostics` is
+  `{runnable, blocked, parked, sleeping}`.
+- **Marker snapshot** (`incompatible`, `uncertain`): `{state: "incompatible" | "uncertain"}`, so
+  the snapshot alone distinguishes every state. `owner_busy`, `observation_failed` and `refused`
+  carry `status: null`.
+- **Receipt**: `{opId, kind: "reply" | "cancellation", continuation: {opId, taskId} | null}` — the
+  verb's own receipt, applied or replayed. The kind matches the verb: `reply` carries a `reply`
+  receipt with its continuation task, `cancel` a `cancellation` receipt with none; `start`, `run`
+  and `status` carry no receipt.
+
+Variant rules (Python's strict models enforce them; the goldens pin the shape both planes agree
+on):
+
+| Outcome | Set fields | Rules |
+|---|---|---|
+| `ok` | `epoch`, view `status`, `receipt` per the verb | a quiescent non-`status` verb is never `running` and never waiting on `pending_decision` |
+| `pending_decision` | `epoch`, view `status`, `receipt` on `reply` | `start`, `run` or `reply` only; `waiting(pending_decision)` |
+| `owner_busy` | `epoch` | — |
+| `incompatible` | `epoch` (int or `null`), `status: {state: "incompatible"}`, `mismatch` | — |
+| `observation_failed` | `epoch`, `error` | `start`, `run` or `reply` only |
+| `refused` | `epoch`, `refusal` | never `status` |
+| `uncertain` | `epoch`, `status: {state: "uncertain"}`, `error` | — |
+
+### (e) Outcome vocabulary and door exit codes
+
+The door exits `0` for `ok` and `pending_decision` and `1` for every other envelope outcome; under
+`--json` it prints the envelope itself on stdout, otherwise human lines on stderr. Door-level
+failures use the standard failure JSON (`{success: false, error_type, message}`) and exit through
+`EXIT_FOR_TYPE` (`not_a_repo` → 2, every other → 1):
+
+- **Before the host is invoked** — `not_a_repo`, `v2_unavailable` (not perk's own checkout, or the
+  host entry missing), `invalid_execution_id` (not the ULID grammar, checked before any path is
+  built). These carry no execution id: nothing could have been recorded.
+- **After the host is invoked** — `node_missing` (spawn failure), `v2_host_timeout`,
+  `v2_host_failed` (non-zero exit, with the last 20 stderr lines), `v2_envelope_invalid` (stdout is
+  not one valid envelope for the requested verb and execution). These carry the execution id —
+  under `--json` as an `execution_id` key after the three base keys, in human mode in the message
+  with a hint to inspect the execution with `perk v2 status <id>` and continue it with
+  `perk v2 run <id>` — because the host may already have recorded work under it.
+
+### (f) Observation policy
+
+`start` observes the door's `--repo`/`--ref`. `run` and `reply` observe the execution's **tracked
+ref** — the `{repo, ref}` of its `seq` 1 observation, which the host reads from the stored records
+inside the lock after the gate and hands to its `Observe(tracked)` seam — so the door cannot send a
+mismatched repo or ref. `status` and `cancel` never observe. A failed observation records nothing.
+
+### (g) The verbs and their defaults
+
+| Verb | Arguments | Defaults |
+|---|---|---|
+| `perk v2 start [--repo PATH] [--ref REF] [--json]` | mints a new execution id every call | `--repo` the invocation checkout root (resolved), `--ref` `HEAD` |
+| `perk v2 run EXECUTION_ID [--json]` | — | — |
+| `perk v2 status EXECUTION_ID [--json]` | read-only | — |
+| `perk v2 reply EXECUTION_ID DECISION_ID ACTION [--actor ACTOR] [--json]` | the kernel refuses a bad action or actor | `--actor` `human:cli` |
+| `perk v2 cancel EXECUTION_ID [--reason TEXT] [--json]` | same reason replays, another is `duplicate_conflict` | `--reason` `cancelled via perk v2 cancel` |
+
+Every option is a plain string, so the host's refusals stay typed under `--json`. The host program
+is the fixture-review program over the production faux worker, which answers each attempt with one
+`report` call over the subject tree.

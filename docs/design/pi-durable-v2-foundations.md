@@ -1072,17 +1072,26 @@ the ref, materializes or verifies the snapshot, and passes the observation as an
 alongside the verb's own input. `run`'s observation commit is itself a full reconcile pass.
 Authorization is valid as of that observation.
 
+**The tracked ref comes from the records.** Only `start` names a repo and ref (the door's
+`--repo`/`--ref`). For `run` and `reply` the host reads the execution's tracked ref — the
+`{repo, ref}` of the `seq` 1 observation — from the stored records, inside the lock after the gate,
+and hands it to the `Observe(tracked)` seam (§10 the host); `start` hands `null`. The kernel's
+tracked-repo rule is unchanged; the door simply cannot send a mismatched repo or ref.
+
 **What a failure records.** An observation failure returns `observation_failed`, and **no v2
 record is written**. Schema initialization by `Harness.open` is disposable runtime state, not a
 record (§6). Snapshot files left under `<store>/subjects/` are cache, not records (§5).
 
 **Status and cancel.** `status` never observes; it reports the age of the latest observation.
 `cancel` does not observe either: it must succeed whatever state the subject is in. It is a
-reconcile commit with the cancellation record as its input.
+reconcile commit with the cancellation record as its input; the host's `cancel` verb is landed
+(node 3.3, §10 the host).
 
 **Where observation runs.** Observation is I/O, so it runs outside the commit but inside the owner
-lock, because it writes under `<store>/subjects/`. The observer is
-`subject/observe.ts::gitObserver`, injected through the host's `Observe` seam (§5 the observer).
+lock, because it writes under `<store>/subjects/`. The observer is `subject/observe.ts`, injected
+through the host's `Observe` seam (§5 the observer): `gitObserver` is a bound observer over its own
+repo and ref, and the door's tracked observer (`door/cli.ts::trackedObserver`) calls
+`observeGitSubject` with the tracked ref the host hands it.
 
 **Refusals.** A kernel refusal rolls back the whole commit, the observation input included, so a
 refused operation leaves no record (node 2.2's proof `B4`, §7). A replayed operation also records
@@ -1265,8 +1274,8 @@ Both are cleaned up by store retention/GC, which is deferred (§14).
 - `kernel/compatibility.ts`: the gate's pure comparison.
 - `durable/waitReason.ts`: wait-reason derivation from records plus `inspect()` and the attempt
   endings (`durable/ending.ts`, node 3.1).
-- `host.ts`: `composeProgram`, `expectedManifest`, `runHost` (the `start`, `run` and `reply`
-  verbs) and `readStatus`.
+- `host.ts`: `composeProgram`, `expectedManifest`, `runHost` (the `start`, `run`, `reply` and
+  `cancel` verbs) and `readStatus`.
 
 The store's SQLite file is `<store>/durable.sqlite`.
 
@@ -1292,19 +1301,25 @@ by construction. Every violation is a `RangeError`, raised before any lock or fi
 **A run, in order:**
 
 1. compose the program;
-2. the store-directory rule: `start` creates the store directory. `run`, `reply` (and status) on
-   a missing one return `incompatible` (`manifest_missing`) with `epoch: null`, taking no lock and
-   creating nothing;
+2. the store-directory rule: `start` creates the store directory. `run`, `reply`, `cancel` (and
+   status) on a missing one return `incompatible` (`manifest_missing`) with `epoch: null`, taking
+   no lock and creating nothing;
 3. lock; `owner_busy` carries the live holder's epoch;
-4. open storage and the Harness, without resuming, counting published commits for its lifetime;
-5. the gate: `start` refuses `already_started` when a manifest exists, and `run` and `reply`
-   refuse `incompatible`;
-6. observe, through an injected seam; `observation_failed` records nothing;
+4. open storage and the Harness, without resuming, counting published commits for its lifetime,
+   then one stored-state read: the manifest and the tracked ref (the `seq` 1 observation's
+   `{repo, ref}`);
+5. the gate: `start` refuses `already_started` when a manifest exists, and `run`, `reply` and
+   `cancel` refuse `incompatible`;
+6. observe, through an injected seam: `Observe(tracked)` receives `null` for `start` and the
+   tracked ref for `run` and `reply` (a bound observer that names its own repo and ref ignores
+   it); `cancel` never observes; `observation_failed` records nothing;
 7. create the execution conversation (`harness.root()`), right before the verb's commit. Status
    never creates it;
 8. `operate(input)`. A `refused` or `uncertain` verb returns at once and never resumes; an applied
-   or replayed verb resumes, and the quiescent outcome carries the verb's receipt (§7 *The
-   reply*);
+   or replayed verb resumes, and the quiescent outcome carries the verb's receipt: a reply's (§7
+   *The reply*) or a cancel's (the cancellation record, whose op id is per execution, so an equal
+   cancel replays it and another reason is `duplicate_conflict`); `null` for `start` and `run`. A
+   cancel quiesces `cancelled`, or `completed` when a continuation already exists;
 9. the quiescence loop;
 10. close;
 11. release.
@@ -1452,6 +1467,59 @@ run holds the lock, or `incompatible`.
 The snapshot also carries the age of the latest observation, the assignments with their attempt
 and acceptance state, and the open decision. Python validates the envelope with a strict Pydantic
 boundary model (node 3.3) and never touches the store.
+
+### The door (node 3.3)
+
+The authoritative contract is `shared/contracts.md` §8.77; this subsection records the shape.
+
+**Two more fields.** The envelope adds `verb` (self-describing, and it lets the strict validator
+check outcome↔verb pairing) and `receipt` after `status`:
+
+```text
+{ "envelope": 1, "outcome", "verb", "executionId", "epoch", "status", "receipt",
+  "refusal", "mismatch", "error" }
+```
+
+Every key is always present, in that order, and an unset field is an explicit `null`. The receipt is
+`{opId, kind: "reply" | "cancellation", continuation: {opId, taskId} | null}`, and its kind matches
+the verb: `reply` carries a `reply` receipt with its continuation task, `cancel` a `cancellation`
+receipt with none, and no other verb carries one.
+
+**Snapshot shapes.**
+
+- `ok` and `pending_decision` carry a *view snapshot*: `{state, waitReason, observation,
+  assignments, decision, cancellation, diagnostics}`. `waitReason` is set exactly for `waiting`;
+  `observation` carries `ageMs`; `assignments` lists every assignment record, each flagged
+  `current` or stale against the latest tree, with its attempts' outcome ids and typed endings;
+  `decision` is the current subject's, and none once cancelled or continued; `diagnostics` counts
+  `runnable`, `blocked`, `parked` and `sleeping`.
+- `incompatible` and `uncertain` carry a *marker snapshot* `{state}`, so the snapshot alone
+  distinguishes every state above.
+- `owner_busy`, `observation_failed` and `refused` carry `status: null`.
+
+**Per-outcome rules.** `pending_decision` only for `start`, `run` or `reply`; `ok` for a
+non-`status` verb is never `running` or waiting on a decision; `observation_failed` only for an
+observing verb; `status` is never `refused`.
+
+**Door exit codes.** `0` for `ok` and `pending_decision`, `1` for every other outcome. Door-level
+failures use perk's standard failure shape: `not_a_repo` (exit 2), `v2_unavailable` and
+`invalid_execution_id` before the host runs, carrying no execution id; `node_missing`,
+`v2_host_timeout`, `v2_host_failed` and `v2_envelope_invalid` after it, carrying the execution id
+(and a hint to inspect it with `perk v2 status <id>` and continue it with `perk v2 run <id>`),
+because the host may already have recorded work.
+
+**Modules.** `extension/pi/v2/door/` (an open-layer directory with relative and `node:` imports
+only): `snapshot.ts`, `envelope.ts`, `cli.ts`, `main.ts` and the committed `golden/` envelopes;
+`extension/pi/v2/durable/fauxWorker.ts`, the deterministic production faux worker (one `report`
+call per attempt); `src/perk/v2/` (`envelope.py`, `door.py`, `render.py`) and the hidden
+`src/perk/cli/commands/v2/` group. The store lives at `<main checkout>/.perk/executions/<id>/`.
+
+**Node 3.3 proves** `V1` the snapshot (`door/snapshot.test.ts`), `V2` the envelope and its goldens
+(`door/envelope.test.ts`), `V3` the cancel verb (`lifecycle/cancel.test.ts`), `V4` tracked-ref
+observation (`lifecycle/tracked.test.ts`), `V5` the host CLI in process (`door/cli.test.ts`), `V6`
+the real process (`door/main.slow.test.ts`, the slow tier) and `V7` the faux worker
+(`door/fauxWorker.test.ts`); Python validates the same goldens (`tests/test_v2_envelope.py`) and
+drives the door with the spawn faked (`tests/test_v2_door.py`).
 
 ## 12. The fixture-review execution kind (a fixture)
 
@@ -1750,6 +1818,7 @@ explicit, reviewed amendment, recorded in the log below.
 | §5 the observer (node 2.4): `subject/` modules, ref-name rule and single resolution, repo-root realpath, ceiling and discovered-root check, scrubbed git environment, raw-object reads with the manifest re-derived per observation, materialization order (temp directory → rename, directory before manifest, never overwritten), fail-closed reuse, no fsync, BOM-keeping strict decoding and CR as path data, strict verifier and canonical manifest parser, removal via `discardTree`, `S1`–`S6`; §8 observer pointer | node 2.4 |
 | §6 the worker rows and the `submit` receipt's submission row; §9 the verification row's recovery (`repair_required`); §10 wait reasons derived with attempt endings and `repair_required`'s precedence, the host program's models and env; §12 the capability set (the report tool, the instructions digest), the native assignment (task phases and endings, fail-closed capability resolution, the snapshot environment and its residual, the tools, the report tool's order and the requested-not-relied-on termination rule, the `prepareArguments` argument check, `repair_required` derivation, measured settlements, `A1`–`A8`) and the stop-condition verdict (holds); §13 executor name; §14 attempt retry deferral | node 3.1 |
 | §7 the reply (node 3.2): the host verb and its order, the quiescent outcome's receipt (applied or replayed, `null` for `start`/`run`), a replayed reply resumes, no-waiter task ownership, `R1`–`R5`; §8 observation precedes receipt lookup; §10 the host's verbs, the missing-store rule and gate for `reply`, and the receipt | node 3.2 |
+| §8 the tracked ref read from records for `run`/`reply`, the `cancel` verb landed; §10 the host's `cancel` verb and its order, `Observe(tracked)` (a bound observer ignores it), the stored-state read, the cancel receipt; §11 the door (node 3.3): the `verb` and `receipt` fields (the kind matches the verb), view and marker snapshots, per-outcome rules, door exit codes, the execution id on post-invocation door failures, module pointers, `V1`–`V7`, and `shared/contracts.md` §8.77 | node 3.3 |
 
 ## 16. Measured evidence (reserved — node 3.4)
 
