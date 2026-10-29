@@ -149,8 +149,20 @@ test(
     addIndexEntry(nonUtf8, "100644", hashObject(nonUtf8, "x\n"), Buffer.from([0x62, 0xff]));
     commitIndex(nonUtf8, "bytes");
 
+    const colon = join(await tempDir(t, "perk-v2-subject-colon-"), "project:one");
+    mkdirSync(colon);
+    fixtureGit(colon, ["init", "-q", "--initial-branch=main", colon]);
+    writeFiles(colon, { "sub/a.txt": "a\n" });
+    commitAll(colon, "first");
+
     const cases: [string, string, string, RegExp][] = [
       ["a missing repo path", join(plain, "absent"), "main", /is missing/],
+      [
+        "a subdirectory where a colon defeats the ceiling",
+        join(colon, "sub"),
+        "main",
+        /is not a repo root/,
+      ],
       ["an existing non-repo directory", plain, "main", /not a git repository/],
       ["a repo subdirectory", join(repo, "sub"), "main", /not a git repository/],
       ["an unknown ref", repo, "refs/heads/nope", /does not resolve to a commit/],

@@ -737,9 +737,13 @@ with another's tree.
 
 **The repo.** `repo` is the realpath of the repo root the caller names: a worktree top, a linked
 worktree's top, or a bare git dir. Git runs as `git -C <root>` with `GIT_CEILING_DIRECTORIES` set
-to the root's parent, so discovery never climbs into an enclosing repo and a subdirectory of a
-repo fails to observe. Switching worktrees therefore changes the recorded repo, which the
-kernel's tracked-repo rule refuses (§12).
+to the root's parent, so discovery does not climb into an enclosing repo. The ceiling is a
+colon-separated list, so a parent path holding `:` silently weakens it; the observer therefore
+also checks that discovery settled exactly on the root (`checkRepoRoot`: `rev-parse
+--absolute-git-dir --is-inside-work-tree --show-prefix` — the root is the git dir itself, or the
+top of its work tree) and fails closed otherwise. A subdirectory of a repo fails to observe.
+Switching worktrees therefore changes the recorded repo, which the kernel's tracked-repo rule
+refuses (§12).
 
 **The git environment.** Every inherited `GIT_*` variable is dropped (`GIT_DIR`, `GIT_WORK_TREE`,
 `GIT_INDEX_FILE`, `GIT_CONFIG_COUNT`/`KEY`/`VALUE`, …); the observer then sets
@@ -782,7 +786,10 @@ verification instead of passing.
 
 **Reuse fails closed.** When a later observation of the same tree finds the snapshot or its
 manifest failing verification, it is `observation_failed` naming the problem, and nothing is
-rewritten. Recovery is manual: restore the write bits, remove the snapshot, re-run.
+rewritten. Recovery is manual: remove both the snapshot directory and its `<tree>.manifest`
+(`discardTree` on each restores the write bits first), then re-run. Removing only the directory is
+not enough when the manifest was altered: the next observation re-materializes the directory but
+keeps the existing manifest, whose digest no longer matches the one derived from git.
 
 **Path text.** Every decode of path bytes — `ls-tree` paths, the verifier's directory-entry
 names, the manifest bytes — is strict UTF-8 that keeps a leading BOM (`decodeStrictUtf8`): the
@@ -1512,7 +1519,7 @@ explicit, reviewed amendment, recorded in the log below.
 | §12 rule precisions — current-subject rounds, attempt 1 started with admission, terminal cancellation and completion, the policy parameter, the refusal order, `superseded` as a spent decision, report validity, well-formed text, the tracked ref, record integrity | node 2.1 |
 | §4 `launch` op kind; §6 record presentation (the record catalog `perk.v2.catalog`) and the `launch` durable-map row; §7 the binding's `operate`, the attempt launcher contract and `B1`–`B6`; §9 commit-failure classification (the failure-latch probe) and `BindingFault` | node 2.2 |
 | §10 the host (node 2.3): host modules, program seam and one-composition rule, extension-name refusal, liveness and release precisions, gate field order and mismatch shape, the missing-store rule, vacuous step 2, the consistent-view quiescence loop, wait-reason precedence, open failure as `uncertain`, commit-free failure detection, `H1`–`H8`; §9 open-failure row; §11 null epoch | node 2.3 |
-| §5 the observer (node 2.4): `subject/` modules, ref-name rule and single resolution, repo-root realpath and ceiling, scrubbed git environment, raw-object reads with the manifest re-derived per observation, materialization order (temp directory → rename, directory before manifest, never overwritten), fail-closed reuse, no fsync, BOM-keeping strict decoding and CR as path data, strict verifier and canonical manifest parser, removal via `discardTree`, `S1`–`S6`; §8 observer pointer | node 2.4 |
+| §5 the observer (node 2.4): `subject/` modules, ref-name rule and single resolution, repo-root realpath, ceiling and discovered-root check, scrubbed git environment, raw-object reads with the manifest re-derived per observation, materialization order (temp directory → rename, directory before manifest, never overwritten), fail-closed reuse, no fsync, BOM-keeping strict decoding and CR as path data, strict verifier and canonical manifest parser, removal via `discardTree`, `S1`–`S6`; §8 observer pointer | node 2.4 |
 
 ## 16. Measured evidence (reserved — node 3.4)
 

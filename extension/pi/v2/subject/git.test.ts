@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { CASE_TIMEOUT_MS } from "../testing/durable.ts";
+import { CASE_TIMEOUT_MS, tempDir } from "../testing/durable.ts";
 import {
   addIndexEntry,
   commitAll,
@@ -22,6 +22,7 @@ import {
 } from "../testing/subject.ts";
 import {
   checkRefFormat,
+  checkRepoRoot,
   decodeStrictUtf8,
   GitError,
   gitEnv,
@@ -72,6 +73,55 @@ test("checkRefFormat accepts ref names and rejects revision expressions", option
     assert.equal(await checkRefFormat(repo, ref), false, ref);
   }
 });
+
+test(
+  "checkRepoRoot accepts a worktree top, a linked worktree, a bare repo and a git dir",
+  options,
+  async (t) => {
+    const repo = realpathSync(await gitRepo(t));
+    writeFiles(repo, { "sub/a.txt": "a\n" });
+    commitAll(repo, "first");
+    const linked = join(realpathSync(await tempDir(t, "perk-v2-subject-linked-")), "wt");
+    fixtureGit(repo, ["worktree", "add", "-q", linked]);
+    const bare = realpathSync(await gitRepo(t, { bare: true }));
+    for (const root of [repo, linked, bare, join(repo, ".git")]) {
+      assert.equal(await checkRepoRoot(root), true, root);
+    }
+  },
+);
+
+test(
+  "checkRepoRoot refuses an enclosing repo, even where a colon defeats the ceiling",
+  options,
+  async (t) => {
+    const parent = join(realpathSync(await tempDir(t, "perk-v2-subject-colon-")), "project:one");
+    mkdirSync(parent);
+    fixtureGit(parent, ["init", "-q", "--initial-branch=main", parent]);
+    writeFiles(parent, { "sub/a.txt": "a\n" });
+    commitAll(parent, "first");
+    const sub = join(parent, "sub");
+    // The control: the colon splits the ceiling, so pinned discovery still finds the parent repo.
+    assert.equal(
+      fixtureGit(sub, ["rev-parse", "--show-toplevel"], undefined, {
+        GIT_CEILING_DIRECTORIES: parent,
+      })
+        .toString()
+        .trim(),
+      parent,
+    );
+    assert.equal(await checkRepoRoot(sub), false);
+    assert.equal(await checkRepoRoot(join(parent, ".git", "refs")), false, "inside a git dir");
+    assert.equal(await checkRepoRoot(parent), true);
+    // Without a colon the ceiling itself stops discovery.
+    const plain = realpathSync(await gitRepo(t));
+    mkdirSync(join(plain, "sub"));
+    await assert.rejects(checkRepoRoot(join(plain, "sub")), (error: unknown) => {
+      assert.ok(error instanceof GitError);
+      assert.match(error.message, /not a git repository/);
+      return true;
+    });
+  },
+);
 
 test("resolveCommitTree resolves a branch, HEAD and a peeled annotated tag", options, async (t) => {
   const repo = await gitRepo(t);

@@ -8,8 +8,9 @@
 //
 // Invariants:
 // - Single resolution: the ref resolves to one commit, and the tree is read from that commit oid.
-// - `repo` is the realpath of the named repo root, and git's discovery stops there, so a
-//   subdirectory of a repo fails to observe and switching worktrees changes the recorded repo.
+// - `repo` is the realpath of the named repo root, and git's discovery must settle exactly there
+//   (the ceiling, then `checkRepoRoot`), so a subdirectory of a repo fails to observe and
+//   switching worktrees changes the recorded repo.
 // - Every operational failure — invalid input, a `GitError`, an unrepresentable tree, a failed
 //   verification, a filesystem error, malformed facts — is `observation_failed` naming its step;
 //   anything else is a programming error and is rethrown.
@@ -18,7 +19,7 @@ import { realpath } from "node:fs/promises";
 import type { Observation, Observe } from "../host.ts";
 import { isWellFormedText } from "../kernel/canonical.ts";
 import { type ObservationFacts, observationProblem } from "../kernel/records.ts";
-import { checkRefFormat, GitError, listTree, resolveCommitTree } from "./git.ts";
+import { checkRefFormat, checkRepoRoot, GitError, listTree, resolveCommitTree } from "./git.ts";
 import { ensureSnapshot, type SnapshotHooks } from "./snapshot.ts";
 
 export type GitObserverOptions = {
@@ -71,6 +72,10 @@ export async function observeGitSubject(options: GitObserverOptions): Promise<Ob
     } catch (error) {
       if (errorCode(error) === "ENOENT") return failed(`repo ${repo} is missing`);
       throw error;
+    }
+    step = `checking repo root ${repoRoot}`;
+    if (!(await checkRepoRoot(repoRoot))) {
+      return failed(`repo ${repoRoot} is not a repo root: git discovered an enclosing repository`);
     }
     step = `checking ref ${shownRef}`;
     if (!(await checkRefFormat(repoRoot, ref))) return failed(`ref ${shownRef} is not a ref name`);

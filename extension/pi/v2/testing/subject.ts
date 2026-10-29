@@ -37,11 +37,19 @@ function fixtureEnv(): NodeJS.ProcessEnv {
   };
 }
 
-/** Run fixture git in `repo` (hermetic env); its stdout. Throws on a non-zero exit. */
-export function fixtureGit(repo: string, args: readonly string[], input?: Buffer | string): Buffer {
+/**
+ * Run fixture git in `repo` (hermetic env, plus `env` overrides); its stdout. Throws on a non-zero
+ * exit.
+ */
+export function fixtureGit(
+  repo: string,
+  args: readonly string[],
+  input?: Buffer | string,
+  env: Readonly<Record<string, string>> = {},
+): Buffer {
   return execFileSync("git", args, {
     cwd: repo,
-    env: fixtureEnv(),
+    env: { ...fixtureEnv(), ...env },
     timeout: FIXTURE_GIT_TIMEOUT_MS,
     stdio: ["pipe", "pipe", "pipe"],
     ...(input === undefined ? {} : { input }),

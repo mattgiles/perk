@@ -398,6 +398,35 @@ test("S3: reuse of a tampered snapshot fails closed and rewrites nothing", optio
   assert.equal(readFileSync(readme, "utf8"), "tampered\n", "the tampered bytes are still there");
 });
 
+test(
+  "S3: a self-consistent forgery of a file and its manifest still fails re-observation",
+  options,
+  async (t) => {
+    const { repo } = await subjectRepo(t);
+    const store = await subjectStore(t);
+    const facts = await observeOk(store, repo);
+    const readme = join(snapshotDir(store, facts.tree), "README.md");
+    const manifest = snapshotManifestPath(store, facts.tree);
+    unlock(readme);
+    writeFileSync(readme, "forged\n");
+    const original = readFileSync(manifest, "utf8");
+    const forged = original.replace(sha256(README), sha256("forged\n"));
+    assert.notEqual(forged, original);
+    unlock(manifest);
+    writeFileSync(manifest, forged);
+    // The control: the forged cache is self-consistent, so only a digest derived from git catches it.
+    assert.deepEqual(await verifySnapshot(store, facts.tree, sha256(forged)), { ok: true });
+
+    const again = await observeGitSubject({ storeDir: store, repo, ref: "main" });
+    assert.equal(again.kind, "observation_failed");
+    if (again.kind === "observation_failed") {
+      assert.match(again.detail, /failed verification: manifest digest mismatch/);
+    }
+    assert.equal(readFileSync(readme, "utf8"), "forged\n", "the forged file is still there");
+    assert.equal(readFileSync(manifest, "utf8"), forged, "the forged manifest is still there");
+  },
+);
+
 test("S4: symlink and gitlink entries materialize and verify per §5", options, async (t) => {
   const { repo, first, commit } = await subjectRepo(t);
   const store = await subjectStore(t);

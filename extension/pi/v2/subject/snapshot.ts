@@ -13,7 +13,9 @@
 //   writes the manifest from git and verifies the directory against it), never the reverse with a
 //   half-written directory.
 // - Reuse fails closed: a cached snapshot or manifest failing verification is a `problem`, and
-//   nothing is rewritten. Recovery is manual (restore the write bits, remove, re-run).
+//   nothing is rewritten. Recovery is manual: remove both the snapshot directory and its
+//   `<tree>.manifest` (`discardTree` on each restores the write bits first), then re-run. Removing
+//   only the directory keeps a tampered manifest, which the next verification refuses again.
 // - No fsync: the protocol guards process death, not power loss; a torn write fails verification.
 // - Modes are set explicitly with `chmod`, independent of the umask: files `0444`, directories
 //   `0555`. Removing a snapshot therefore needs the write bits restored first (`discardTree`).

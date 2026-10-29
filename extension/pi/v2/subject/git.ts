@@ -3,12 +3,14 @@
 // Invariants:
 // - Every invocation is an argv array (never a shell) with an explicit timeout, and runs against
 //   one named repo root: `git -C <root>`.
-// - The environment is pinned: every inherited `GIT_*` variable is dropped, discovery cannot climb
-//   above the root (`GIT_CEILING_DIRECTORIES`), replace refs are ignored and no credential prompt
-//   can block. The claim this supports is scoped: neither the tree's content nor an inherited
-//   environment variable can select a helper, because only `rev-parse`, `check-ref-format`,
-//   `ls-tree` and `cat-file --batch` run, and none of them runs a filter, textconv, hook or
-//   checkout. Repo-local, user and system config still apply (so `safe.directory` keeps working).
+// - The environment is pinned: every inherited `GIT_*` variable is dropped, discovery is told not
+//   to climb above the root (`GIT_CEILING_DIRECTORIES`), replace refs are ignored and no
+//   credential prompt can block. The ceiling is a colon-separated list, so it cannot hold every
+//   path; `checkRepoRoot` is the check that discovery settled on the named root.
+// - The no-helper claim is scoped: neither the tree's content nor an inherited environment
+//   variable can select a helper, because only `rev-parse`, `check-ref-format`, `ls-tree` and
+//   `cat-file --batch` run, and none of them runs a filter, textconv, hook or checkout.
+//   Repo-local, user and system config still apply (so `safe.directory` keeps working).
 // - Raw committed bytes come only from `cat-file --batch`, never from `archive` or a checkout,
 //   both of which apply `eol`, `export-*` and filter attributes.
 // - Path bytes are decoded strictly (`decodeStrictUtf8`): invalid UTF-8 is a representability
@@ -104,6 +106,31 @@ function runGit(repoRoot: string, args: readonly string[]): Promise<GitResult> {
       },
     );
   });
+}
+
+/**
+ * Whether git's discovered repository is rooted exactly at `repoRoot`: it is the git dir itself
+ * (a bare repo, or a named git dir), or `repoRoot` is the top of its work tree (a worktree or a
+ * linked worktree). `GIT_CEILING_DIRECTORIES` is a colon-separated list, so a parent path holding
+ * `:` silently weakens the ceiling; this check is what keeps discovery from settling on an
+ * enclosing repo. Throws `GitError` when no repository is found at all.
+ */
+export async function checkRepoRoot(repoRoot: string): Promise<boolean> {
+  const args = ["rev-parse", "--absolute-git-dir", "--is-inside-work-tree", "--show-prefix"];
+  const result = await runGit(repoRoot, args);
+  if (result.exitCode !== 0) throw new GitError(args, exitReason(result.exitCode, result.stderr));
+  const text = result.stdout.toString("utf8");
+  const lines = text.endsWith("\n") ? text.slice(0, -1).split("\n") : [];
+  const [gitDir, insideWorkTree, prefix] = lines;
+  if (
+    lines.length !== 3 ||
+    gitDir === undefined ||
+    prefix === undefined ||
+    (insideWorkTree !== "true" && insideWorkTree !== "false")
+  ) {
+    throw new GitError(args, `unexpected output ${JSON.stringify(text)}`);
+  }
+  return gitDir === repoRoot || (insideWorkTree === "true" && prefix === "");
 }
 
 /** Whether `ref` is a ref name (`check-ref-format --allow-onelevel`); not a revision expression. */
