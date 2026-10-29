@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { Models } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   type AnyTask,
@@ -41,6 +42,7 @@ import {
   type Wake,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { type AttemptEnding, readAttemptEndings } from "./durable/ending.ts";
 import {
   type AttemptLauncher,
   type BindingDeps,
@@ -76,10 +78,17 @@ export type AssignmentContext = {
   readonly storeDir: string;
 };
 
-/** The assignment's work: its attempt launcher and the extension registering its tasks. */
+/**
+ * The assignment's work: its attempt launcher, the extension registering its tasks, and the model
+ * catalog and environment factory its workers need (forwarded to the Harness).
+ */
 export type AssignmentWork = {
   readonly launcher: AttemptLauncher;
   readonly extension: Extension;
+  /** Default `createModels()`, an empty catalog. */
+  readonly models?: Models;
+  /** Default none: every tool runs without an environment. */
+  readonly env?: HarnessOptions["env"];
 };
 
 /** What the host executes: the host-resolved policy, its version, and the assignment's work. */
@@ -89,11 +98,16 @@ export type HostProgram = {
   readonly assignment: (context: AssignmentContext) => AssignmentWork;
 };
 
-/** One host call's composition: the dependencies, the registry, and the manifest's definitions. */
+/**
+ * One host call's composition: the dependencies, the registry, the manifest's definitions, and the
+ * assignment's model catalog and environment factory.
+ */
 export type Composition = {
   readonly deps: BindingDeps;
   readonly registry: Registry;
   readonly definitions: Readonly<Record<string, number>>;
+  readonly models?: Models;
+  readonly env?: HarnessOptions["env"];
 };
 
 export type OpenHarness = (
@@ -137,6 +151,8 @@ export type HostView = {
   readonly records: ReadRecordSet;
   readonly inspection: HarnessInspection;
   readonly wake: Wake;
+  /** The launched attempt tasks' typed endings, by attempt id (committed `getTask` reads). */
+  readonly endings: ReadonlyMap<string, AttemptEnding>;
   /** `null` only in a status view while work is runnable (running). */
   readonly waitReason: WaitReason | null;
 };
@@ -243,7 +259,13 @@ export function composeProgram(options: Pick<HostOptions, "storeDir" | "program"
       throw new RangeError(`the registry does not resolve ${task.definition.name} to its task`);
     }
   }
-  return { deps, registry, definitions };
+  return {
+    deps,
+    registry,
+    definitions,
+    ...(work.models === undefined ? {} : { models: work.models }),
+    ...(work.env === undefined ? {} : { env: work.env }),
+  };
 }
 
 /** The execution manifest a host with `definitions` expects; pure. */
@@ -324,8 +346,9 @@ async function withHarness<T>(
     harness = await openHarness(
       storage,
       {
-        models: createModels(),
+        models: composition.models ?? createModels(),
         registry: composition.registry,
+        ...(composition.env === undefined ? {} : { env: composition.env }),
         ...(options.onReport === undefined ? {} : { onReport: options.onReport }),
       },
       context,
@@ -401,11 +424,12 @@ async function quiesce(
     const before = session.commits();
     const inspection = await harness.inspect(context);
     const records = await readRecords(harness);
+    const endings = await readAttemptEndings(harness, records);
     const wake = harness.wake();
     if (session.commits() !== before || wake.active) continue;
-    const waitReason = deriveWaitReason(records.records, policy, liveStates(inspection));
+    const waitReason = deriveWaitReason(records.records, policy, liveStates(inspection), endings);
     if (waitReason === null) throw noReason("run");
-    return { records, inspection, wake, waitReason };
+    return { records, inspection, wake, endings, waitReason };
   }
 }
 
@@ -413,11 +437,12 @@ async function quiesce(
 async function collectStatus(harness: Harness, policy: FixturePolicy): Promise<HostView> {
   const inspection = await harness.inspect(context);
   const records = await readRecords(harness);
+  const endings = await readAttemptEndings(harness, records);
   const wake = harness.wake();
-  if (wake.active) return { records, inspection, wake, waitReason: null };
-  const waitReason = deriveWaitReason(records.records, policy, liveStates(inspection));
+  if (wake.active) return { records, inspection, wake, endings, waitReason: null };
+  const waitReason = deriveWaitReason(records.records, policy, liveStates(inspection), endings);
   if (waitReason === null) throw noReason("status");
-  return { records, inspection, wake, waitReason };
+  return { records, inspection, wake, endings, waitReason };
 }
 
 /**

@@ -11,8 +11,8 @@
 //   value is corruption (`KernelInvariantError`), never a refusal.
 // - The presented set is the manifest, every cataloged operation record, and each
 //   `<decision-id>/continuation` row projected to its continuation record. Unreferenced records are
-//   presented like any other, because the catalog lists keys, not references. `launch` rows are
-//   bookkeeping the kernel never sees.
+//   presented like any other, because the catalog lists keys, not references. An attempt's
+//   `launch`, worker-conversation and `submit` rows are bookkeeping the kernel never sees.
 // - Every value handed out is a plain copy: drafts are revoked once the commit callback returns.
 // - The boundary guards check only what the binding itself wrote (family, type, key); the kernel's
 //   `indexRecords` validates every semantic rule over the presented set.
@@ -22,11 +22,13 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { DocumentReader, JsonObject, Tx } from "@earendil-works/pi-durable";
 import { jsonEquals } from "../kernel/canonical.ts";
 import {
+  type AttemptRecord,
   type ContinuationRecord,
   type ExecutionManifest,
   KernelInvariantError,
   type KernelRecord,
   type OperationRecord,
+  type RecordIndex,
 } from "../kernel/records.ts";
 import {
   CATALOG_KIND,
@@ -79,6 +81,22 @@ function asJsonObject(value: ChordJsonValue, kind: string, key: string | null): 
     throw corrupt(kind, key, "not a JSON object");
   }
   return value;
+}
+
+/**
+ * The attempt whose worker conversation is `conversationId`: the one whose `<attempt-id>` durable-map
+ * row is `{conversation, conversationId}`, or `null` when no attempt names it.
+ */
+export function attemptOfConversation(
+  index: RecordIndex,
+  durableMap: ReadonlyMap<string, DurableMapRow>,
+  conversationId: number,
+): AttemptRecord | null {
+  for (const attempt of index.attempts.values()) {
+    const row = durableMap.get(attempt.attemptId);
+    if (row?.durableKind === "conversation" && row.durableId === conversationId) return attempt;
+  }
+  return null;
 }
 
 /** The continuation record a `<decision-id>/continuation` durable-map key projects to. */

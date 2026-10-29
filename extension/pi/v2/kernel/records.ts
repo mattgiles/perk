@@ -533,6 +533,17 @@ export function indexRecords(records: readonly KernelRecord[]): RecordIndex {
   };
 }
 
+/**
+ * The manifest digest of `tree`: that of the highest-`seq` observation of it, or `null` when no
+ * observation names it. A tree's manifest digest is a function of the tree, so every observation of
+ * it agrees; the latest is read only to make the choice deterministic.
+ */
+export function manifestDigestFor(index: RecordIndex, tree: string): string | null {
+  return (
+    index.observations.findLast((observation) => observation.tree === tree)?.manifestDigest ?? null
+  );
+}
+
 function emptyIndex(): RecordIndex {
   return {
     manifest: null,

@@ -116,7 +116,8 @@ function resultIds(record: OperationRecord): string[] {
     case "continuation":
       return [record.opId];
     case "attempt":
-      return [launchOpId(record.attemptId)];
+      // The launched task, then the worker submission mapped under the `submit` op id itself.
+      return [launchOpId(record.attemptId), record.opId];
     default:
       return [];
   }
