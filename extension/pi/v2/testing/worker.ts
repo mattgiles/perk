@@ -328,6 +328,11 @@ export type StoreView = {
   entries(conversationId: number): Promise<EntryRecord[]>;
   submissions(conversationId: number): Promise<SubmissionRecord[]>;
   task(id: number): Promise<TaskRecord<JsonValue, JsonValue, JsonValue> | undefined>;
+  /** The tasks of `kind` on the conversation. */
+  tasks(
+    conversationId: number,
+    kind: string,
+  ): Promise<TaskRecord<JsonValue, JsonValue, JsonValue>[]>;
   /** The conversation's current `pi.agent` document. */
   agent(conversationId: number): Promise<JsonObject | undefined>;
   /** The conversation's tool results with their persisted diagnostics, in order. */
@@ -380,6 +385,15 @@ export async function withStore<T>(
         ),
       ),
     task: (id) => storage.task(asTaskId(id), context),
+    tasks: (conversationId, kind) =>
+      scanAll((cursor) =>
+        storage.scanTasks(
+          { conversationId: asConversationId(conversationId), kind },
+          100,
+          cursor,
+          context,
+        ),
+      ),
     agent: async (conversationId) => {
       const records = await scanAll((cursor) =>
         storage.scanDocuments(
