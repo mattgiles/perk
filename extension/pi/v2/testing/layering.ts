@@ -17,7 +17,8 @@
 //     the Durable homes (the host entry and `durable/`); files under `kernel/` (tests included)
 //     carry none at all.
 //   Intra-v2 layering (`checkLayering`): `kernel/ → kernel/`; `durable/ → kernel/ | durable/`;
-//     the host entry and the dev files may import any v2 file; no cycles; no unresolved v2 target.
+//     every open-layer file — the host entry, Durable-free production modules such as `store/`,
+//     and the dev files — may import any v2 file; no cycles; no unresolved v2 target.
 //
 // Together the last two prove the kernel Durable-free transitively: its relative closure stays
 // inside `kernel/`, and no kernel file names a bare non-`node:` package — so nothing in the

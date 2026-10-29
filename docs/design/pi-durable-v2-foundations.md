@@ -920,6 +920,7 @@ nothing: its receipt is returned before anything is written (§7 step 2).
 | Snapshot verification failure at attempt start or acceptance | detected outside the commit, immediately before it (§5); the guarded commit never runs | `refused` (`snapshot_tampered`); nothing recorded | repair: the attempt stays incomplete |
 | Observation failure | none; it happens before any commit | `observation_failed`; nothing recorded | fix the ref or repo, then re-run the verb |
 | Lock busy | none; it happens before storage opens | `owner_busy` | retry after the live owner exits |
+| Storage open or `Harness.open` failure, after the lock | none; the Harness never became usable | `uncertain` | reopen under §10 |
 | Execution-manifest mismatch, or no execution manifest on a non-`start` verb | none; the gate refuses before any task phase runs | `incompatible`, naming the field (`manifest_missing` when absent) | a migration (deferred), or `start` on a store whose first commit never landed |
 | `start` on a store that already has an execution manifest | none; the gate refuses (§10 step 4) | `refused` (`already_started`) | use `run`/`status` |
 
@@ -953,6 +954,9 @@ nothing: its receipt is returned before anything is written (§7 step 2).
   the host owns the lifecycle, so that is a caller bug. A fault is never a refusal: nothing is
   recorded, and an open Harness stays open.
 
+The host (node 2.3, §10) classifies its own rejections by the same failure latch, read through
+`wake()`'s usability check rather than a probe commit, so a status open makes no commit on any path.
+
 ## 10. The host lifecycle
 
 1. Take the **store owner lock** (protocol below).
@@ -977,14 +981,15 @@ nothing: its receipt is returned before anything is written (§7 step 2).
 5. Observe, for the observing verbs (§8).
 6. `operate(input)`. For `start`, this one commit writes the manifest, the observation and the
    admissions (§7).
-7. `resume()`, then wait until `wake().active === false`.
+7. `resume()`, then wait until `wake().active === false` and a view collected after it is
+   consistent (*The host*, below).
 8. Derive the **wait reason** from records plus `inspect()`. The vocabulary is closed:
    `pending_decision`, `unmet_prerequisite`, `assignment_incomplete`, `repair_required`,
    `parked`, `blocked`, `sleeping`, `cancelled`, `completed`.
 9. `close()`, then release the lock. The epoch directory stays behind as the record of that epoch.
 
 **Status** runs lock → open → gate → read records + `inspect()` → close → release. It never calls
-`resume()` or any other call that enables progress. Submit and wait enable scheduling, while
+`resume()`, never commits, and makes no other call that enables progress. Submit and wait enable scheduling, while
 `inspect()` and reads do not (`packages/durable/docs/spec.md#2.2 Public Harness surface`).
 
 **Quiescence** means no runnable work **and** a derivable wait reason. The same code serves a
@@ -1028,33 +1033,155 @@ the property fencing keys on. There is no reclaim rename: a design that renames 
 directory aside cannot bind that rename to the epoch it observed.
 
 **Liveness.** The holder of an unreleased epoch is dead exactly when its `host` is this host and
-either the recorded pid does not exist or that process's start time differs from `startedAt`.
-Looking up the start time is a host seam (Linux `/proc/<pid>/stat`). Two cases are treated as
-**live**, so the result is `owner_busy` and the epoch is never treated as free:
+either no live process has the recorded pid (it is absent, or a zombie) or that process's start
+time differs from `startedAt`. `host` is `os.hostname()`. `startedAt` is `/proc/<pid>/stat` field
+22 (clock ticks since boot) as a decimal string, or `null` where the seam is unsupported. Looking
+up the start time is a host seam (Linux `/proc/<pid>/stat`). These cases are treated as **live**,
+so the result is `owner_busy` and the epoch is never treated as free:
 
 - a host where the seam is unsupported;
-- a lock recorded by a different host.
+- a lock recorded by a different host;
+- a holder whose `startedAt` is `null`;
+- a missing or malformed `meta.json`, or one whose `epoch` differs from its directory name.
 
 Liveness fails closed.
 
-**Release.** `close()` the Harness, then write `owner/<epoch>/released` as a temp file in the
-epoch directory followed by a rename. A crash before release leaves an unreleased epoch whose
-process is dead, and the next host classifies it as free.
+**Release.** `close()` the Harness, then check that `owner/<epoch>/meta.json` still carries this
+acquisition's nonce (a process's memory of having acquired is not a fence), and write
+`owner/<epoch>/released` as a temp file in the epoch directory followed by a rename. `meta.json`
+and the `released` marker are each synced before their rename. The parent directory is not: the
+protocol guards process death, not power loss. A crash before release leaves an unreleased epoch
+whose process is dead, and the next host classifies it as free.
 
 **Retention.** Epoch directories are never deleted while the store exists. Deleting one could let
 a contender working from an older listing re-create it. Abandoned temp directories are ignored.
 Both are cleaned up by store retention/GC, which is deferred (§14).
 
-**Node 2.3 proves:**
+**Node 2.3 proves** (files under `extension/pi/v2/`):
 
-- a second live owner is refused;
-- two concurrent acquirers after a dead owner: exactly one creates the next epoch, and the other
-  sees `owner_busy`;
-- epochs are unique and strictly increasing across acquisitions;
-- a crash between acquisition and the first commit leaves an unreleased epoch that the next host
-  treats as free, plus a `manifest_missing` store;
-- a liveness seam that is unsupported, or on a different host, never treats an unreleased epoch as
-  free.
+- `H1` a second live owner is refused (`store/ownerLock.test.ts`, `lifecycle/ownership.test.ts`);
+- `H2` two concurrent acquirers after a dead owner: exactly one creates the next epoch, and the
+  other sees `owner_busy` (`store/ownerLock.test.ts`, both contenders held inside the
+  check-then-act window);
+- `H3` epochs are unique and strictly increasing across acquisitions (`store/ownerLock.test.ts`,
+  `lifecycle/run.test.ts`);
+- `H4` a crash between acquisition and the first commit leaves an unreleased epoch that the next
+  host treats as free, plus a `manifest_missing` store (`lifecycle/ownership.test.ts`);
+- `H5` a liveness seam that is unsupported, or on a different host, never treats an unreleased
+  epoch as free (`store/ownerLock.test.ts`).
+
+### The host (node 2.3)
+
+**Modules.** Under `extension/pi/v2/`:
+
+- `store/ownerLock.ts` (the protocol above) and `store/liveness.ts` (the procfs liveness seam).
+  `store/` is a Durable-free open-layer directory with `node:` imports only, so P10's layering is
+  unchanged.
+- `kernel/compatibility.ts`: the gate's pure comparison.
+- `durable/waitReason.ts`: wait-reason derivation from records plus `inspect()`.
+- `host.ts`: `composeProgram`, `expectedManifest`, `runHost` (the `start` and `run` verbs) and
+  `readStatus`.
+
+The store's SQLite file is `<store>/durable.sqlite`.
+
+**The host program.** A host executes a *host program*: the host-resolved policy, its
+`policyVersion`, and an assignment factory returning the attempt launcher plus the Durable
+extension that registers the assignment's tasks. Each host call composes it **exactly once**,
+before the lock:
+
+- it validates the program: a normalized capability set, `policyVersion` an integer ≥ 1, and
+  every assignment task named `perk.v2.*`, unrepeated, and not a binding name;
+- it installs the binding's extension, then the assignment's, into a fresh registry. Durable's
+  `install` replaces an extension of the same name in place, so an assignment extension whose
+  name is already installed is refused;
+- it derives the manifest's `definitions` from the binding's documents and tasks plus the
+  extension's tasks, never by hand, and proves that every task the manifest names resolves in the
+  registry to exactly the task object it came from.
+
+That one composition supplies the registry for `Harness.open`, the binding's dependencies, the
+gate's expected manifest and `start`'s manifest, so the manifest and the installed work correspond
+by construction. Every violation is a `RangeError`, raised before any lock or file is touched.
+
+**A run, in order:**
+
+1. compose the program;
+2. the store-directory rule: `start` creates the store directory. `run` (and status) on a missing
+   one returns `incompatible` (`manifest_missing`) with `epoch: null`, taking no lock and creating
+   nothing;
+3. lock; `owner_busy` carries the live holder's epoch;
+4. open storage and the Harness, without resuming, counting published commits for its lifetime;
+5. the gate: `start` refuses `already_started` when a manifest exists, and `run` refuses
+   `incompatible`;
+6. observe, through an injected seam; `observation_failed` records nothing;
+7. create the execution conversation (`harness.root()`), right before the verb's commit. Status
+   never creates it;
+8. `operate(input)`. A `refused` or `uncertain` verb returns at once and never resumes;
+9. the quiescence loop;
+10. close;
+11. release.
+
+§10 step 2 is vacuous here: no worker can spawn a subprocess until that capability exists (§14), so
+there is nothing to sweep.
+
+**The gate** compares seven fields in this order: `recordVersion`, `definitions`,
+`policyVersion`, `durableVersion`, `chordVersion`, `workspace`, `executionKind`. `createdAt` and
+the constant `type` are excluded. It reports the first difference as `{field, expected, found}`,
+with the whole top-level values; a missing or malformed stored field reads as `null`, and
+`definitions` compares canonically, so key order is irrelevant. An absent manifest is
+`{field: "manifest_missing", expected: null, found: null}`.
+
+**The quiescence loop.** `resume()`, then poll `wake()` every 10 ms (real time) until it is
+inactive, then collect `inspect()` and the records. The view is accepted only if no commit was
+published during the collection **and** a `wake()` read after it is still inactive: `wake()`
+compares sleeping deadlines with the clock on every call, so an inactive answer is not a barrier.
+Otherwise the driver calls `resume()` again, which makes due sleepers runnable, and returns to
+polling. There is no iteration cap: an execution that keeps producing work keeps the run going.
+
+**Wait reasons** are derived in precedence order: `completed` > `cancelled` >
+`pending_decision` (a decision over the current subject only) > `blocked` (any block but
+`restart_limit`) > `parked` > `sleeping` > `assignment_incomplete`. `unmet_prerequisite` and
+`repair_required` have no fixture producer yet; the native assignment derives `repair_required`.
+A consistent, inactive view with no derivable reason throws `HostFault`, a host or binding bug,
+never an outcome.
+
+**Uncertain.**
+
+- A rejection from the storage open or `Harness.open` after the lock is `uncertain`:
+  initialization and open's recovery bookkeeping may have written.
+- Any later rejection inside the open window is `uncertain` when it is `SessionFailed`, or when
+  the Harness has failed. Failure is detected through `wake()`, whose usability check reads
+  Durable's failure latch before the closing state, never through a probe commit.
+- Every other rejection (a `BindingFault`, a `HostFault`, an `observe` throw, a
+  `KernelInvariantError`) is rethrown after close and release.
+
+Status therefore makes no commit call on any path, the exceptional ones included.
+
+**Status** is one collection, with no loop because nothing is scheduled: `inspect()`, the records,
+then `wake()`. Its wait reason is `null` (running) while `wake().active`, and otherwise the derived
+reason. It never calls `commit`, `root()`, `operate`, `resume()`, a submit, a wait, `retryTask` or
+`abortTask`.
+
+**Close before release, on every path.** The Harness closes, and its `closed` settles, in a
+`finally`; the lock is released in an outer `finally`, after it, on refusals, faults and
+`uncertain` outcomes too. A failing storage close is reported by Durable itself (`session_failed`)
+and does not replace the outcome. Only a killed process leaves an unreleased epoch.
+
+The host never creates step tasks: `run`'s commit is itself a full reconcile pass, and the step
+task is registered only because the manifest names it.
+
+**Node 2.3 also proves:**
+
+- `H6` an incompatible manifest is refused with no task phase executed
+  (`lifecycle/gate.test.ts`);
+- `H7` a status open never schedules work, and makes no forbidden call on the normal and the
+  failed path (`lifecycle/status.test.ts`);
+- `H8` real `SIGKILL`: a retained record survives, and the interrupted task recovers without
+  repeating accepted work (`lifecycle/recovery.slow.test.ts`, the slow tier).
+
+The composition rules are proved in `lifecycle/compose.test.ts`, the consistent-view loop in
+`lifecycle/quiescence.test.ts`, and close before release — a held shutdown after a quiescent run,
+a failed Harness and a failed open keeps the epoch unreleased and a competing host `owner_busy` — in
+`lifecycle/ownership.test.ts`.
 
 ### Containment and fencing verdict
 
@@ -1104,6 +1231,7 @@ on `ubuntu-latest` — cooperative escape). Evidence:
 **Fields.**
 
 - `epoch` is the owner epoch this call held. For `owner_busy` it is the live holder's epoch.
+  `epoch` is `null` when the call took no lock (a missing store directory, §10).
 - `refusal.reason` uses the §9 vocabulary, and `mismatch.field` names the first mismatching
   execution-manifest field (or `manifest_missing`).
 
@@ -1268,6 +1396,7 @@ explicit, reviewed amendment, recorded in the log below.
 | Containment and fencing verdict recorded (§10): GO supervised, with closing the reaped-leader pid-reuse window as a prerequisite before workers spawn; pi-env 1.4.0 joins the pin family; evidence archive/pi-durable-v2-containment-characterization.md | node 1.4 |
 | §12 rule precisions — current-subject rounds, attempt 1 started with admission, terminal cancellation and completion, the policy parameter, the refusal order, `superseded` as a spent decision, report validity, well-formed text, the tracked ref, record integrity | node 2.1 |
 | §4 `launch` op kind; §6 record presentation (the record catalog `perk.v2.catalog`) and the `launch` durable-map row; §7 the binding's `operate`, the attempt launcher contract and `B1`–`B6`; §9 commit-failure classification (the failure-latch probe) and `BindingFault` | node 2.2 |
+| §10 the host (node 2.3): host modules, program seam and one-composition rule, extension-name refusal, liveness and release precisions, gate field order and mismatch shape, the missing-store rule, vacuous step 2, the consistent-view quiescence loop, wait-reason precedence, open failure as `uncertain`, commit-free failure detection, `H1`–`H8`; §9 open-failure row; §11 null epoch | node 2.3 |
 
 ## 16. Measured evidence (reserved — node 3.4)
 

@@ -283,7 +283,7 @@ export class CountingStorage extends MemoryStorage {
 }
 
 /** A delegating proxy over `inner` whose method `name` is replaced by `method(target)`. */
-function withMethod<K extends "commit" | "mintId">(
+function withMethod<K extends "commit" | "mintId" | "findDocument" | "close">(
   inner: Storage,
   name: K,
   method: (target: Storage) => Storage[K],
@@ -383,6 +383,53 @@ export function failingMint(inner: Storage): {
       armed = error;
     },
   };
+}
+
+/**
+ * Delegate everything to `inner`, unarmed. `arm(error)` makes exactly the next `findDocument` whose
+ * address names `kind` reject with `error`, then disarms; every other call delegates. The kind
+ * filter makes arming before `Harness.open` safe: nothing but v2 code reads a `perk.v2.*` kind.
+ */
+export function failingFind(
+  inner: Storage,
+  kind: string,
+): { storage: Storage; arm(error: Error): void } {
+  let armed: Error | undefined;
+  const storage = withMethod(inner, "findDocument", (target) => (address, at, callContext) => {
+    const error = armed;
+    if (error === undefined || address.kind !== kind) {
+      return target.findDocument(address, at, callContext);
+    }
+    armed = undefined;
+    return Promise.reject(error);
+  });
+  return {
+    storage,
+    arm: (error) => {
+      armed = error;
+    },
+  };
+}
+
+/**
+ * Delegate everything to `inner`, except that `close` is held: `closing` resolves when the first
+ * `close` call arrives, and the close reaches `inner` only once `release()` is called. It holds a
+ * Harness in its shutdown — a healthy close, a failed Session's self-close, or a host's cleanup
+ * close after a failed open — for as long as a test needs.
+ */
+export function gatedClose(inner: Storage): {
+  storage: Storage;
+  closing: Promise<void>;
+  release(): void;
+} {
+  const called = deferred();
+  const gate = deferred();
+  const storage = withMethod(inner, "close", (target) => async (callContext) => {
+    called.resolve();
+    await gate.promise;
+    return target.close(callContext);
+  });
+  return { storage, closing: called.promise, release: () => gate.resolve() };
 }
 
 /** Delegate everything to `inner`, keeping each committed batch (detached) once `inner` landed it. */

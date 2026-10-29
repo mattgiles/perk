@@ -1,5 +1,7 @@
-// The v2 host entry opens and closes a Harness, and every dependency the workspace declares
-// resolves at exactly its declared pin — the executable half of the workspace's resolution record
+// The v2 host entry's version pins: the Durable and chord versions it records in every execution
+// manifest equal the workspace manifest's declared pins (a pin bump fails here and forces a
+// conscious manifest change), and every dependency the workspace declares resolves at exactly its
+// declared pin — the executable half of the workspace's resolution record
 // (docs/design/archive/pi-durable-v2-workspace.md holds the measured locations).
 
 import assert from "node:assert/strict";
@@ -7,8 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { MemoryStorage } from "@earendil-works/pi-durable";
-import { openHost } from "./host.ts";
+import { CHORD_VERSION, DURABLE_VERSION } from "./host.ts";
 
 /** One importable entry per declared dependency (not every package exports `./package.json`). */
 const ENTRY_SPECIFIERS: Readonly<Record<string, string>> = {
@@ -61,11 +62,10 @@ function resolvedManifest(name: string, entrySpecifier: string): { path: string;
   }
 }
 
-test("opens a Harness over MemoryStorage and closes it", async () => {
-  const host = await openHost(new MemoryStorage());
-  assert.ok(host.harness, "the host carries its Harness");
-  await host.close();
-  await host.harness.closed;
+test("the manifest's Durable and chord versions equal the workspace's declared pins", () => {
+  const declared = declaredDependencies();
+  assert.equal(DURABLE_VERSION, declared["@earendil-works/pi-durable"], "DURABLE_VERSION");
+  assert.equal(CHORD_VERSION, declared["@earendil-works/chord"], "CHORD_VERSION");
 });
 
 test("resolves every declared dependency at its declared pin", () => {

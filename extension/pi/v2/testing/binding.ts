@@ -205,20 +205,32 @@ export type FakeInput = {
 export type FakeAssignment = Task<FakeInput, { phase: "run" }, null, object>;
 
 /**
+ * Test hooks around the fake's one commit, in the phase: `before` runs before it, `after` once it
+ * resolved. They count phases, block a phase (resolve its deferred in teardown — `close()` joins a
+ * running phase), or arm a storage failure.
+ */
+export type FakeHooks = {
+  before?(input: FakeInput): void | Promise<void>;
+  after?(input: FakeInput): void | Promise<void>;
+};
+
+/**
  * The attempt's stand-in work: one commit that, when `accept`, accepts `fakeReport(subject)` with
- * the verified digest through `operateInTx`, then completes. `deps` is a thunk because the
- * launcher that creates this task is itself part of the dependencies.
+ * the verified digest through `operateInTx`, then completes; `hooks` run around that commit. `deps`
+ * is a thunk because the launcher that creates this task is itself part of the dependencies.
  */
 export function defineFakeAssignment(
   deps: () => BindingDeps,
-  options: { readonly accept: boolean },
+  options: { readonly accept: boolean; readonly hooks?: FakeHooks },
 ): FakeAssignment {
+  const { hooks } = options;
   return defineTask<FakeInput, { phase: "run" }, null>({
     name: FAKE_ASSIGNMENT_NAME,
     version: 1,
     initial: () => ({ phase: "run" }),
     phases: {
       run: async (task, runtime, phaseContext) => {
+        await hooks?.before?.(task.input);
         await runtime.commit(async (tx) => {
           if (options.accept) {
             const { attemptId, subjectDigest, verifiedDigest } = task.input;
@@ -236,6 +248,7 @@ export function defineFakeAssignment(
           }
           return completed(null);
         }, phaseContext);
+        await hooks?.after?.(task.input);
       },
     },
     abort: async (_task, runtime, phaseContext) => {
