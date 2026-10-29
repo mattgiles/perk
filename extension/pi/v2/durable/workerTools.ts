@@ -152,20 +152,31 @@ export const lsTool = defineTool({
   parameters: lsSchema,
   replay: "safe",
   async execute(args, api, context) {
-    const env = requireEnv(api);
-    const dir = await resolveStart(env, args.path, context);
-    const names = getOrThrow(await env.listDir(dir, context))
-      .map((info) =>
-        info.kind === "directory"
-          ? `${info.name}/`
-          : info.kind === "symlink"
-            ? `${info.name}@`
-            : info.name,
-      )
-      .sort(compareBytes);
-    return textResult(capped(names, LIST_CAP), "(empty directory)");
+    return textResult(
+      await listDirectory(requireEnv(api), args.path, context),
+      "(empty directory)",
+    );
   },
 });
+
+/** `ls`'s output lines: the names of one directory, sorted bytewise and capped. */
+export async function listDirectory(
+  env: ExecutionEnv,
+  path: string | undefined,
+  context: Context,
+): Promise<string[]> {
+  const dir = await resolveStart(env, path, context);
+  const names = getOrThrow(await env.listDir(dir, context))
+    .map((info) =>
+      info.kind === "directory"
+        ? `${info.name}/`
+        : info.kind === "symlink"
+          ? `${info.name}@`
+          : info.name,
+    )
+    .sort(compareBytes);
+  return capped(names, LIST_CAP);
+}
 
 const findSchema = Type.Object({
   pattern: Type.String({
@@ -184,15 +195,27 @@ export const findTool = defineTool({
   parameters: findSchema,
   replay: "safe",
   async execute(args, api, context) {
-    const env = requireEnv(api);
-    const start = await resolveStart(env, args.path, context);
-    const paths = (await walk(env, start, context))
-      .filter((entry) => posix.matchesGlob(entry.relative, args.pattern))
-      .map((entry) => rootRelative(env, entry.absolute))
-      .sort(compareBytes);
-    return textResult(capped(paths, LIST_CAP), "(no matches)");
+    return textResult(
+      await findPaths(requireEnv(api), args.pattern, args.path, context),
+      "(no matches)",
+    );
   },
 });
+
+/** `find`'s output lines: the matching paths, relative to the root, sorted bytewise and capped. */
+export async function findPaths(
+  env: ExecutionEnv,
+  pattern: string,
+  path: string | undefined,
+  context: Context,
+): Promise<string[]> {
+  const start = await resolveStart(env, path, context);
+  const paths = (await walk(env, start, context))
+    .filter((entry) => posix.matchesGlob(entry.relative, pattern))
+    .map((entry) => rootRelative(env, entry.absolute))
+    .sort(compareBytes);
+  return capped(paths, LIST_CAP);
+}
 
 const grepSchema = Type.Object({
   text: Type.String({ description: "Literal, case-sensitive text to search for (not a regex)" }),
@@ -211,35 +234,50 @@ export const grepTool = defineTool({
   parameters: grepSchema,
   replay: "safe",
   async execute(args, api, context) {
-    const env = requireEnv(api);
-    if (args.text === "") throw new Error("grep: text is empty");
-    const start = await resolveStart(env, args.path, context);
-    const startInfo = getOrThrow(await env.fileInfo(start, context));
-    const files =
-      startInfo.kind === "directory"
-        ? (await walk(env, start, context))
-            .filter((entry) => entry.info.kind === "file")
-            .map((entry) => ({ absolute: entry.absolute, size: entry.info.size }))
-        : [{ absolute: start, size: startInfo.size }];
-    const ordered = files
-      .map((file) => ({ ...file, path: rootRelative(env, file.absolute) }))
-      .sort((a, b) => compareBytes(a.path, b.path));
-    const matches: string[] = [];
-    for (const file of ordered) {
-      if (file.size > GREP_MAX_BYTES) continue;
-      const text = getOrThrow(await env.readTextFile(file.absolute, context));
-      if (text.includes("\0")) continue;
-      const lines = text.split("\n");
-      for (let i = 0; i < lines.length; i++) {
-        const line = (lines[i] ?? "").replace(/\r$/, "");
-        if (!line.includes(args.text)) continue;
-        matches.push(`${file.path}:${i + 1}:${line.slice(0, GREP_LINE_CHARS)}`);
-        if (matches.length > MATCH_CAP) return textResult(capped(matches, MATCH_CAP), "");
-      }
-    }
-    return textResult(matches, "(no matches)");
+    return textResult(
+      await grepText(requireEnv(api), args.text, args.path, context),
+      "(no matches)",
+    );
   },
 });
+
+/**
+ * `grep`'s output lines: `path:line:text` for every line containing `text`, files in bytewise path
+ * order, capped. Throws for an empty `text`.
+ */
+export async function grepText(
+  env: ExecutionEnv,
+  text: string,
+  path: string | undefined,
+  context: Context,
+): Promise<string[]> {
+  if (text === "") throw new Error("grep: text is empty");
+  const start = await resolveStart(env, path, context);
+  const startInfo = getOrThrow(await env.fileInfo(start, context));
+  const files =
+    startInfo.kind === "directory"
+      ? (await walk(env, start, context))
+          .filter((entry) => entry.info.kind === "file")
+          .map((entry) => ({ absolute: entry.absolute, size: entry.info.size }))
+      : [{ absolute: start, size: startInfo.size }];
+  const ordered = files
+    .map((file) => ({ ...file, path: rootRelative(env, file.absolute) }))
+    .sort((a, b) => compareBytes(a.path, b.path));
+  const matches: string[] = [];
+  for (const file of ordered) {
+    if (file.size > GREP_MAX_BYTES) continue;
+    const content = getOrThrow(await env.readTextFile(file.absolute, context));
+    if (content.includes("\0")) continue;
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = (lines[i] ?? "").replace(/\r$/, "");
+      if (!line.includes(text)) continue;
+      matches.push(`${file.path}:${i + 1}:${line.slice(0, GREP_LINE_CHARS)}`);
+      if (matches.length > MATCH_CAP) return capped(matches, MATCH_CAP);
+    }
+  }
+  return matches;
+}
 
 // One character of a well-formed string: anything but a surrogate, or a surrogate pair.
 const TEXT_CHAR = String.raw`(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])`;
