@@ -38,7 +38,7 @@ def test_git_common_dir(git_repo, tmp_path_factory):
     # Main checkout: its own resolved `.git`.
     main = git.git_common_dir(git_repo)
     assert main == (git_repo / ".git").resolve()
-    assert main.is_absolute()
+    assert main is not None and main.is_absolute()
 
     # A subdirectory and a linked worktree resolve to the same shared dir.
     sub = git_repo / "sub"
