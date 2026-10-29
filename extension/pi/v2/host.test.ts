@@ -15,6 +15,7 @@ const ENTRY_SPECIFIERS: Readonly<Record<string, string>> = {
   "@earendil-works/chord": "@earendil-works/chord/context",
   "@earendil-works/pi-ai": "@earendil-works/pi-ai/models",
   "@earendil-works/pi-durable": "@earendil-works/pi-durable",
+  "@earendil-works/pi-env": "@earendil-works/pi-env",
 };
 
 function isStringRecord(value: unknown): value is Record<string, string> {

@@ -1,6 +1,7 @@
 // The v2 tier wiring: fast ∪ slow is every v2 test and the two are disjoint, the fast tier holds
-// its anchors, the filename rule partitions a synthetic tree (pruning node_modules), and the
-// recipes plus the `[[ci.checks]]` rows run what they claim.
+// its anchors, the filename rule partitions a synthetic tree (pruning node_modules), the slow tier
+// runs under a reporter that prints diagnostics, and the recipes plus the `[[ci.checks]]` rows run
+// what they claim.
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -100,6 +101,19 @@ test("the v2 recipes run the v2 runner and the aggregates reach them", () => {
   ]) {
     assert.ok(testBody.includes(line), `\`test\` runs \`${line}\``);
   }
+});
+
+test("the slow tier prints its diagnostics: spec reporter for slow, dot for fast", () => {
+  const runner = readFileSync(resolve(import.meta.dirname, "runTier.ts"), "utf8");
+  assert.ok(
+    runner.includes('const reporter = tier === "slow" ? "spec" : "dot";'),
+    "runTier.ts picks the reporter per tier",
+  );
+  // Assembled from parts so the expected source text is not itself read as a template string.
+  assert.ok(
+    runner.includes(["`--test-reporter=$", "{reporter}`"].join("")),
+    "runTier.ts passes the per-tier reporter to node --test",
+  );
 });
 
 test("the three v2 rows run their recipes over globs that reach their inputs", () => {

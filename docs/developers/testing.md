@@ -120,7 +120,10 @@ guards and tests) is carved out of every v1 surface, so it carries its own recip
 - `just test-v2` — the **fast** tier: every v2 test except `*.slow.test.ts`.
 - `just test-v2-slow` — the **slow** tier: `*.slow.test.ts` files (real-process / SIGKILL cases).
   A slow test is born with the suffix — tiering is by filename, not a list. While the tier is
-  empty, the recipe prints a notice and exits 0; an empty fast tier is an error.
+  empty, the recipe prints a notice and exits 0; an empty fast tier is an error. The slow tier
+  runs under the `spec` reporter (the fast tier under `dot`) because the containment probes emit
+  `perk-v2-containment …` evidence rows as test diagnostics, which `dot` drops and the CI log
+  preserves.
 
 `extension/pi/v2/testing/runTier.ts` is the v2-owned runner (v2 may not import v1's).
 `just typecheck` and `just test` reach all three, so `just ci` and GitHub CI cover v2. In-session,

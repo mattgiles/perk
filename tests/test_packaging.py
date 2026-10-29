@@ -490,6 +490,7 @@ def test_v2_workspace_publish_isolation():
         "@earendil-works/chord": "1.4.0",
         "@earendil-works/pi-ai": "1.4.0",
         "@earendil-works/pi-durable": "1.4.0",
+        "@earendil-works/pi-env": "1.4.0",
     }
     assert v2["scripts"]["typecheck"] == "tsc --noEmit"
 

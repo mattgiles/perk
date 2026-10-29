@@ -947,6 +947,24 @@ acquisition, unique and strictly increasing because the directory name is the cl
 effects left by earlier owners keys on it.
 _Avoid_: generation, version, term
 
+**Supervised execution** (pi-durable v2):
+A worker command run through a pi-env daemon whose stdin is the owner's pipe; the daemon puts every
+command in its own session and kills every session it started when the pipe closes — the stop half
+of the fence. A graceful close must clean up and await settlement before closing the connection.
+_Avoid_: sandbox, container, subprocess isolation
+
+**Stop set** / **Residual** (pi-durable v2):
+What a containment mechanism kills on owner death, vs. what it provably cannot; residuals are
+isolated by per-attempt workspaces where files are the harm, closed before adoption where they are
+not (a signal to a reused pid), and reported — never pretended away.
+_Avoid_: leak list, known issues, blast radius
+
+**Report-only sweep** (pi-durable v2):
+The Linux `/proc/*/environ` scan for the `PERK_V2_STORE` / `PERK_V2_EPOCH` labels of earlier
+epochs, run at open to list survivors with their start times; it kills nothing and never blocks
+open.
+_Avoid_: reaper, fence kill, orphan cleanup
+
 **Wait reason**:
 The closed-vocabulary domain reason a quiescent execution is not progressing — `pending_decision`,
 `unmet_prerequisite`, `assignment_incomplete`, `repair_required`, `parked`, `blocked`, `sleeping`,

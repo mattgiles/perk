@@ -68,7 +68,10 @@ def _family_keys(deps: dict[str, str]) -> set[str]:
 # v2 workspace family is pinned by `extension/pi/v2/package.json` alone — a Durable pin bump is its
 # own re-verification trigger (docs/design/pi-durable-v2-foundations.md §15), never a side effect
 # of a Pi adoption. The v2 workspace also declares pi-ai, a host-family member shared at one pin.
-V2_WORKSPACE_FAMILY = frozenset({"@earendil-works/pi-durable", "@earendil-works/chord"})
+# pi-env (the local command daemon the containment verdict measures, §10) is a v2-family member.
+V2_WORKSPACE_FAMILY = frozenset(
+    {"@earendil-works/pi-durable", "@earendil-works/chord", "@earendil-works/pi-env"}
+)
 
 
 def _host_family() -> set[str]:
