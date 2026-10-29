@@ -131,6 +131,8 @@ async function crashedWithin(first: FirstProcess): Promise<void> {
   } finally {
     clearTimeout(timer);
   }
+  // A crashed storage hangs every call, a close included: never dispose this process.
+  first.opened.abandon();
 }
 
 function plainCrashable(t: Parameters<typeof fixtureSubject>[0]) {
