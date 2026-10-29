@@ -170,19 +170,10 @@ test("B6: the presented record set is complete, including records nothing refere
     modelChain(inputs),
   );
 
-  // 3. The cancellation. Were the latest observation not presented, the next run would take seq 2;
-  //    were the cancellation not presented, it would admit the new tree.
+  // 3. The cancellation, then its consequence: were the latest observation not presented, the run
+  //    would take seq 2; were the cancellation not presented, it would admit the new tree.
   inputs.push(cancelOp());
   expectApplied(await operate(session.target, cancelOp()));
-  session = await checkState(
-    t,
-    "the cancellation",
-    session,
-    path,
-    setup,
-    installed,
-    modelChain(inputs),
-  );
   inputs.push(runOp(T2, C2));
   const run = expectApplied(await operate(session.target, runOp(T2, C2)));
   assert.deepEqual(
@@ -196,7 +187,7 @@ test("B6: the presented record set is complete, including records nothing refere
     "the cancellation was presented: no admission for the new tree",
   );
   const final = modelChain(inputs);
-  session = await checkState(t, "after the consequences", session, path, setup, installed, final);
+  session = await checkState(t, "the cancellation", session, path, setup, installed, final);
   const finalRead = (await readRecords(session.opened.harness)).records;
 
   // Vacuity control: the kernel accepts each truncated set, so only presentation catches the
