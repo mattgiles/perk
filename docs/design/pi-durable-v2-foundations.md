@@ -712,6 +712,120 @@ At the last two points a failure is the refusal `snapshot_tampered` (§9). The a
 records the digest it verified. An outcome authorizes only its exact subject. Node 2.4's proof
 list includes a symlink entry and a gitlink entry.
 
+### The observer (node 2.4)
+
+**Modules.** Under `extension/pi/v2/`:
+
+- `subject/git.ts`: the observer's git reads and the strict path decoder `decodeStrictUtf8`;
+- `subject/snapshot.ts`: the snapshot store (`ensureSnapshot`), the verifier (`verifySnapshot`),
+  the path helpers (`snapshotDir`, `snapshotManifestPath`) and `discardTree`;
+- `subject/observe.ts`: `observeGitSubject` and `gitObserver`, the host's `Observe` seam (§8);
+- `kernel/subject.ts::parseSnapshotManifest`: the pure manifest parser, the renderer's inverse.
+
+`subject/` is a Durable-free open-layer directory with `node:` imports only, so P10's layering is
+unchanged. A durable-layer consumer (node 3.1's report tool) cannot import it; it receives
+`verifySnapshot` through its host-program seam (the assignment factory's `AssignmentContext`
+already carries `storeDir`), the way the attempt launcher arrives.
+
+**Ref and resolution.** The ref must be a ref name: `git check-ref-format --allow-onelevel`, so
+`HEAD`, `main`, `refs/heads/main` and tags pass, while revision expressions (`HEAD~1`, `main^`,
+`@{u}`, `a..b`) are `observation_failed` even though git could resolve them. A ref that is empty,
+not well-formed, contains NUL or starts with `-` is refused before git runs. The ref is recorded
+verbatim and resolved **once**: `rev-parse --verify --end-of-options <ref>^{commit}`, then
+`<commit>^{tree}` from that commit oid, so a ref moving mid-observation cannot pair one commit
+with another's tree.
+
+**The repo.** `repo` is the realpath of the repo root the caller names: a worktree top, a linked
+worktree's top, or a bare git dir. Git runs as `git -C <root>` with `GIT_CEILING_DIRECTORIES` set
+to the root's parent, so discovery never climbs into an enclosing repo and a subdirectory of a
+repo fails to observe. Switching worktrees therefore changes the recorded repo, which the
+kernel's tracked-repo rule refuses (§12).
+
+**The git environment.** Every inherited `GIT_*` variable is dropped (`GIT_DIR`, `GIT_WORK_TREE`,
+`GIT_INDEX_FILE`, `GIT_CONFIG_COUNT`/`KEY`/`VALUE`, …); the observer then sets
+`GIT_CEILING_DIRECTORIES`, `GIT_NO_REPLACE_OBJECTS=1` and `GIT_TERMINAL_PROMPT=0`. Only
+`rev-parse`, `check-ref-format`, `ls-tree` and `cat-file --batch` run, as argv arrays with an
+explicit timeout (60 s) each; none runs a filter, textconv, hook, status or checkout. The claim
+is scoped: neither the tree's content nor an inherited environment variable can select a helper.
+Repo-local, user and system config still apply, so `safe.directory` keeps working. These git
+children are the host's own short-lived reads over pipes, not a worker capability (P7); §10's
+`PERK_V2_*` labels apply to worker spawns only.
+
+**Raw object reads.** The entries come from `ls-tree -r -z --full-tree <tree>`, and every blob
+and link object's bytes from one `cat-file --batch` stream, never from `archive` or a checkout
+(both apply `eol`, `export-*` and filter attributes). Each object must echo the requested oid
+and be a blob. The manifest is **re-derived from git on every observation**: the stored manifest
+file is never the source of the digest. A first observation writes the objects into the temp
+directory during that same pass; a reuse only hashes them.
+
+**Materialization order.**
+
+1. validate every entry before any write: `100644`/`100755` blob, `120000` blob (link) or
+   `160000` commit (gitlink), each path a snapshot path, each oid a git oid, no duplicate, no path
+   that is both an entry and a directory;
+2. write into the sibling temp directory `subjects/.tmp.<nonce>/`, each file created exclusively
+   and then `chmod 0444`; create the gitlink directories;
+3. `chmod 0555` every directory, the root included (explicit modes, independent of the umask);
+4. rename the directory into place. The temp is a sibling, so the rename never needs write
+   permission on the `0555` directory itself. A collision (`ENOTEMPTY`/`EEXIST`) discards the temp
+   and verifies the existing snapshot;
+5. write the manifest only when absent: `subjects/.tmp.<nonce>.manifest`, `chmod 0444`, rename;
+6. verify.
+
+**Partial states.** The directory is renamed before the manifest, so a crash can leave a
+directory without its manifest: the next observation writes the manifest from git and verifies
+the directory against it. A manifest without its directory gets the directory materialized, the
+manifest kept, and verification decides. A snapshot directory and a manifest file are each
+written only when absent, never overwritten or repaired; stray `.tmp.*` names are ignored. There
+is no fsync: the protocol guards process death, not power loss, and a torn write fails
+verification instead of passing.
+
+**Reuse fails closed.** When a later observation of the same tree finds the snapshot or its
+manifest failing verification, it is `observation_failed` naming the problem, and nothing is
+rewritten. Recovery is manual: restore the write bits, remove the snapshot, re-run.
+
+**Path text.** Every decode of path bytes — `ls-tree` paths, the verifier's directory-entry
+names, the manifest bytes — is strict UTF-8 that keeps a leading BOM (`decodeStrictUtf8`): the
+default decoder consumes a leading U+FEFF, which in a filename is part of the name. A CR is an
+ordinary path character (the grammar forbids only LF, NUL, lone surrogates and non-UTF-8), so a
+manifest line whose path ends in CR ends in CRLF and stays canonical. This is safe because the
+verifier checks the manifest file's digest before it parses anything.
+
+**Verifier precisions.** The manifest digest is checked first; the parse (`parseSnapshotManifest`)
+accepts only canonical text, an exact re-render round trip. The walk reads directory-entry names
+as raw bytes, classifies every child by `lstat` (a link is never followed: a symlink, fifo,
+socket or device is a problem), and visits names in bytewise order, so the reported problem is
+deterministic: the first one in the walk, otherwise the first missing path in manifest order.
+Every missing, unreadable or altered path is a returned problem, never a throw; only a malformed
+`tree` or `manifestDigest` argument throws (`RangeError`, a caller bug).
+
+**The failure boundary.** `observeGitSubject` maps every operational failure to
+`observation_failed` with a detail naming its step: invalid input, a `GitError`, an
+unrepresentable tree, a failed verification, a filesystem error (an `E…` errno code), and
+facts `observationProblem` rejects. Anything else is a programming error and is rethrown; the
+host rethrows it after close and release (§10).
+
+**Removal.** Snapshot directories are `0555`, so removing a snapshot or a store needs the owner's
+write bits restored first: `discardTree` does that (never following a link), then removes the
+tree. Retention and GC, abandoned `subjects/.tmp.*` entries included, stay deferred (§14).
+
+**Node 2.4 proves:**
+
+- `S1` materializing twice yields one snapshot — also temp then rename, a competing
+  observation inside the window, and the partial states (`subject/snapshot.test.ts`);
+- `S2` uncommitted edits in the live checkout never appear in the snapshot, which holds raw
+  committed bytes (`subject/observe.test.ts`);
+- `S3` a tampered snapshot fails verification — the tamper matrix, BOM renames included, and
+  fail-closed reuse (`subject/snapshot.test.ts`);
+- `S4` symlink and gitlink entries materialize and verify per §5 (`subject/snapshot.test.ts`);
+- `S5` an unresolvable ref or a missing repo is `observation_failed` and records nothing
+  (`subject/observe.test.ts`, `lifecycle/observation.test.ts`);
+- `S6` a new tree at the ref yields a new subject, and a commit with the same tree a new
+  observation of the same subject (`subject/observe.test.ts`, `lifecycle/observation.test.ts`).
+
+The parser cases (CR and BOM paths included) are in `kernel/subject.test.ts`, the git reads and
+the decoder in `subject/git.test.ts`, and the exact-names case in `subject/snapshot.test.ts`.
+
 ## 6. Record tiers
 
 | Tier | Examples | Sole writer | Lifetime | Who reads |
@@ -905,7 +1019,8 @@ record (§6). Snapshot files left under `<store>/subjects/` are cache, not recor
 reconcile commit with the cancellation record as its input.
 
 **Where observation runs.** Observation is I/O, so it runs outside the commit but inside the owner
-lock, because it writes under `<store>/subjects/`.
+lock, because it writes under `<store>/subjects/`. The observer is
+`subject/observe.ts::gitObserver`, injected through the host's `Observe` seam (§5 the observer).
 
 **Refusals.** A kernel refusal rolls back the whole commit, the observation input included, so a
 refused operation leaves no record (node 2.2's proof `B4`, §7). A replayed operation also records
@@ -1397,6 +1512,7 @@ explicit, reviewed amendment, recorded in the log below.
 | §12 rule precisions — current-subject rounds, attempt 1 started with admission, terminal cancellation and completion, the policy parameter, the refusal order, `superseded` as a spent decision, report validity, well-formed text, the tracked ref, record integrity | node 2.1 |
 | §4 `launch` op kind; §6 record presentation (the record catalog `perk.v2.catalog`) and the `launch` durable-map row; §7 the binding's `operate`, the attempt launcher contract and `B1`–`B6`; §9 commit-failure classification (the failure-latch probe) and `BindingFault` | node 2.2 |
 | §10 the host (node 2.3): host modules, program seam and one-composition rule, extension-name refusal, liveness and release precisions, gate field order and mismatch shape, the missing-store rule, vacuous step 2, the consistent-view quiescence loop, wait-reason precedence, open failure as `uncertain`, commit-free failure detection, `H1`–`H8`; §9 open-failure row; §11 null epoch | node 2.3 |
+| §5 the observer (node 2.4): `subject/` modules, ref-name rule and single resolution, repo-root realpath and ceiling, scrubbed git environment, raw-object reads with the manifest re-derived per observation, materialization order (temp directory → rename, directory before manifest, never overwritten), fail-closed reuse, no fsync, BOM-keeping strict decoding and CR as path data, strict verifier and canonical manifest parser, removal via `discardTree`, `S1`–`S6`; §8 observer pointer | node 2.4 |
 
 ## 16. Measured evidence (reserved — node 3.4)
 
