@@ -12,6 +12,7 @@
 //     acknowledgement included — as a killed process would.
 
 import assert from "node:assert/strict";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import type { Context, JsonValue } from "@earendil-works/chord";
@@ -53,10 +54,11 @@ import {
 import { fixturePolicy, fixtureWorkerPrompt } from "../kernel/fixture.ts";
 import { type FixtureProgramOptions, fixtureProgram } from "../program.ts";
 import { gitObserver } from "../subject/observe.ts";
+import { SNAPSHOT_FILE_MODE, snapshotDir } from "../subject/snapshot.ts";
 import { attemptIdOf, REF, type Role } from "./binding.ts";
 import { context, crashable, defer, fauxSetup, type Opened, type Setup } from "./durable.ts";
 import { hostOptions } from "./host.ts";
-import { commitAll, gitRepo, subjectStore, treeOf, writeFiles } from "./subject.ts";
+import { commitAll, gitRepo, subjectStore, treeOf, unlock, writeFiles } from "./subject.ts";
 
 export const ROLES: readonly Role[] = ["a", "b"];
 
@@ -221,6 +223,52 @@ export async function startNative(
   const script = roleScript(host.setup.faux, subject.tree, scripts(subject.tree));
   const outcome = await runHost(host.options, { type: "start", observe: subject.observe });
   return { ...subject, ...host, script, outcome };
+}
+
+/**
+ * A barrier for `parties` concurrent steps: `arrive()` resolves once all have arrived. Gating each
+ * role's first model request on it means both workers exist — so both attempts passed their
+ * attempt-start verification — before any step acts.
+ */
+export function barrier(parties: number): { arrive(): Promise<void>; arrived(): number } {
+  let count = 0;
+  let open!: () => void;
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return {
+    arrive: () => {
+      count++;
+      if (count >= parties) open();
+      return opened;
+    },
+    arrived: () => count,
+  };
+}
+
+/** Tamper with one snapshot file of `tree` (idempotent), and restore its bytes and mode. */
+export function snapshotTamper(
+  storeDir: string,
+  tree: string,
+  path = "a.txt",
+): { tamper(): void; restore(): void; tampered(): boolean } {
+  const file = join(snapshotDir(storeDir, tree), path);
+  let original: Buffer | undefined;
+  return {
+    tamper: () => {
+      if (original !== undefined) return;
+      original = readFileSync(file);
+      unlock(file);
+      writeFileSync(file, "tampered\n");
+    },
+    restore: () => {
+      if (original === undefined) return;
+      writeFileSync(file, original);
+      chmodSync(file, SNAPSHOT_FILE_MODE);
+      original = undefined;
+    },
+    tampered: () => original !== undefined,
+  };
 }
 
 // ── host options ────────────────────────────────────────────────────────────────────────────────
