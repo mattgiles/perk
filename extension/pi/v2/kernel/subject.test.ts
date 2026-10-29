@@ -10,6 +10,7 @@ import {
   gitTreeSubject,
   isSnapshotPath,
   type ManifestEntry,
+  parseSnapshotManifest,
   snapshotManifest,
   subjectDigest,
 } from "./subject.ts";
@@ -153,4 +154,55 @@ test("isSnapshotPath accepts POSIX relative paths and rejects the rest", () => {
   ]) {
     assert.equal(isSnapshotPath(path), false, JSON.stringify(path));
   }
+});
+
+test("parseSnapshotManifest inverts the renderer: the golden and the empty text round-trip", () => {
+  const parsed = parseSnapshotManifest(GOLDEN);
+  assert.ok(parsed.ok, parsed.ok ? "" : parsed.problem);
+  const rendered = snapshotManifest(parsed.entries);
+  assert.ok(rendered.ok);
+  assert.equal(rendered.text, GOLDEN);
+  assert.deepEqual(
+    new Set(parsed.entries.map((entry) => JSON.stringify(entry))),
+    new Set(ENTRIES.map((entry) => JSON.stringify(entry))),
+  );
+  assert.deepEqual(parseSnapshotManifest(""), { ok: true, entries: [] });
+});
+
+test("parsed paths keep every character the grammar allows: CR and a leading BOM", () => {
+  const paths = ["cr\r", "a\rb", "\uFEFFroot", "dir/\uFEFFnested"];
+  const manifest = snapshotManifest(paths.map((path) => blob(path)));
+  assert.ok(manifest.ok);
+  assert.ok(manifest.text.includes("cr\r\n"), "a CR-ending path renders as a CRLF line ending");
+  const parsed = parseSnapshotManifest(manifest.text);
+  assert.ok(parsed.ok, parsed.ok ? "" : parsed.problem);
+  assert.deepEqual(parsed.entries.map((entry) => entry.path).sort(), [...paths].sort());
+  const again = snapshotManifest(parsed.entries);
+  assert.ok(again.ok);
+  assert.equal(again.text, manifest.text);
+});
+
+test("parseSnapshotManifest rejects every non-canonical text with a problem, never a throw", () => {
+  const SHA = "f".repeat(64);
+  const OID = "7".repeat(40);
+  const line = (path: string, kind = "blob", sha = SHA, mode = "100644", oid = OID) =>
+    `${kind} ${sha} ${mode} ${oid} ${path}\n`;
+  const cases: [string, string][] = [
+    ["no trailing LF", line("a").slice(0, -1)],
+    ["too few fields", `blob ${SHA} 100644 ${OID}\n`],
+    ["an empty path", `blob ${SHA} 100644 ${OID} \n`],
+    ["unknown kind", line("a", "tree")],
+    ["a blob with -", line("a", "blob", "-")],
+    ["a gitlink with a sha", line("a", "gitlink", SHA, "160000")],
+    ["lines out of order", line("b") + line("a")],
+    ["a duplicate path", line("a") + line("a")],
+    ["a .. segment", line("a/../b")],
+    ["a mode/kind mismatch", line("a", "blob", SHA, "120000")],
+    ["uppercase hex", line("a", "blob", SHA.toUpperCase())],
+  ];
+  for (const [label, text] of cases) {
+    const parsed = parseSnapshotManifest(text);
+    assert.equal(parsed.ok, false, label);
+  }
+  assert.ok(parseSnapshotManifest(line("a") + line("b")).ok, "the control is canonical");
 });

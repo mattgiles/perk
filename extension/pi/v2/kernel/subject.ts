@@ -9,6 +9,10 @@
 // - A path that cannot be represented (LF, NUL, a lone surrogate, a non-relative or
 //   non-normalized path) makes the manifest a `problem` result, never a throw, so the observer
 //   can map it to `observation_failed`.
+// - The parser is the renderer's inverse and accepts only canonical text: a parse must re-render
+//   to exactly the input, so a parsed manifest is ordered, unique and valid by construction.
+//   Every character `isSnapshotPath` allows is path data, a CR included — a line whose path ends
+//   in CR ends in CRLF and is still canonical.
 
 import { isWellFormedText, sha256Hex } from "./canonical.ts";
 import { isGitOid, isSha256Hex } from "./identity.ts";
@@ -113,4 +117,76 @@ export function snapshotManifest(entries: readonly ManifestEntry[]): SnapshotMan
     .map(({ entry }) => manifestLine(entry))
     .join("");
   return { ok: true, text, digest: sha256Hex(text) };
+}
+
+export type ParsedSnapshotManifest =
+  | { readonly ok: true; readonly entries: readonly ManifestEntry[] }
+  | { readonly ok: false; readonly problem: string };
+
+/** The line's first four space-separated fields and the rest (the path), or `null` if fewer. */
+function manifestFields(line: string): readonly [string, string, string, string, string] | null {
+  const fields: string[] = [];
+  let rest = line;
+  for (let n = 0; n < 4; n++) {
+    const at = rest.indexOf(" ");
+    if (at < 0) return null;
+    fields.push(rest.slice(0, at));
+    rest = rest.slice(at + 1);
+  }
+  const [kind, sha, mode, oid] = fields;
+  if (kind === undefined || sha === undefined || mode === undefined || oid === undefined) {
+    return null;
+  }
+  if (rest === "") return null;
+  return [kind, sha, mode, oid, rest];
+}
+
+function parsedEntry(
+  kind: string,
+  sha: string,
+  mode: string,
+  oid: string,
+  path: string,
+): ManifestEntry | string {
+  switch (kind) {
+    case "blob":
+      if (sha === "-") return "a blob carries no sha256";
+      if (mode !== "100644" && mode !== "100755")
+        return `mode ${JSON.stringify(mode)} is not a blob mode`;
+      return { kind, mode, oid, sha256: sha, path };
+    case "link":
+      if (sha === "-") return "a link carries no sha256";
+      if (mode !== "120000") return `mode ${JSON.stringify(mode)} is not a link mode`;
+      return { kind, mode, oid, sha256: sha, path };
+    case "gitlink":
+      if (sha !== "-") return "a gitlink carries a sha256";
+      if (mode !== "160000") return `mode ${JSON.stringify(mode)} is not a gitlink mode`;
+      return { kind, mode, oid, path };
+    default:
+      return `unknown entry kind ${JSON.stringify(kind)}`;
+  }
+}
+
+/**
+ * The entries of a canonical snapshot manifest, or the first problem. Never throws. A path keeps
+ * everything after the fourth space, spaces and CR included; the result must re-render to exactly
+ * `text`, which rejects order, duplicates and every other non-canonical form.
+ */
+export function parseSnapshotManifest(text: string): ParsedSnapshotManifest {
+  if (typeof text !== "string") return { ok: false, problem: "manifest is not text" };
+  if (text === "") return { ok: true, entries: [] };
+  if (!text.endsWith("\n")) return { ok: false, problem: "manifest does not end with LF" };
+  const entries: ManifestEntry[] = [];
+  const lines = text.slice(0, -1).split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const fields = manifestFields(lines[i] ?? "");
+    if (fields === null) return { ok: false, problem: `line ${i + 1}: fewer than five fields` };
+    const entry = parsedEntry(...fields);
+    if (typeof entry === "string") return { ok: false, problem: `line ${i + 1}: ${entry}` };
+    entries.push(entry);
+  }
+  const rendered = snapshotManifest(entries);
+  if (!rendered.ok) return { ok: false, problem: rendered.problem };
+  if (rendered.text !== text) return { ok: false, problem: "manifest is not canonical" };
+  return { ok: true, entries };
 }
