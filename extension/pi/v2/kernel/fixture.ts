@@ -9,9 +9,13 @@
 //   function of the record set.
 // - Incomplete coverage stays visible: a role without an accepted outcome is listed with
 //   `acceptedOutcomeId: null` and `complete` is false (P6).
+// - The worker policy is pure text and names: the capability set binds the model, the worker
+//   extension and every tool it enables (the report tool included, P7), plus the digest of the
+//   one instructions text, so a changed instruction is a different assignment.
 
-import { type CapabilitySet, capabilitySetDigest } from "./capability.ts";
-import { deriveAssignmentId } from "./identity.ts";
+import { sha256Hex } from "./canonical.ts";
+import { type CapabilitySet, capabilitySetDigest, normalizeCapabilitySet } from "./capability.ts";
+import { deriveAssignmentId, isGitOid, isSlug } from "./identity.ts";
 import { indexRecords, type KernelRecord, type RecordIndex } from "./records.ts";
 
 export const FIXTURE_EXECUTION_KIND = "fixture-review";
@@ -23,6 +27,61 @@ export const FIXTURE_ACTOR = "human:cli";
 
 /** The host-resolved, code-owned policy the fixture rules read (versioned by `policyVersion`). */
 export type FixturePolicy = { readonly capabilitySet: CapabilitySet };
+
+/** The extension that carries the worker's tools and the native assignment task. */
+export const FIXTURE_WORKER_EXTENSION = "perk.v2.report";
+/** The tool a worker finishes through. */
+export const FIXTURE_REPORT_TOOL = "report";
+/** Every tool a worker conversation enables, sorted: three read tools, `read`, and the report. */
+export const FIXTURE_WORKER_TOOLS = ["find", "grep", "ls", "read", FIXTURE_REPORT_TOOL] as const;
+/** The worker's model. */
+export const FIXTURE_MODEL = { provider: "faux", modelId: "faux-1" } as const;
+/** The policy version of `fixturePolicy()`; a change to the policy bumps it. */
+export const FIXTURE_POLICY_VERSION = 1;
+
+const FIXTURE_INSTRUCTIONS = [
+  "You review one git tree. The workspace root is a read-only snapshot of that tree.",
+  "Read it only with these tools: `read` (one file), `ls` (one directory), `grep` (literal,",
+  "case-sensitive text, never a regular expression) and `find` (a glob matched against paths",
+  "relative to the search root).",
+  "Nothing can be written or executed, and every path outside the snapshot is refused.",
+  "Finish by calling `report` exactly once, alone in its turn, as your last action, with",
+  '{"subjectDigest": <the tree named in the request>, "summary": <non-empty text>,',
+  '"findings": [{"path": <snapshot-relative path>, "note": <non-empty text>}]}.',
+  'A finding path has no leading "/" and no empty, "." or ".." segment. Use an empty',
+  "findings list when there is nothing to note.",
+].join("\n");
+
+/** The worker's fixed instructions; their sha256 is the capability set's `instructionsDigest`. */
+export function renderFixtureInstructions(): string {
+  return FIXTURE_INSTRUCTIONS;
+}
+
+/**
+ * The per-attempt submission content naming the role and the subject tree; deterministic, so a
+ * rerun submits the same text. Throws `RangeError` for a malformed role or tree.
+ */
+export function fixtureWorkerPrompt(role: string, subjectDigest: string): string {
+  if (!isSlug(role)) throw new RangeError(`malformed role: ${JSON.stringify(role)}`);
+  if (!isGitOid(subjectDigest)) {
+    throw new RangeError(`malformed subject digest: ${JSON.stringify(subjectDigest)}`);
+  }
+  return `Review subject ${subjectDigest} as reviewer ${role}.`;
+}
+
+/** The fixture policy: the normalized worker capability set over the constants above. */
+export function fixturePolicy(): FixturePolicy {
+  return {
+    capabilitySet: normalizeCapabilitySet({
+      model: { provider: FIXTURE_MODEL.provider, modelId: FIXTURE_MODEL.modelId },
+      extensions: [FIXTURE_WORKER_EXTENSION],
+      tools: [...FIXTURE_WORKER_TOOLS],
+      instructionsDigest: sha256Hex(renderFixtureInstructions()),
+      posture: "read-only",
+      workspaceRoot: "subject-snapshot",
+    }),
+  };
+}
 
 /** The assignment id for `role` over `subjectDigest` under the policy's capability set. */
 export function roleAssignmentId(

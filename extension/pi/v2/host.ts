@@ -41,6 +41,7 @@ import {
   type Wake,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { type AttemptEnding, readAttemptEndings } from "./durable/ending.ts";
 import {
   type AttemptLauncher,
   type BindingDeps,
@@ -137,6 +138,8 @@ export type HostView = {
   readonly records: ReadRecordSet;
   readonly inspection: HarnessInspection;
   readonly wake: Wake;
+  /** The launched attempt tasks' typed endings, by attempt id (committed `getTask` reads). */
+  readonly endings: ReadonlyMap<string, AttemptEnding>;
   /** `null` only in a status view while work is runnable (running). */
   readonly waitReason: WaitReason | null;
 };
@@ -401,11 +404,12 @@ async function quiesce(
     const before = session.commits();
     const inspection = await harness.inspect(context);
     const records = await readRecords(harness);
+    const endings = await readAttemptEndings(harness, records);
     const wake = harness.wake();
     if (session.commits() !== before || wake.active) continue;
-    const waitReason = deriveWaitReason(records.records, policy, liveStates(inspection));
+    const waitReason = deriveWaitReason(records.records, policy, liveStates(inspection), endings);
     if (waitReason === null) throw noReason("run");
-    return { records, inspection, wake, waitReason };
+    return { records, inspection, wake, endings, waitReason };
   }
 }
 
@@ -413,11 +417,12 @@ async function quiesce(
 async function collectStatus(harness: Harness, policy: FixturePolicy): Promise<HostView> {
   const inspection = await harness.inspect(context);
   const records = await readRecords(harness);
+  const endings = await readAttemptEndings(harness, records);
   const wake = harness.wake();
-  if (wake.active) return { records, inspection, wake, waitReason: null };
-  const waitReason = deriveWaitReason(records.records, policy, liveStates(inspection));
+  if (wake.active) return { records, inspection, wake, endings, waitReason: null };
+  const waitReason = deriveWaitReason(records.records, policy, liveStates(inspection), endings);
   if (waitReason === null) throw noReason("status");
-  return { records, inspection, wake, waitReason };
+  return { records, inspection, wake, endings, waitReason };
 }
 
 /**
