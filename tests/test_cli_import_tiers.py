@@ -40,6 +40,7 @@ HEAVY = (
     "perk.plan",
     "perk.cli.commands",
     "perk.cli.stages",
+    "perk.v2",
 )
 
 # The callback-only tier: what `--version` additionally never pays for. The eager option exits

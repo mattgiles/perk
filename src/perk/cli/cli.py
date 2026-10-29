@@ -44,6 +44,7 @@ def _register_root_commands(root: click.Group) -> None:
     from perk.cli.commands.run_worker_cmd import run_worker_cmd
     from perk.cli.commands.skills import skills_group
     from perk.cli.commands.state import state_group
+    from perk.cli.commands.v2 import v2_group
     from perk.cli.commands.workflow import workflow_group
     from perk.cli.commands.worktree import worktree_group
     from perk.cli.stages import register_stage_commands
@@ -94,6 +95,9 @@ def _register_root_commands(root: click.Group) -> None:
     # `resume` and `replan` now live under the `plan` group. `replan` is still a dedicated
     # cold door, not a registry stage: it borrows `plan` to re-launch with the target plan's
     # original run_id (in-place upsert).
+    root.add_command(v2_group)
+    # `v2` is the hidden experimental pi-durable v2 door (contracts.md §8.77): perk's own
+    # checkout only, never listed without PERK_SHOW_HIDDEN.
     register_stage_commands(root)
 
 

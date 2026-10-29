@@ -34,6 +34,25 @@ def test_main_worktree_root(git_repo, tmp_path_factory):
     assert git.main_worktree_root(outside) is None
 
 
+def test_git_common_dir(git_repo, tmp_path_factory):
+    # Main checkout: its own resolved `.git`.
+    main = git.git_common_dir(git_repo)
+    assert main == (git_repo / ".git").resolve()
+    assert main.is_absolute()
+
+    # A subdirectory and a linked worktree resolve to the same shared dir.
+    sub = git_repo / "sub"
+    sub.mkdir()
+    assert git.git_common_dir(sub) == main
+    wt = git_repo / ".worktrees" / "wt-common-dir"
+    git.worktree_add(git_repo, wt, branch="plan-common", create_branch=True)
+    assert git.git_common_dir(wt) == main
+
+    # Non-repo: None.
+    outside = tmp_path_factory.mktemp("not-a-repo")
+    assert git.git_common_dir(outside) is None
+
+
 def test_worktree_lifecycle(git_repo):
     wt = git_repo / ".worktrees" / "wt1"
     git.worktree_add(git_repo, wt, branch="wt1", create_branch=True)
