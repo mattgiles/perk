@@ -1,9 +1,10 @@
 // The step task (docs/design/pi-durable-v2-foundations.md §7 the step task and task ownership, §9).
 // Over SQLite: `perk.v2.step` is `operate()` with no input, committed from the task's own commit —
 // on settled records it writes nothing but its own completion. Under a policy the records were not
-// reconciled under, a step admits the new round exactly once beside concurrent host steps (the
-// host's manifest gate refuses such a policy change in production; here it makes the step's work
-// observable). On an unstarted store the step's refusal faults the task and records nothing.
+// reconciled under (the host's manifest gate refuses such a policy change in production; here it
+// makes the step's work observable), the step task alone persists the new round — records, launched
+// tasks and launch rows — in its own completing commit, and beside concurrent host steps the round
+// is admitted exactly once. On an unstarted store the step's refusal faults the task and records nothing.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -14,13 +15,16 @@ import { operate } from "../durable/operate.ts";
 import { readRecords } from "../durable/records.ts";
 import { createStepTask, STEP_TASK_NAME } from "../durable/tasks.ts";
 import { capabilitySetDigest } from "../kernel/capability.ts";
-import { launchOpId } from "../kernel/identity.ts";
+import { admitOpId, launchOpId, submitOpId } from "../kernel/identity.ts";
 import type { KernelRecord } from "../kernel/records.ts";
 import {
   assertSameRecords,
+  assignmentIdOf,
   attemptIdOf,
   expectApplied,
+  FAKE_ASSIGNMENT_NAME,
   installBinding,
+  modelAfter,
   ofType,
   openBinding,
   policyA,
@@ -96,6 +100,78 @@ test("the step task is operate() with no input", { timeout: CASE_TIMEOUT_MS }, a
   assert.deepEqual(host.recorded, []);
   assert.deepEqual(host.actions, []);
   assert.equal(store.batches.length, hostAt, "zero storage batches");
+});
+
+test("a step task alone persists a changed policy's new round in its own commit", {
+  timeout: CASE_TIMEOUT_MS,
+}, async (t) => {
+  const path = await sqlitePath(t);
+  const setupA = fauxSetup();
+  const installedA = installBinding(setupA, { policy: policyA, accept: true });
+  const first = await openBinding(t, await openNodeSqliteStorage(path), setupA, installedA);
+  expectApplied(await operate(first.target, startOp()));
+  await quiesce(first.opened.harness);
+  const underA = (await readRecords(first.opened.harness)).records;
+  await first.opened.dispose();
+
+  // Reopen under policy B with no host operation: only the step task can admit B's round.
+  const setupB = fauxSetup();
+  const installedB = installBinding(setupB, { policy: policyB, accept: false });
+  const store = recording(await openNodeSqliteStorage(path));
+  const { opened } = await openBinding(t, store.storage, setupB, installedB);
+  const { harness } = opened;
+  const id = await harness.commit(
+    (tx) => createStepTask(tx, installedB.step, opened.root.id),
+    context,
+  );
+  const before = store.batches.length;
+  await quiesce(harness);
+
+  const completing = store.batches
+    .slice(before)
+    .filter((batch) =>
+      batch.some(
+        (write) =>
+          write.type === "task" && write.value.id === id && write.value.state.status === "terminal",
+      ),
+    );
+  assert.equal(completing.length, 1, "one batch completes the step task");
+  const batch = completing[0] ?? [];
+  const created = new Map(
+    batch.flatMap((write) =>
+      write.type === "document.create"
+        ? [[`${write.record.kind} ${write.record.key ?? ""}`, write.content.value] as const]
+        : [],
+    ),
+  );
+  const fakes = batch.flatMap((write) =>
+    write.type === "task" && write.value.kind === FAKE_ASSIGNMENT_NAME ? [write.value] : [],
+  );
+  assert.equal(fakes.length, 2, "the step's own commit launches both attempts");
+  for (const role of ["a", "b"] as const) {
+    const assignment = assignmentIdOf(role, T1, policyB);
+    const attempt = attemptIdOf(role, T1, policyB);
+    assert.ok(
+      created.has(`perk.v2.assignment ${admitOpId(assignment)}`),
+      `${role}: admitted in the step's commit`,
+    );
+    assert.ok(
+      created.has(`perk.v2.attempt ${submitOpId(attempt)}`),
+      `${role}: attempt recorded in the step's commit`,
+    );
+    const fake = fakes.find((task) => Reflect.get(Object(task.input), "attemptId") === attempt);
+    assert.ok(fake !== undefined, `${role}: its fake task is created in the step's commit`);
+    assert.deepEqual(
+      created.get(`perk.v2.durable-map ${launchOpId(attempt)}`),
+      { durableKind: "task", durableId: fake.id },
+      `${role}: its launch row names that task, in the step's commit`,
+    );
+  }
+  assertSameRecords(
+    (await readRecords(harness)).records,
+    modelAfter(underA, undefined, policyB),
+    "the step applied exactly the kernel's policy-B step",
+  );
 });
 
 test("a step under a changed policy admits the new round exactly once, beside concurrent host steps", {
