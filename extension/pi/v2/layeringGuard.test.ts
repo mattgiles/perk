@@ -103,7 +103,7 @@ test("every bare package v2 names is declared and confined to the Durable homes"
   );
 });
 
-test("inside v2, every relative edge obeys the layers — no cycles, nothing unresolved, live kernel edges", () => {
+test("inside v2, every relative edge obeys the layers — no cycles, nothing unresolved, live kernel and durable edges", () => {
   const { edges, violations, cycles, unresolved } = checkLayering(v2Files(), readExtensionFile);
   assert.deepEqual(
     { violations, cycles, unresolved },
@@ -116,6 +116,10 @@ test("inside v2, every relative edge obeys the layers — no cycles, nothing unr
   assert.ok(
     edges.get("pi/v2/kernel/reconcile.ts")?.includes("pi/v2/kernel/records.ts"),
     "the edge map carries the live kernel → kernel edge reconcile.ts → records.ts",
+  );
+  assert.ok(
+    edges.get("pi/v2/durable/operate.ts")?.includes("pi/v2/kernel/reconcile.ts"),
+    "the edge map carries the live durable → kernel edge operate.ts → reconcile.ts",
   );
 });
 

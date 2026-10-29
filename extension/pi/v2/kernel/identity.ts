@@ -16,6 +16,7 @@ export const OP_KINDS = [
   "observe",
   "admit",
   "submit",
+  "launch",
   "accept-report",
   "aggregate",
   "open-decision",
@@ -142,6 +143,14 @@ export function admitOpId(assignmentId: string): string {
 /** `<attempt-id>/submit`: the Durable `requestId` of the attempt's submission. */
 export function submitOpId(attemptId: string): string {
   return `${attemptId}/submit`;
+}
+
+/**
+ * `<attempt-id>/launch`: the durable-map key of the attempt's launched Durable task; the kernel
+ * records nothing under it.
+ */
+export function launchOpId(attemptId: string): string {
+  return `${attemptId}/launch`;
 }
 
 /** `<attempt-id>/accept-report`. */
