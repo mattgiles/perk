@@ -904,6 +904,14 @@ The immutable read-only materialization of a subject under `<store>/subjects/<di
 against its tree-derived sha256 manifest; the only tree a worker reads.
 _Avoid_: checkout, worktree, copy
 
+**Snapshot manifest** (pi-durable v2):
+The text derived from a subject's git tree — one line per entry,
+`<kind> <sha256|-> <git-mode> <oid> <path>`, sorted bytewise by path — stored beside the snapshot
+as `<store>/subjects/<tree>.manifest`. Its sha256 is the observation's manifest digest, and the
+snapshot verifier checks the snapshot's paths and content against it. Derived from git, never from
+walking the snapshot. Distinct from the **Execution manifest**.
+_Avoid_: checksum file, file list, index
+
 **Observation** (pi-durable v2):
 A recorded, immutable read of an authority fact — the tracked ref resolved to commit, tree and
 manifest digest at a time — taken outside any commit and passed into the reconcile commit it
@@ -1002,7 +1010,7 @@ The `perk.v2.manifest` singleton `start`'s commit writes — record version, eve
 document and task definition version, policy version, Durable and chord versions, workspace
 identity (repo identity + execution id) and execution kind. The compatibility gate compares it field
 by field (all but `createdAt`) before any resume. Distinct from the delivery glossary's
-**Continuation manifest** and the subject's snapshot manifest.
+**Continuation manifest** and the subject's **Snapshot manifest**.
 _Avoid_: schema version, metadata, lockfile
 
 **Quiescence** (pi-durable v2):
