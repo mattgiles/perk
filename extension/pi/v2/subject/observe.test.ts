@@ -60,7 +60,9 @@ test(
     symlinkSync(repo, link);
     const store = await subjectStore(t);
     const facts = expectObserved(
-      await gitObserver({ storeDir: store, repo: link, ref: "refs/heads/main", now: () => 4242 })(),
+      await gitObserver({ storeDir: store, repo: link, ref: "refs/heads/main", now: () => 4242 })(
+        null,
+      ),
     );
     assert.deepEqual(facts, {
       repo: realpathSync(repo),

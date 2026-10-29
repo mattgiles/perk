@@ -1,0 +1,18 @@
+{
+  "envelope": 1,
+  "outcome": "incompatible",
+  "verb": "run",
+  "executionId": "01HZY3V8Q2M5N7P9R1T3V5X7Z9",
+  "epoch": null,
+  "status": {
+    "state": "incompatible"
+  },
+  "receipt": null,
+  "refusal": null,
+  "mismatch": {
+    "field": "manifest_missing",
+    "expected": null,
+    "found": null
+  },
+  "error": null
+}

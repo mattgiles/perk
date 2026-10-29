@@ -122,7 +122,10 @@ export async function observeGitSubject(options: GitObserverOptions): Promise<Ob
   }
 }
 
-/** The host's `Observe` seam over `observeGitSubject(options)`. */
+/**
+ * The host's `Observe` seam over `observeGitSubject(options)`: a bound observer. It names its own
+ * repo and ref, so it ignores the tracked argument the host passes.
+ */
 export function gitObserver(options: GitObserverOptions): Observe {
-  return () => observeGitSubject(options);
+  return (_tracked) => observeGitSubject(options);
 }
