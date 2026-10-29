@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { Models } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   type AnyTask,
@@ -77,10 +78,17 @@ export type AssignmentContext = {
   readonly storeDir: string;
 };
 
-/** The assignment's work: its attempt launcher and the extension registering its tasks. */
+/**
+ * The assignment's work: its attempt launcher, the extension registering its tasks, and the model
+ * catalog and environment factory its workers need (forwarded to the Harness).
+ */
 export type AssignmentWork = {
   readonly launcher: AttemptLauncher;
   readonly extension: Extension;
+  /** Default `createModels()`, an empty catalog. */
+  readonly models?: Models;
+  /** Default none: every tool runs without an environment. */
+  readonly env?: HarnessOptions["env"];
 };
 
 /** What the host executes: the host-resolved policy, its version, and the assignment's work. */
@@ -90,11 +98,16 @@ export type HostProgram = {
   readonly assignment: (context: AssignmentContext) => AssignmentWork;
 };
 
-/** One host call's composition: the dependencies, the registry, and the manifest's definitions. */
+/**
+ * One host call's composition: the dependencies, the registry, the manifest's definitions, and the
+ * assignment's model catalog and environment factory.
+ */
 export type Composition = {
   readonly deps: BindingDeps;
   readonly registry: Registry;
   readonly definitions: Readonly<Record<string, number>>;
+  readonly models?: Models;
+  readonly env?: HarnessOptions["env"];
 };
 
 export type OpenHarness = (
@@ -246,7 +259,13 @@ export function composeProgram(options: Pick<HostOptions, "storeDir" | "program"
       throw new RangeError(`the registry does not resolve ${task.definition.name} to its task`);
     }
   }
-  return { deps, registry, definitions };
+  return {
+    deps,
+    registry,
+    definitions,
+    ...(work.models === undefined ? {} : { models: work.models }),
+    ...(work.env === undefined ? {} : { env: work.env }),
+  };
 }
 
 /** The execution manifest a host with `definitions` expects; pure. */
@@ -327,8 +346,9 @@ async function withHarness<T>(
     harness = await openHarness(
       storage,
       {
-        models: createModels(),
+        models: composition.models ?? createModels(),
         registry: composition.registry,
+        ...(composition.env === undefined ? {} : { env: composition.env }),
         ...(options.onReport === undefined ? {} : { onReport: options.onReport }),
       },
       context,

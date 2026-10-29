@@ -1,20 +1,23 @@
 // The host-program composition (docs/design/pi-durable-v2-foundations.md §10 the host): one
 // composition per host call, whatever the outcome; an assignment extension that would replace an
 // installed one, or a malformed task set, is refused with `RangeError` before any lock or file is
-// touched; the manifest's definitions correspond to the registry by construction; and the expected
-// manifest of the fake program is exactly the binding fixture's.
+// touched; the manifest's definitions correspond to the registry by construction; the expected
+// manifest of the fake program is exactly the binding fixture's; and the assignment's model catalog
+// and environment factory reach `Harness.open` (an empty catalog and no environment by default).
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { type AnyTask, defineTask } from "@earendil-works/pi-durable";
+import { createModels } from "@earendil-works/pi-ai/models";
+import { type AnyTask, defineTask, Harness, type HarnessOptions } from "@earendil-works/pi-durable";
 import { V2_DOCUMENTS } from "../durable/documents.ts";
 import { BINDING_EXTENSION_NAME, STEP_TASK_NAME } from "../durable/tasks.ts";
 import {
   composeProgram,
   expectedManifest,
   type HostProgram,
+  type OpenHarness,
   readStatus,
   runHost,
 } from "../host.ts";
@@ -165,4 +168,47 @@ test("the fake program's expected manifest is the binding fixture's", {
     expectedManifest(composeProgram(options).definitions, options, HOST_NOW),
     manifest(),
   );
+});
+
+test("the assignment's models and env reach Harness.open; the defaults are empty", {
+  timeout: CASE_TIMEOUT_MS,
+}, async (t) => {
+  const seen: HarnessOptions[] = [];
+  const recordingOpen: OpenHarness = (storage, options, context) => {
+    seen.push(options);
+    return Harness.open(storage, options, context);
+  };
+  const models = createModels();
+  const env: NonNullable<HarnessOptions["env"]> = () => undefined;
+  const base = fakeProgram();
+  const program: HostProgram = {
+    ...base,
+    assignment: (context) => ({ ...base.assignment(context), models, env }),
+  };
+  const store = await storeIn(t);
+  const options = hostOptions(store, program, { openHarness: recordingOpen });
+  expectQuiescent(await runHost(options, { type: "start", observe: observed() }));
+  expectStatus(await readStatus(options));
+  assert.equal(seen.length, 2);
+  for (const opened of seen) {
+    assert.equal(opened.models, models, "the assignment's catalog");
+    assert.equal(opened.env, env, "the assignment's env factory");
+  }
+  const composition = composeProgram(options);
+  assert.equal(composition.models, models);
+  assert.equal(composition.env, env);
+
+  seen.length = 0;
+  const plain = await storeIn(t);
+  expectQuiescent(
+    await runHost(hostOptions(plain, fakeProgram(), { openHarness: recordingOpen }), {
+      type: "start",
+      observe: observed(),
+    }),
+  );
+  assert.equal(seen.length, 1);
+  const [opened] = seen;
+  assert.ok(opened !== undefined);
+  assert.notEqual(opened.models, models, "a fresh catalog");
+  assert.equal(Object.hasOwn(opened, "env"), false, "no environment");
 });
