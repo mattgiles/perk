@@ -710,10 +710,14 @@ immediately before it (P2). It runs at three points:
 - inside the accept-report tool, before the accept-once commit (node 3.1), where a failure is the
   refusal `snapshot_tampered` (§9).
 
-The native assignment also verifies once more at settle, diagnostically. A failure at any point
-leaves the attempt incomplete with wait reason `repair_required` (§12 the native assignment). The
-accepted outcome records the digest it verified. An outcome authorizes only its exact subject. Node 2.4's proof
-list includes a symlink entry and a gitlink entry.
+The native assignment also verifies once more at settle, diagnostically. A failure at attempt start
+or acceptance, or at settle for an attempt with no accepted outcome, ends that attempt in a
+`snapshot_tampered` repair. A settle failure never revokes an accepted outcome: an attempt whose
+report was accepted ends `accepted` whatever settle finds. A repair ending yields the wait reason
+`repair_required` only for a current-subject role with no accepted outcome, and only under §10's
+precedence (§12 the native assignment). The accepted outcome records the digest it verified. An
+outcome authorizes only its exact subject. Node 2.4's proof list includes a symlink entry and a
+gitlink entry.
 
 ### The observer (node 2.4)
 
