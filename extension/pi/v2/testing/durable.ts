@@ -38,6 +38,7 @@ import {
   type HarnessOptions,
   type HarnessSettings,
   type HookRegistration,
+  type Id,
   MemoryStorage,
   type Registry,
   type ReportInfo,
@@ -281,15 +282,24 @@ export class CountingStorage extends MemoryStorage {
   }
 }
 
-/** A delegating proxy over `inner` whose `commit` is replaced by `commit(target)`. */
-function withCommit(inner: Storage, commit: (target: Storage) => Storage["commit"]): Storage {
+/** A delegating proxy over `inner` whose method `name` is replaced by `method(target)`. */
+function withMethod<K extends "commit" | "mintId">(
+  inner: Storage,
+  name: K,
+  method: (target: Storage) => Storage[K],
+): Storage {
   return new Proxy(inner, {
     get(target, property) {
-      if (property === "commit") return commit(target);
+      if (property === name) return method(target);
       const value: unknown = Reflect.get(target, property, target);
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
+}
+
+/** A delegating proxy over `inner` whose `commit` is replaced by `commit(target)`. */
+function withCommit(inner: Storage, commit: (target: Storage) => Storage["commit"]): Storage {
+  return withMethod(inner, "commit", commit);
 }
 
 /** Count `commit` calls reaching `inner` (a delegating proxy, for storages that cannot be subclassed). */
@@ -324,6 +334,66 @@ export function failing(inner: Storage): {
       armed = error;
     },
   };
+}
+
+/**
+ * Delegate everything to `inner`, unarmed. `armNextCommit(error)` makes exactly the next `commit`
+ * reach `inner` and land there, then reject with `error` — a storage success whose acknowledgement
+ * was lost — and disarms.
+ */
+export function acknowledgementLost(inner: Storage): {
+  storage: Storage;
+  armNextCommit(error: Error): void;
+} {
+  let armed: Error | undefined;
+  const storage = withCommit(inner, (target) => async (writes, callContext) => {
+    const error = armed;
+    armed = undefined;
+    const seq = await target.commit(writes, callContext);
+    if (error !== undefined) throw error;
+    return seq;
+  });
+  return {
+    storage,
+    armNextCommit: (error) => {
+      armed = error;
+    },
+  };
+}
+
+/**
+ * Delegate everything to `inner`, unarmed. `armNextMint(error)` makes exactly the next `mintId`
+ * reject with `error`, then disarms. Durable mints inside a commit callback (a created document or
+ * task), so this is a storage failure that surfaces from inside the callback.
+ */
+export function failingMint(inner: Storage): {
+  storage: Storage;
+  armNextMint(error: Error): void;
+} {
+  let armed: Error | undefined;
+  const storage = withMethod(inner, "mintId", (target) => <I extends Id<string>>(): Promise<I> => {
+    const error = armed;
+    if (error === undefined) return target.mintId<I>();
+    armed = undefined;
+    return Promise.reject(error);
+  });
+  return {
+    storage,
+    armNextMint: (error) => {
+      armed = error;
+    },
+  };
+}
+
+/** Delegate everything to `inner`, keeping each committed batch (detached) once `inner` landed it. */
+export function recording(inner: Storage): { storage: Storage; batches: StorageWrite[][] } {
+  const batches: StorageWrite[][] = [];
+  const storage = withCommit(inner, (target) => async (writes, callContext) => {
+    const seq = await target.commit(writes, callContext);
+    batches.push(structuredClone([...writes]));
+    return seq;
+  });
+  return { storage, batches };
 }
 
 /**

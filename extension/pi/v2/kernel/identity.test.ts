@@ -19,6 +19,7 @@ import {
   isGitOid,
   isSha256Hex,
   isSlug,
+  launchOpId,
   OP_KINDS,
   observeOpId,
   openDecisionOpId,
@@ -40,6 +41,7 @@ test("the op kinds and the reserved assignment kinds are the §4 lists", () => {
     "observe",
     "admit",
     "submit",
+    "launch",
     "accept-report",
     "aggregate",
     "open-decision",
@@ -48,6 +50,8 @@ test("the op kinds and the reserved assignment kinds are the §4 lists", () => {
     "cancel",
   ]);
   assert.deepEqual(RESERVED_ASSIGNMENT_KINDS, ["decision", "observe", "aggregate", "cancel"]);
+  // An op kind starts with a letter, so it never collides with an attempt ordinal (all digits).
+  for (const kind of OP_KINDS) assert.match(kind, /^[a-z]/, kind);
 });
 
 test("every derivation renders the pinned grammar", () => {
@@ -95,6 +99,10 @@ test("every op-id helper renders its scope and kind", () => {
   assert.equal(
     submitOpId(attempt),
     "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/fixture-report/a/4b825dc642cb6eb9a060e54bf8d69288fbee4904/0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0/1/submit",
+  );
+  assert.equal(
+    launchOpId(attempt),
+    "v2/01HZY3V8Q2M5N7P9R1T3V5X7Z9/fixture-report/a/4b825dc642cb6eb9a060e54bf8d69288fbee4904/0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0/1/launch",
   );
   assert.equal(
     acceptReportOpId(attempt),
