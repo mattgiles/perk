@@ -6,7 +6,8 @@
 //
 // A run, in order: compose the program (once per call) → the store-directory rule → lock → open
 // storage and the Harness (never resumed) → gate → observe → the execution conversation → one
-// `operate` → resume and wait for a consistent quiescent view → close → release.
+// `operate` (a reply's lookup, recording, checks, consumption and continuation all happen in it) →
+// resume and wait for a consistent quiescent view → close → release.
 //
 // Invariants:
 // - One composition per host call feeds the registry, the binding's dependencies, the gate's
@@ -20,6 +21,8 @@
 // - The Harness closes before the lock is released, on every path; a refusal, a fault and an
 //   `uncertain` outcome included. Only a killed process leaves an unreleased epoch.
 // - The host never creates step tasks: `run`'s commit is itself a full reconcile pass.
+// - A replayed reply still resumes: a continuation an earlier unacknowledged commit created runs
+//   now, exactly once.
 
 import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -46,6 +49,7 @@ import { type AttemptEnding, readAttemptEndings } from "./durable/ending.ts";
 import {
   type AttemptLauncher,
   type BindingDeps,
+  type BindingReceipt,
   type CommitInput,
   operate,
 } from "./durable/operate.ts";
@@ -140,7 +144,14 @@ export type Observe = () => Promise<Observation>;
 
 export type HostVerb =
   | { readonly type: "start"; readonly observe: Observe }
-  | { readonly type: "run"; readonly observe: Observe };
+  | { readonly type: "run"; readonly observe: Observe }
+  | {
+      readonly type: "reply";
+      readonly observe: Observe;
+      readonly decisionId: string;
+      readonly action: string;
+      readonly actor: string;
+    };
 
 export type HostMismatch =
   | ManifestMismatch
@@ -171,6 +182,8 @@ export type HostRunOutcome =
   | {
       readonly kind: "quiescent";
       readonly epoch: number;
+      /** The verb's own receipt: a reply's, applied or replayed; `null` for `start` and `run`. */
+      readonly receipt: BindingReceipt | null;
       readonly view: HostView & { readonly waitReason: WaitReason };
     }
   | OwnerBusy
@@ -445,10 +458,35 @@ async function collectStatus(harness: Harness, policy: FixturePolicy): Promise<H
   return { records, inspection, wake, endings, waitReason };
 }
 
+/** The verb's commit input over its observation; `manifest` is called for `start` only. */
+function verbInput(
+  verb: HostVerb,
+  facts: ObservationFacts,
+  manifest: () => ExecutionManifest,
+): CommitInput {
+  switch (verb.type) {
+    case "start":
+      return { type: "start", manifest: manifest(), observation: facts };
+    case "run":
+      return { type: "run", observation: facts };
+    case "reply":
+      return {
+        type: "reply",
+        decisionId: verb.decisionId,
+        action: verb.action,
+        actor: verb.actor,
+        observation: facts,
+      };
+  }
+}
+
 /**
- * Run one verb to quiescence under the store owner lock. `start` creates the store directory and
- * refuses `already_started` on a started store; `run` on a missing store directory is
- * `incompatible` (`manifest_missing`, `epoch: null`) and creates nothing.
+ * Run one verb (`start`, `run` or `reply`) to quiescence under the store owner lock. `start`
+ * creates the store directory and refuses `already_started` on a started store; `run` and `reply`
+ * on a missing store directory are `incompatible` (`manifest_missing`, `epoch: null`) and create
+ * nothing, and both pass the gate before observing. An applied or replayed verb resumes; the
+ * quiescent outcome carries the verb's own receipt: a reply's, applied or replayed, whose
+ * continuation row names the continuation it created; `null` for `start` and `run`.
  */
 export async function runHost(options: HostOptions, verb: HostVerb): Promise<HostRunOutcome> {
   const composition = composeProgram(options);
@@ -478,7 +516,7 @@ export async function runHost(options: HostOptions, verb: HostVerb): Promise<Hos
             },
           };
         }
-        if (verb.type === "run") {
+        if (verb.type !== "start") {
           const incompatible = compatibility(stored, composition, options, epoch);
           if (incompatible !== null) return incompatible;
         }
@@ -487,25 +525,21 @@ export async function runHost(options: HostOptions, verb: HostVerb): Promise<Hos
           return { kind: "observation_failed", epoch, detail: observation.detail };
         }
         const root = await harness.root(context);
-        const input: CommitInput =
-          verb.type === "start"
-            ? {
-                type: "start",
-                manifest: expectedManifest(
-                  composition.definitions,
-                  options,
-                  (options.now ?? Date.now)(),
-                ),
-                observation: observation.facts,
-              }
-            : { type: "run", observation: observation.facts };
+        const input = verbInput(verb, observation.facts, () =>
+          expectedManifest(composition.definitions, options, (options.now ?? Date.now)()),
+        );
         const outcome = await operate(
           { harness, executionConversationId: root.id, deps: composition.deps },
           input,
         );
         if (outcome.kind === "refused") return { kind: "refused", epoch, refusal: outcome.refusal };
         if (outcome.kind === "uncertain") return { kind: "uncertain", epoch, error: outcome.error };
-        return { kind: "quiescent", epoch, view: await quiesce(session, composition.deps.policy) };
+        return {
+          kind: "quiescent",
+          epoch,
+          receipt: outcome.receipt,
+          view: await quiesce(session, composition.deps.policy),
+        };
       },
     );
   } finally {

@@ -362,6 +362,29 @@ export function acknowledgementLost(inner: Storage): {
 }
 
 /**
+ * Delegate everything to `inner`, except the first `commit` whose writes match `predicate`: it
+ * reaches `inner` and lands there, then rejects with `error` (a storage success whose
+ * acknowledgement was lost), and `fired()` turns true. Every later commit delegates. Matching on
+ * the batch, never "the next commit", targets one operation's own commit even when other commits
+ * (a `root()` call included) run before it.
+ */
+export function acknowledgementLostWhen(
+  inner: Storage,
+  predicate: (writes: readonly StorageWrite[]) => boolean,
+  error: Error,
+): { storage: Storage; fired(): boolean } {
+  let fired = false;
+  const storage = withCommit(inner, (target) => async (writes, callContext) => {
+    const lose = !fired && predicate(writes);
+    const seq = await target.commit(writes, callContext);
+    if (!lose) return seq;
+    fired = true;
+    throw error;
+  });
+  return { storage, fired: () => fired };
+}
+
+/**
  * Delegate everything to `inner`, unarmed. `armNextMint(error)` makes exactly the next `mintId`
  * reject with `error`, then disarms. Durable mints inside a commit callback (a created document or
  * task), so this is a storage failure that surfaces from inside the callback.
