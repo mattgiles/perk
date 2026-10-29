@@ -167,6 +167,8 @@ function keysOf(catalog: CatalogValue, kind: string): string[] {
 export class TxRecordSet {
   /** The presented set as loaded; writes do not grow it (the caller derives the set after). */
   readonly records: readonly KernelRecord[];
+  /** Every durable-map row, loaded or written in this commit (it grows with `writeRow`). */
+  readonly durableMap: ReadonlyMap<string, DurableMapRow>;
   readonly #tx: Tx;
   readonly #catalog: CatalogValue;
   readonly #rows: Map<string, DurableMapRow>;
@@ -181,11 +183,7 @@ export class TxRecordSet {
     this.#catalog = catalog;
     this.records = records;
     this.#rows = rows;
-  }
-
-  /** Every durable-map row, loaded or written in this commit. */
-  get durableMap(): ReadonlyMap<string, DurableMapRow> {
-    return this.#rows;
+    this.durableMap = rows;
   }
 
   /** Write one kernel record and catalog its key. A continuation is never written (see `writeRow`). */

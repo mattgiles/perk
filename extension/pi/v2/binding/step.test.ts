@@ -1,9 +1,9 @@
 // The step task (docs/design/pi-durable-v2-foundations.md §7 the step task and task ownership, §9).
 // Over SQLite: `perk.v2.step` is `operate()` with no input, committed from the task's own commit —
 // on settled records it writes nothing but its own completion. Under a policy the records were not
-// reconciled under, a step admits the new round exactly once beside concurrent host steps (2.3's
-// gate refuses such a policy change in production; here it makes the step's work observable). On
-// an unstarted store the step's refusal faults the task and records nothing.
+// reconciled under, a step admits the new round exactly once beside concurrent host steps (the
+// host's manifest gate refuses such a policy change in production; here it makes the step's work
+// observable). On an unstarted store the step's refusal faults the task and records nothing.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

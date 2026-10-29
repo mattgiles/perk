@@ -945,6 +945,20 @@ the pure kernel `reconcile(records) → actions` over in-transaction records, ap
 atomically; the step task is the input-less case.
 _Avoid_: transaction, save, update, mutation
 
+**Binding** (pi-durable v2):
+The only Durable-aware v2 layer, `extension/pi/v2/durable/`. It stores kernel records as
+session-scoped document families, presents them through the record catalog, persists
+`evaluateOperation`'s result in one commit (`operate`), maps Durable ids to Perk identities, and
+classifies a failed commit as uncertain, refused or a binding fault.
+_Avoid_: adapter, driver, kernel, host
+
+**Record catalog**:
+The `perk.v2.catalog` session singleton listing every v2 family member's key, and whether the
+manifest exists. It is appended in the commit that writes each member. The binding acquires only
+cataloged keys, because Durable's `Tx` cannot enumerate a family and `tx.doc()` creates what it
+misses.
+_Avoid_: index (the kernel's in-memory `RecordIndex`), registry, ledger, family scan
+
 **Store owner lock**:
 The exclusive claim a v2 host takes before storage opens by creating the next epoch directory
 `<store>/owner/<epoch>/` with an atomic rename; the highest epoch holds the store while its process

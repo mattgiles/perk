@@ -588,12 +588,16 @@ decision      v2/<execution-id>/decision/<subject-digest>/<decision-kind>
 | `observe` | execution | `<seq>`: the next observation ordinal, assigned in the recording commit | the observation record (always a fresh key, never a duplicate) |
 | `admit` | assignment | — | `{capabilitySet}` |
 | `submit` | attempt | — | `{conversationId}`. This op id is the Durable `requestId`. |
+| `launch` | attempt | — | the Durable task id mapped under it |
 | `accept-report` | attempt | — | the report + the verified digest |
 | `aggregate` | execution | `<subject-digest>` | the accepted-outcome ids |
 | `open-decision` | decision | — | `{allowedActions, actor}` |
 | `reply` | decision | — | `{decisionId, action, actor}` (one reply per decision) |
 | `continuation` | decision | — | the Durable task id mapped under it |
 | `cancel` | execution | — | `{reason}` |
+
+Like `continuation`, `launch` has no family: its record is its durable-map row (§6), and the
+kernel records nothing under it.
 
 **Replay rule.** If an operation's key already exists with an equal payload, the operation returns
 the existing receipt. This lookup runs *before* any freshness, cancellation or supersession check.
@@ -714,7 +718,7 @@ list includes a symlink entry and a gitlink entry.
 |---|---|---|---|---|
 | **Authority facts** | issue backend, git refs + trees, GitHub | their owners. v2 writes none in this objective. | the authority's | observation, outside commits |
 | **Observations** | the `perk.v2.observation` family, keyed by op id | the reconcile commit that takes the observation as an input | session-scoped, immutable: one record per observation | reconcile, the status view |
-| **v2 records** | the `perk.v2.manifest` singleton and the families `perk.v2.assignment`, `perk.v2.attempt`, `perk.v2.outcome`, `perk.v2.decision`, `perk.v2.reply`, `perk.v2.cancellation`, `perk.v2.durable-map` | reconcile commits only | session-scoped, `checkpointWhen: () => true` on every family, immutable once written, corrections appended | reconcile, the gate, receipt lookup, the status view |
+| **v2 records** | the `perk.v2.manifest` and `perk.v2.catalog` singletons and the families `perk.v2.assignment`, `perk.v2.attempt`, `perk.v2.outcome`, `perk.v2.decision`, `perk.v2.reply`, `perk.v2.cancellation`, `perk.v2.durable-map` | reconcile commits only | session-scoped, `checkpointWhen: () => true` on every family, immutable once written, corrections appended | reconcile, the gate, receipt lookup, the status view |
 | **Disposable runtime state** | Durable task checkpoints, memos, task-scoped documents, `pi.*` documents, transcripts, inbox, `pi.usage`, SQLite schema | Durable | until the task ends, or Durable's own policy | Durable, plus diagnostics via `inspect()` |
 | **Derived views** | status snapshot, wait reason, door payloads, `inspect()` | nobody: computed on read | never stored | the door, the status view |
 
@@ -723,6 +727,7 @@ list includes a symlink entry and a gitlink entry.
 | Family | Shape | Key | Written by | Holds |
 |---|---|---|---|---|
 | `perk.v2.manifest` | singleton | none | `start`'s commit, once | the execution manifest (§10) |
+| `perk.v2.catalog` | singleton | none | every commit that writes a v2 document | the record catalog |
 | `perk.v2.observation` | operation record | the `observe` op id | the observing verb's commit | the observation record (§5) |
 | `perk.v2.assignment` | operation record | the `admit` op id | admission | the §4 payload |
 | `perk.v2.attempt` | operation record | the `submit` op id | submission | the §4 payload |
@@ -739,27 +744,56 @@ list includes a symlink entry and a gitlink entry.
   created for. The fixture's rows are:
   - the worker conversation, under its attempt id;
   - the Durable submission, under the `submit` op id;
-  - the continuation task, under the `continuation` op id.
+  - the continuation task, under the `continuation` op id;
+  - the attempt's launched Durable task (its assignment task), under `<attempt-id>/launch`,
+    written by the commit that applies `start-attempt`.
 
-  The `continuation` op kind has no family of its own: its record is its durable-map row. The step
-  task is input-less and idempotent and is created for no Perk identity, so it has no row.
-- **The singleton.** `perk.v2.manifest` has no key and no op id, and `start` is not an operation
+  The `continuation` and `launch` op kinds have no family of their own: each one's record is its
+  durable-map row. The step task is input-less and idempotent and is created for no Perk identity,
+  so it has no row.
+- **The singletons.** `perk.v2.manifest` has no key and no op id, and `start` is not an operation
   kind. A repeated `start` is caught by the gate (`already_started`, §10), never by receipt
-  lookup.
+  lookup. `perk.v2.catalog` holds no record: it is the record catalog (record presentation,
+  below).
 
 **Receipt lookup.** For op id *X*, read the family that *X*'s `op-kind` names (durable-map for
-`continuation`). The receipt is that record plus the durable-map rows for the result ids *X*
-derives:
+`continuation`; a `launch` row is reached through its attempt's receipt). The receipt is that
+record plus the durable-map rows for the result ids *X* derives:
 
-- `submit`: the submission row under *X*;
+- `submit`: the launch row under `<attempt-id>/launch`, and, once node 3.1 maps the worker
+  submission, the submission row under *X*;
 - `reply`: the continuation row under `<decision-id>/continuation`. That continuation task id is
-  the reply's receipt.
+  the reply's receipt;
+- `continuation`: its own row.
 
-**Binding constraint (node 2.2).** Durable's `Tx` cannot enumerate a document family, and
-`tx.doc()` is get-or-create (`packages/durable/docs/spec.md#3.3 Access and creation`). A family
-acquisition seeded with the input therefore performs §7 step 2's "look up or record" in a single
-call. How the binding presents every record to the kernel without a family scan, the highest
-observation `seq` included, is node 2.2's to pin, as an amendment to this section.
+**Record presentation (node 2.2).** Durable's `Tx` cannot enumerate a document family, and
+`tx.doc()` is get-or-create (`packages/durable/docs/spec.md#3.3 Access and creation`). So the
+binding keeps the **record catalog**, the `perk.v2.catalog` singleton
+`{manifest, members: {<family kind>: [keys in write order]}}`, which lists all eight families from
+creation:
+
+- **One writer.** Every v2 document write appends its key to the catalog in the same commit, so a
+  member and its catalog entry land or roll back together.
+- **Acquire only what the catalog names**, or the key being written, and the manifest only when
+  `manifest` is true or `start` writes it. Op ids embed digests, so keys cannot be probed; a
+  get-or-create probe would create members; and a read outside the commit is not atomic. An absent
+  cataloged member, an already-cataloged write, or an uncataloged member holding another value is
+  a binding fault (`KernelInvariantError`, §9).
+- **The presented set.** The kernel sees the manifest, every cataloged operation record, and each
+  `<decision-id>/continuation` row projected to its continuation record. `launch` rows, and node
+  3.1's conversation and submission rows, are bookkeeping the kernel never sees. Unreferenced
+  records (an attempt without an outcome, the latest observation, the cancellation) arrive like
+  any other, because the catalog lists keys, not references.
+- **The highest seq.** Observations are cataloged one per commit in seq order, so the cataloged
+  keys are exactly `observe/1..n`. The next seq is n + 1, and `indexRecords` refuses a gap.
+- **Absence means not started.** Only `start`'s commit creates the catalog. A refused commit on an
+  unstarted store rolls its acquired empty catalog back.
+- **Reads outside a commit use `snapshot()`**, which never creates anything. `readRecords` reads
+  the catalog, then its members: members are immutable and cataloged in the commit that writes
+  them, so the catalog read first fixes one committed state. Receipt lookup needs no catalog: it
+  addresses the op id's family directly.
+- **Tier.** The catalog is written by reconcile commits only, checkpoints on every write, and is an
+  index the kernel never sees.
 
 Every v2 task name and document kind starts with `perk.v2.`, because Durable reserves `pi.`
 (`packages/durable/docs/spec.md#12. API footguns` "Reserved `pi.` names"). A record family
@@ -818,6 +852,43 @@ abort cascade from a worker conversation reaches these tasks
 execution manifest, the first observation and the admissions are written in that one commit, and
 no v2 write happens outside a reconcile commit.
 
+**The binding (node 2.2).** `operate(input?)` lives in
+[`extension/pi/v2/durable/operate.ts`](../../extension/pi/v2/durable/operate.ts), the only
+Durable-aware v2 layer. Within one commit it:
+
+1. loads the presented set (§6 record presentation) and calls `evaluateOperation`. The binding
+   checks nothing first, so receipt lookup stays first;
+2. throws `KernelRefusal` for a `refused` result, so the commit rolls back, and returns the
+   receipt for a `replayed` one;
+3. for an `applied` result, writes `recorded`, then each action in order, exactly as the kernel's
+   reference applier `nextRecords`:
+   - `admit`, `aggregate` and `open-decision` write their record;
+   - `start-attempt` writes the attempt record, calls the host's attempt launcher, and writes the
+     attempt's `launch` row;
+   - `continue` creates `perk.v2.continuation` and writes its row.
+
+**The attempt launcher** is a host-supplied seam. It runs inside the reconcile commit, after the
+attempt record is staged, and creates exactly one Durable task, the attempt's work, whose id it
+returns. It performs no table reads, because it may run after the commit's first table write. It
+writes no v2 document, because the binding writes the `launch` row. A throw is a binding fault
+(§9).
+
+`perk.v2.step` runs the same commit body with no input, from the step task's own commit, which
+also completes the task; a refusal or a fault faults the task and records nothing. A receipt is
+the kernel's receipt plus the durable-map rows of the result ids its record derives (§6), and
+`lookupReceipt(reader, opId)` finds it after a reopen, outside any commit, through `snapshot()`.
+
+Proved as `B1`–`B6` in [`extension/pi/v2/binding/`](../../extension/pi/v2/binding/), over SQLite
+with a fake assignment task standing in for the launched work:
+
+- `B1`: two assignments, each accepted exactly once;
+- `B2`: duplicate and concurrent operations converge to one admission;
+- `B3`: after storage success and a lost acknowledgement, reopening finds the receipt by op id,
+  with exactly one continuation;
+- `B4`: a refused operation leaves no record and the Harness usable;
+- `B5`: no record lives only in task-scoped state;
+- `B6`: the presented record set is complete, including records nothing references.
+
 ## 8. The observation policy
 
 **Which verbs observe.** `start`, `run` and `reply` observe the tracked ref first. Each resolves
@@ -837,8 +908,8 @@ reconcile commit with the cancellation record as its input.
 lock, because it writes under `<store>/subjects/`.
 
 **Refusals.** A kernel refusal rolls back the whole commit, the observation input included, so a
-refused operation leaves no record (node 2.2's proof). A replayed operation also records nothing:
-its receipt is returned before anything is written (§7 step 2).
+refused operation leaves no record (node 2.2's proof `B4`, §7). A replayed operation also records
+nothing: its receipt is returned before anything is written (§7 step 2).
 
 ## 9. The outcome taxonomy
 
@@ -863,6 +934,24 @@ its receipt is returned before anything is written (§7 step 2).
 - `invalid_report`;
 - `snapshot_tampered`;
 - `already_started`.
+
+**Classification (node 2.2).** `operate` (§7) classifies a rejected commit by the Harness's health:
+
+- **`uncertain`** when the Harness has failed: the rejection is `SessionFailed`, or a no-op probe
+  commit rejects with `SessionFailed`. That holds whichever call failed, a storage `mintId` inside
+  the callback included, and a `KernelRefusal` that coincides with a failure is `uncertain` too:
+  the conservative answer wins. Durable closes a failed Session itself.
+- The probe only reads the failure latch, which a failed storage call sets before its rejection
+  reaches anyone; in a healthy Harness it writes nothing. A probe that resolves, or that rejects
+  any other way (the plain closed error of a closing or closed Harness), means not failed, and its
+  error is discarded. Close lets admitted commits settle and never runs a refused commit's
+  callback, so the original rejection is not in doubt.
+- **`refused`** for a `KernelRefusal`.
+- Any other rejection in a Harness that has not failed is a **binding fault**, thrown as
+  `BindingFault`, whose cause is always the original rejection. `KernelInvariantError` (a malformed
+  presented set) is the named case, and so is an operation on a Harness its caller already closed:
+  the host owns the lifecycle, so that is a caller bug. A fault is never a refusal: nothing is
+  recorded, and an open Harness stays open.
 
 ## 10. The host lifecycle
 
@@ -1081,7 +1170,7 @@ above left open:
   changes nothing.
 - **Attempts.** Reconcile starts attempt 1 of each admitted assignment in the commit that admits
   it. The attempt record carries Perk ids only. Its Durable conversation and submission are
-  durable-map rows (§6), so §4's `submit` payload is the binding's to compare (node 2.2). The
+  durable-map rows (§6), so §4's `submit` payload is the binding's to compare (node 3.1). The
   fixture never starts a second attempt, and an incomplete attempt stays visible.
 - **Terminal states.** Once a cancellation is recorded or a continuation exists, reconcile emits
   no action of any kind. Observations are still recorded, and `cancel` is still accepted.
@@ -1104,8 +1193,8 @@ above left open:
   any other is `invalid_input`.
 - **Record integrity.** The kernel refuses to decide over a record set whose references do not
   resolve, for example a reply without its decision or an outcome that disagrees with its
-  attempt. That is a binding fault, not a refusal. Presenting every record is the binding's
-  obligation (§6, node 2.2).
+  attempt. That is a binding fault, not a refusal (§9 classification). Presenting every record
+  is the binding's obligation (§6 record presentation).
 
 ## 13. The four-question extension recipe
 
@@ -1155,7 +1244,7 @@ feature.
 | 1.3 | §3 evidence pointers, one test per Durable behavior, each naming its principle. A failure amends this record before dependents proceed. |
 | 1.4 | §10 step 2 and its verdict subsection; P7, P8 |
 | 2.1 | §4 including the replay rule; §5 digests and observation order; §6; §7 kernel; §9 refusal reasons; §10 wait reasons; §12 rules |
-| 2.2 | §6 families, record keys, receipt lookup, checkpoint policy and the binding constraint; §7 `operate`, receipt-first lookup and task ownership; §9 |
+| 2.2 | §4 `launch`; §6 families, record keys, receipt lookup, checkpoint policy and record presentation; §7 `operate`, receipt-first lookup and task ownership; §9 |
 | 2.3 | §10 lifecycle, the lock protocol and its proof list; §11 outcomes |
 | 2.4 | §5 snapshot-manifest grammar, verifier and the symlink/gitlink proofs; §8. Its proof "a new commit at the ref yields a new subject" reads as "a new *tree* at the ref yields a new subject, and a commit with the same tree yields a new observation of the same subject". |
 | 3.1 | P7 enforcement seam; §5 verification points; §12 |
@@ -1178,6 +1267,7 @@ explicit, reviewed amendment, recorded in the log below.
 | Record created: P1–P10 with evidence; identity, subject, tier, write, observation, outcome, lifecycle (epoch-named owner directories), envelope, fixture, recipe, deferral and consumer sections | node 1.1 |
 | Containment and fencing verdict recorded (§10): GO supervised, with closing the reaped-leader pid-reuse window as a prerequisite before workers spawn; pi-env 1.4.0 joins the pin family; evidence archive/pi-durable-v2-containment-characterization.md | node 1.4 |
 | §12 rule precisions — current-subject rounds, attempt 1 started with admission, terminal cancellation and completion, the policy parameter, the refusal order, `superseded` as a spent decision, report validity, well-formed text, the tracked ref, record integrity | node 2.1 |
+| §4 `launch` op kind; §6 record presentation (the record catalog `perk.v2.catalog`) and the `launch` durable-map row; §7 the binding's `operate`, the attempt launcher contract and `B1`–`B6`; §9 commit-failure classification (the failure-latch probe) and `BindingFault` | node 2.2 |
 
 ## 16. Measured evidence (reserved — node 3.4)
 

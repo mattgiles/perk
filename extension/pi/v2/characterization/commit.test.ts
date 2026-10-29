@@ -1,5 +1,5 @@
 // Durable characterization — P1 (one advancement owner) and P5 (three tiers, one writer each),
-// docs/design/pi-durable-v2-foundations.md §3 P1/P5, §6 (record tiers, its binding constraint) and
+// docs/design/pi-durable-v2-foundations.md §3 P1/P5, §6 (record tiers, record presentation) and
 // §7 (the write contract). One `Tx` writes conversation-owned tasks and session doc-family records
 // in a single atomic storage batch; a family member is get-or-create by key (no enumeration, the
 // seed of an existing member is ignored); and a task created from a task's commit runs only after
