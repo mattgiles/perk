@@ -997,6 +997,20 @@ The closed-vocabulary domain reason a quiescent execution is not progressing —
 `cancelled`, `completed` — derived from records plus `inspect()`, never a stored flag.
 _Avoid_: status, blocked reason (Durable's derived task state), idle
 
+**Execution manifest** (pi-durable v2):
+The `perk.v2.manifest` singleton `start`'s commit writes — record version, every `perk.v2.*`
+document and task definition version, policy version, Durable and chord versions, workspace
+identity (repo identity + execution id) and execution kind. The compatibility gate compares it field
+by field (all but `createdAt`) before any resume. Distinct from the delivery glossary's
+**Continuation manifest** and the subject's snapshot manifest.
+_Avoid_: schema version, metadata, lockfile
+
+**Quiescence** (pi-durable v2):
+The point a host run closes at — no runnable work (`wake().active === false`, still inactive after a
+view collected with no intervening commit) and a derivable wait reason. Never completion by itself:
+a parked, blocked or sleeping task, or a pending decision, is quiescent too.
+_Avoid_: idle, done, settled
+
 **v2 workspace**:
 The private npm workspace `extension/pi/v2/` (`perk-v2`): its own `package.json` dependencies,
 tsconfig, host entry, guards and node:test tiers, carved out of every v1 verification surface and
