@@ -12,7 +12,7 @@ hash = "sha256:d14cc0780d0cc07885cd4ddc5bfb66a563a9a7cb7e31c2b8246fa23c2be87ebb"
 path = ".gitignore"
 kind = "block"
 version = "4.2.0"
-hash = "sha256:b794695bee28c07cee56bfd2c21fd6126f6cd35fdad64d150c72818a6634820b"
+hash = "sha256:9d6b72a9e8d3faea32c5e33b4f2e8049bfbff8e17b1671cc68142c18136db1cc"
 
 [managed.artifacts.remote-setup-action]
 path = ".github/actions/perk-remote-setup/action.yml"

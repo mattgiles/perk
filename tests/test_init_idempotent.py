@@ -37,6 +37,14 @@ def test_init_agent_dir_ignore_rules(scaffolded_perk_repo, artifact):
     assert git.is_ignored(root, ".pi/agent/auth.json")
 
 
+def test_init_ignores_v2_execution_stores(scaffolded_perk_repo):
+    """A v2 execution store's files (`.perk/executions/<id>/…`) are gitignored by the managed block
+    (contracts.md §8.77); the converge test's tmp root is no git repo, so the probe runs here."""
+    root = scaffolded_perk_repo
+    assert git.is_ignored(root, ".perk/executions/01HZY3V8Q2M5N7P9R1T3V5X7Z9/durable.sqlite")
+    assert git.is_ignored(root, ".perk/executions/01HZY3V8Q2M5N7P9R1T3V5X7Z9/owner/1/meta.json")
+
+
 def _seed_cfg(pi_dir: Path) -> Path:
     """The committed config path (`<root>/.perk/config.toml`), creating `.perk/` as needed.
 
@@ -151,6 +159,8 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "/.pi/agent/*\n!/.pi/agent/models.json" in gitignore
     # The whole `.perk/workflow/` cache tree is gitignored wholesale (no per-file entries).
     assert "/.perk/workflow/" in gitignore
+    # The experimental v2 execution stores are gitignored wholesale too.
+    assert "/.perk/executions/" in gitignore
     # The borrowed pi-subagents engine's project-scoped run-artifact root is transient.
     assert "/.pi-subagents/" in gitignore
     # The perk library is a gitignored cache whose README alone is committed.

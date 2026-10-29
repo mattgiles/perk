@@ -18,6 +18,7 @@ node_modules/
 /.perk/local.toml
 /.worktrees/
 /.perk/workflow/
+/.perk/executions/
 /.pi-subagents/
 /docs/library/**
 !/docs/library/README.md

@@ -16,8 +16,8 @@ segment adjacent to a ``/`` operator in either of two shapes:
 - ``".pi"`` adjacent to a legacy config follow-segment (``"perk.toml"`` /
   ``"perk.local.toml"`` or the legacy filename constants); or
 - ``".perk"`` adjacent to a current perk-owned follow-segment (``"workflow"`` / ``"skills"`` /
-  ``"config.toml"`` / ``"local.toml"`` / ``"required-perk-version"`` / ``"last-seen-version"``
-  or the filename constants).
+  ``"config.toml"`` / ``"local.toml"`` / ``"required-perk-version"`` / ``"last-seen-version"`` /
+  ``"executions"`` or the filename constants).
 
 A third arm guards the perk library root: ``"docs" / "library"`` construction (or a
 ``Path("docs/library...`` literal) belongs only in ``paths.library_dir``.
@@ -43,9 +43,9 @@ _PI_FOLLOW = (
 # A `.perk`-adjacent current perk-owned follow-segment.
 _PERK_FOLLOW = (
     r'("workflow"|"skills"|"config\.toml"|"local\.toml"|"required-perk-version"'
-    r'|"last-seen-version"|"managed-state\.toml"'
+    r'|"last-seen-version"|"managed-state\.toml"|"executions"'
     r"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME|REQUIRED_VERSION_FILENAME"
-    r"|LAST_SEEN_VERSION_FILENAME|MANAGED_STATE_FILENAME)"
+    r"|LAST_SEEN_VERSION_FILENAME|MANAGED_STATE_FILENAME|EXECUTIONS_DIRNAME)"
 )
 
 # A quoted `".pi"` segment in path construction (adjacent to a `/`) followed by a legacy config
@@ -59,6 +59,10 @@ PERK_PATTERN = re.compile(r"""["']\.perk["']\s*/\s*""" + _PERK_FOLLOW)
 # The perk library root (`docs/library/`): a quoted `"docs" / "library"` construction or a
 # `Path("docs/library...` literal. Gitignore-pattern strings and prose mentions never match.
 LIBRARY_PATTERN = re.compile(r'["\']docs["\']\s*/\s*["\']library["\']|Path\(\s*["\']docs/library')
+
+
+# The executions arm alone, for the seam self-check (the v2 execution-store family).
+_EXECUTIONS_ARM = re.compile(r"""["']\.perk["']\s*/\s*("executions"|EXECUTIONS_DIRNAME)""")
 
 
 def _matches(line: str) -> bool:
@@ -119,6 +123,9 @@ class TestPerkOwnedPathGuard:
         assert any(LIBRARY_PATTERN.search(line) for line in paths_src.splitlines()), (
             "paths.py no longer matches the library arm — guard is vacuous"
         )
+        assert any(_EXECUTIONS_ARM.search(line) for line in paths_src.splitlines()), (
+            "paths.py no longer matches the executions arm — guard is vacuous"
+        )
 
     def test_positive_each_family_arm_matches(self) -> None:
         """Per-arm positive asserts on synthetic strings — keeps the config/local arms honest even
@@ -141,6 +148,8 @@ class TestPerkOwnedPathGuard:
         assert PERK_PATTERN.search('root / ".perk" / LAST_SEEN_VERSION_FILENAME')
         assert PERK_PATTERN.search('root / ".perk" / "managed-state.toml"')
         assert PERK_PATTERN.search('root / ".perk" / MANAGED_STATE_FILENAME')
+        assert PERK_PATTERN.search('root / ".perk" / "executions"')
+        assert PERK_PATTERN.search('root / ".perk" / EXECUTIONS_DIRNAME')
         # The library arm.
         assert LIBRARY_PATTERN.search('root / "docs" / "library"')
         assert LIBRARY_PATTERN.search('Path("docs/library/catalog.json")')
