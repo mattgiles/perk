@@ -173,7 +173,9 @@ export async function ensureSnapshot(options: {
 }): Promise<EnsuredSnapshot> {
   const { storeDir, repoRoot, tree, hooks } = options;
   const planned = planEntries(options.entries);
-  if (typeof planned === "string") return { ok: false, problem: planned };
+  if (typeof planned === "string") {
+    return { ok: false, problem: `tree ${tree} cannot be represented: ${planned}` };
+  }
   const subjects = join(storeDir, SUBJECTS_DIR);
   const target = snapshotDir(storeDir, tree);
   const manifestPath = snapshotManifestPath(storeDir, tree);
