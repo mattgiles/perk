@@ -283,7 +283,7 @@ export class CountingStorage extends MemoryStorage {
 }
 
 /** A delegating proxy over `inner` whose method `name` is replaced by `method(target)`. */
-function withMethod<K extends "commit" | "mintId" | "findDocument">(
+function withMethod<K extends "commit" | "mintId" | "findDocument" | "close">(
   inner: Storage,
   name: K,
   method: (target: Storage) => Storage[K],
@@ -409,6 +409,27 @@ export function failingFind(
       armed = error;
     },
   };
+}
+
+/**
+ * Delegate everything to `inner`, except that `close` is held: `closing` resolves when the first
+ * `close` call arrives, and the close reaches `inner` only once `release()` is called. It holds a
+ * Harness in its shutdown — a healthy close, a failed Session's self-close, or a host's cleanup
+ * close after a failed open — for as long as a test needs.
+ */
+export function gatedClose(inner: Storage): {
+  storage: Storage;
+  closing: Promise<void>;
+  release(): void;
+} {
+  const called = deferred();
+  const gate = deferred();
+  const storage = withMethod(inner, "close", (target) => async (callContext) => {
+    called.resolve();
+    await gate.promise;
+    return target.close(callContext);
+  });
+  return { storage, closing: called.promise, release: () => gate.resolve() };
 }
 
 /** Delegate everything to `inner`, keeping each committed batch (detached) once `inner` landed it. */

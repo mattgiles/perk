@@ -1178,8 +1178,10 @@ task is registered only because the manifest names it.
 - `H8` real `SIGKILL`: a retained record survives, and the interrupted task recovers without
   repeating accepted work (`lifecycle/recovery.slow.test.ts`, the slow tier).
 
-The composition rules are proved in `lifecycle/compose.test.ts`, and the consistent-view loop in
-`lifecycle/quiescence.test.ts`.
+The composition rules are proved in `lifecycle/compose.test.ts`, the consistent-view loop in
+`lifecycle/quiescence.test.ts`, and close before release — a held shutdown after a quiescent run,
+a failed Harness and a failed open keeps the epoch unreleased and a competing host `owner_busy` — in
+`lifecycle/ownership.test.ts`.
 
 ### Containment and fencing verdict
 
