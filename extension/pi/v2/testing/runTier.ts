@@ -2,8 +2,8 @@
 // flags…]` (the `test-v2` / `test-v2-slow` recipes). 2× core concurrency over the tier's explicit
 // file list; extra flags ride before the files. Exits with node's own status. The fast tier uses
 // the dot reporter; the slow tier uses `spec`, because the containment probes report their
-// `perk-v2-containment …` evidence rows as test diagnostics, which `dot` drops and `spec` prints
-// into the (CI) log.
+// `perk-v2-containment …` evidence rows and the capstone its `perk-v2-capstone …` rows as test
+// diagnostics, which `dot` drops and `spec` prints into the (CI) log, along with visible skips.
 // An independent, v2-owned copy of `extension/testing/runJsTestTier.ts` — v2 may not import v1's
 // runner (`layering.ts`' cross-generation rule).
 

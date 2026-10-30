@@ -11,10 +11,11 @@
 //   `cancel` never observe.
 // - The envelope's clock is read once, after the host call returns. Host and binding faults
 //   (`HostFault`, `BindingFault`, any other throw) propagate: they are never an outcome.
+// - The deps are seams only: the envelope never depends on them.
 
 import { isAbsolute } from "node:path";
 import { parseArgs } from "node:util";
-import type { WorkerModels } from "../durable/assignment.ts";
+import type { VerifyPoint, WorkerModels } from "../durable/assignment.ts";
 import { fixtureWorkerModels } from "../durable/fauxWorker.ts";
 import { type HostOptions, type Observe, readStatus, runHost, type TrackedRef } from "../host.ts";
 import { isExecutionId } from "../kernel/identity.ts";
@@ -155,6 +156,8 @@ export type CliDeps = {
   readonly models?: WorkerModels;
   /** Default: one stderr line per report. */
   readonly onReport?: HostOptions["onReport"];
+  /** Runs before every snapshot verification; default none. */
+  readonly onVerify?: (point: VerifyPoint, tree: string) => void | Promise<void>;
 };
 
 /**
@@ -189,7 +192,10 @@ export async function runCli(
   const options: HostOptions = {
     storeDir,
     workspace: { repoIdentity: command.repoIdentity, executionId: command.executionId },
-    program: fixtureProgram({ models: deps.models ?? fixtureWorkerModels() }),
+    program: fixtureProgram({
+      models: deps.models ?? fixtureWorkerModels(),
+      ...(deps.onVerify === undefined ? {} : { onVerify: deps.onVerify }),
+    }),
     now,
     onReport: deps.onReport ?? reportToStderr,
   };

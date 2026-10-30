@@ -1509,10 +1509,20 @@ failures use perk's standard failure shape: `not_a_repo` (exit 2), `v2_unavailab
 because the host may already have recorded work.
 
 **Modules.** `extension/pi/v2/door/` (an open-layer directory with relative and `node:` imports
-only): `snapshot.ts`, `envelope.ts`, `cli.ts`, `main.ts` and the committed `golden/` envelopes;
+only): `snapshot.ts`, `envelope.ts`, `cli.ts`, `main.ts`, `testGate.ts` and the committed
+`golden/` envelopes;
 `extension/pi/v2/durable/fauxWorker.ts`, the deterministic production faux worker (one `report`
 call per attempt); `src/perk/v2/` (`envelope.py`, `door.py`, `render.py`) and the hidden
 `src/perk/cli/commands/v2/` group. The store lives at `<main checkout>/.perk/executions/<id>/`.
+
+**The test gate (node 3.4).** When `PERK_V2_TEST_GATE` names an existing absolute directory, the
+host entry composes the fixture program with a verification gate (`door/testGate.ts`). Before any
+store work the gate appends `host <pid> <startTime|->` to `<dir>/verify.log` (procfs field 22, or
+`-`); before every snapshot verification it appends `<point> <pid> <tree>`, and it holds the n-th
+verification of a point in that process while `<dir>/hold-<point>-<n>` exists. It never alters a
+verification or an observation; a malformed value is a fault (exit 1, empty stdout); the door
+neither sets nor clears it, because the host inherits the door's environment. It is the only test
+seam the capstone (§16) uses: observation stays the real git observer behind the door.
 
 **Node 3.3 proves** `V1` the snapshot (`door/snapshot.test.ts`), `V2` the envelope and its goldens
 (`door/envelope.test.ts`), `V3` the cancel verb (`lifecycle/cancel.test.ts`), `V4` tracked-ref
@@ -1781,6 +1791,8 @@ feature.
 | Chord or browser transport, multiple clients, wakeable or daemon host, status during a run | `status` during a run returns `owner_busy` | the shared-workspace objective |
 | User docs and the `perk-expert` mirror | v2 is hidden | the objective that makes v2 end-user usable |
 | v1 migration and switching the default | v2 is experimental | an adoption objective after the plan workflow |
+| Retiring the fixture test gate (`PERK_V2_TEST_GATE`) | a seam over the fixture's faux program; real execution kinds need their own fault-injection story | the plan-workflow objective |
+| Generalizing fixture vocabulary out of the host, binding, wait-reason derivation and status view | the §16 census found fixture names outside the four answers' homes | the plan-workflow objective |
 
 ## 15. Consumers and reconciliation
 
