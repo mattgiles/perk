@@ -92,6 +92,8 @@ test("G1: a SIGKILLed door host's accepted work survives, one `perk v2 run` reco
   // 4. Without a liveness seam the dead holder can never be proved dead: fail closed, visibly.
   if (!supported) {
     await waitForGate(start, (gate) => countAt(gate, "acceptance") >= 2);
+    // The hold keeps this host from finishing, so while its door runs the pid is still its own.
+    assert.equal(start.result(), undefined, "the held door is still running");
     process.kill(host.pid, "SIGKILL");
     const killed = await start.exited;
     const id = failureOf(killed).execution_id;

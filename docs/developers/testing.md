@@ -129,7 +129,8 @@ guards and tests) is carved out of every v1 surface, so it carries its own recip
   (`uv sync --all-packages`, which CI and worktree setup both run). It creates executions under the
   **main checkout's** `.perk/executions/` — even from a linked worktree — and removes each one
   after proving its host dead; if teardown cannot prove that, it leaves the files for diagnosis and
-  fails. On Linux it requires procfs liveness; elsewhere `G1` skips visibly. It emits
+  fails. Teardown signals a host only by its procfs identity (pid plus start time), never by a bare
+  pid; a host it cannot identify has its gate's holds released and runs to its end. On Linux it requires procfs liveness; elsewhere `G1` skips visibly. It emits
   `perk-v2-capstone …` rows. Because it drives the door, the `test-v2-slow` row also triggers on
   the door's Python modules (`src/perk/v2/**`, `src/perk/cli/commands/v2/**`).
 

@@ -1886,6 +1886,14 @@ The run below shows all five cases `✔`, `fail 0`, `skipped 0`, all ten require
 Blob hashes are `git rev-parse <A>:<path>`. Only the local dev host's rows are transcribed; GitHub
 `ubuntu-latest` runs the same cases as a CI gate.
 
+**After commit A (review).** Teardown no longer signals a host whose procfs identity it cannot
+verify (a bare pid may already name another process once Python reaped the host): it releases
+that gate's holds instead, so the host runs to its end. `testing/capstone.ts`,
+`capstone/teardown.slow.test.ts` (`G6` reads the execution id from the envelope on that path) and
+`capstone/recovery.slow.test.ts` (one added still-running check before the non-procfs kill) changed
+for it. On the evidence host every announced host had a start time, so none of those branches ran
+in the evidence run; the evidence stays pinned to commit A.
+
 ### Criteria (MEASURED)
 
 | Requirement | Proof | Result at commit A |

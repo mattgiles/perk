@@ -12,6 +12,9 @@
 //     Host death follows from the door's exit — `uv` exited ⇒ Python returned from
 //     `subprocess.run` ⇒ the host was reaped — and, on procfs hosts, `waitGone` over the announced
 //     identities is a second, independent check. Process groups are not used.
+//   - `close()` signals a host only by its procfs identity. A host whose identity it cannot verify
+//     is never signalled by its bare pid, which may already name another process once Python
+//     reaped the host: its gate's holds are released instead, so it runs to its end.
 //   - Execution ids are learned from door output (an envelope's `executionId`, a post-invocation
 //     failure's `execution_id`) or the owner scan (`executionOfOwner`).
 //   - Subjects are changed with plain git only (`fixtureGit`).
@@ -25,6 +28,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { rm } from "node:fs/promises";
@@ -247,17 +251,17 @@ function identityKey(host: GateHost): string {
   return `${host.pid} ${host.startTime ?? "-"}`;
 }
 
-/** SIGKILL an announced host: by identity where procfs knows it, else by its still-unreaped pid. */
-function killHost(host: GateHost): void {
-  if (host.startTime !== null && procAvailable()) {
-    killIdentity({ pid: host.pid, startTime: host.startTime });
-    return;
-  }
-  // Without a start time (no procfs) the door is still running, so its host is not reaped yet.
-  try {
-    process.kill(host.pid, "SIGKILL");
-  } catch (error) {
-    if (errorCode(error) !== "ESRCH") throw error;
+/** An announced host's identity, when procfs can re-check it before a signal; else `null`. */
+function verifiableIdentity(host: GateHost): Identity | null {
+  return host.startTime !== null && procAvailable()
+    ? { pid: host.pid, startTime: host.startTime }
+    : null;
+}
+
+/** Remove every hold file of a gate: its held host then runs to its end, so its door exits. */
+function releaseHolds(gate: string): void {
+  for (const name of readdirSync(gate)) {
+    if (name.startsWith("hold-")) rmSync(join(gate, name), { force: true });
   }
 }
 
@@ -361,17 +365,24 @@ export function capstone(t: TestContext): CapstoneRun {
   const closeOnce = async (): Promise<{ readonly discarded: string[] }> => {
     const pending = handles.filter((handle) => handle.result() === undefined);
     const running = (): DoorHandle[] => pending.filter((handle) => handle.result() === undefined);
-    // Kill every host a still-running door announced — including one announcing late — once each,
-    // until every pending door exited or the bound passed.
+    // End every still-running door — including one whose host announces late — until each exited
+    // or the bound passed: a host procfs can identify is SIGKILLed by identity, once; any other
+    // has its gate's holds released, so it runs to its end and its door exits on its own.
     const signalled = new Set<string>();
     const deadline = Date.now() + TEARDOWN_MS;
     while (running().length > 0 && Date.now() < deadline) {
       for (const handle of running()) {
         for (const host of readGate(handle.gate).hosts) {
+          const identity = verifiableIdentity(host);
+          if (identity === null) {
+            // A bare pid is no identity: never signal it, end the host by releasing its holds.
+            releaseHolds(handle.gate);
+            continue;
+          }
           const key = identityKey(host);
           if (signalled.has(key)) continue;
           signalled.add(key);
-          killHost(host);
+          killIdentity(identity);
         }
       }
       await sleep(KILL_POLL_MS);
