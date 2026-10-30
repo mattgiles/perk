@@ -16306,10 +16306,11 @@ no user docs and no `perk-expert` mirror. The design record is
 `docs/design/pi-durable-v2-foundations.md` (§8 observation, §10 the host, §11 the door envelope).
 Owning modules: `extension/pi/v2/host.ts` (the host verbs), `extension/pi/v2/door/` (`snapshot.ts`
 the status snapshot, `envelope.ts` the envelope, `cli.ts` the host CLI, `main.ts` the process
-entry, `golden/` the committed envelope goldens), `extension/pi/v2/durable/fauxWorker.ts` (the
-production faux worker), `src/perk/v2/` (`envelope.py` the strict wire models, `door.py` target
-resolution and invocation, `render.py` the human lines), `src/perk/cli/commands/v2/` (the hidden
-group), `src/perk/substrate/paths.py::execution_store_dir` (the store location).
+entry, `testGate.ts` the test gate, `golden/` the committed envelope goldens),
+`extension/pi/v2/durable/fauxWorker.ts` (the production faux worker), `src/perk/v2/`
+(`envelope.py` the strict wire models, `door.py` target resolution and invocation, `render.py` the
+human lines), `src/perk/cli/commands/v2/` (the hidden group),
+`src/perk/substrate/paths.py::execution_store_dir` (the store location).
 
 ### (a) The two-plane boundary for v2 executions
 
@@ -16350,6 +16351,17 @@ The exit contract: one JSON envelope line on stdout and exit `0`; a usage error 
 empty on every non-zero exit. The host's Durable reports go to stderr, one line each. The door's
 timeout is 600 s (`HOST_TIMEOUT_S`); a killed host leaves an unreleased owner epoch that belongs to
 a dead process, so the next host frees it.
+
+**The test gate.** When `PERK_V2_TEST_GATE` names an existing absolute directory, the host entry
+composes the fixture program with a verification gate (`door/testGate.ts`). Once composed, before
+any store work, the gate appends `host <pid> <startTime|->` to `<dir>/verify.log` (the start time
+is procfs field 22, or `-` where it cannot be read). Before every snapshot verification it appends
+`<point> <pid> <tree>` (`point` is `attempt-start`, `acceptance` or `settle`), and it holds the
+n-th verification of a point in that process while `<dir>/hold-<point>-<n>` exists. It never
+alters a verification or an observation. An unset or empty value composes no gate; any other value
+that is not an existing absolute directory is a fault (exit `1`, empty stdout). The door neither
+sets nor clears it: the host inherits the door's environment. It is the capstone's timing and
+process-identity seam (design §16).
 
 ### (d) The envelope
 

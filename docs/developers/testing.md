@@ -124,6 +124,15 @@ guards and tests) is carved out of every v1 surface, so it carries its own recip
   runs under the `spec` reporter (the fast tier under `dot`) because the containment probes emit
   `perk-v2-containment …` evidence rows as test diagnostics, which `dot` drops and the CI log
   preserves.
+- The slow tier's **capstone** (`extension/pi/v2/capstone/`) drives the real `perk v2` door
+  through `uv run --no-sync perk`, so the tier needs the synced Python environment
+  (`uv sync --all-packages`, which CI and worktree setup both run). It creates executions under the
+  **main checkout's** `.perk/executions/` — even from a linked worktree — and removes each one
+  after proving its host dead; if teardown cannot prove that, it leaves the files for diagnosis and
+  fails. Teardown signals a host only by its procfs identity (pid plus start time), never by a bare
+  pid; a host it cannot identify has its gate's holds released and runs to its end. On Linux it requires procfs liveness; elsewhere `G1` skips visibly. It emits
+  `perk-v2-capstone …` rows. Because it drives the door, the `test-v2-slow` row also triggers on
+  the door's Python modules (`src/perk/v2/**`, `src/perk/cli/commands/v2/**`).
 
 `extension/pi/v2/testing/runTier.ts` is the v2-owned runner (v2 may not import v1's).
 `just typecheck` and `just test` reach all three, so `just ci` and GitHub CI cover v2. In-session,

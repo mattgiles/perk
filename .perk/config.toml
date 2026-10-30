@@ -122,7 +122,8 @@ trusted = true
 # v2's program type-checks it through the guards' import. `test-v2` triggers on the whole
 # `extension/**`: its layering guard reads every v1 file (tests included) for the v1 → v2
 # direction, so a v1-only edit must still schedule it — and the row is cheap (a MemoryStorage
-# smoke plus static guards). `test-v2-slow` is v2-only (its tier reads nothing from v1).
+# smoke plus static guards). `test-v2-slow`'s tier reads nothing from v1, but its capstone drives
+# the Python `perk v2` door end to end, so the row also triggers on the door's Python modules.
 # `typecheck-js`'s `extension/**` glob also matches v2 edits — an accepted over-trigger (globs have
 # no negation; the root project excludes v2, so it passes quickly).
 [[ci.checks]]
@@ -178,7 +179,7 @@ glob = "extension/**,package.json,package-lock.json"
 [[ci.checks]]
 name = "test-v2-slow"
 command = "just test-v2-slow"
-glob = "extension/pi/v2/**,package.json,package-lock.json"
+glob = "extension/pi/v2/**,src/perk/v2/**,src/perk/cli/commands/v2/**,package.json,package-lock.json"
 
 [[ci.checks]]
 name = "docs-check"

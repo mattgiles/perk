@@ -139,8 +139,11 @@ test("the three v2 rows run their recipes over globs that reach their inputs", (
     rows.get("test-v2")?.glob.includes("extension/**"),
     "`test-v2` triggers on extension/**",
   );
-  assert.ok(
-    rows.get("test-v2-slow")?.glob.includes("extension/pi/v2/**"),
-    "`test-v2-slow` triggers on extension/pi/v2/**",
-  );
+  // The capstone drives the Python `perk v2` door end to end: a door-only edit must schedule it.
+  for (const pattern of ["extension/pi/v2/**", "src/perk/v2/**", "src/perk/cli/commands/v2/**"]) {
+    assert.ok(
+      rows.get("test-v2-slow")?.glob.includes(pattern),
+      `\`test-v2-slow\` triggers on ${pattern}`,
+    );
+  }
 });
