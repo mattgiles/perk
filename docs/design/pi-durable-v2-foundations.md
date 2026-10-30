@@ -1,8 +1,9 @@
 # pi-durable v2 foundations — first principles and the walking-skeleton contract
 
 **Status:** binding design record for Objective #2847 (node 1.1). Nodes 1.2–3.4 build against it;
-node 1.4 recorded the fencing verdict (§10), node 3.4 appends the measured evidence. Changing a principle is
-an explicit, reviewed amendment (see Consumers and reconciliation).
+node 1.4 recorded the fencing verdict (§10), node 3.4 appended the measured evidence and the
+plan-workflow hand-off list (§16). Changing a principle is an explicit, reviewed amendment (see
+Consumers and reconciliation).
 
 pi-durable v2 is Perk's second integration generation. In it, **Perk keeps execution state and
 accepted evidence, bounded tasks do the work, and only validated domain outcomes authorize the next
@@ -1831,9 +1832,271 @@ explicit, reviewed amendment, recorded in the log below.
 | §6 the worker rows and the `submit` receipt's submission row; §9 the verification row's recovery (`repair_required`); §10 wait reasons derived with attempt endings and `repair_required`'s precedence, the host program's models and env; §12 the capability set (the report tool, the instructions digest), the native assignment (task phases and endings, fail-closed capability resolution, the snapshot environment and its residual, the tools, the report tool's order and the requested-not-relied-on termination rule, the `prepareArguments` argument check, `repair_required` derivation, measured settlements, `A1`–`A8`) and the stop-condition verdict (holds); §13 executor name; §14 attempt retry deferral | node 3.1 |
 | §7 the reply (node 3.2): the host verb and its order, the quiescent outcome's receipt (applied or replayed, `null` for `start`/`run`), a replayed reply resumes, no-waiter task ownership, `R1`–`R5`; §8 observation precedes receipt lookup; §10 the host's verbs, the missing-store rule and gate for `reply`, and the receipt | node 3.2 |
 | §8 the tracked ref read from records for `run`/`reply`, the `cancel` verb landed; §10 the host's `cancel` verb and its order, `Observe(tracked)` (a bound observer ignores it), the stored-state read, the cancel receipt; §11 the door (node 3.3): the `verb` and `receipt` fields (the kind matches the verb), view and marker snapshots, per-outcome rules, door exit codes, the execution id on post-invocation door failures, module pointers, `V1`–`V7`, and `shared/contracts.md` §8.77 | node 3.3 |
+| §11 the test gate; §14 the test-gate and fixture-vocabulary deferrals; §16 the capstone (`G1`–`G6`), the measured exit assessment and the plan-workflow hand-off list | node 3.4 |
 
-## 16. Measured evidence (reserved — node 3.4)
+## 16. Measured evidence and exit assessment (node 3.4)
 
-Node 3.4 appends here the MEASURED vs SOURCE-DERIVED exit assessment (work retained, work
-repeated, manual recovery steps, obligations added and removed, the recipe as exercised) and the
-hand-off list for the plan-workflow objective.
+The capstone drives the walking skeleton end to end through the real shell door — `uv run
+--no-sync perk v2 …` → the Python door → `node extension/pi/v2/door/main.ts` — against temp git
+subjects changed with plain git, with no test-only observation injection: the test gate (§11) only
+logs and holds. Its proofs are `G1` (the SIGKILL-recovery flow,
+`extension/pi/v2/capstone/recovery.slow.test.ts`), `G2`–`G4` (the variants,
+`capstone/variants.slow.test.ts`), `G5` (the gate, fast tier, `door/testGate.test.ts`) and `G6`
+(teardown, `capstone/teardown.slow.test.ts`), over the driver `testing/capstone.ts`. Every
+subsection below is labelled **MEASURED** (read from the evidence run's verbatim output) or
+**SOURCE-DERIVED** (reasoned from the source, with pointers).
+
+### Verdict (MEASURED, against a rule fixed before the run)
+
+**Dogfood gate: `PASS` (`G1`–`G6` at `d86034972c618c2fd439beb6928a6cec6cb4b064`, local host).**
+
+The vocabulary is closed — `PASS | BLOCKED | FAIL` — and the rule was fixed before the run:
+
+- **PASS** requires, in the evidence run's verbatim output: the `G1`, `G2`, `G3`, `G4` and `G6`
+  cases passed, with the `spec` summary showing `skipped 0` and `fail 0`; every required row
+  present (`G1` `roles`, `retained`, `repeated`, `records`, `recovery`, `epochs`, `timing`, plus
+  the `G2`, `G3` and `G4` rows); and no `G1 liveness` row.
+- **BLOCKED**: `G1` was skipped, or a `G1 liveness` row is present (procfs liveness unsupported:
+  recovery was not exercised).
+- **FAIL**: any other outcome.
+
+The run below shows all five cases `✔`, `fail 0`, `skipped 0`, all ten required rows, and no
+`G1 liveness` row. `G5` runs in the fast tier, where it passed at the same commit (exit `0`).
+
+### Context (MEASURED)
+
+| Fact | Value |
+|---|---|
+| Commit A (the implementation commit) | `d86034972c618c2fd439beb6928a6cec6cb4b064` |
+| `extension/pi/v2/capstone/recovery.slow.test.ts` blob | `514ec57e49e697f33c6dc859790bc8ed62bf8758` |
+| `extension/pi/v2/capstone/variants.slow.test.ts` blob | `f2caa051be6848899756c415ba649412994d1826` |
+| `extension/pi/v2/capstone/teardown.slow.test.ts` blob | `c71bf3907573b3b65850106d72d4faa74371bb0c` |
+| `extension/pi/v2/testing/capstone.ts` blob | `67fa7fbf61ec29e0a0a74dd6762bb1a39e63e689` |
+| `extension/pi/v2/door/testGate.ts` blob | `b3d3265a4717c8ea8b884a5944e874d175989b20` |
+| `extension/pi/v2/door/main.ts` blob | `ca2850fac47695f8e07f732c92f2aa7399dc347a` |
+| `uname -sr` | `Linux 7.0.0-1013-aws` |
+| `/etc/os-release` `PRETTY_NAME` | `Ubuntu 24.04.5 LTS` |
+| `node --version` | `v24.22.1` |
+| `uv --version` | `uv 0.13.6 (x86_64-unknown-linux-gnu)` |
+| `uv run --no-sync python --version` | `Python 3.13.15` |
+| `git --version` | `git version 2.43.0` |
+| Command (clean tree at commit A) | `just test-v2-slow --test-name-pattern='^G'`; `G5`: `just test-v2 --test-name-pattern='G5'` |
+| Date | 2026-10-30 (UTC) |
+
+Blob hashes are `git rev-parse <A>:<path>`. Only the local dev host's rows are transcribed; GitHub
+`ubuntu-latest` runs the same cases as a CI gate.
+
+### Criteria (MEASURED)
+
+| Requirement | Proof | Result at commit A |
+|---|---|---|
+| `start` runs two report assignments and accepts the first | `G1` steps 5–9: two `attempt-start` and two `acceptance` lines in the start host; after the kill exactly one assignment accepted (`G1 retained` `acceptedOutcomes: 1`) | PASS |
+| SIGKILL during the second | `G1` step 7: the second report held inside its report tool at acceptance (`hold-acceptance-2`), its host SIGKILLed by identity; the door fails `v2_host_failed` (`exited -9`) naming the execution | PASS |
+| `run` passes the gate, recovers the second without re-running accepted work, and accepts the aggregate once | `G1` steps 10, 11, 16: `run` returns `pending_decision` at epoch 3; the recovery host verifies `attempt-start` 0 and `acceptance` 1; the first outcome id is unchanged; `aggregate-outcome` 1 | PASS |
+| A decision opens and `status` explains the wait | `G1` steps 10, 12: the decision `{subjectDigest, [approve, reject], human:cli}`; `status` reports `waiting (pending_decision)` and the exact `perk v2 reply` line | PASS |
+| `reply` creates exactly one continuation and the execution completes | `G1` steps 14, 16: `completed` with a continuation receipt, a repeat replays it, one continuation task, completed | PASS |
+| Live edits leave both verified digests on the original snapshot | `G2`: a commit, an uncommitted edit and an untracked file during both held reports; both `verifiedDigest` equal the observed digest; only `T1` is materialized | PASS |
+| A tree-changing commit makes `reply` stale; a same-tree commit does not | `G3` (refused `stale_subject`, nothing recorded; a revert to the subject's tree completes), and `G1` step 13 (an empty commit) | PASS |
+| After `cancel`, nothing is admitted | `G4`: a reply is refused `cancelled`; `run` over a changed tree records observation 2 and admits nothing | PASS |
+| Teardown hygiene | `G6`: a held host is killed by identity, proven dead, and only then its store and the run root are discarded; `close()` is idempotent | PASS |
+
+### Rows (MEASURED)
+
+The evidence run's output, verbatim. The five file-level `✔` lines are the slow files whose cases
+the name pattern filtered out.
+
+```text
+node extension/pi/v2/testing/runTier.ts slow --test-name-pattern=^G
+✔ G1: a SIGKILLed door host's accepted work survives, one `perk v2 run` recovers the rest, and reply completes (9015.289907ms)
+ℹ perk-v2-capstone G1 roles {"first":"b","second":"a"}
+ℹ perk-v2-capstone G1 retained {"epoch":2,"state":"running","acceptedOutcomes":1,"firstOutcomeId":"v2/01M65D1V916JEV2RD04BAMTR2S/fixture-report/b/75d338fa7f2cba9a598ba415f969976496c884bd/0c51858ee40be04e150b109f64d9b1b5df01a3bece8bee2be2ce0106e863228a/1/accept-report","attempts":2,"observationSeq":1,"firstEndingAtKill":"accepted","epoch1":{"released":false,"pidIsKilledHost":true}}
+ℹ perk-v2-capstone G1 epochs [[1,false],[2,true],[3,true],[4,true],[5,true],[6,true],[7,true],[8,true]]
+ℹ perk-v2-capstone G1 repeated {"verify":{"killed":{"attempt-start":2,"acceptance":2,"settle":1},"recovery":{"attempt-start":0,"acceptance":1,"settle":1}},"perWorker":[{"submissions":1,"assistantTurns":1,"reportResults":1},{"submissions":1,"assistantTurns":1,"reportResults":1}],"fixtureReportTasks":2,"attemptsPerAssignment":[1,1]}
+ℹ perk-v2-capstone G1 records {"assignment":2,"attempt":2,"report-outcome":2,"aggregate-outcome":1,"decision":1,"reply":1,"continuation":1,"cancellation":0,"observation":3,"continuationTasks":1}
+ℹ perk-v2-capstone G1 recovery {"doorFailure":"v2_host_failed","hintNamesStatusAndRun":true,"recoveryCommands":["run"],"inspectionCommands":["status"],"storeEdits":0}
+ℹ perk-v2-capstone G1 timing [{"label":"status-busy","wallMs":936},{"label":"start","wallMs":2008},{"label":"status-after-kill","wallMs":978},{"label":"run","wallMs":1018},{"label":"status-waiting","wallMs":957},{"label":"status-human","wallMs":969},{"label":"reply","wallMs":1010},{"label":"reply-again","wallMs":1014},{"label":"status-done","wallMs":958}]
+✔ G6: close() kills a held door host, proves it dead, then discards its store and the run root (1088.925296ms)
+✔ G2: live edits during running assignments leave both verified digests on the observed snapshot (1175.817115ms)
+ℹ perk-v2-capstone G2 digests {"observed":"00db6dda1c685b2a08dc762e4ed10f0ecdf339509dc74e5bfb623920a8280319","verified":["00db6dda1c685b2a08dc762e4ed10f0ecdf339509dc74e5bfb623920a8280319","00db6dda1c685b2a08dc762e4ed10f0ecdf339509dc74e5bfb623920a8280319"],"liveTree":"e9bfa7a12c91ac1b4974e000965333eaa81896ab","snapshotTrees":["75d338fa7f2cba9a598ba415f969976496c884bd"]}
+✔ G3: a tree-changing commit makes reply stale; a revert to the subject's tree does not (4052.528939ms)
+ℹ perk-v2-capstone G3 stale {"refusal":"stale_subject","observationSeqAfterRefusal":1,"revertTreeEqualsSubject":true,"replyAfterRevert":"ok","state":"completed"}
+✔ G4: after cancel, nothing further is admitted (4080.977796ms)
+ℹ perk-v2-capstone G4 cancel {"replyRefusal":"cancelled","observationSeqAfterRun":2,"assignments":2,"currentAssignments":0,"fixtureReportTasks":2,"continuationTasks":0}
+✔ extension/pi/v2/containment/alternatives.slow.test.ts (227.832951ms)
+✔ extension/pi/v2/containment/ownerDeath.slow.test.ts (222.294208ms)
+✔ extension/pi/v2/containment/supervised.slow.test.ts (219.533421ms)
+✔ extension/pi/v2/door/main.slow.test.ts (261.257778ms)
+✔ extension/pi/v2/lifecycle/recovery.slow.test.ts (242.909001ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9584.473265
+```
+
+### Work retained (MEASURED)
+
+From `G1 retained`, `G1 records` and `G1 epochs`, everything the kill could have lost survived it:
+
+- the first report's accepted outcome (`first` was role `b` in this run), whose id is unchanged
+  after recovery;
+- both attempts (`attempts: 2`) and the observation at `seq` 1;
+- the first attempt's ending, which had landed before the kill (`firstEndingAtKill:
+  "accepted"`);
+- epoch 1, unreleased, its `meta.json` naming the killed host (`epoch1: {released: false,
+  pidIsKilledHost: true}`); the next `status` held epoch 2 and showed the execution `running`.
+
+### Work repeated (MEASURED, then SOURCE-DERIVED)
+
+**MEASURED** (`G1 repeated`):
+
+| Measure | Killed host | Recovery host |
+|---|---|---|
+| `attempt-start` verifications | 2 | 0 |
+| `acceptance` verifications | 2 | 1 |
+| `settle` verifications | 1 | 1 |
+
+Per worker: 1 submission, 1 model turn and 1 accepted report result, for both workers. Two
+fixture-report tasks, one attempt each (`attemptsPerAssignment: [1, 1]`).
+
+**SOURCE-DERIVED.**
+
+- The second worker's model turn was committed before its report tool ran, so recovery reran only
+  the replay-safe report tool (`replay: "safe"`, `durable/workerTools.ts::createReportTool`;
+  Durable reruns an interrupted safe tool call on reopen). The rerun found no acceptance record and
+  re-verified the snapshot before accepting: P7 on replay, the same path `A5 (i)` proves in
+  process, here under a real SIGKILL. Nothing else re-ran: no attempt restarted and no model turn
+  repeated.
+- A repeated `settle` verification happens exactly when the first attempt's ending commit had not
+  landed before the kill: its task then reruns its `settle` phase. In this run it had landed, so
+  the recovery host's one `settle` is the second attempt's; `G1` asserts the other branch's count
+  (2) too, but this run did not exercise it. An ending is diagnostic runtime state, not accepted
+  work (P6): repeating it can never repeat an acceptance.
+
+### Manual recovery steps
+
+**MEASURED** (`G1 recovery`): the door's `v2_host_failed` failure names the execution, and its hint
+names `perk v2 status <id>` and `perk v2 run <id>`. One `perk v2 run` reached the decision.
+`status` was inspection only, and no store, lock or snapshot file was edited between the kill and
+the recovery.
+
+**SOURCE-DERIVED.** Liveness frees the dead holder's epoch (§10 *Liveness*): the killed host's
+`host` is this host and its recorded pid no longer names a live process with its start time. The
+one documented manual recovery — a cached snapshot that fails verification, cleared by
+`discardTree` on both the snapshot directory and its manifest (§5) — was not exercised. On a host
+without a liveness seam, a killed owner's store stays `owner_busy` and no door verb recovers it
+(§10, liveness fails closed).
+
+**Timing (MEASURED, informational):** `G1 timing` — each door call took 0.94–1.02 s wall time
+(`uv run` → Python → `node` → open, verb, close), and the start that was held and killed 2.0 s.
+
+### Obligations added and removed (SOURCE-DERIVED, with proof pointers)
+
+| Obligation | Status | Proofs and pointers |
+|---|---|---|
+| Uncertain commits | removed at fixture level | §9; `B3`, `R5`, `lifecycle/uncertain.test.ts` |
+| Child processes that outlive their owner | **not discharged** for subprocess workers: no worker spawns (`A3`: `exec` refused); the problem is reproduced in `containment/ownerDeath.slow.test.ts`; the §10 verdict stands | §10 |
+| Replay that skips hooks | removed at fixture level | `A5`; `G1`'s replayed report tool |
+| Stale approvals | removed at fixture level | `K4`, `R3`, `V5`, `G3` |
+| Duplicate replies | removed at fixture level | `R2`, `R5`, `G1` |
+| Incomplete review coverage | removed at fixture level | `K5`, `A2` |
+| Incompatible resume | removed at fixture level | `H6`; `G1`'s `run` passing the gate |
+| Owner crash | removed at fixture level | `H8`, `G1` |
+| The reaped-leader pid-reuse window | added, open — a prerequisite before any worker spawns | §10 |
+| Per-attempt workspace isolation | added, open | §10 |
+| The graceful-close order | added, open | §10 |
+| Filesystem view and network policy as P7 environment obligations | added, open | §10 |
+| The snapshot environment's gate-then-open window | added, open (residual) | §12 *The snapshot environment* |
+| The manual snapshot recovery | added, open | §5 |
+| No recovery for a killed owner without a liveness seam | added, open | §10 *Liveness* |
+| Store retention and GC, including owner epochs and temp directories | added, open | §14 |
+| Attempt retry after repair | added, open | §14 |
+| Record completeness as each binding's proof obligation | added, open | §6 record presentation; §7 `B6` |
+| Wiring the §10 step-2 sweep once workers spawn | added, open | §10 |
+| The fixture test gate | added, open | §11, §14 |
+| Fixture vocabulary in generic layers | added, open | the census below; §14 |
+
+The first eight rows are the objective's *Why* list.
+
+### The four-question recipe as exercised
+
+| Question | The fixture's answer (§13) | What `G1` exercised |
+|---|---|---|
+| 1. Subject | `git-tree`, materialized as the read-only snapshot with its manifest | **MEASURED:** every verification in both hosts named the subject tree `T1`, and every observation (`seq` 1–3) carried it; `G2`'s `snapshotTrees` shows one snapshot per observed tree. **SOURCE-DERIVED:** later observations of `T1` reuse its snapshot (§5, never overwritten) |
+| 2. Observations and records | `perk.v2.observation` plus the §6 families | **MEASURED** (`G1 records`): `observation` 3, `assignment` 2, `attempt` 2, `report-outcome` 2, `aggregate-outcome` 1, `decision` 1, `reply` 1, `continuation` 1, `cancellation` 0 |
+| 3. Reconcile rules | §12's rules | **MEASURED** by their records: admit (the two assignments and attempts), accept ×2, aggregate, open decision, continue |
+| 4. Executors | `perk.v2.fixture-report` and `perk.v2.continuation` | **MEASURED:** two fixture-report tasks and one continuation task, all completed |
+
+**The fixture-vocabulary census (MEASURED)**, at commit A, from the workspace directory (so
+`!testing/**` excludes the dev-only helpers; no `./testing/` path is listed):
+
+```text
+$ cd extension/pi/v2 && rg -c 'FIXTURE_|fixture[A-Z]|Fixture' --glob '*.ts' --glob '!*.test.ts' --glob '!testing/**' --glob '!node_modules/**' . | sort
+./door/cli.ts:5
+./door/snapshot.ts:2
+./durable/assignment.ts:16
+./durable/fauxWorker.ts:13
+./durable/operate.ts:2
+./durable/waitReason.ts:4
+./durable/workerTools.ts:15
+./host.ts:5
+./kernel/fixture.ts:28
+./kernel/reconcile.ts:14
+./kernel/records.ts:2
+./kernel/report.ts:5
+./program.ts:11
+```
+
+**Its classification (SOURCE-DERIVED)**, paths relative to `extension/pi/v2`:
+
+- Q1 (`subject/`, `kernel/subject.ts`): none listed — the subject layer names no fixture.
+- Q2 (`kernel/records.ts`, `durable/documents.ts`, `durable/records.ts`): `kernel/records.ts`.
+- Q3 (`kernel/reconcile.ts`, `kernel/fixture.ts`, `kernel/report.ts`): all three.
+- Q4 (`durable/assignment.ts`, `durable/workerTools.ts`, `durable/snapshotEnv.ts`,
+  `durable/ending.ts`, `durable/continuation.ts`, `durable/fauxWorker.ts`, `program.ts`):
+  `durable/assignment.ts`, `durable/workerTools.ts`, `durable/fauxWorker.ts`, `program.ts`.
+- Infrastructure: `host.ts` (`FIXTURE_EXECUTION_KIND` in the manifest it writes, `FixturePolicy` in
+  the program seam), `durable/operate.ts` (`BindingDeps.policy: FixturePolicy`),
+  `durable/waitReason.ts` (`FIXTURE_DECISION_KIND`, `coverageOf`, `FixturePolicy`),
+  `door/snapshot.ts` (`FIXTURE_DECISION_KIND` to find the open decision) and `door/cli.ts` (it
+  composes `fixtureProgram` over `fixtureWorkerModels`).
+
+**The honest assessment.** The infrastructure files that name the fixture — the host, the binding,
+wait-reason derivation, the status view and the host CLI — are where a second execution kind needs
+more than the four answers today: each assumes the one fixture policy, decision kind or program.
+That work is generalization owed by the plan-workflow objective's first real kind (hand-off item
+7), not a fifth question: none of it adds a subject, a record family, a rule or an executor.
+
+### Hand-off list for the plan-workflow objective (SOURCE-DERIVED)
+
+1. **The containment verdict (node 1.4, §10): GO, supervised execution.** Worker commands run
+   through a locally started pi-env daemon — `RemoteExecutionEnv` over `Connection({ command:
+   ["setsid", localDaemon()] })` where `setsid(1)` exists, else the plain daemon — never through
+   `NodeExecutionEnv.exec` directly. Every spawn carries the `PERK_V2_STORE`/`PERK_V2_EPOCH`
+   labels, and the §10 step-2 report-only sweep is wired then. Evidence:
+   `archive/pi-durable-v2-containment-characterization.md`.
+2. **Its graceful-close order:** `env.cleanup()`, then await every running `exec`'s settlement,
+   then `connection.close()`. Closing first leaks every running command.
+3. **Its residuals and the per-attempt workspace isolation obligation.** The residuals — `setsid`
+   escapes; background work that outlives its command's leader; owner-and-daemon group kills
+   without `setsid(1)`, and terminating signals to the daemon; the spawn→register window (2 of
+   400) — are all isolated by rooting every attempt's environment at its own workspace, never
+   reused before it is discarded.
+4. **The prerequisite before any worker spawns:** close the reaped-leader pid-reuse window, with a
+   re-verified pi-env pin or a Perk-side leader holding its pid, measured on both hosts.
+5. Filesystem view and network policy are not provided. They are P7 environment obligations;
+   reviewers get no subprocess capability.
+6. Re-verification triggers: a Durable-family pin bump, a runner-image or kernel-line change, or a
+   P7/P8 change. Each re-runs `just test-v2-slow` on both hosts.
+7. Real execution kinds replace the fixture. Generalize the census's infrastructure files first.
+8. Attempt retry after repair.
+9. The effect ledger, budget admission, and real provider, auth and settings composition (P10
+   shapes, §14).
+10. Extract shared report definitions from v1 when real reviewer reports arrive.
+11. Retire or replace the fixture test gate.
+12. Store retention and GC of `.perk/executions/`.
+13. The capstone's measured door-call timings (`G1 timing`) as the baseline a real door is compared
+    against.
